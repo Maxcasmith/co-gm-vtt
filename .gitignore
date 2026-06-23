@@ -3,3 +3,4 @@ dist
 .env
 .turbo
 packages/api/storage/campaigns/
+packages/api/storage/config.json
