@@ -1,0 +1,21 @@
+{
+  "name": "co-gm-vtt",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "api": "pnpm --filter api dev",
+    "client": "pnpm --filter client dev",
+    "dev": "turbo dev --ui=tui",
+    "build": "turbo build"
+  },
+  "author": "maxsmith",
+  "license": "ISC",
+  "packageManager": "pnpm@10.12.1",
+  "pnpm": {
+    "onlyBuiltDependencies": ["sharp"]
+  },
+  "devDependencies": {
+    "turbo": "^2.7.5",
+    "typescript": "^5.9.3"
+  }
+}
