@@ -1,5 +1,25 @@
 const API_BASE = 'https://api.deepseek.com/v1';
 
+export interface ChatMessage { role: 'user' | 'assistant'; content: string }
+
+export async function deepseekChat(system: string, messages: ChatMessage[], apiKey: string, model: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1024,
+      messages: [{ role: 'system', content: system }, ...messages],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
+    throw new Error(err.error?.message ?? res.statusText);
+  }
+  const data = await res.json() as { choices: { message: { content: string } }[] };
+  return data.choices[0]?.message.content ?? '';
+}
+
 export async function deepseekComplete(prompt: string, apiKey: string, model: string): Promise<string> {
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',

@@ -340,6 +340,21 @@ export const ORIGIN_FEATS = [
   'Musician', 'Savage Attacker', 'Skilled', 'Tavern Brawler', 'Tough',
 ];
 
+export interface ShopItem {
+  id: string;
+  name: string;
+  cost: number;
+  description: string;
+}
+
+export const SHOP_ITEMS: ShopItem[] = [
+  { id: 'longsword',         name: 'Longsword',          cost: 15, description: '1d8 slashing. Versatile (1d10).' },
+  { id: 'shield',            name: 'Shield',              cost: 10, description: '+2 AC bonus.' },
+  { id: 'handaxe',           name: 'Handaxe',             cost:  5, description: '1d6 slashing. Light, thrown (20/60 ft).' },
+  { id: 'leather-armour',    name: 'Leather Armour',      cost: 10, description: 'AC 11 + DEX modifier.' },
+  { id: 'potion-of-healing', name: 'Potion of Healing',   cost: 50, description: 'Restores 2d4+2 HP.' },
+];
+
 export const ORIGIN_FEAT_DETAILS: Record<string, BackgroundFeat> = {
   'Alert':                    { name: "Alert", description: "You gain a +5 bonus to Initiative rolls and you can't be surprised while conscious." },
   'Crafter':                  { name: "Crafter", description: "You gain proficiency with three Artisan's Tools of your choice and receive a 20% discount when purchasing nonmagical items." },

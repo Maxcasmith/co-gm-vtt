@@ -5,13 +5,27 @@ import {
   CAMPAIGNS_DIR,
   getConfig, writeCampaignFile, listCampaigns,
   getWorldMeta, writeWorldMeta,
-  writeCharacter, getCharacter, findCharacterByPassword, writeCharacterImage,
+  writeCharacter, getCharacter, listCharacters, findCharacterByPassword, writeCharacterImage,
+  readWorldState, writeWorldState, readCampaignFile,
 } from '../storage.ts';
 import { getStoryProvider } from '../providers/index.ts';
 import { buildConceptsPrompt, buildWorldGenPrompt } from '../prompts.ts';
+import { processSession } from '../session-processor/index.ts';
 import { processPortrait } from '../utils/image.ts';
+import { generateWorldState, tickWorldNarrative } from '../session-processor/imagePrompts.ts';
 
 export const campaignsRouter = Router();
+
+// ── session processing ────────────────────────────────────────────────────────
+
+campaignsRouter.post('/:slug/session/process', async (req, res) => {
+  try {
+    const result = await processSession(req.params.slug ?? '');
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Processing failed' });
+  }
+});
 
 // ── list ──────────────────────────────────────────────────────────────────────
 
@@ -71,9 +85,11 @@ campaignsRouter.post('/generate', async (req, res) => {
       token => { accumulated += token; send({ type: 'token', content: token }); },
     );
 
-    const world = JSON.parse(
-      accumulated.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
-    ) as Record<string, unknown> & { world?: { name?: string } };
+    const start = accumulated.indexOf('{');
+    const end   = accumulated.lastIndexOf('}');
+    if (start === -1 || end === -1) throw new Error('Model did not return a JSON object');
+    const jsonStr = accumulated.slice(start, end + 1).replace(/,(\s*[}\]])/g, '$1');
+    const world = JSON.parse(jsonStr) as Record<string, unknown> & { world?: { name?: string } };
 
     send({ type: 'progress', message: 'Writing vault...' });
     await writeVault(slug, world, tags, concept);
@@ -97,6 +113,11 @@ campaignsRouter.post('/generate', async (req, res) => {
 });
 
 // ── character endpoints ───────────────────────────────────────────────────────
+
+campaignsRouter.get('/:id/party', async (req, res) => {
+  const chars = await listCharacters(req.params.id ?? '');
+  res.json(chars.map(({ password: _pw, ...c }) => c));
+});
 
 campaignsRouter.post('/:id/party', async (req, res) => {
   const slug = req.params.id ?? '';
@@ -197,3 +218,107 @@ async function writeVault(slug: string, data: Record<string, unknown>, tags: str
     writeCampaignFile(slug, 'meta.json', JSON.stringify({ tags, concept, createdAt: new Date().toISOString() }, null, 2)),
   ]);
 }
+
+// ── Resting ───────────────────────────────────────────────────────────────────
+
+const HIT_DICE: Record<string, number> = {
+  Artificer: 8, Barbarian: 12, Bard: 8, Cleric: 8, Druid: 8,
+  Fighter: 10, Monk: 8, Paladin: 10, Ranger: 10, Rogue: 8,
+  Sorcerer: 6, Warlock: 8, Wizard: 6,
+};
+function statMod(score: number) { return Math.floor((score - 10) / 2); }
+function calcMaxHp(char: Character): number {
+  return char.maxHp ?? ((HIT_DICE[char.class] ?? 8) + statMod(char.stats.con));
+}
+
+campaignsRouter.post('/:id/rest/short', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { characterId, hitDiceSpent } = req.body as { characterId: string; hitDiceSpent: number };
+    const char = await getCharacter(id, characterId);
+    if (!char) return res.status(404).json({ error: 'Character not found' });
+
+    const dieSize  = HIT_DICE[char.class] ?? 8;
+    const conMod   = statMod(char.stats.con);
+    const maxHp    = calcMaxHp(char);
+    const current  = char.currentHp ?? maxHp;
+
+    let hpGained = 0;
+    for (let i = 0; i < (hitDiceSpent ?? 0); i++) {
+      hpGained += Math.floor(Math.random() * dieSize) + 1 + conMod;
+    }
+    hpGained = Math.max(0, hpGained);
+    const currentHp = Math.min(maxHp, current + hpGained);
+
+    await writeCharacter(id, characterId, { ...char, currentHp, maxHp });
+    return res.json({ hpGained, currentHp, maxHp });
+  } catch (err) {
+    return res.status(500).json({ error: err instanceof Error ? err.message : 'Rest failed' });
+  }
+});
+
+campaignsRouter.post('/:id/rest/long', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { characterId } = req.body as { characterId: string };
+    const char = await getCharacter(id, characterId);
+    if (!char) return res.status(404).json({ error: 'Character not found' });
+
+    const maxHp = calcMaxHp(char);
+    await writeCharacter(id, characterId, { ...char, currentHp: maxHp, maxHp });
+
+    // Advance world state
+    const HOURS = 8;
+    let state = await readWorldState(id);
+
+    const config = await getConfig();
+    const { model, apiKey } = config.combat;
+
+    if (!state && apiKey) {
+      const [worldMd, factionsMd] = await Promise.all([
+        readCampaignFile(id, 'world.md'),
+        readCampaignFile(id, 'factions.md'),
+      ]);
+      state = await generateWorldState(worldMd ?? '', factionsMd ?? '', apiKey, model);
+      if (state) { state.dayNumber = 1; state.totalHoursElapsed = 0; }
+    }
+
+    let worldEvents: string | null = null;
+    if (state) {
+      state.totalHoursElapsed += HOURS;
+      state.dayNumber = Math.floor(state.totalHoursElapsed / 24) + 1;
+      const newlyCompleted: string[] = [];
+
+      for (const actor of state.actors) {
+        if (actor.status !== 'active') continue;
+        actor.daysElapsed += HOURS / 24;
+        for (const ms of actor.milestones) {
+          if (!ms.completed && actor.daysElapsed >= ms.day) {
+            ms.completed = true;
+            ms.completedOnDay = Math.floor(actor.daysElapsed);
+            newlyCompleted.push(`${actor.name}: ${ms.description}`);
+          }
+        }
+        // Update currentStatus to next uncompleted milestone
+        const next = actor.milestones.find(m => !m.completed);
+        if (next) actor.currentStatus = `Working toward: ${next.description}`;
+        else if (actor.daysElapsed >= actor.totalDays) {
+          actor.status = 'succeeded';
+          actor.currentStatus = `Has achieved their ultimate goal: ${actor.ultimateGoal}`;
+          newlyCompleted.push(`⚠️ ${actor.name} HAS SUCCEEDED: ${actor.ultimateGoal}`);
+        }
+      }
+
+      if (apiKey) {
+        const worldMd = await readCampaignFile(id, 'world.md');
+        worldEvents = await tickWorldNarrative(state, HOURS, worldMd ?? '', newlyCompleted, apiKey, model);
+      }
+
+      await writeWorldState(id, state);
+    }
+
+    return res.json({ currentHp: maxHp, maxHp, worldEvents: worldEvents ?? undefined });
+  } catch (err) {
+    return res.status(500).json({ error: err instanceof Error ? err.message : 'Long rest failed' });
+  }
+});

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
-import type { CharacterStats } from 'shared';
+import type { CharacterStats, InventoryItem } from 'shared';
 import type { StatName } from './srd.ts';
 
 interface CharacterDraft {
@@ -21,7 +21,9 @@ interface CharacterDraft {
   portraitPath: string;
   tokenPath: string;
   expertiseSkills: string[];
-  activeTab: 'info' | 'spells';
+  activeTab: 'info' | 'spells' | 'shop';
+  gold: number;
+  inventory: InventoryItem[];
 }
 
 interface CharacterContextValue extends CharacterDraft {
@@ -47,6 +49,8 @@ const BLANK: Omit<CharacterDraft, 'id'> = {
   portraitBase64: '', portraitPath: '', tokenPath: '',
   expertiseSkills: [],
   activeTab: 'info',
+  gold: 200,
+  inventory: [],
 };
 
 const STAT_IDX: Record<StatName, number> = { STR: 0, DEX: 1, CON: 2, INT: 3, WIS: 4, CHA: 5 };

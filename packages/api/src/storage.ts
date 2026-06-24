@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { AppConfig, Campaign, WorldMeta, Character } from 'shared';
+import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, EnemyStatBlock, WorldState } from 'shared';
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const STORAGE_DIR = path.resolve(__dir, '../storage');
@@ -11,8 +11,9 @@ const CONFIG_PATH = path.join(STORAGE_DIR, 'config.json');
 export const CAMPAIGNS_DIR = path.join(STORAGE_DIR, 'campaigns');
 
 const DEFAULT_CONFIG: AppConfig = {
-  story: { provider: 'claude', model: 'claude-sonnet-4-6', apiKey: '' },
-  image: { model: 'dall-e-3', apiKey: '' },
+  story:  { provider: 'claude', model: 'claude-sonnet-4-6', apiKey: '' },
+  image:  { model: 'gpt-image-1', apiKey: '' },
+  combat: { model: 'gpt-4o-mini', apiKey: '' },
 };
 
 export async function getConfig(): Promise<AppConfig> {
@@ -84,6 +85,16 @@ export async function getCharacter(slug: string, charId: string): Promise<Charac
   }
 }
 
+export async function listCharacters(slug: string): Promise<Character[]> {
+  const partyPath = path.join(CAMPAIGNS_DIR, slug, 'party');
+  if (!existsSync(partyPath)) return [];
+  const entries = await readdir(partyPath, { withFileTypes: true });
+  const chars = await Promise.all(
+    entries.filter(e => e.isDirectory()).map(e => getCharacter(slug, e.name)),
+  );
+  return chars.filter((c): c is Character => c !== null);
+}
+
 export async function findCharacterByPassword(slug: string, password: string): Promise<Character | null> {
   const partyPath = path.join(CAMPAIGNS_DIR, slug, 'party');
   if (!existsSync(partyPath)) return null;
@@ -96,8 +107,117 @@ export async function findCharacterByPassword(slug: string, password: string): P
   return null;
 }
 
+export async function readChatLog(slug: string): Promise<ChatPayload[]> {
+  try {
+    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'chat.json'), 'utf-8');
+    return JSON.parse(raw) as ChatPayload[];
+  } catch {
+    return [];
+  }
+}
+
+export async function appendChatLog(slug: string, message: ChatPayload): Promise<void> {
+  const log = await readChatLog(slug);
+  log.push(message);
+  await writeCampaignFile(slug, 'chat.json', JSON.stringify(log, null, 2));
+}
+
 export async function writeCharacterImage(slug: string, charId: string, filename: string, data: Buffer): Promise<void> {
   const dir = partyDir(slug, charId);
   await mkdir(dir, { recursive: true });
   await writeFile(path.join(dir, filename), data);
+}
+
+export async function listEntitySlugs(slug: string, type: string): Promise<string[]> {
+  const dir = path.join(CAMPAIGNS_DIR, slug, 'entities', type);
+  if (!existsSync(dir)) return [];
+  const entries = await readdir(dir, { withFileTypes: true });
+  return entries.filter(e => e.isFile() && e.name.endsWith('.md')).map(e => e.name.replace(/\.md$/, ''));
+}
+
+export async function readEntity(slug: string, type: string, entitySlug: string): Promise<string | null> {
+  try {
+    return await readFile(path.join(CAMPAIGNS_DIR, slug, 'entities', type, `${entitySlug}.md`), 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+export async function writeEntity(slug: string, type: string, entitySlug: string, content: string): Promise<void> {
+  const dir = path.join(CAMPAIGNS_DIR, slug, 'entities', type);
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, `${entitySlug}.md`), content, 'utf-8');
+}
+
+export async function saveMap(slug: string, mapId: string, buffer: Buffer): Promise<void> {
+  const dir = path.join(CAMPAIGNS_DIR, slug, 'maps');
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, `${mapId}.jpg`), buffer);
+}
+
+export async function appendMapIndex(slug: string, entry: BattleMap): Promise<void> {
+  const indexPath = path.join(CAMPAIGNS_DIR, slug, 'maps', 'index.json');
+  let index: BattleMap[] = [];
+  try { index = JSON.parse(await readFile(indexPath, 'utf-8')) as BattleMap[]; } catch { /* first map */ }
+  index.push(entry);
+  await writeFile(indexPath, JSON.stringify(index, null, 2), 'utf-8');
+}
+
+export async function listMaps(slug: string): Promise<BattleMap[]> {
+  try {
+    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'maps', 'index.json'), 'utf-8');
+    return JSON.parse(raw) as BattleMap[];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveEncounter(slug: string, enemies: EnemyStatBlock[]): Promise<void> {
+  await writeCampaignFile(slug, 'encounter.json', JSON.stringify(enemies, null, 2));
+}
+
+export async function loadEncounter(slug: string): Promise<EnemyStatBlock[] | null> {
+  try {
+    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'encounter.json'), 'utf-8');
+    return JSON.parse(raw) as EnemyStatBlock[];
+  } catch {
+    return null;
+  }
+}
+
+export async function clearEncounter(slug: string): Promise<void> {
+  const p = path.join(CAMPAIGNS_DIR, slug, 'encounter.json');
+  try { if (existsSync(p)) await writeFile(p, '[]', 'utf-8'); } catch { /* ignore */ }
+}
+
+export async function readWorldState(slug: string): Promise<WorldState | null> {
+  try {
+    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'world-state.json'), 'utf-8');
+    return JSON.parse(raw) as WorldState;
+  } catch { return null; }
+}
+
+export async function writeWorldState(slug: string, state: WorldState): Promise<void> {
+  await writeCampaignFile(slug, 'world-state.json', JSON.stringify(state, null, 2));
+}
+
+export async function readCampaignFile(slug: string, filename: string): Promise<string | null> {
+  try {
+    return await readFile(path.join(CAMPAIGNS_DIR, slug, filename), 'utf-8');
+  } catch { return null; }
+}
+
+export async function archiveChatLog(slug: string): Promise<void> {
+  const chatPath = path.join(CAMPAIGNS_DIR, slug, 'chat.json');
+  const sessionsDir = path.join(CAMPAIGNS_DIR, slug, 'sessions');
+  await mkdir(sessionsDir, { recursive: true });
+  try {
+    const raw = await readFile(chatPath, 'utf-8');
+    const date = new Date().toISOString().slice(0, 10);
+    const existing = await readdir(sessionsDir);
+    const count = existing.filter(f => f.startsWith(date)).length;
+    const archiveName = `${date}-${String(count + 1).padStart(3, '0')}.json`;
+    await writeFile(path.join(sessionsDir, archiveName), raw, 'utf-8');
+  } catch { /* no chat log yet */ }
+  await writeFile(chatPath, '[]', 'utf-8');
 }

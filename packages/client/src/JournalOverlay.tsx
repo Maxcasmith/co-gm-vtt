@@ -7,9 +7,11 @@ interface Props {
   open: boolean;
   onClose: () => void;
   character: Character;
+  sessionActive: boolean;
+  dmThinking: boolean;
 }
 
-export default function JournalOverlay({ open, onClose, character }: Props) {
+export default function JournalOverlay({ open, onClose, character, sessionActive, dmThinking }: Props) {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -62,7 +64,7 @@ export default function JournalOverlay({ open, onClose, character }: Props) {
             </div>
           ) : (
             messages.map((msg, i) => (
-              <div key={i} className={`journal-msg${msg.senderName === 'System' ? ' journal-msg--system' : ''}`}>
+              <div key={i} className={`journal-msg${msg.variant === 'recap' ? ' journal-msg--recap' : msg.senderName === 'System' ? ' journal-msg--system' : ''}`}>
                 <div className="journal-msg-header">
                   <span className="journal-msg-sender">{msg.senderName}</span>
                   <span className="journal-msg-time">
@@ -75,16 +77,28 @@ export default function JournalOverlay({ open, onClose, character }: Props) {
           )}
         </div>
 
+        {dmThinking && (
+          <div className="journal-msg journal-msg--recap journal-thinking">
+            <div className="journal-msg-header">
+              <span className="journal-msg-sender">Virtual DM</span>
+            </div>
+            <div className="journal-msg-text">
+              <span className="journal-thinking-dots"><span>.</span><span>.</span><span>.</span></span>
+            </div>
+          </div>
+        )}
+
         <div className="journal-input-row">
           <input
             className="journal-input"
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') send(); }}
-            placeholder="Say something…"
+            placeholder={sessionActive ? 'Say something…' : 'Session hasn\'t started yet'}
+            disabled={!sessionActive}
             autoFocus
           />
-          <button className="btn-primary" onClick={send} disabled={!input.trim()}>Send</button>
+          <button className="btn-primary" onClick={send} disabled={!sessionActive || !input.trim()}>Send</button>
         </div>
       </div>
     </div>

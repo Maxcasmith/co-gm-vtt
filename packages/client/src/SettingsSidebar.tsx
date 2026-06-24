@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AppConfig, StoryProvider, ImageModel } from 'shared';
+import type { AppConfig, StoryProvider, ImageModel, CombatConfig } from 'shared';
 
 interface Props {
   open: boolean;
@@ -35,13 +35,21 @@ const STORY_PROVIDERS: { id: StoryProvider; label: string; models: { id: string;
 ];
 
 const IMAGE_MODELS: { id: ImageModel; label: string }[] = [
-  { id: 'dall-e-3', label: 'DALL·E 3' },
-  { id: 'dall-e-2', label: 'DALL·E 2' },
+  { id: 'gpt-image-1', label: 'GPT Image 1' },
+  { id: 'dall-e-3',    label: 'DALL·E 3' },
+  { id: 'dall-e-2',    label: 'DALL·E 2' },
+];
+
+const COMBAT_MODELS: { id: CombatConfig['model']; label: string }[] = [
+  { id: 'gpt-4o-mini',  label: 'GPT-4o Mini (Recommended)' },
+  { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+  { id: 'gpt-4o',       label: 'GPT-4o' },
 ];
 
 const DEFAULT_CONFIG: AppConfig = {
-  story: { provider: 'claude', model: 'claude-sonnet-4-6', apiKey: '' },
-  image: { model: 'dall-e-3', apiKey: '' },
+  story:  { provider: 'claude', model: 'claude-sonnet-4-6', apiKey: '' },
+  image:  { model: 'gpt-image-1', apiKey: '' },
+  combat: { model: 'gpt-4o-mini', apiKey: '' },
 };
 
 const API = `http://${window.location.hostname}:3001`;
@@ -49,8 +57,9 @@ const API = `http://${window.location.hostname}:3001`;
 export default function SettingsSidebar({ open, onClose }: Props) {
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
   const [saved, setSaved] = useState<AppConfig>(DEFAULT_CONFIG);
-  const [storyStatus, setStoryStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
-  const [imageStatus, setImageStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [storyStatus, setStoryStatus]   = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [imageStatus, setImageStatus]   = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [combatStatus, setCombatStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const discardRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -84,8 +93,8 @@ export default function SettingsSidebar({ open, onClose }: Props) {
     onClose();
   }
 
-  async function testConnection(type: 'story' | 'image') {
-    const set = type === 'story' ? setStoryStatus : setImageStatus;
+  async function testConnection(type: 'story' | 'image' | 'combat') {
+    const set = type === 'story' ? setStoryStatus : type === 'image' ? setImageStatus : setCombatStatus;
     set('testing');
     try {
       const r = await fetch(`${API}/api/config/test`, {
@@ -193,6 +202,43 @@ export default function SettingsSidebar({ open, onClose }: Props) {
               {imageStatus !== 'idle' && imageStatus !== 'testing' && (
                 <span className={`status-badge status-badge--${imageStatus}`}>
                   {imageStatus === 'ok' ? '● Connected' : '● Failed'}
+                </span>
+              )}
+            </div>
+          </section>
+
+          <div className="settings-divider" />
+
+          <section className="settings-section">
+            <h3 className="settings-section-title">Combat AI</h3>
+            <p className="settings-section-note">We recommend a lower-cost model here — encounter generation is a simple structured task that doesn't need frontier reasoning.</p>
+            <label className="modal-label">
+              Model
+              <select
+                className="modal-select"
+                value={config.combat.model}
+                onChange={e => setConfig(c => ({ ...c, combat: { ...c.combat, model: e.target.value } }))}
+              >
+                {COMBAT_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+            </label>
+            <label className="modal-label">
+              OpenAI API Key
+              <input
+                className="modal-input"
+                type="password"
+                value={config.combat.apiKey}
+                onChange={e => setConfig(c => ({ ...c, combat: { ...c.combat, apiKey: e.target.value } }))}
+                placeholder="sk-…"
+              />
+            </label>
+            <div className="settings-test-row">
+              <button className="btn-test" onClick={() => testConnection('combat')} disabled={combatStatus === 'testing'}>
+                {combatStatus === 'testing' ? 'Testing…' : 'Test Connection'}
+              </button>
+              {combatStatus !== 'idle' && combatStatus !== 'testing' && (
+                <span className={`status-badge status-badge--${combatStatus}`}>
+                  {combatStatus === 'ok' ? '● Connected' : '● Failed'}
                 </span>
               )}
             </div>

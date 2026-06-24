@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { Character } from 'shared';
+import type { Character, Weapon, Consumable, TurnOrderEntry } from 'shared';
+import { isWeapon, isConsumable } from 'shared';
 import { on, dispatch } from './events.ts';
 import {
   STAT_NAMES,
@@ -25,11 +26,33 @@ const STAT_KEYS: Array<keyof Character['stats']> = ['str', 'dex', 'con', 'int', 
 
 type SheetTab = 'abilities' | 'features' | 'inventory';
 
-interface Props { character: Character }
+interface Props { character: Character; currentHp?: number; maxHp?: number; }
 
 // ── Abilities ─────────────────────────────────────────────────────────────────
 
 function AbilitiesTab({ character }: { character: Character }) {
+  const [deathSuccesses, setDeathSuccesses] = useState(0);
+  const [deathFailures, setDeathFailures]   = useState(0);
+
+  function rollDeathSave() {
+    const roll = Math.floor(Math.random() * 20) + 1;
+    let msg: string;
+    if (roll === 20) {
+      setDeathSuccesses(3);
+      msg = `(Death Save) ${character.name} rolls a 20 — miraculous recovery!`;
+    } else if (roll === 1) {
+      setDeathFailures(f => Math.min(3, f + 2));
+      msg = `(Death Save) ${character.name} rolls a 1 — two failures!`;
+    } else if (roll >= 10) {
+      setDeathSuccesses(s => Math.min(3, s + 1));
+      msg = `(Death Save) ${character.name} rolls ${roll} — success.`;
+    } else {
+      setDeathFailures(f => Math.min(3, f + 1));
+      msg = `(Death Save) ${character.name} rolls ${roll} — failure.`;
+    }
+    dispatch('vtt:chat:message-sent', { text: msg, senderName: character.name, timestamp: Date.now() });
+  }
+
   const cls = character.class;
   const proficientSaves = new Set<string>(CLASS_SAVING_THROWS[cls] ?? []);
   const proficientSkills = new Set<string>([
@@ -74,6 +97,17 @@ function AbilitiesTab({ character }: { character: Character }) {
               </div>
             );
           })}
+
+          <button className="sheet-save-row sheet-save-row--clickable" onClick={rollDeathSave} title="Roll death saving throw">
+            <span className="sheet-save-dot" />
+            <span className="sheet-save-label">DEATH</span>
+            <span className="sheet-save-val">d20</span>
+          </button>
+
+          <div className="sheet-death-saves">
+            <progress className="sheet-death-bar sheet-death-bar--life"  max={3} value={deathSuccesses} />
+            <progress className="sheet-death-bar sheet-death-bar--death" max={3} value={deathFailures} />
+          </div>
         </div>
 
         <div>
@@ -155,12 +189,94 @@ function FeaturesTab({ character }: { character: Character }) {
 
 // ── Inventory ─────────────────────────────────────────────────────────────────
 
-function InventoryTab() {
+const WEAPON_NAMES    = /sword|dagger|axe|mace|staff|bow|spear|lance|rapier|club|flail|hammer|trident|whip|blade/i;
+const ARMOUR_NAMES    = /armou?r|shield|helmet|gauntlet|boot|plate|chain|mail/i;
+const CONSUMABLE_NAMES = /potion|scroll|ration|herb|tincture|elixir/i;
+
+const SECTIONS = [
+  { label: 'Weapons',     test: (i: Item | Weapon | Consumable) => isWeapon(i)      || WEAPON_NAMES.test(i.name)     },
+  { label: 'Armour',      test: (i: Item | Weapon | Consumable) => ARMOUR_NAMES.test(i.name)                         },
+  { label: 'Consumables', test: (i: Item | Weapon | Consumable) => isConsumable(i)  || CONSUMABLE_NAMES.test(i.name) },
+  { label: 'Other',       test: () => true                                                                            },
+] as const;
+
+function asWeapon(item: Item | Weapon | Consumable): Weapon {
+  if (isWeapon(item)) return item;
+  return { ...item, type: 'weapon' as const, damage: '1d8', damageType: 'slashing', attackBonus: 0, range: 5, properties: [] };
+}
+
+function asConsumable(item: Item | Weapon | Consumable): Consumable {
+  if (isConsumable(item)) return item;
+  return { ...item, type: 'consumable' as const, effect: '', actionCost: 'bonusAction' };
+}
+
+function InventoryTab({ character, combatActive }: { character: Character; combatActive: boolean }) {
+  const items = character.inventory ?? [];
+
+  function handleWeaponClick(weapon: Weapon) {
+    dispatch('vtt:sheet:closed', {});
+    dispatch('vtt:targeting:start', { weapon, actionType: 'action' });
+  }
+
+  function handleConsumableClick(item: Consumable) {
+    dispatch('vtt:sheet:closed', {});
+    dispatch('vtt:consumable:used', { item, characterId: character.id });
+  }
+
+  // Assign each item to its first matching section
+  const grouped = new Map<string, Array<Item | Weapon | Consumable>>();
+  for (const item of items) {
+    const section = SECTIONS.find(s => s.test(item))!;
+    const bucket = grouped.get(section.label) ?? [];
+    bucket.push(item);
+    grouped.set(section.label, bucket);
+  }
+
   return (
-    <div className="sheet-empty">
-      <p className="sheet-empty-title">No items yet</p>
-      <p className="sheet-empty-hint">Items will appear here as you acquire them</p>
-    </div>
+    <>
+      {character.gold != null && (
+        <div className="sheet-inv-gold">
+          <span className="sheet-inv-gold-label">Gold</span>
+          <span className="sheet-inv-gold-value">{character.gold} gp</span>
+        </div>
+      )}
+      {items.length === 0
+        ? <div className="sheet-empty">
+            <p className="sheet-empty-title">No items yet</p>
+            <p className="sheet-empty-hint">Items will appear here as you acquire them</p>
+          </div>
+        : SECTIONS.map(section => {
+            const bucket = grouped.get(section.label);
+            if (!bucket?.length) return null;
+            return (
+              <div key={section.label} className="sheet-inv-section">
+                <p className="sheet-inv-section-title">{section.label}</p>
+                <div className="sheet-inventory">
+                  {bucket.map(item => {
+                    const weapon     = combatActive && section.label === 'Weapons'     ? asWeapon(item)     : null;
+                    const consumable = combatActive && section.label === 'Consumables' ? asConsumable(item) : null;
+                    return (
+                      <div
+                        key={item.id}
+                        className={`sheet-inv-card${weapon ? ' sheet-inv-card--weapon' : ''}${consumable ? ' sheet-inv-card--consumable' : ''}`}
+                        onClick={weapon ? () => handleWeaponClick(weapon) : consumable ? () => handleConsumableClick(consumable) : undefined}
+                      >
+                        <div className="sheet-inv-card-header">
+                          <span className="sheet-inv-name">{item.name}</span>
+                          {item.quantity > 1 && <span className="sheet-inv-qty">×{item.quantity}</span>}
+                        </div>
+                        {item.description && <p className="sheet-inv-desc">{item.description}</p>}
+                        {weapon     && <span className="sheet-inv-attack">Attack</span>}
+                        {consumable && <span className="sheet-inv-use">Use</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })
+      }
+    </>
   );
 }
 
@@ -172,9 +288,17 @@ const TABS: { id: SheetTab; label: string }[] = [
   { id: 'inventory', label: 'Inventory' },
 ];
 
-export default function CharacterSheetOverlay({ character }: Props) {
+const NEXT_LEVEL_XP = 100;
+
+export default function CharacterSheetOverlay({ character, currentHp, maxHp }: Props) {
   const [visible, setVisible] = useState(false);
-  const [tab, setTab] = useState<SheetTab>('abilities');
+  const [tab, setTab]         = useState<SheetTab>('abilities');
+  const [combatActive, setCombatActive] = useState(false);
+  useEffect(() => on('vtt:combat:state', ({ active }) => setCombatActive(active)), []);
+  const [currentXp, setCurrentXp] = useState(() => {
+    const stored = sessionStorage.getItem(`vtt-xp:${character.id}`);
+    return stored ? parseInt(stored, 10) : 0;
+  });
 
   useEffect(() => {
     const unsubOpen  = on('vtt:sheet:opened', () => setVisible(true));
@@ -193,8 +317,17 @@ export default function CharacterSheetOverlay({ character }: Props) {
 
   if (!visible) return null;
 
-  const hitDie = HIT_DICE[character.class] ?? 8;
-  const hp = hitDie + modNum(character.stats.con);
+  const hitDie   = HIT_DICE[character.class] ?? 8;
+  const derivedMaxHp = hitDie + modNum(character.stats.con);
+  const displayMax     = maxHp     ?? derivedMaxHp;
+  const displayCurrent = currentHp ?? displayMax;
+
+  const dexMod = modNum(character.stats.dex);
+  const ac = character.class === 'Barbarian'
+    ? 10 + dexMod + modNum(character.stats.con)
+    : character.class === 'Monk'
+      ? 10 + dexMod + modNum(character.stats.wis)
+      : 10 + dexMod;
 
   const portraitCharId = character.portraitPath
     ? character.portraitPath.split('/')[1] ?? character.id
@@ -215,11 +348,47 @@ export default function CharacterSheetOverlay({ character }: Props) {
             <p className="sheet-name">{character.name}</p>
             <p className="sheet-subtitle">{character.class} · {character.species} · {character.background}</p>
           </div>
-          <div className="sheet-hp">
-            <div className="sheet-hp-value">{hp}</div>
-            <div className="sheet-hp-label">Max HP</div>
-          </div>
+          <button
+            className={`sheet-initiative-btn${!combatActive ? ' sheet-initiative-btn--disabled' : ''}`}
+            disabled={!combatActive}
+            onClick={combatActive ? () => {
+              const dexMod = modNum(character.stats.dex);
+              const roll   = Math.floor(Math.random() * 20) + 1;
+              const entry: TurnOrderEntry = { id: character.id, name: character.name, initiative: roll + dexMod, isPlayer: true };
+              dispatch('vtt:combat:initiative:roll', { entry });
+              dispatch('vtt:sheet:closed', {});
+            } : undefined}
+          >
+            Initiative
+          </button>
+          <button
+            className={`sheet-rest-btn${combatActive ? ' sheet-rest-btn--disabled' : ''}`}
+            disabled={combatActive}
+            onClick={combatActive ? undefined : () => { dispatch('vtt:sheet:closed', {}); dispatch('vtt:rest:open', {}); }}
+          >
+            Rest
+          </button>
           <button className="sheet-close" onClick={() => dispatch('vtt:sheet:closed', {})} aria-label="Close">×</button>
+        </div>
+
+        <div className="sheet-hp-strip">
+          <span className="sheet-hp-strip-label">HP</span>
+          <span className={`sheet-hp-strip-value${displayCurrent < displayMax ? ' sheet-hp-strip-value--damaged' : ''}`}>{displayCurrent} / {displayMax}</span>
+          <span className="sheet-hp-strip-sep" />
+          <span className="sheet-hp-strip-label">AC</span>
+          <span className="sheet-hp-strip-value">{ac}</span>
+          <span className="sheet-hp-strip-sep" />
+          <span className="sheet-hp-strip-label">INIT</span>
+          <span className="sheet-hp-strip-value">{(() => { const n = modNum(character.stats.dex) + (character.initiativeBonus ?? 0); return n >= 0 ? `+${n}` : `${n}`; })()}</span>
+          <div className="sheet-xp">
+            <progress className="sheet-xp-bar" max={NEXT_LEVEL_XP} value={currentXp} />
+            <span className="sheet-xp-label">{currentXp} / {NEXT_LEVEL_XP} XP</span>
+            <button
+              className={`sheet-levelup-btn${currentXp >= NEXT_LEVEL_XP ? ' sheet-levelup-btn--ready' : ''}`}
+              disabled={currentXp < NEXT_LEVEL_XP}
+              onClick={() => { setCurrentXp(0); sessionStorage.setItem(`vtt-xp:${character.id}`, '0'); }}
+            >LEVEL UP</button>
+          </div>
         </div>
 
         <div className="sheet-tabs">
@@ -237,7 +406,7 @@ export default function CharacterSheetOverlay({ character }: Props) {
         <div className="sheet-content">
           {tab === 'abilities' && <AbilitiesTab character={character} />}
           {tab === 'features'  && <FeaturesTab  character={character} />}
-          {tab === 'inventory' && <InventoryTab />}
+          {tab === 'inventory' && <InventoryTab character={character} combatActive={combatActive} />}
         </div>
       </div>
     </div>

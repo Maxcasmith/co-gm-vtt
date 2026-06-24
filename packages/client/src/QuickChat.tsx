@@ -5,9 +5,11 @@ interface Props {
   open: boolean;
   onClose: () => void;
   senderName: string;
+  sessionActive: boolean;
+  disabled?: boolean;
 }
 
-export default function QuickChat({ open, onClose, senderName }: Props) {
+export default function QuickChat({ open, onClose, senderName, sessionActive, disabled = false }: Props) {
   const [lastMessage, setLastMessage] = useState<{ text: string; senderName: string } | null>(null);
   const [text, setText] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -30,11 +32,11 @@ export default function QuickChat({ open, onClose, senderName }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || !sessionActive) return null;
 
   function send() {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || disabled) return;
     dispatch('vtt:chat:message-sent', { text: trimmed, senderName, timestamp: Date.now() });
     onClose();
   }
@@ -48,14 +50,15 @@ export default function QuickChat({ open, onClose, senderName }: Props) {
       )}
       <input
         ref={inputRef}
-        className="quick-chat-input"
+        className={`quick-chat-input${disabled ? ' quick-chat-input--disabled' : ''}`}
         value={text}
         onChange={e => setText(e.target.value)}
         onKeyDown={e => {
           if (e.key === 'Enter') { e.preventDefault(); send(); }
           if (e.key === 'Escape') { e.preventDefault(); onClose(); }
         }}
-        placeholder="Say something…"
+        placeholder={disabled ? "Not your turn…" : "Say something…"}
+        readOnly={disabled}
       />
     </div>
   );

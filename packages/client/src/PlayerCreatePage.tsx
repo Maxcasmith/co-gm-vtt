@@ -3,6 +3,7 @@ import type { WorldMeta } from 'shared';
 import { CharacterProvider, useCharacter } from './character-creation/CharacterContext.tsx';
 import PlayerInfoTab from './character-creation/PlayerInfoTab.tsx';
 import SpellsTab from './character-creation/SpellsTab.tsx';
+import ShopTab from './character-creation/ShopTab.tsx';
 import { BACKGROUND_SKILLS } from './character-creation/srd.ts';
 import './app.css';
 
@@ -60,6 +61,8 @@ function CreatePageInner({ campaignId, campaignName }: { campaignId: string; cam
           ],
           portraitPath: c.portraitPath,
           tokenPath: c.tokenPath,
+          inventory: c.inventory,
+          gold: c.gold,
           campaignId,
         }),
       });
@@ -109,10 +112,18 @@ function CreatePageInner({ campaignId, campaignName }: { campaignId: string; cam
         >
           Spells
         </button>
+        <button
+          className={`tab-btn ${c.activeTab === 'shop' ? 'tab-btn--active' : ''}`}
+          onClick={() => c.set('activeTab', 'shop')}
+        >
+          Shop
+        </button>
       </nav>
 
       <div className="create-body">
-        {c.activeTab === 'spells' ? <SpellsTab /> : <PlayerInfoTab campaignId={campaignId} />}
+        {c.activeTab === 'spells' ? <SpellsTab />
+          : c.activeTab === 'shop' ? <ShopTab />
+          : <PlayerInfoTab campaignId={campaignId} />}
       </div>
 
       {error && <p className="modal-error create-error">{error}</p>}

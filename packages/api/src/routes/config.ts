@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { AppConfig } from 'shared';
 import { getConfig, saveConfig } from '../storage.ts';
-import { getStoryProvider, getImageProvider } from '../providers/index.ts';
+import { getStoryProvider, getImageProvider, getCombatProvider } from '../providers/index.ts';
 
 export const configRouter = Router();
 
@@ -17,12 +17,12 @@ configRouter.put('/', async (req, res) => {
 });
 
 configRouter.post('/test', async (req, res) => {
-  const { type } = req.body as { type: 'story' | 'image' };
+  const { type } = req.body as { type: 'story' | 'image' | 'combat' };
   const config = await getConfig();
   try {
-    const ok = type === 'image'
-      ? await getImageProvider(config).validateKey()
-      : await getStoryProvider(config).validateKey();
+    const ok = type === 'image'  ? await getImageProvider(config).validateKey()
+             : type === 'combat' ? await getCombatProvider(config).validateKey()
+             :                     await getStoryProvider(config).validateKey();
     res.json({ ok, message: ok ? 'Connection successful' : 'Invalid API key' });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Connection failed';

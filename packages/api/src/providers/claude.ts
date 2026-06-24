@@ -1,6 +1,26 @@
 const API_BASE = 'https://api.anthropic.com/v1';
 const ANTHROPIC_VERSION = '2023-06-01';
 
+export interface ChatMessage { role: 'user' | 'assistant'; content: string }
+
+export async function claudeChat(system: string, messages: ChatMessage[], apiKey: string, model: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+    },
+    body: JSON.stringify({ model, max_tokens: 1024, system, messages }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
+    throw new Error(err.error?.message ?? res.statusText);
+  }
+  const data = await res.json() as { content: { text: string }[] };
+  return data.content[0]?.text ?? '';
+}
+
 export async function claudeComplete(prompt: string, apiKey: string, model: string): Promise<string> {
   const res = await fetch(`${API_BASE}/messages`, {
     method: 'POST',

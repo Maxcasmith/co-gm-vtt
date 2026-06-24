@@ -1,5 +1,25 @@
 const API_BASE = 'https://api.openai.com/v1';
 
+export interface ChatMessage { role: 'user' | 'assistant'; content: string }
+
+export async function openaiChat(system: string, messages: ChatMessage[], apiKey: string, model: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1024,
+      messages: [{ role: 'system', content: system }, ...messages],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
+    throw new Error(err.error?.message ?? res.statusText);
+  }
+  const data = await res.json() as { choices: { message: { content: string } }[] };
+  return data.choices[0]?.message.content ?? '';
+}
+
 export async function openaiComplete(prompt: string, apiKey: string, model: string): Promise<string> {
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
@@ -101,6 +121,28 @@ export async function describeImage(base64image: string, apiKey: string): Promis
   }
   const data = await res.json() as { choices: { message: { content: string } }[] };
   return data.choices[0]?.message.content ?? '';
+}
+
+export async function generateBattleMap(prompt: string, apiKey: string, model: string): Promise<Buffer> {
+  const isGptImage = model === 'gpt-image-1';
+  const size = isGptImage ? '1536x1024' : '1792x1024';
+
+  const res = await fetch(`${API_BASE}/images/generations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, prompt, n: 1, size }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
+    throw new Error(err.error?.message ?? res.statusText);
+  }
+  const data = await res.json() as { data: { url?: string; b64_json?: string; b64?: string }[] };
+  const item = data.data[0];
+  if (!item) throw new Error('No image returned');
+  if (item.b64)      return Buffer.from(item.b64, 'base64');
+  if (item.b64_json) return Buffer.from(item.b64_json, 'base64');
+  if (item.url)      return Buffer.from(await (await fetch(item.url)).arrayBuffer());
+  throw new Error('No image data in response');
 }
 
 export async function generatePortraitImage(prompt: string, apiKey: string, model: string): Promise<Buffer> {
