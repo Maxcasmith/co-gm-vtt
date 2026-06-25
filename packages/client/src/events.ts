@@ -54,6 +54,7 @@ export interface CombatInitiativeRollPayload { entry: TurnOrderEntry }
 export interface CombatTurnOrderPayload { entries: TurnOrderEntry[] }
 export interface MovementUsedPayload  { ft: number }
 export interface MovementGainedPayload { ft: number }
+export type CombatActionSpentPayload = Record<string, never>
 
 export interface RollRequestPayload {
   characterId: string;
@@ -111,6 +112,7 @@ export interface VTTEventMap {
   'vtt:combat:turn:order':      CombatTurnOrderPayload;
   'vtt:movement:used':          MovementUsedPayload;
   'vtt:movement:gained':        MovementGainedPayload;
+  'vtt:combat:action:spent':    CombatActionSpentPayload;
 }
 
 // ── Core API ──────────────────────────────────────────────────────────────────

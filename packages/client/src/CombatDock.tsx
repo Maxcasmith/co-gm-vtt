@@ -70,11 +70,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   }), [character.name, character.id]);
 
   useEffect(() => on('vtt:combat:attack', () => {
-    setResources(prev => {
-      const next = { ...prev, action: false };
-      saveResources(character.id, next);
-      return next;
-    });
+    spendAction();
     setTargeting(null);
   }), [character.id]);
 
@@ -84,6 +80,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
       saveResources(character.id, next);
       return next;
     });
+    if (item.actionCost === 'action') dispatch('vtt:combat:action:spent', {});
   }), [character.id]);
 
   useEffect(() => on('vtt:targeting:start', ({ weapon }) => setTargeting(weapon)), []);
@@ -101,6 +98,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
       saveResources(character.id, next);
       return next;
     });
+    dispatch('vtt:combat:action:spent', {});
   }
 
   function handleStandardAction(action: typeof STANDARD_ACTIONS[number]) {

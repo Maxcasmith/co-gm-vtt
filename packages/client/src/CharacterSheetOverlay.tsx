@@ -307,7 +307,7 @@ export default function CharacterSheetOverlay({ character, currentHp, maxHp }: P
     setIsMyTurn(mine);
     if (mine) setActionAvailable(true);
   }), [character.name]);
-  useEffect(() => on('vtt:combat:attack', () => setActionAvailable(false)), []);
+  useEffect(() => on('vtt:combat:action:spent', () => setActionAvailable(false)), []);
   const [currentXp, setCurrentXp] = useState(() => {
     const stored = sessionStorage.getItem(`vtt-xp:${character.id}`);
     return stored ? parseInt(stored, 10) : 0;

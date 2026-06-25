@@ -69,25 +69,25 @@ export interface CombatVictory {
 }
 
 export interface ServerToClientEvents {
-  'players:update':       (players: Player[]) => void;
-  'roll:result':          (result: RollResult) => void;
-  'chat:message':         (payload: ChatPayload) => void;
-  'chat:history':         (messages: ChatPayload[]) => void;
-  'session:state':        (active: boolean) => void;
-  'session:recap':        (text: string) => void;
-  'dm:thinking':          (active: boolean) => void;
-  'combat:state':         (active: boolean) => void;
-  'map:generating':       () => void;
-  'map:generated':        (mapId: string) => void;
+  'players:update': (players: Player[]) => void;
+  'roll:result': (result: RollResult) => void;
+  'chat:message': (payload: ChatPayload) => void;
+  'chat:history': (messages: ChatPayload[]) => void;
+  'session:state': (active: boolean) => void;
+  'session:recap': (text: string) => void;
+  'dm:thinking': (active: boolean) => void;
+  'combat:state': (active: boolean) => void;
+  'map:generating': () => void;
+  'map:generated': (mapId: string) => void;
   'encounter:generating': () => void;
-  'encounter:ready':      (enemies: EnemyStatBlock[]) => void;
-  'token:moved':          (pos: TokenPosition) => void;
-  'combat:turn':          (data: { actorName: string }) => void;
-  'combat:initiative':    (entry: TurnOrderEntry) => void;
-  'combat:turn:order':    (entries: TurnOrderEntry[]) => void;
+  'encounter:ready': (enemies: EnemyStatBlock[]) => void;
+  'token:moved': (pos: TokenPosition) => void;
+  'combat:turn': (data: { actorName: string }) => void;
+  'combat:initiative': (entry: TurnOrderEntry) => void;
+  'combat:turn:order': (entries: TurnOrderEntry[]) => void;
   'combat:attack:result': (result: AttackResult) => void;
-  'creature:update':      (data: { id: string; currentHp: number; maxHp: number; effects: string[] }) => void;
-  'combat:victory':       (data: CombatVictory) => void;
+  'creature:update': (data: { id: string; currentHp: number; maxHp: number; effects: string[] }) => void;
+  'combat:victory': (data: CombatVictory) => void;
   'combat:player:damage': (data: { characterId: string; characterName: string; damage: number; currentHp: number; maxHp: number }) => void;
   'rest:result': (data: { currentHp: number; maxHp: number; hpGained?: number; worldEvents?: string }) => void;
   'combat:death:save': (data: { characterName: string; roll: number; isNatural20: boolean; isNatural1: boolean; success: boolean; successes: number; failures: number; stable: boolean; dead: boolean }) => void;
@@ -96,16 +96,16 @@ export interface ServerToClientEvents {
 }
 
 export interface ClientToServerEvents {
-  'player:join':    (payload: { name: Player; campaignId: string }) => void;
-  'roll:check':     (payload: { campaignId: string; characterId: string; stat: string; skill?: string }) => void;
-  'roll:save':      (payload: { campaignId: string; characterId: string; stat: string }) => void;
-  'chat:message':   (payload: { text: string; senderName: string }) => void;
-  'session:start':  (payload: { campaignId: string }) => void;
-  'session:end':    (payload: { campaignId: string }) => void;
-  'token:move':     (pos: TokenPosition) => void;
+  'player:join': (payload: { name: Player; campaignId: string }) => void;
+  'roll:check': (payload: { campaignId: string; characterId: string; stat: string; skill?: string }) => void;
+  'roll:save': (payload: { campaignId: string; characterId: string; stat: string }) => void;
+  'chat:message': (payload: { text: string; senderName: string }) => void;
+  'session:start': (payload: { campaignId: string }) => void;
+  'session:end': (payload: { campaignId: string }) => void;
+  'token:move': (pos: TokenPosition) => void;
   'combat:turn:end': () => void;
   'combat:initiative:roll': (entry: TurnOrderEntry) => void;
-  'combat:attack':  (payload: { attackerId: string; attackerName: string; targetId: string; weapon: Weapon }) => void;
+  'combat:attack': (payload: { attackerId: string; attackerName: string; targetId: string; weapon: Weapon }) => void;
 }
 
 export type StoryProvider = 'claude' | 'openai' | 'deepseek';

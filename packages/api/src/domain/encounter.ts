@@ -194,7 +194,9 @@ export class Encounter {
   // ── Turn order ──────────────────────────────────────────────────────────────
 
   addToTurnOrder(p: Participant): void {
-    // Upsert: replace if already present (re-roll case)
+    // Remember the current actor before mutating the order — sorting can shift indices
+    const currentId = this.currentRound ? this.currentActor?.id : undefined;
+
     const idx = this.turnOrder.findIndex(e => e.id === p.id);
     if (idx !== -1) {
       this.turnOrder[idx] = p;
@@ -202,6 +204,12 @@ export class Encounter {
       this.turnOrder.push(p);
     }
     this.sortTurnOrder();
+
+    // Re-anchor the turn index to the same actor after the sort
+    if (currentId !== undefined) {
+      const newIdx = this.turnOrder.findIndex(e => e.id === currentId);
+      if (newIdx !== -1) this._turnIndex = newIdx;
+    }
   }
 
   sortTurnOrder(): void {
