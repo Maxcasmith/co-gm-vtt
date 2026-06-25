@@ -46,6 +46,7 @@ const creatureState = new Map<string, Map<string, { currentHp: number; effects: 
 const playerHp = new Map<string, Map<string, { current: number; max: number }>>();
 const playerCharIdByName = new Map<string, Map<string, string>>();
 const deathSaves = new Map<string, Map<string, { successes: number; failures: number; stable: boolean }>>();
+const playerSocketIds = new Map<string, string>(); // playerName → socketId (for private events)
 
 const HIT_DICE: Record<string, number> = {
   Artificer: 8, Barbarian: 12, Bard: 8, Cleric: 8, Druid: 8,
@@ -72,6 +73,15 @@ function rollDice(formula: string): number {
 }
 
 function emitTurn(cid: string) {
+  if (!combatState.get(cid)) return;
+
+  // TPK: if every tracked player is at 0 HP, end now — before anyone acts
+  const hpMap = playerHp.get(cid);
+  if (hpMap && hpMap.size > 0 && [...hpMap.values()].every(e => e.current <= 0)) {
+    endCombatDefeated(cid);
+    return;
+  }
+
   const order = turnOrders.get(cid) ?? [];
   if (!order.length) return;
   const idx = (turnIndex.get(cid) ?? 0) % order.length;
@@ -98,6 +108,7 @@ function isOccupied(positions: Record<string, { gx: number; gy: number }>, gx: n
 }
 
 async function runDeathSave(cid: string, actor: TurnOrderEntry): Promise<void> {
+  if (!combatState.get(cid)) return;
   if (!deathSaves.has(cid)) deathSaves.set(cid, new Map());
   const savesMap = deathSaves.get(cid)!;
   if (!savesMap.has(actor.name)) savesMap.set(actor.name, { successes: 0, failures: 0, stable: false });
@@ -105,6 +116,7 @@ async function runDeathSave(cid: string, actor: TurnOrderEntry): Promise<void> {
 
   if (saves.stable) { advanceTurn(cid); return; }
 
+  const charId   = playerCharIdByName.get(cid)?.get(actor.name);
   const roll     = d20();
   const isNat20  = roll === 20;
   const isNat1   = roll === 1;
@@ -112,9 +124,7 @@ async function runDeathSave(cid: string, actor: TurnOrderEntry): Promise<void> {
   let dead   = false;
 
   if (isNat20) {
-    // Regain 1 HP
-    const charId = playerCharIdByName.get(cid)?.get(actor.name);
-    const entry  = charId ? playerHp.get(cid)?.get(charId) : undefined;
+    const entry = charId ? playerHp.get(cid)?.get(charId) : undefined;
     if (entry && charId) {
       entry.current = 1;
       io.to(ROOM).emit('combat:player:damage', { characterId: charId, characterName: actor.name, damage: -1, currentHp: 1, maxHp: entry.max });
@@ -133,24 +143,29 @@ async function runDeathSave(cid: string, actor: TurnOrderEntry): Promise<void> {
   if (!stable && saves.successes >= 3) { stable = true; saves.stable = true; }
   if (saves.failures >= 3) dead = true;
 
+  // Private: only the rolling player sees their save result
   const saveData = { characterName: actor.name, roll, isNatural20: isNat20, isNatural1: isNat1, success: roll >= 10, successes: saves.successes, failures: saves.failures, stable, dead };
-  io.to(ROOM).emit('combat:death:save', saveData);
+  const socketId = playerSocketIds.get(actor.name);
+  if (socketId) io.to(socketId).emit('combat:death:save', saveData);
 
-  const msg = dead
-    ? `${actor.name} has failed their third death save — they are dead.`
-    : (stable || isNat20)
-    ? `${actor.name} rolls ${roll} — STABILIZED! (${saves.successes}/3 successes)`
-    : roll >= 10
-    ? `${actor.name} rolls ${roll} on a death save — SUCCESS (${saves.successes}/3 successes, ${saves.failures}/3 failures)`
-    : isNat1
-    ? `${actor.name} rolls a 1 — DOUBLE FAILURE (${saves.successes}/3 successes, ${saves.failures}/3 failures)`
-    : `${actor.name} rolls ${roll} on a death save — FAILURE (${saves.successes}/3 successes, ${saves.failures}/3 failures)`;
-
-  io.to(ROOM).emit('chat:message', { text: msg, senderName: 'Combat', timestamp: Date.now() });
-  void appendChatLog(cid, { text: msg, senderName: 'Combat', timestamp: Date.now() });
+  // Broadcast visible outcomes only
+  if (dead && charId) {
+    const deadMsg = { text: `${actor.name} has perished.`, senderName: 'Combat', timestamp: Date.now() };
+    io.to(ROOM).emit('combat:player:dead', { characterId: charId, characterName: actor.name });
+    io.to(ROOM).emit('chat:message', deadMsg);
+    void appendChatLog(cid, deadMsg);
+  } else if (stable && !isNat20) {
+    const stableMsg = { text: `${actor.name} has stabilized.`, senderName: 'Combat', timestamp: Date.now() };
+    io.to(ROOM).emit('chat:message', stableMsg);
+    void appendChatLog(cid, stableMsg);
+  } else if (isNat20) {
+    const miracleMsg = { text: `${actor.name} surges back to life!`, senderName: 'Combat', timestamp: Date.now() };
+    io.to(ROOM).emit('chat:message', miracleMsg);
+    void appendChatLog(cid, miracleMsg);
+  }
 
   await delay(1500);
-  advanceTurn(cid);
+  advanceTurn(cid); // TPK check happens inside emitTurn
 }
 
 async function runEnemyAI(cid: string, actor: TurnOrderEntry): Promise<void> {
@@ -231,6 +246,7 @@ async function runEnemyAI(cid: string, actor: TurnOrderEntry): Promise<void> {
         const hpMap = playerHp.get(cid);
         const entry = hpMap?.get(targetChar.id);
         if (entry) {
+          const wasDown = entry.current <= 0;
           entry.current = Math.max(0, entry.current - damage);
           remainingHp = entry.current;
           targetDead  = entry.current <= 0;
@@ -242,14 +258,45 @@ async function runEnemyAI(cid: string, actor: TurnOrderEntry): Promise<void> {
             maxHp: entry.max,
           });
           console.log(`[ai] ${actor.name} attacks ${target.name} with ${atk.name}: ${roll}${fmtMod(atk.bonus)} = ${total} vs AC ${targetAc} — HIT ${damage} (${entry.current}/${entry.max} HP)`);
+
+          // Hitting a downed player: 2 automatic death save failures
+          if (wasDown) {
+            if (!deathSaves.has(cid)) deathSaves.set(cid, new Map());
+            const savesMap = deathSaves.get(cid)!;
+            if (!savesMap.has(target.name)) savesMap.set(target.name, { successes: 0, failures: 0, stable: false });
+            const saves = savesMap.get(target.name)!;
+            saves.failures = Math.min(3, saves.failures + 2);
+            saves.stable = false;
+            const nowDead = saves.failures >= 3;
+            // Private save update
+            const socketId = playerSocketIds.get(target.name);
+            if (socketId) {
+              io.to(socketId).emit('combat:death:save', {
+                characterName: target.name, roll: 0, isNatural20: false, isNatural1: false,
+                success: false, successes: saves.successes, failures: saves.failures, stable: false, dead: nowDead,
+              });
+            }
+            if (nowDead) {
+              io.to(ROOM).emit('combat:player:dead', { characterId: targetChar.id, characterName: target.name });
+              const deadMsg = { text: `${target.name} has perished.`, senderName: 'Combat', timestamp: Date.now() };
+              io.to(ROOM).emit('chat:message', deadMsg);
+              void appendChatLog(cid, deadMsg);
+            }
+          }
         }
       } else {
         console.log(`[ai] ${actor.name} attacks ${target.name} with ${atk.name}: ${roll}${fmtMod(atk.bonus)} = ${total} vs AC ${targetAc} — MISS`);
       }
-      // Non-blocking flavour text for NPC attacks
-      void (async () => {
-        const cfg = await getConfig();
-        if (!cfg.combat.apiKey) return;
+      // Broadcast the attack result so clients can show hit/miss effects
+      io.to(ROOM).emit('combat:attack:result', {
+        attackerName: actor.name, targetName: target.name, targetId: targetChar?.id ?? target.name,
+        weaponName: atk.name, d20: roll, attackBonus: atk.bonus, total, ac: targetAc,
+        hit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
+      });
+
+      // Blocking flavour text — resolve before advancing turn to prevent stacking
+      const cfg = await getConfig();
+      if (cfg.combat.apiKey) {
         const atkResult = { attackerName: actor.name, targetName: target.name, targetId: target.name, weaponName: atk.name, d20: roll, attackBonus: atk.bonus, total, ac: targetAc, hit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead };
         const flavour = await generateCombatFlavour(atkResult, cfg.combat.apiKey, cfg.combat.model);
         if (flavour) {
@@ -257,7 +304,8 @@ async function runEnemyAI(cid: string, actor: TurnOrderEntry): Promise<void> {
           io.to(ROOM).emit('chat:message', msg);
           void appendChatLog(cid, msg);
         }
-      })();
+      }
+
     } else {
       console.log(`[ai] ${actor.name} cannot reach ${target.name} (${finalDist} cells away)`);
     }
@@ -265,6 +313,39 @@ async function runEnemyAI(cid: string, actor: TurnOrderEntry): Promise<void> {
 
   await delay(600);
   advanceTurn(cid);
+}
+
+function endSession(cid: string): void {
+  if (!sessionState.get(cid)) return;
+  sessionState.set(cid, false);
+  io.to(ROOM).emit('session:state', false);
+  void processSession(cid).then(result => {
+    const names = [...(result.updated ?? []), ...(result.created ?? []), ...(result.cascaded ?? [])];
+    const text = result.skipped
+      ? 'Session ended — no chat to process.'
+      : `Session ended — notes updated: ${names.join(', ') || 'nothing new'}`;
+    io.to(ROOM).emit('chat:message', { text, senderName: 'System', timestamp: Date.now() });
+  });
+}
+
+function endCombatDefeated(cid: string): void {
+  if (!combatState.get(cid)) return;
+  combatState.set(cid, false);
+  io.to(ROOM).emit('combat:defeat');
+  setTimeout(() => {
+    encounterState.delete(cid);
+    creatureState.delete(cid);
+    tokenPositions.delete(cid);
+    turnIndex.delete(cid);
+    turnOrders.delete(cid);
+    expectedTurnCount.delete(cid);
+    playerHp.delete(cid);
+    playerCharIdByName.delete(cid);
+    deathSaves.delete(cid);
+    void clearEncounter(cid);
+    io.to(ROOM).emit('combat:state', false);
+    endSession(cid);
+  }, 8000);
 }
 
 async function applyDamageToCreature(cid: string, targetId: string, damage: number): Promise<void> {
@@ -526,6 +607,7 @@ function fmtMod(n: number) { return n >= 0 ? `+${n}` : `${n}`; }
 io.on('connection', (socket) => {
   socket.on('player:join', ({ name: player, campaignId }) => {
     connected.add(player);
+    playerSocketIds.set(player, socket.id);
     void socket.join(ROOM);
     io.to(ROOM).emit('players:update', [...connected]);
     const cpl = campaignPlayers.get(campaignId) ?? [];
@@ -575,17 +657,7 @@ io.on('connection', (socket) => {
       })();
     });
 
-    socket.on('session:end', ({ campaignId: cid }) => {
-      sessionState.set(cid, false);
-      io.to(ROOM).emit('session:state', false);
-      void processSession(cid).then(result => {
-        const names = [...(result.updated ?? []), ...(result.created ?? []), ...(result.cascaded ?? [])];
-        const text = result.skipped
-          ? 'Session ended — no chat to process.'
-          : `Session ended — notes updated: ${names.join(', ') || 'nothing new'}`;
-        io.to(ROOM).emit('chat:message', { text, senderName: 'System', timestamp: Date.now() });
-      });
-    });
+    socket.on('session:end', ({ campaignId: cid }) => { endSession(cid); });
 
     function dispatchDMResponse(cid: string): void {
       if (!sessionState.get(cid)) return;
@@ -838,11 +910,15 @@ io.on('connection', (socket) => {
     });
 
     socket.on('combat:turn:end', () => {
-      advanceTurn(campaignId);
+      const order = turnOrders.get(campaignId) ?? [];
+      const idx   = (turnIndex.get(campaignId) ?? 0) % order.length;
+      // Ignore stray turn:end events during NPC turns — runEnemyAI calls advanceTurn itself
+      if (order[idx]?.isPlayer) advanceTurn(campaignId);
     });
 
     socket.on('disconnect', () => {
       connected.delete(player);
+      playerSocketIds.delete(player);
       io.to(ROOM).emit('players:update', [...connected]);
     });
   });

@@ -96,6 +96,8 @@ export interface ServerToClientEvents {
   'combat:player:damage': (data: { characterId: string; characterName: string; damage: number; currentHp: number; maxHp: number }) => void;
   'rest:result': (data: { currentHp: number; maxHp: number; hpGained?: number; worldEvents?: string }) => void;
   'combat:death:save': (data: { characterName: string; roll: number; isNatural20: boolean; isNatural1: boolean; success: boolean; successes: number; failures: number; stable: boolean; dead: boolean }) => void;
+  'combat:defeat': () => void;
+  'combat:player:dead': (data: { characterId: string; characterName: string }) => void;
 }
 
 

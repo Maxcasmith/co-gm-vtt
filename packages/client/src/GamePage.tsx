@@ -14,6 +14,7 @@ import BattleMapBackground from './BattleMapBackground.tsx';
 import CombatDock from './CombatDock.tsx';
 import TurnOrderBar from './TurnOrderBar.tsx';
 import VictoryScreen from './VictoryScreen.tsx';
+import DefeatScreen from './DefeatScreen.tsx';
 import { dispatch, on } from './events.ts';
 import './app.css';
 
@@ -47,8 +48,10 @@ function GameCanvas({ character }: { character: Character }) {
   const [dmThinking, setDmThinking] = useState(false);
   const [isMyTurn, setIsMyTurn] = useState(false);
   const [victory, setVictory] = useState<import('./VictoryScreen.tsx').VictoryData | null>(null);
+  const [defeated, setDefeated] = useState(false);
   const [deadCreatureIds, setDeadCreatureIds] = useState<Set<string>>(new Set());
   const [downPlayerNames, setDownPlayerNames] = useState<Set<string>>(new Set());
+  const [deadPlayerNames, setDeadPlayerNames] = useState<Set<string>>(new Set());
   const [playerHpState, setPlayerHpState] = useState<{ current: number; max: number } | null>(null);
   const lastSpaceRef = useRef<number>(0);
   const socketRef = useRef<ReturnType<typeof io> | null>(null);
@@ -103,6 +106,12 @@ function GameCanvas({ character }: { character: Character }) {
       else setDownPlayerNames(prev => { const s = new Set(prev); s.delete(data.characterName); return s; });
     });
     socket.on('combat:death:save', data => dispatch('vtt:combat:death:save', data));
+    socket.on('combat:defeat', () => { dispatch('vtt:combat:defeat', {}); setDefeated(true); });
+    socket.on('combat:player:dead', data => {
+      dispatch('vtt:combat:player:dead', data);
+      setDeadPlayerNames(prev => new Set([...prev, data.characterName]));
+      setDownPlayerNames(prev => { const s = new Set(prev); s.delete(data.characterName); return s; });
+    });
     const unsubRest = on('vtt:rest:result', ({ currentHp, maxHp }) => setPlayerHpState({ current: currentHp, max: maxHp }));
     socket.on('creature:update', data => {
       dispatch('vtt:creature:update', data);
@@ -142,7 +151,7 @@ function GameCanvas({ character }: { character: Character }) {
 
   useEffect(() => on('vtt:combat:state', ({ active }) => {
     setCombatActive(active);
-    if (!active) { setIsMyTurn(false); setVictory(null); setDeadCreatureIds(new Set()); setDownPlayerNames(new Set()); setPlayerHpState(null); }
+    if (!active) { setIsMyTurn(false); setVictory(null); setDefeated(false); setDeadCreatureIds(new Set()); setDownPlayerNames(new Set()); setDeadPlayerNames(new Set()); setPlayerHpState(null); }
   }), []);
   useEffect(() => on('vtt:combat:turn', ({ actorName }) => setIsMyTurn(actorName === character.name)), [character.name]);
   useEffect(() => on('vtt:combat:attack', ({ attackerId, attackerName, targetId, weapon }) => {
@@ -249,6 +258,7 @@ function GameCanvas({ character }: { character: Character }) {
         movementRemaining={movementRemaining}
         deadCreatureIds={deadCreatureIds}
         downPlayerNames={downPlayerNames}
+        deadPlayerNames={deadPlayerNames}
       />
       <TurnOrderBar campaignId={character.campaignId} />
       <CombatDock character={character} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} />
@@ -259,6 +269,7 @@ function GameCanvas({ character }: { character: Character }) {
       <ChatWidget />
       <QuickChat open={quickChatOpen} onClose={() => setQuickChatOpen(false)} senderName={character.name} sessionActive={sessionActive} disabled={combatActive && !isMyTurn} />
       {victory && <VictoryScreen data={victory} onDismiss={() => setVictory(null)} />}
+      {defeated && <DefeatScreen onDismiss={() => setDefeated(false)} />}
       <ShortcutsOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <RestModal character={character} />
       <BattleMapBackground campaignId={character.campaignId} />

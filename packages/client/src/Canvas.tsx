@@ -5,6 +5,11 @@ import './app.css';
 
 const CELL = 64;
 const TOKEN_R = 24;
+const FLOAT_DUR  = 950;   // ms for floating text
+const FLASH_DUR  = 220;   // ms for token flash
+
+interface FloatEffect { id: number; x: number; y: number; text: string; isHit: boolean; startTime: number }
+interface FlashEffect { tokenKey: string; startTime: number }
 
 interface Props {
   player: Player;
@@ -17,6 +22,7 @@ interface Props {
   movementRemaining?: number;
   deadCreatureIds?: Set<string>;
   downPlayerNames?: Set<string>;
+  deadPlayerNames?: Set<string>;
 }
 
 function drawToken(
@@ -56,7 +62,7 @@ function drawToken(
   ctx.fillText(name.length > 10 ? name.slice(0, 9) + '…' : name, x, y + TOKEN_R + 12);
 }
 
-export default function Canvas({ player, characterId, connected, showBattleMap, encounter, tokenUrl, tokenPositions, movementRemaining = 0, deadCreatureIds, downPlayerNames }: Props) {
+export default function Canvas({ player, characterId, connected, showBattleMap, encounter, tokenUrl, tokenPositions, movementRemaining = 0, deadCreatureIds, downPlayerNames, deadPlayerNames }: Props) {
   const ref         = useRef<HTMLCanvasElement>(null);
   const tokenImg    = useRef<HTMLImageElement | null>(null);
   const [tokenReady, setTokenReady] = useState(false);
@@ -68,6 +74,46 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
   useEffect(() => { playerRef.current = player; },               [player]);
   useEffect(() => { tokenPositionsRef.current = tokenPositions; }, [tokenPositions]);
   useEffect(() => { movementRef.current = movementRemaining; },   [movementRemaining]);
+
+  // Hit/miss visual effects
+  const floatEffectsRef = useRef<FloatEffect[]>([]);
+  const flashEffectsRef = useRef<FlashEffect[]>([]);
+  const [animTick, setAnimTick] = useState(0);
+  const animRafRef = useRef<number | null>(null);
+
+  function kickAnimLoop() {
+    if (animRafRef.current !== null) return;
+    function tick() {
+      const now = Date.now();
+      floatEffectsRef.current = floatEffectsRef.current.filter(e => now - e.startTime < FLOAT_DUR);
+      flashEffectsRef.current = flashEffectsRef.current.filter(e => now - e.startTime < FLASH_DUR);
+      setAnimTick(t => t + 1);
+      if (floatEffectsRef.current.length > 0 || flashEffectsRef.current.length > 0) {
+        animRafRef.current = requestAnimationFrame(tick);
+      } else {
+        animRafRef.current = null;
+      }
+    }
+    animRafRef.current = requestAnimationFrame(tick);
+  }
+
+  useEffect(() => on('vtt:combat:attack:result', result => {
+    const posById   = tokenPositionsRef.current?.[result.targetId];
+    const posByName = tokenPositionsRef.current?.[result.targetName];
+    const pos       = posById ?? posByName;
+    const tokenKey  = posById ? result.targetId : result.targetName;
+    if (!pos) return;
+    const x = pos.gx * CELL + CELL / 2;
+    const y = pos.gy * CELL + CELL / 2;
+    const now = Date.now();
+    if (result.hit && result.damage != null) {
+      flashEffectsRef.current.push({ tokenKey, startTime: now });
+      floatEffectsRef.current.push({ id: now, x, y, text: `-${result.damage}`, isHit: true, startTime: now });
+    } else if (!result.hit) {
+      floatEffectsRef.current.push({ id: now, x, y, text: 'Miss', isHit: false, startTime: now });
+    }
+    kickAnimLoop();
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drag state — refs keep closures fresh inside window listeners
   const dragRef     = useRef<{ id: string; x: number; y: number } | null>(null);
@@ -247,9 +293,10 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           const x = isDragged ? drag!.x : pos.gx * CELL + CELL / 2;
           const y = isDragged ? drag!.y : pos.gy * CELL + CELL / 2;
           const img = name === player ? tokenImg.current ?? undefined : undefined;
-          const isDown = downPlayerNames?.has(name) ?? false;
+          const isDead = deadPlayerNames?.has(name) ?? false;
+          const isDown = !isDead && (downPlayerNames?.has(name) ?? false);
 
-          if (name === player && !isDown) {
+          if (name === player && !isDown && !isDead) {
             ctx.beginPath();
             ctx.arc(x, y, TOKEN_R + 4, 0, Math.PI * 2);
             ctx.strokeStyle = isDragged ? 'rgba(255,220,50,0.9)' : 'rgba(255,220,50,0.4)';
@@ -257,9 +304,34 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
             ctx.stroke();
           }
 
-          if (isDown) ctx.filter = 'grayscale(1) opacity(0.55)';
+          if (isDead) ctx.filter = 'grayscale(1) opacity(0.25)';
+          else if (isDown) ctx.filter = 'grayscale(1) opacity(0.55)';
           drawToken(ctx, x, y, (name[0] ?? '?').toUpperCase(), name, name === player ? '#3a7bd5' : '#5a9ff5', img);
-          if (isDown) ctx.filter = 'none';
+          ctx.filter = 'none';
+
+          // Hit flash overlay
+          const playerFlash = flashEffectsRef.current.find(f => f.tokenKey === name);
+          if (playerFlash) {
+            const ft = (Date.now() - playerFlash.startTime) / FLASH_DUR;
+            ctx.save();
+            ctx.globalAlpha = Math.sin(ft * Math.PI) * 0.6;
+            ctx.fillStyle = '#ff2222';
+            ctx.beginPath(); ctx.arc(x, y, TOKEN_R, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+          }
+
+          // Dead marker: a red × over the token
+          if (isDead) {
+            const r = TOKEN_R * 0.45;
+            ctx.save();
+            ctx.globalAlpha = 0.85;
+            ctx.strokeStyle = '#c0392b';
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.beginPath(); ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x + r, y - r); ctx.lineTo(x - r, y + r); ctx.stroke();
+            ctx.restore();
+          }
         });
 
         // Enemy tokens
@@ -285,6 +357,17 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           if (isDead) ctx.filter = 'grayscale(1) opacity(0.45)';
           drawToken(ctx, x, y, (enemy.name[0] ?? '?').toUpperCase(), enemy.name, isDead ? '#555' : '#c0392b');
           if (isDead) ctx.filter = 'none';
+
+          // Hit flash overlay
+          const enemyFlash = flashEffectsRef.current.find(f => f.tokenKey === enemy.id);
+          if (enemyFlash) {
+            const ft = (Date.now() - enemyFlash.startTime) / FLASH_DUR;
+            ctx.save();
+            ctx.globalAlpha = Math.sin(ft * Math.PI) * 0.6;
+            ctx.fillStyle = '#ff2222';
+            ctx.beginPath(); ctx.arc(x, y, TOKEN_R, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+          }
         });
 
         // Drag line: origin → cursor with distance label at midpoint
@@ -325,6 +408,28 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           }
         }
       }
+        // Floating hit/miss text
+        const now = Date.now();
+        for (const eff of floatEffectsRef.current) {
+          const t = Math.min((now - eff.startTime) / FLOAT_DUR, 1);
+          const scale   = t < 0.2 ? 0.3 + (t / 0.2) * 0.85 : 1.15 - t * 0.15; // pop up, slight shrink
+          const yOff    = -t * 55;
+          const alpha   = t > 0.65 ? 1 - (t - 0.65) / 0.35 : 1;
+          const rot     = Math.sin(t * Math.PI * 2.5) * 0.13;
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.translate(eff.x, eff.y + yOff);
+          ctx.rotate(rot);
+          ctx.scale(scale, scale);
+          ctx.font = 'bold 21px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.shadowColor = 'rgba(0,0,0,0.95)';
+          ctx.shadowBlur = 7;
+          ctx.fillStyle = eff.isHit ? '#ff4040' : '#ffffff';
+          ctx.fillText(eff.text, 0, 0);
+          ctx.restore();
+        }
     } else {
       ctx.fillStyle = '#1a1a2e';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -340,7 +445,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
         ctx.fillText(`• ${p}`, 20, 100 + i * 24);
       });
     }
-  }, [player, connected, showBattleMap, encounter, tokenReady, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames]);
+  }, [player, connected, showBattleMap, encounter, tokenReady, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick]);
 
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!showBattleMap || !encounter || !tokenPositions) return;

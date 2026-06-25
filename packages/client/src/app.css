@@ -2507,6 +2507,78 @@ button.sheet-save-row {
   background: rgba(212, 175, 55, 0.1);
 }
 
+/* ── Defeat screen ───────────────────────────────────────────────────────────── */
+
+.defeat-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+  animation: fade-in 1.2s ease;
+}
+
+.defeat-card {
+  background: rgba(8, 4, 4, 0.97);
+  border: 1px solid rgba(180, 50, 50, 0.45);
+  border-radius: 16px;
+  padding: 56px 72px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 440px;
+  width: 90vw;
+  box-shadow: 0 0 80px rgba(160, 30, 30, 0.2);
+}
+
+.defeat-title {
+  font-size: 52px;
+  font-weight: 700;
+  color: #c0392b;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.defeat-subtitle {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  margin: 0;
+}
+
+.defeat-flavour {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 17px;
+  color: rgba(255, 255, 255, 0.55);
+  font-style: italic;
+  margin: 8px 0 0;
+  line-height: 1.6;
+}
+
+.defeat-dismiss {
+  margin-top: 24px;
+  padding: 10px 32px;
+  border: 1px solid rgba(180, 50, 50, 0.4);
+  border-radius: 8px;
+  background: transparent;
+  color: #c0392b;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.defeat-dismiss:hover {
+  background: rgba(180, 50, 50, 0.1);
+}
+
 /* ── rest modal ── */
 .rest-modal {
   position: fixed;
@@ -2884,6 +2956,11 @@ button.sheet-save-row {
   background: var(--surface-hover);
   border-color: #f9731655;
   box-shadow: 0 0 8px rgba(249, 115, 22, 0.08);
+}
+.sheet-inv-card--disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
 }
 
 .sheet-inv-card-header {

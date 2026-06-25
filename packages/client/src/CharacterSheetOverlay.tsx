@@ -210,10 +210,11 @@ function asConsumable(item: Item | Weapon | Consumable): Consumable {
   return { ...item, type: 'consumable' as const, effect: '', actionCost: 'bonusAction' };
 }
 
-function InventoryTab({ character, combatActive }: { character: Character; combatActive: boolean }) {
+function InventoryTab({ character, combatActive, isMyTurn, actionAvailable }: { character: Character; combatActive: boolean; isMyTurn: boolean; actionAvailable: boolean }) {
   const items = character.inventory ?? [];
 
   function handleWeaponClick(weapon: Weapon) {
+    if (!isMyTurn || !actionAvailable) return;
     dispatch('vtt:sheet:closed', {});
     dispatch('vtt:targeting:start', { weapon, actionType: 'action' });
   }
@@ -255,10 +256,11 @@ function InventoryTab({ character, combatActive }: { character: Character; comba
                   {bucket.map(item => {
                     const weapon     = combatActive && section.label === 'Weapons'     ? asWeapon(item)     : null;
                     const consumable = combatActive && section.label === 'Consumables' ? asConsumable(item) : null;
+                    const clickable  = weapon ? (isMyTurn && actionAvailable) : !!consumable;
                     return (
                       <div
                         key={item.id}
-                        className={`sheet-inv-card${weapon ? ' sheet-inv-card--weapon' : ''}${consumable ? ' sheet-inv-card--consumable' : ''}`}
+                        className={`sheet-inv-card${weapon ? ' sheet-inv-card--weapon' : ''}${consumable ? ' sheet-inv-card--consumable' : ''}${(weapon || consumable) && !clickable ? ' sheet-inv-card--disabled' : ''}`}
                         onClick={weapon ? () => handleWeaponClick(weapon) : consumable ? () => handleConsumableClick(consumable) : undefined}
                       >
                         <div className="sheet-inv-card-header">
@@ -293,8 +295,19 @@ const NEXT_LEVEL_XP = 100;
 export default function CharacterSheetOverlay({ character, currentHp, maxHp }: Props) {
   const [visible, setVisible] = useState(false);
   const [tab, setTab]         = useState<SheetTab>('abilities');
-  const [combatActive, setCombatActive] = useState(false);
-  useEffect(() => on('vtt:combat:state', ({ active }) => setCombatActive(active)), []);
+  const [combatActive, setCombatActive]     = useState(false);
+  const [isMyTurn, setIsMyTurn]             = useState(false);
+  const [actionAvailable, setActionAvailable] = useState(true);
+  useEffect(() => on('vtt:combat:state', ({ active }) => {
+    setCombatActive(active);
+    if (!active) { setIsMyTurn(false); setActionAvailable(true); }
+  }), []);
+  useEffect(() => on('vtt:combat:turn', ({ actorName }) => {
+    const mine = actorName === character.name;
+    setIsMyTurn(mine);
+    if (mine) setActionAvailable(true);
+  }), [character.name]);
+  useEffect(() => on('vtt:combat:attack', () => setActionAvailable(false)), []);
   const [currentXp, setCurrentXp] = useState(() => {
     const stored = sessionStorage.getItem(`vtt-xp:${character.id}`);
     return stored ? parseInt(stored, 10) : 0;
@@ -406,7 +419,7 @@ export default function CharacterSheetOverlay({ character, currentHp, maxHp }: P
         <div className="sheet-content">
           {tab === 'abilities' && <AbilitiesTab character={character} />}
           {tab === 'features'  && <FeaturesTab  character={character} />}
-          {tab === 'inventory' && <InventoryTab character={character} combatActive={combatActive} />}
+          {tab === 'inventory' && <InventoryTab character={character} combatActive={combatActive} isMyTurn={isMyTurn} actionAvailable={actionAvailable} />}
         </div>
       </div>
     </div>

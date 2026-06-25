@@ -44,6 +44,8 @@ export interface CombatVictoryPayload extends CombatVictory {}
 export interface PlayerDamagePayload { characterId: string; characterName: string; damage: number; currentHp: number; maxHp: number }
 export interface RestResultPayload { currentHp: number; maxHp: number; hpGained?: number; worldEvents?: string }
 export interface DeathSavePayload { characterName: string; roll: number; isNatural20: boolean; isNatural1: boolean; success: boolean; successes: number; failures: number; stable: boolean; dead: boolean }
+export type CombatDefeatPayload = Record<string, never>;
+export interface PlayerDeadPayload { characterId: string; characterName: string }
 export interface ConsumableUsedPayload { item: Consumable; characterId: string }
 export interface CombatTurnPayload { actorName: string }
 export type CombatTurnEndPayload = Record<string, never>
@@ -99,6 +101,8 @@ export interface VTTEventMap {
   'vtt:combat:player:damage':   PlayerDamagePayload;
   'vtt:rest:result':            RestResultPayload;
   'vtt:combat:death:save':      DeathSavePayload;
+  'vtt:combat:defeat':          CombatDefeatPayload;
+  'vtt:combat:player:dead':     PlayerDeadPayload;
   'vtt:consumable:used':        ConsumableUsedPayload;
   'vtt:combat:turn':            CombatTurnPayload;
   'vtt:combat:turn:end':        CombatTurnEndPayload;
