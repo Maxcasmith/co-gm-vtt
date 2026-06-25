@@ -1,4 +1,4 @@
-type CampaignType = 'campaign' | 'one-shot';
+type CampaignType = 'campaign' | 'one-shot' | 'dungeon-crawl';
 
 // ── Shared lore instruction ───────────────────────────────────────────────────
 // Appended to both prompts. Tells the model to honour named IPs when present
@@ -104,7 +104,10 @@ Return ONLY a single valid JSON object — no markdown fences, no explanation:
   },
   "geography": {
     "regions": [
-      { "name": "string", "description": "string", "keyLocations": [{ "name": "string", "description": "string" }] }
+      { "name": "string", "description": "string", "keyLocations": [{ "name": "string", "description": "string" }, { "name": "string", "description": "string" }, { "name": "string", "description": "string" }] },
+      { "name": "string", "description": "string", "keyLocations": [{ "name": "string", "description": "string" }, { "name": "string", "description": "string" }, { "name": "string", "description": "string" }] },
+      { "name": "string", "description": "string", "keyLocations": [{ "name": "string", "description": "string" }, { "name": "string", "description": "string" }, { "name": "string", "description": "string" }] },
+      { "name": "string", "description": "string", "keyLocations": [{ "name": "string", "description": "string" }, { "name": "string", "description": "string" }, { "name": "string", "description": "string" }] }
     ],
     "startingLocation": { "name": "string — a specific named place that fits the world", "description": "string — richly detailed and grounded in the world's specifics. Enough to open play immediately." }
   },

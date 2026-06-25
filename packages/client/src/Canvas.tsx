@@ -469,8 +469,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           ctx.restore();
         }
     } else {
-      ctx.fillStyle = '#1a1a2e';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = '#e0e0e0';
       ctx.font = '14px monospace';
       ctx.textAlign = 'left';

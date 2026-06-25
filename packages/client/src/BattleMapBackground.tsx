@@ -3,9 +3,9 @@ import { on, dispatch } from './events.ts';
 
 const API = `http://${window.location.hostname}:3001`;
 
-interface Props { campaignId: string }
+interface Props { campaignId: string; worldMapUrl?: string }
 
-export default function BattleMapBackground({ campaignId }: Props) {
+export default function BattleMapBackground({ campaignId, worldMapUrl }: Props) {
   const [mapUrl, setMapUrl]       = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [visible, setVisible]     = useState(false);
@@ -34,7 +34,14 @@ export default function BattleMapBackground({ campaignId }: Props) {
     return () => { unsubCombat(); unsubGen(); unsubDone(); };
   }, [campaignId]);
 
-  if (!visible) return null;
+  if (!visible) {
+    if (!worldMapUrl) return null;
+    return (
+      <div className="battle-map-bg">
+        <img className="battle-map-img" src={worldMapUrl} alt="World map" />
+      </div>
+    );
+  }
 
   return (
     <div className="battle-map-bg">

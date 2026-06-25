@@ -1,7 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { Character } from 'shared';
+import type { Character, CheckRequest } from 'shared';
 import type { ChatMessageReceivedPayload } from './events.ts';
 import { on, dispatch } from './events.ts';
+import { SKILLS } from './character-creation/srd.ts';
+
+const SAVE_STAT: Record<string, string> = {
+  strength: 'STR', str: 'STR',
+  dexterity: 'DEX', dex: 'DEX',
+  constitution: 'CON', con: 'CON',
+  intelligence: 'INT', int: 'INT',
+  wisdom: 'WIS', wis: 'WIS',
+  charisma: 'CHA', cha: 'CHA',
+};
+
+function reqKey(req: CheckRequest) { return `${req.player}:${req.skill}:${req.type}`; }
+function reqStat(req: CheckRequest): string {
+  if (req.type === 'check') return SKILLS.find(s => s.name === req.skill)?.stat ?? req.skill.slice(0, 3).toUpperCase();
+  return SAVE_STAT[req.skill.toLowerCase()] ?? req.skill.slice(0, 3).toUpperCase();
+}
 
 interface Props {
   open: boolean;
@@ -23,12 +39,39 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
 
   // Messages live above the open-guard so they survive close/reopen
   const [messages, setMessages] = useState<ChatMessageReceivedPayload[]>([]);
+  const [rollingKeys, setRollingKeys] = useState<Set<string>>(new Set());
+  const [doneKeys, setDoneKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     return on('vtt:chat:message-received', msg => {
       setMessages(prev => [...prev, msg]);
     });
   }, []);
+
+  useEffect(() => on('vtt:roll:result', result => {
+    setRollingKeys(prev => {
+      const next = new Set(prev);
+      for (const msg of messages) {
+        for (const req of msg.checkRequests ?? []) {
+          if (req.player === result.characterName && req.type === result.rollType && reqStat(req) === result.stat) {
+            next.delete(reqKey(req));
+          }
+        }
+      }
+      return next;
+    });
+    setDoneKeys(prev => {
+      const next = new Set(prev);
+      for (const msg of messages) {
+        for (const req of msg.checkRequests ?? []) {
+          if (req.player === result.characterName && req.type === result.rollType && reqStat(req) === result.stat) {
+            next.add(reqKey(req));
+          }
+        }
+      }
+      return next;
+    });
+  }), [messages]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -54,6 +97,15 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
     setInput('');
   }
 
+  function rollRequest(req: CheckRequest) {
+    const key = reqKey(req);
+    setRollingKeys(prev => new Set([...prev, key]));
+    const stat = reqStat(req).toLowerCase();
+    const base = { characterId: character.id, campaignId: character.campaignId, stat };
+    if (req.type === 'check') dispatch('vtt:roll:check', { ...base, skill: req.skill });
+    else dispatch('vtt:roll:save', base);
+  }
+
   return (
     <div className="journal-scrim">
       <div className="journal-panel">
@@ -69,17 +121,39 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
               <p className="journal-empty-hint">Roll a die or say something to begin the record.</p>
             </div>
           ) : (
-            messages.map((msg, i) => (
-              <div key={i} className={`journal-msg${msg.variant === 'recap' ? ' journal-msg--recap' : msg.senderName === 'System' ? ' journal-msg--system' : ''}`}>
-                <div className="journal-msg-header">
-                  <span className="journal-msg-sender">{formatSender(msg.senderName)}</span>
-                  <span className="journal-msg-time">
-                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
+            messages.map((msg, i) => {
+              const myRequests = (msg.checkRequests ?? []).filter(r => r.player === character.name);
+              return (
+                <div key={i} className={`journal-msg${msg.variant === 'recap' ? ' journal-msg--recap' : msg.senderName === 'System' ? ' journal-msg--system' : ''}`}>
+                  <div className="journal-msg-header">
+                    <span className="journal-msg-sender">{formatSender(msg.senderName)}</span>
+                    <span className="journal-msg-time">
+                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <div className="journal-msg-text">{msg.text}</div>
+                  {myRequests.length > 0 && (
+                    <div className="journal-roll-requests">
+                      {myRequests.map(req => {
+                        const key = reqKey(req);
+                        if (doneKeys.has(key)) return null;
+                        const rolling = rollingKeys.has(key);
+                        return (
+                          <button
+                            key={key}
+                            className="journal-roll-btn"
+                            disabled={rolling}
+                            onClick={() => rollRequest(req)}
+                          >
+                            {rolling ? 'Rolling…' : `Roll ${req.skill} ${req.type === 'save' ? 'Save' : 'Check'}`}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-                <div className="journal-msg-text">{msg.text}</div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 

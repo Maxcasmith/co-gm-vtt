@@ -52,7 +52,7 @@ const encounters = new Map<string, Encounter>();
 const tokenPositions = new Map<string, Record<string, { gx: number; gy: number }>>();
 const dmQueue = new Map<string, Promise<void>>();
 const campaignPlayers = new Map<string, string[]>();
-const playerSocketIds = new Map<string, string>(); // playerName → socketId (for private events)
+const playerSocketIds = new Map<string, string>(); // charId → socketId (for private events)
 
 const HIT_DICE: Record<string, number> = {
   Artificer: 8, Barbarian: 12, Bard: 8, Cleric: 8, Druid: 8,
@@ -152,7 +152,7 @@ async function runDeathSave(cid: string, actor: Participant): Promise<void> {
     characterName: actor.name, roll, isNatural20: isNat20, isNatural1: isNat1,
     success: roll >= 10, successes: saves.successes, failures: saves.failures, stable, dead,
   };
-  const socketId = playerSocketIds.get(actor.name);
+  const socketId = playerSocketIds.get(actor.id);
   if (socketId) io.to(socketId).emit('combat:death:save', saveData);
 
   if (dead) {
@@ -284,7 +284,7 @@ async function runEnemyAI(cid: string, actor: Participant): Promise<void> {
               playerParticipant.deathSaves.failures = Math.min(3, playerParticipant.deathSaves.failures + 2);
               playerParticipant.deathSaves.stable = false;
               const nowDead = playerParticipant.deathSaves.failures >= 3;
-              const socketId = playerSocketIds.get(targetParticipant.name);
+              const socketId = playerSocketIds.get(targetParticipant.id);
               if (socketId) {
                 io.to(socketId).emit('combat:death:save', {
                   characterName: targetParticipant.name, roll: 0, isNatural20: false, isNatural1: false,
@@ -715,7 +715,7 @@ async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
       if (!char) return;
       const updated = { ...char, inventory: [...(char.inventory ?? []), ...effect.items] };
       await writeCharacter(cid, char.id, updated);
-      const sid = playerSocketIds.get(effect.player);
+      const sid = playerSocketIds.get(char.id);
       if (sid) io.to(sid).emit('character:inventory:add', effect.items);
     } else if (effect.type === 'scene_build') {
       const locationSlug = effect.locationName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -791,9 +791,9 @@ World-building (written to entity files, injected into future DM context):
 • [[SCENE_BUILD:Location Name:physical details]] — add spatial facts to a location
 • [[NPC_BUILD:NPC Name:observed detail]] — add observed facts to an NPC`;
 
-async function handleAdminCommand(cid: string, senderName: string, command: string): Promise<void> {
+async function handleAdminCommand(cid: string, senderId: string, senderName: string, command: string): Promise<void> {
   if (command === 'help') {
-    const sid = playerSocketIds.get(senderName);
+    const sid = playerSocketIds.get(senderId);
     if (sid) io.to(sid).emit('chat:message', { text: ADMIN_HELP, senderName: 'System', timestamp: Date.now() });
     return;
   }
@@ -885,16 +885,15 @@ function dispatchDMResponse(cid: string): void {
       const config = await getConfig();
       const { model: tagsModel, provider: tagsProvider } = config.tiers[config.tasks.combat];
       const tagsApiKey = getTierApiKey(config.apiKeys, tagsProvider);
-      const { text: cleanResponse, effects, speakingAs } = tagsApiKey
+      const { text: cleanResponse, effects, speakingAs, checkRequests } = tagsApiKey
         ? await processVdmResponse(rawResponse, tagsApiKey, tagsModel)
-        : { text: rawResponse, effects: [], speakingAs: undefined };
+        : { text: rawResponse, effects: [], speakingAs: undefined, checkRequests: [] };
 
       await applyEffects(cid, effects);
 
       const senderName = speakingAs ? `${speakingAs} (Virtual DM)` : 'Virtual DM';
-      const dmPayload = { text: cleanResponse, senderName, timestamp: Date.now() };
-      await appendChatLog(cid, dmPayload);
-      io.to(ROOM).emit('session:recap', cleanResponse);
+      await appendChatLog(cid, { text: cleanResponse, senderName, timestamp: Date.now() });
+      io.to(ROOM).emit('session:recap', { text: cleanResponse, senderName, checkRequests });
     } catch (err) {
       console.error('[dm] response error:', err);
       io.to(ROOM).emit('chat:message', { text: `[DM error: ${(err as Error).message}]`, senderName: 'System', timestamp: Date.now() });
@@ -905,9 +904,9 @@ function dispatchDMResponse(cid: string): void {
 }
 
 io.on('connection', (socket) => {
-  socket.on('player:join', ({ name: player, campaignId }) => {
+  socket.on('player:join', ({ name: player, id: charId, campaignId }) => {
     connected.add(player);
-    playerSocketIds.set(player, socket.id);
+    playerSocketIds.set(charId, socket.id);
     void socket.join(ROOM);
     io.to(ROOM).emit('players:update', [...connected]);
     const cpl = campaignPlayers.get(campaignId) ?? [];
@@ -962,10 +961,10 @@ io.on('connection', (socket) => {
         try {
           const { text, isFirstSession } = await runRecap(cid);
           await appendChatLog(cid, { text, senderName: 'Virtual DM', timestamp: Date.now() });
-          io.to(ROOM).emit('session:recap', text);
+          io.to(ROOM).emit('session:recap', { text, senderName: 'Virtual DM' });
         } catch (err) {
           console.error('[dm] recap error:', err);
-          io.to(ROOM).emit('session:recap', 'The story begins...');
+          io.to(ROOM).emit('session:recap', { text: 'The story begins...', senderName: 'Virtual DM' });
         } finally {
           io.to(ROOM).emit('dm:thinking', false);
         }
@@ -1018,7 +1017,7 @@ io.on('connection', (socket) => {
 
     socket.on('chat:message', ({ text, senderName }) => {
       if (text.startsWith('/admin ')) {
-        void handleAdminCommand(campaignId, senderName, text.slice(7).trim());
+        void handleAdminCommand(campaignId, charId, senderName, text.slice(7).trim());
         return;
       }
 
@@ -1226,7 +1225,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
       connected.delete(player);
-      playerSocketIds.delete(player);
+      playerSocketIds.delete(charId);
       io.to(ROOM).emit('players:update', [...connected]);
     });
   });

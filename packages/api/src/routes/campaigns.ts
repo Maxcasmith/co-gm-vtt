@@ -7,12 +7,16 @@ import {
   getWorldMeta, writeWorldMeta,
   writeCharacter, getCharacter, listCharacters, findCharacterByPassword, writeCharacterImage,
   readWorldState, writeWorldState, readCampaignFile, writeEntity,
+  listEntitySlugs, readEntity,
 } from '../storage.ts';
 import { getStoryProvider, getTierApiKey } from '../providers/index.ts';
 import { buildConceptsPrompt, buildWorldGenPrompt } from '../prompts.ts';
 import { processSession } from '../session-processor/index.ts';
 import { processPortrait } from '../utils/image.ts';
-import { generateWorldState, tickWorldNarrative } from '../session-processor/imagePrompts.ts';
+import { generateWorldState, tickWorldNarrative, buildWorldMapPrompt } from '../session-processor/imagePrompts.ts';
+import { generateBattleMap } from '../providers/openai.ts';
+import { writeFile } from 'fs/promises';
+import path from 'path';
 
 export const campaignsRouter = Router();
 
@@ -31,6 +35,12 @@ campaignsRouter.post('/:slug/session/process', async (req, res) => {
 
 campaignsRouter.get('/', async (_req, res) => {
   res.json(await listCampaigns());
+});
+
+campaignsRouter.get('/:id/world-map', (req, res) => {
+  res.sendFile(`${req.params.id}/world-map.jpg`, { root: CAMPAIGNS_DIR }, err => {
+    if (err) res.status(404).json({ error: 'No world map' });
+  });
 });
 
 // ── campaign meta ─────────────────────────────────────────────────────────────
@@ -68,7 +78,7 @@ campaignsRouter.post('/concepts', async (req, res) => {
 // ── world generation (SSE) ────────────────────────────────────────────────────
 
 campaignsRouter.post('/generate', async (req, res) => {
-  const { tags, concept, name, type = 'campaign' } = req.body as { tags: string[]; concept: WorldConcept; name: string; type?: 'campaign' | 'one-shot' };
+  const { tags, concept, name, type = 'campaign' } = req.body as { tags: string[]; concept: WorldConcept; name: string; type?: 'campaign' | 'one-shot' | 'dungeon-crawl' };
   if (!concept || !tags?.length) { res.status(400).json({ error: 'tags and concept required' }); return; }
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -80,7 +90,8 @@ campaignsRouter.post('/generate', async (req, res) => {
 
   try {
     let accumulated = '';
-    await getStoryProvider(await getConfig()).stream(
+    const config = await getConfig();
+    await getStoryProvider(config).stream(
       buildWorldGenPrompt(tags, concept.name, concept.description, type),
       token => { accumulated += token; send({ type: 'token', content: token }); },
     );
@@ -104,6 +115,30 @@ campaignsRouter.post('/generate', async (req, res) => {
       concept: { name: concept.name, description: concept.description },
     });
 
+    if (type === 'campaign' && config.image.generateWorldMap) {
+      const apiKey = config.apiKeys.openai;
+      if (apiKey) {
+        send({ type: 'progress', message: 'Generating world map...' });
+        try {
+          const worldMd = await readCampaignFile(slug, 'world.md') ?? '';
+          const locationSlugs = await listEntitySlugs(slug, 'location');
+          const locationContents = await Promise.all(locationSlugs.map(s => readEntity(slug, 'location', s)));
+          const locationsSummary = locationContents.filter(Boolean).map(c => {
+            // Extract name + description only (stop before ## Scene Notes)
+            const text = c!;
+            const cutoff = text.indexOf('\n## ');
+            return cutoff === -1 ? text.trim() : text.slice(0, cutoff).trim();
+          }).join('\n\n');
+          const prompt = buildWorldMapPrompt(worldMd, locationsSummary, tags);
+          const buffer = await generateBattleMap(prompt, apiKey, config.image.model);
+          await writeFile(path.join(CAMPAIGNS_DIR, slug, 'world-map.jpg'), buffer);
+          console.log('[world-map] generated for:', slug);
+        } catch (err) {
+          console.error('[world-map] generation failed:', err);
+        }
+      }
+    }
+
     send({ type: 'complete', id: slug, name: campaignName });
   } catch (err) {
     send({ type: 'error', message: err instanceof Error ? err.message : 'Generation failed' });
@@ -122,6 +157,11 @@ campaignsRouter.get('/:id/party', async (req, res) => {
 campaignsRouter.post('/:id/party', async (req, res) => {
   const slug = req.params.id ?? '';
   const data = req.body as Omit<Character, 'createdAt'> & { id?: string };
+  const existing = await listCharacters(slug);
+  if (existing.some(c => c.name.toLowerCase() === data.name?.toLowerCase())) {
+    res.status(409).json({ error: 'A character with that name already exists in this campaign' });
+    return;
+  }
   const charId = data.id ?? randomUUID();
   const character: Character = { ...data, id: charId, campaignId: slug, createdAt: new Date().toISOString() };
   await writeCharacter(slug, charId, character);

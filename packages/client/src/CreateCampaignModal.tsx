@@ -20,13 +20,14 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
   const conceptsCache = useRef<Map<string, WorldConcept[]>>(new Map());
 
   const [step, setStep] = useState<Step>('tags');
-  const [campaignType, setCampaignType] = useState<'campaign' | 'one-shot'>('campaign');
+  const [campaignType, setCampaignType] = useState<'campaign' | 'one-shot' | 'dungeon-crawl'>('campaign');
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [loadingConcepts, setLoadingConcepts] = useState(false);
   const [concepts, setConcepts] = useState<WorldConcept[]>([]);
   const [selectedConcept, setSelectedConcept] = useState<WorldConcept | null>(null);
   const [streamContent, setStreamContent] = useState('');
+  const [progressMsg, setProgressMsg] = useState('');
   const [done, setDone] = useState(false);
   const [campaignId, setCampaignId] = useState('');
   const [error, setError] = useState('');
@@ -40,6 +41,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
     setConcepts([]);
     setSelectedConcept(null);
     setStreamContent('');
+    setProgressMsg('');
     setDone(false);
     setCampaignId('');
     setError('');
@@ -107,6 +109,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
     if (!selectedConcept) return;
     setStep('generating');
     setStreamContent('');
+    setProgressMsg('');
     setDone(false);
     setError('');
 
@@ -133,6 +136,8 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
           if (evt.type === 'token' && evt.content) {
             setStreamContent(s => s + evt.content);
             if (streamRef.current) streamRef.current.scrollTop = streamRef.current.scrollHeight;
+          } else if (evt.type === 'progress') {
+            setProgressMsg(evt.message ?? '');
           } else if (evt.type === 'complete') {
             setCampaignId(evt.id ?? '');
             setDone(true);
@@ -159,9 +164,10 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
             </div>
             <label className="modal-label">
               Type
-              <select className="modal-select" value={campaignType} onChange={e => setCampaignType(e.target.value as 'campaign' | 'one-shot')}>
+              <select className="modal-select" value={campaignType} onChange={e => setCampaignType(e.target.value as 'campaign' | 'one-shot' | 'dungeon-crawl')}>
                 <option value="campaign">Campaign</option>
                 <option value="one-shot">One Shot</option>
+                <option value="dungeon-crawl">Dungeon Crawl</option>
               </select>
             </label>
             <div className="tag-input-area">
@@ -241,6 +247,12 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
               {!done && <p className="modal-hint">The lore is being written. This may take a moment.</p>}
             </div>
             <pre ref={streamRef} className="stream-output">{streamContent}</pre>
+            {progressMsg && !done && (
+              <div className="world-gen-progress">
+                <span className="world-gen-progress-dot" /><span className="world-gen-progress-dot" /><span className="world-gen-progress-dot" />
+                {progressMsg}
+              </div>
+            )}
             {error && <p className="modal-error">{error}</p>}
             {done && (
               <p className="modal-success">

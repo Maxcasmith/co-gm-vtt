@@ -1,4 +1,4 @@
-import type { EnemyStatBlock, TokenPosition, Weapon, Consumable, TurnOrderEntry, AttackResult, CombatVictory } from 'shared';
+import type { EnemyStatBlock, TokenPosition, Weapon, Consumable, TurnOrderEntry, AttackResult, CombatVictory, CheckRequest, RollResult } from 'shared';
 
 // ── Payload types ─────────────────────────────────────────────────────────────
 //
@@ -71,7 +71,10 @@ export interface ChatMessageReceivedPayload {
   senderName: string;
   timestamp: number;
   variant?: 'recap';
+  checkRequests?: CheckRequest[];
 }
+
+export type RollResultPayload = RollResult;
 
 // ── Event registry ────────────────────────────────────────────────────────────
 //
@@ -86,6 +89,7 @@ export interface VTTEventMap {
   'vtt:sheet:closed':           SheetClosedPayload;
   'vtt:roll:check':             RollRequestPayload;
   'vtt:roll:save':              RollRequestPayload;
+  'vtt:roll:result':            RollResultPayload;
   'vtt:rest:open':              RestOpenPayload;
   'vtt:combat:state':           CombatStatePayload;
   'vtt:map:generating':         MapGeneratingPayload;

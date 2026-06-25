@@ -16,7 +16,7 @@ const DEFAULT_CONFIG: AppConfig = {
   tiers:    { light: { provider: 'openai', model: 'gpt-4o-mini' }, thinking: { provider: 'claude', model: 'claude-sonnet-4-6' } },
   tasks:    { story: 'thinking', combat: 'light' },
   apiKeys:  { openai: '', anthropic: '', deepseek: '' },
-  image:    { model: 'gpt-image-1', generateMaps: true },
+  image:    { model: 'gpt-image-1', generateMaps: true, generateWorldMap: false },
   narration: { model: 'none', voice: 'onyx' },
 };
 

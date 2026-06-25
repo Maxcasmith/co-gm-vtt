@@ -638,6 +638,33 @@
   margin-bottom: 12px;
 }
 
+.world-gen-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'Cinzel', serif;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--gold);
+  margin-bottom: 8px;
+}
+
+.world-gen-progress-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--gold);
+  animation: world-gen-pulse 1.2s ease-in-out infinite;
+}
+.world-gen-progress-dot:nth-child(2) { animation-delay: 0.2s; }
+.world-gen-progress-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes world-gen-pulse {
+  0%, 100% { opacity: 0.2; transform: scale(0.8); }
+  50%       { opacity: 1;   transform: scale(1.2); }
+}
+
 .modal-success code {
   font-size: 12px;
   background: var(--bg);
@@ -2287,6 +2314,33 @@ button.sheet-save-row {
   line-height: 1.65;
 }
 
+.journal-roll-requests {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.journal-roll-btn {
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface-hover);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.journal-roll-btn:hover:not(:disabled) {
+  background: var(--border);
+}
+
+.journal-roll-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .journal-input-row {
   display: flex;
   gap: 10px;
@@ -3556,7 +3610,7 @@ button.sheet-save-row {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  z-index: 9500;
+  z-index: 99999;
   pointer-events: none;
 }
 

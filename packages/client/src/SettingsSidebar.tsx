@@ -65,7 +65,7 @@ const DEFAULT_CONFIG: AppConfig = {
   tiers: { light: { provider: 'openai', model: 'gpt-4o-mini' }, thinking: { provider: 'claude', model: 'claude-sonnet-4-6' } },
   tasks: { story: 'thinking', combat: 'light' },
   apiKeys: { openai: '', anthropic: '', deepseek: '' },
-  image: { model: 'gpt-image-1', generateMaps: true },
+  image: { model: 'gpt-image-1', generateMaps: true, generateWorldMap: false },
   narration: { model: 'none', voice: 'onyx' },
 };
 
@@ -297,6 +297,23 @@ export default function SettingsSidebar({ open, onClose }: Props) {
                 className={`settings-toggle ${config.image.generateMaps ? 'settings-toggle--on' : ''}`}
                 onClick={() => setConfig(c => ({ ...c, image: { ...c.image, generateMaps: !c.image.generateMaps } }))}
                 aria-pressed={config.image.generateMaps}
+              >
+                <span className="settings-toggle-thumb" />
+              </button>
+            </div>
+            <div className="settings-toggle-row">
+              <div className="settings-toggle-text">
+                <span className="settings-toggle-label">Generate world map for campaigns</span>
+                <span className="settings-toggle-desc">
+                  {config.image.generateWorldMap
+                    ? 'A world map will be generated after campaign creation and used as the canvas background outside of combat.'
+                    : 'No world map will be generated. The canvas will be blank outside of combat.'}
+                </span>
+              </div>
+              <button
+                className={`settings-toggle ${config.image.generateWorldMap ? 'settings-toggle--on' : ''}`}
+                onClick={() => setConfig(c => ({ ...c, image: { ...c.image, generateWorldMap: !c.image.generateWorldMap } }))}
+                aria-pressed={config.image.generateWorldMap}
               >
                 <span className="settings-toggle-thumb" />
               </button>

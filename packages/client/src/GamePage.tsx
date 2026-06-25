@@ -59,6 +59,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [tokenUrls, setTokenUrls] = useState<Record<string, string>>({});
   const [acquisitions, setAcquisitions] = useState<Character['inventory']>([]);
   const [itemNotifications, setItemNotifications] = useState<{ id: string; name: string }[]>([]);
+  const [worldMapUrl, setWorldMapUrl] = useState<string | undefined>(undefined);
   const lastSpaceRef = useRef<number>(0);
   const socketRef = useRef<ReturnType<typeof io> | null>(null);
   const onCharacterUpdateRef = useRef(onCharacterUpdate);
@@ -74,6 +75,13 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    const url = `${API}/api/campaigns/${character.campaignId}/world-map`;
+    fetch(url, { method: 'HEAD' })
+      .then(r => { if (r.ok) setWorldMapUrl(url); })
+      .catch(() => {});
+  }, [character.campaignId]);
+
   useEffect(() => on('vtt:chat:message-received', ({ text, senderName }) => {
     if (senderName === 'Virtual DM') narrate(text);
   }), []);
@@ -81,7 +89,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   useEffect(() => {
     const socket = io(API);
     socketRef.current = socket;
-    socket.emit('player:join', { name: character.name, campaignId: character.campaignId });
+    socket.emit('player:join', { name: character.name, id: character.id, campaignId: character.campaignId });
     socket.on('players:update', setConnected);
     socket.on('players:characters', map => {
       setTokenUrls(Object.fromEntries(
@@ -105,13 +113,14 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       messages.forEach(msg => dispatch('vtt:chat:message-received', msg));
     });
 
-    // Bridge roll results → chat
+    // Bridge roll results → chat + typed event
     socket.on('roll:result', result => {
       dispatch('vtt:chat:message-received', {
         text: result.description,
         senderName: 'System',
         timestamp: Date.now(),
       });
+      dispatch('vtt:roll:result', result);
     });
 
     // Bridge outgoing chat → socket, incoming → chat event
@@ -168,8 +177,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('map:generated', mapId => dispatch('vtt:map:generated', { mapId, campaignId: character.campaignId }));
     socket.on('encounter:generating', () => dispatch('vtt:encounter:generating', {}));
     socket.on('encounter:ready', enemies => { setEncounter(enemies); dispatch('vtt:encounter:ready', { enemies }); });
-    socket.on('session:recap', text => {
-      dispatch('vtt:chat:message-received', { text, senderName: 'Virtual DM', timestamp: Date.now(), variant: 'recap' });
+    socket.on('session:recap', ({ text, senderName, checkRequests }) => {
+      dispatch('vtt:chat:message-received', { text, senderName, timestamp: Date.now(), variant: 'recap', checkRequests });
     });
     socket.on('combat:log', data => dispatch('vtt:combat:log', data));
 
@@ -323,7 +332,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       {defeated && <DefeatScreen onDismiss={() => setDefeated(false)} />}
       <ShortcutsOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <RestModal character={character} />
-      <BattleMapBackground campaignId={character.campaignId} />
+      <BattleMapBackground campaignId={character.campaignId} worldMapUrl={worldMapUrl} />
       <div className="item-notifications">
         {itemNotifications.map(n => (
           <div key={n.id} className="item-notification">

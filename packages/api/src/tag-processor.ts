@@ -1,4 +1,4 @@
-import type { Item, Weapon, Consumable, Ammunition, EnemyStatBlock } from 'shared';
+import type { Item, Weapon, Consumable, Ammunition, EnemyStatBlock, CheckRequest } from 'shared';
 import { randomUUID } from 'crypto';
 
 export type AcquiredItem = Item | Weapon | Consumable | Ammunition;
@@ -14,6 +14,7 @@ interface ProcessResult {
   text: string;
   effects: TagEffect[];
   speakingAs?: string;
+  checkRequests: CheckRequest[];
 }
 
 const TAG_RE = /\[\[([A-Z_]+):([^:[\]]+):([^\]]+)\]\]/g;
@@ -163,6 +164,13 @@ export async function processVdmResponse(
   const speakingAsMatch = text.match(SPEAKING_AS_RE);
   const speakingAs = speakingAsMatch?.[1]?.trim();
 
+  const CHECK_RE = /\[\[REQUEST_CHECK:([^|[\]]+)\|([^\]]+)\]\]/g;
+  const SAVE_RE  = /\[\[REQUEST_SAVE:([^|[\]]+)\|([^\]]+)\]\]/g;
+  const checkRequests: CheckRequest[] = [
+    ...[...text.matchAll(CHECK_RE)].map(m => ({ player: m[1]!.trim(), skill: m[2]!.trim(), type: 'check' as const })),
+    ...[...text.matchAll(SAVE_RE)].map(m =>  ({ player: m[1]!.trim(), skill: m[2]!.trim(), type: 'save'  as const })),
+  ];
+
   const COMBAT_INIT_RE = /\[\[COMBAT_INIT\]\]/g;
   if (text.includes('[[COMBAT_INIT]]')) {
     console.log('[tag] COMBAT_INIT detected');
@@ -206,6 +214,6 @@ export async function processVdmResponse(
     }),
   ]);
 
-  const strippedText = text.replace(TAG_RE, '').replace(PARTY_JOIN_RE, '').replace(SCENE_BUILD_RE, '').replace(NPC_BUILD_RE, '').replace(COMBAT_INIT_RE, '').replace(SPEAKING_AS_RE, '').replace(/\s{2,}/g, ' ').trim();
-  return { text: strippedText, effects, speakingAs };
+  const strippedText = text.replace(TAG_RE, '').replace(PARTY_JOIN_RE, '').replace(SCENE_BUILD_RE, '').replace(NPC_BUILD_RE, '').replace(COMBAT_INIT_RE, '').replace(SPEAKING_AS_RE, '').replace(CHECK_RE, '').replace(SAVE_RE, '').replace(/\s{2,}/g, ' ').trim();
+  return { text: strippedText, effects, checkRequests, ...(speakingAs !== undefined ? { speakingAs } : {}) };
 }

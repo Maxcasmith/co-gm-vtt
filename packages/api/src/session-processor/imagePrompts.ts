@@ -323,3 +323,28 @@ Map Size: MEDIUM
 Final Requirement:
 Visually express every piece of provided context through architecture, terrain, props, lighting, damage, wear, clutter, and environmental storytelling. Maintain strict top-down orthographic perspective, realistic scale, tactical usability, and premium battle-map quality throughout.`;
 }
+
+export function buildWorldMapPrompt(worldMd: string, locationsSummary: string, tags: string[]): string {
+  const tagLine = tags.length ? tags.join(', ') : 'dark fantasy';
+  return `Create a FANTASY WORLD MAP in the style of classic RPG cartography. This map must be scoped exclusively to the world described below — no generic fantasy tropes that contradict the setting. Every visual choice (palette, terrain, iconography, atmosphere) must reflect the specific tone and themes of this campaign.
+
+CAMPAIGN TAGS (these define the mood, genre, and visual identity of this world — the map must embody them):
+${tagLine}
+
+STYLE RULES (MANDATORY):
+- Hand-drawn or painterly top-down world map aesthetic (like classic D&D sourcebook maps)
+- Illustrated terrain features: mountains, forests, coastlines, rivers, deserts — styled to match the campaign tags above
+- Every named location listed below MUST appear on the map as a marked landmark or settlement with a small illustrative icon
+- Colour palette, linework, and overall aesthetic derived from the campaign tags — not generic parchment if the setting doesn't call for it
+- Decorative compass rose in a style matching the world's tone
+- Rich, dense detail — no empty areas
+- No grid, no UI, no text labels, no borders
+
+WORLD CONTEXT
+
+${worldMd.slice(0, 1200)}
+
+LOCATIONS (each must be visually represented on the map)
+
+${locationsSummary.slice(0, 1200)}`;
+}

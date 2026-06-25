@@ -10,10 +10,17 @@ export interface RollResult {
   description: string;
 }
 
+export interface CheckRequest {
+  player: string;
+  skill: string;
+  type: 'check' | 'save';
+}
+
 export interface ChatPayload {
   text: string;
   senderName: string;
   timestamp: number;
+  checkRequests?: CheckRequest[];
 }
 
 export interface BattleMap {
@@ -75,7 +82,7 @@ export interface ServerToClientEvents {
   'chat:message': (payload: ChatPayload) => void;
   'chat:history': (messages: ChatPayload[]) => void;
   'session:state': (active: boolean) => void;
-  'session:recap': (text: string) => void;
+  'session:recap': (payload: { text: string; senderName: string; checkRequests?: CheckRequest[] }) => void;
   'dm:thinking': (active: boolean) => void;
   'combat:state': (active: boolean) => void;
   'map:generating': () => void;
@@ -100,7 +107,7 @@ export interface ServerToClientEvents {
 }
 
 export interface ClientToServerEvents {
-  'player:join': (payload: { name: Player; campaignId: string }) => void;
+  'player:join': (payload: { name: Player; id: string; campaignId: string }) => void;
   'roll:check': (payload: { campaignId: string; characterId: string; stat: string; skill?: string }) => void;
   'roll:save': (payload: { campaignId: string; characterId: string; stat: string }) => void;
   'chat:message': (payload: { text: string; senderName: string }) => void;
@@ -123,6 +130,7 @@ export interface ModelTier {
 export interface ImageConfig {
   model: ImageModel;
   generateMaps: boolean;
+  generateWorldMap: boolean;
 }
 
 export type NarrationModel = 'none' | 'browser' | 'tts-1' | 'tts-1-hd';
@@ -160,7 +168,7 @@ export interface WorldMeta {
   id: string;
   name: string;
   campaignDir: string;
-  type: 'campaign' | 'one-shot';
+  type: 'campaign' | 'one-shot' | 'dungeon-crawl';
   concept?: { name: string; description: string };
   tags?: string[];
 }
