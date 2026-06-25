@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { Character } from 'shared';
 import type { ChatMessageReceivedPayload } from './events.ts';
 import { on, dispatch } from './events.ts';
@@ -9,6 +9,12 @@ interface Props {
   character: Character;
   sessionActive: boolean;
   dmThinking: boolean;
+}
+
+function formatSender(name: string): React.ReactNode {
+  const match = name.match(/^(.+) \(Virtual DM\)$/);
+  if (!match) return name;
+  return <>{match[1]} <span className="vdm-tag">(Virtual DM)</span></>;
 }
 
 export default function JournalOverlay({ open, onClose, character, sessionActive, dmThinking }: Props) {
@@ -66,7 +72,7 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
             messages.map((msg, i) => (
               <div key={i} className={`journal-msg${msg.variant === 'recap' ? ' journal-msg--recap' : msg.senderName === 'System' ? ' journal-msg--system' : ''}`}>
                 <div className="journal-msg-header">
-                  <span className="journal-msg-sender">{msg.senderName}</span>
+                  <span className="journal-msg-sender">{formatSender(msg.senderName)}</span>
                   <span className="journal-msg-time">
                     {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>

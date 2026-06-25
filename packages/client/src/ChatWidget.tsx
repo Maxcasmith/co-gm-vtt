@@ -1,5 +1,11 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { on } from './events.ts';
+
+function formatSender(name: string): React.ReactNode {
+  const match = name.match(/^(.+) \(Virtual DM\)$/);
+  if (!match) return name;
+  return <>{match[1]} <span className="vdm-tag">(Virtual DM)</span></>;
+}
 
 interface Quote {
   text: string;
@@ -26,7 +32,7 @@ export default function ChatWidget() {
         onAnimationEnd={() => setQuote(null)}
       >
         &#x201C;{quote.text}&#x201D;
-        <span className="chat-widget-sender"> — {quote.senderName}</span>
+        <span className="chat-widget-sender"> — {formatSender(quote.senderName)}</span>
       </p>
     </div>
   );

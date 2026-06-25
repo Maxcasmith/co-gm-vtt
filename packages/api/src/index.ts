@@ -9,8 +9,8 @@ import { campaignsRouter } from './routes/campaigns.ts';
 import { readdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { getCharacter, writeCharacter, readChatLog, appendChatLog, listEntitySlugs, readEntity, getWorldMeta, getConfig, CAMPAIGNS_DIR, saveMap, appendMapIndex, listMaps, saveEncounter, loadEncounter, clearEncounter, readWorldState, writeWorldState, readCampaignFile, listCharacters } from './storage.ts';
-import { getStoryProvider } from './providers/index.ts';
+import { getCharacter, writeCharacter, readChatLog, appendChatLog, listEntitySlugs, readEntity, writeEntity, getWorldMeta, getConfig, CAMPAIGNS_DIR, saveMap, appendMapIndex, listMaps, listPremadeMaps, saveEncounter, loadEncounter, clearEncounter, readWorldState, writeWorldState, readCampaignFile, listCharacters, loadPartyAllies, savePartyAllies } from './storage.ts';
+import { getStoryProvider, getTierApiKey } from './providers/index.ts';
 import { buildRecapPrompt } from './session-processor/prompts.ts';
 import { processSession, getDMResponse } from './session-processor/index.ts';
 import { parseLocationContext, buildBattleMapPrompt, generateEncounterEnemies, generateCombatFlavour, resolveImprovisedAction, generateWorldState, tickWorldNarrative } from './session-processor/imagePrompts.ts';
@@ -20,6 +20,7 @@ import { adminRouter } from './routes/admin.ts';
 import { randomUUID } from 'crypto';
 import { Encounter, Team, Participant } from './domain/encounter.ts';
 import { Creature } from './domain/creature.ts';
+import { processVdmResponse, type TagEffect, type AcquiredItem } from './tag-processor.ts';
 
 const app = express();
 app.use(cors());
@@ -35,6 +36,15 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
 });
 
 const ROOM = 'sandbox';
+
+// ponytail: intercept console.log to broadcast logs to connected clients for the combat log overlay
+const _origLog = console.log;
+console.log = (...args: unknown[]) => {
+  _origLog(...args);
+  const text = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+  io.to(ROOM).emit('combat:log', { text, timestamp: Date.now() });
+};
+
 const connected = new Set<Player>();
 const sessionState = new Map<string, boolean>();
 const combatState = new Map<string, boolean>();
@@ -73,13 +83,14 @@ function emitTurn(cid: string) {
   const encounter = encounters.get(cid);
   if (!encounter) return;
 
-  if (encounter.allPlayersDead()) {
+  if (encounter.allPlayersDown()) {
     endCombatDefeated(cid);
     return;
   }
 
   const actor = encounter.currentActor;
   if (!actor) return;
+  console.log(`[turn] emitTurn: actor=${actor.name} idx=${encounter.turnOrder.indexOf(actor)} order=[${encounter.turnOrder.map(p => p.name).join(',')}]`);
   io.to(ROOM).emit('combat:turn', { actorName: actor.name });
 
   if (!actor.isPlayer) {
@@ -108,7 +119,7 @@ async function runDeathSave(cid: string, actor: Participant): Promise<void> {
 
   if (saves.stable) { advanceTurn(cid); return; }
 
-  const roll = d20();
+  const roll = new D20Roll().roll();
   const isNat20 = roll === 20;
   const isNat1 = roll === 1;
   let stable = false;
@@ -179,15 +190,17 @@ async function runEnemyAI(cid: string, actor: Participant): Promise<void> {
     return advanceTurn(cid);
   }
 
-  // Find nearest player by Chebyshev distance
-  const players = campaignPlayers.get(cid) ?? [];
-  let target: { name: string; gx: number; gy: number } | null = null;
+  // Find nearest target on a different team by Chebyshev distance
+  let target: { participant: Participant; gx: number; gy: number } | null = null;
   let minDist = Infinity;
-  for (const pname of players) {
-    const p = positions[pname];
-    if (!p) continue;
-    const d = Math.max(Math.abs(p.gx - epos.gx), Math.abs(p.gy - epos.gy));
-    if (d < minDist) { minDist = d; target = { name: pname, ...p }; }
+  for (const p of encounter.turnOrder) {
+    if (p.teamId === actor.teamId || p.isDown()) continue;
+    // Players use name as token key; non-players (allies included) use id
+    const posKey = p.isPlayer ? p.name : p.id;
+    const pos = positions[posKey];
+    if (!pos) continue;
+    const d = Math.max(Math.abs(pos.gx - epos.gx), Math.abs(pos.gy - epos.gy));
+    if (d < minDist) { minDist = d; target = { participant: p, ...pos }; }
   }
 
   if (!target) return advanceTurn(cid);
@@ -227,72 +240,93 @@ async function runEnemyAI(cid: string, actor: Participant): Promise<void> {
   if (creature.attacks.length > 0) {
     const atk = creature.attacks[Math.floor(Math.random() * creature.attacks.length)]!;
     const finalDist = Math.max(Math.abs(target.gx - gx), Math.abs(target.gy - gy));
+    const targetParticipant = target.participant;
+
     if (finalDist <= 1) {
-      const chars = await listCharacters(cid);
-      const targetChar = chars.find(c => c.name === target!.name);
-      const targetAc = targetChar ? (10 + statMod(targetChar.stats.dex)) : 10;
-      const roll = d20();
+      let targetAc: number;
+      let targetCharForAttack: Awaited<ReturnType<typeof listCharacters>>[number] | undefined;
+
+      if (targetParticipant.isPlayer) {
+        const chars = await listCharacters(cid);
+        targetCharForAttack = chars.find(c => c.name === targetParticipant.name);
+        targetAc = targetCharForAttack ? (10 + statMod(targetCharForAttack.stats.dex)) : 10;
+      } else {
+        targetAc = encounter.findCreature(targetParticipant.id)?.ac ?? 10;
+      }
+
+      const roll = new D20Roll().roll();
       const total = roll + atk.bonus;
       const hit = total >= targetAc;
       let damage: number | undefined;
       let remainingHp: number | undefined;
       let targetDead = false;
 
-      if (hit && targetChar) {
+      if (hit) {
         damage = rollDice(atk.damage);
-        const playerParticipant = encounter.players.find(p => p.id === targetChar.id);
-        if (playerParticipant) {
-          const wasDown = playerParticipant.isDown();
-          playerParticipant.takeDamage(damage);
-          remainingHp = playerParticipant.currentHp;
-          targetDead = playerParticipant.currentHp <= 0;
-          io.to(ROOM).emit('combat:player:damage', {
-            characterId: targetChar.id,
-            characterName: target!.name,
-            damage,
-            currentHp: playerParticipant.currentHp,
-            maxHp: playerParticipant.maxHp,
-          });
-          console.log(`[ai] ${actor.name} attacks ${target!.name} with ${atk.name}: ${roll}${fmtMod(atk.bonus)} = ${total} vs AC ${targetAc} — HIT ${damage} (${playerParticipant.currentHp}/${playerParticipant.maxHp} HP)`);
 
-          if (wasDown) {
-            playerParticipant.deathSaves.failures = Math.min(3, playerParticipant.deathSaves.failures + 2);
-            playerParticipant.deathSaves.stable = false;
-            const nowDead = playerParticipant.deathSaves.failures >= 3;
-            const socketId = playerSocketIds.get(target!.name);
-            if (socketId) {
-              io.to(socketId).emit('combat:death:save', {
-                characterName: target!.name, roll: 0, isNatural20: false, isNatural1: false,
-                success: false, successes: playerParticipant.deathSaves.successes,
-                failures: playerParticipant.deathSaves.failures, stable: false, dead: nowDead,
-              });
-            }
-            if (nowDead) {
-              io.to(ROOM).emit('combat:player:dead', { characterId: targetChar.id, characterName: target!.name });
-              const deadMsg = { text: `${target!.name} has perished.`, senderName: 'Combat', timestamp: Date.now() };
-              io.to(ROOM).emit('chat:message', deadMsg);
-              void appendChatLog(cid, deadMsg);
+        if (targetParticipant.isPlayer && targetCharForAttack) {
+          const playerParticipant = encounter.players.find(p => p.id === targetCharForAttack!.id);
+          if (playerParticipant) {
+            const wasDown = playerParticipant.isDown();
+            playerParticipant.takeDamage(damage);
+            remainingHp = playerParticipant.currentHp;
+            targetDead = playerParticipant.currentHp <= 0;
+            io.to(ROOM).emit('combat:player:damage', {
+              characterId: targetCharForAttack.id,
+              characterName: targetParticipant.name,
+              damage,
+              currentHp: playerParticipant.currentHp,
+              maxHp: playerParticipant.maxHp,
+            });
+            console.log(`[ai] ${actor.name} attacks ${targetParticipant.name} with ${atk.name}: ${roll}${fmtMod(atk.bonus)} = ${total} vs AC ${targetAc} — HIT ${damage} (${playerParticipant.currentHp}/${playerParticipant.maxHp} HP)`);
+
+            if (wasDown) {
+              playerParticipant.deathSaves.failures = Math.min(3, playerParticipant.deathSaves.failures + 2);
+              playerParticipant.deathSaves.stable = false;
+              const nowDead = playerParticipant.deathSaves.failures >= 3;
+              const socketId = playerSocketIds.get(targetParticipant.name);
+              if (socketId) {
+                io.to(socketId).emit('combat:death:save', {
+                  characterName: targetParticipant.name, roll: 0, isNatural20: false, isNatural1: false,
+                  success: false, successes: playerParticipant.deathSaves.successes,
+                  failures: playerParticipant.deathSaves.failures, stable: false, dead: nowDead,
+                });
+              }
+              if (nowDead) {
+                io.to(ROOM).emit('combat:player:dead', { characterId: targetCharForAttack.id, characterName: targetParticipant.name });
+                const deadMsg = { text: `${targetParticipant.name} has perished.`, senderName: 'Combat', timestamp: Date.now() };
+                io.to(ROOM).emit('chat:message', deadMsg);
+                void appendChatLog(cid, deadMsg);
+              }
             }
           }
+        } else {
+          // Ally or other non-player target — use creature damage path
+          void applyDamageToCreature(cid, targetParticipant.id, damage);
+          remainingHp = encounter.findCreature(targetParticipant.id)?.currentHp;
+          targetDead = encounter.findCreature(targetParticipant.id)?.isDead() ?? false;
         }
       } else {
-        console.log(`[ai] ${actor.name} attacks ${target!.name} with ${atk.name}: ${roll}${fmtMod(atk.bonus)} = ${total} vs AC ${targetAc} — MISS`);
+        console.log(`[ai] ${actor.name} attacks ${targetParticipant.name} with ${atk.name}: ${roll}${fmtMod(atk.bonus)} = ${total} vs AC ${targetAc} — MISS`);
       }
 
+      const targetId = targetParticipant.isPlayer ? (targetCharForAttack?.id ?? targetParticipant.name) : targetParticipant.id;
       io.to(ROOM).emit('combat:attack:result', {
-        attackerName: actor.name, targetName: target!.name, targetId: targetChar?.id ?? target!.name,
+        attackerName: actor.name, targetName: targetParticipant.name, targetId,
         weaponName: atk.name, d20: roll, attackBonus: atk.bonus, total, ac: targetAc,
         hit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
       });
 
       const cfg = await getConfig();
-      if (cfg.combat.apiKey) {
+      const cfgTier = cfg.tiers[cfg.tasks.combat];
+      const cfgApiKey = getTierApiKey(cfg.apiKeys, cfgTier.provider);
+      if (cfgApiKey) {
         const atkResult = {
-          attackerName: actor.name, targetName: target!.name, targetId: target!.name,
+          attackerName: actor.name, targetName: targetParticipant.name, targetId,
           weaponName: atk.name, d20: roll, attackBonus: atk.bonus, total, ac: targetAc,
           hit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
         };
-        const flavour = await generateCombatFlavour(atkResult, cfg.combat.apiKey, cfg.combat.model);
+        const flavour = await generateCombatFlavour(atkResult, cfgApiKey, cfgTier.model);
         if (flavour) {
           const msg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
           io.to(ROOM).emit('chat:message', msg);
@@ -300,7 +334,7 @@ async function runEnemyAI(cid: string, actor: Participant): Promise<void> {
         }
       }
     } else {
-      console.log(`[ai] ${actor.name} cannot reach ${target!.name} (${finalDist} cells away)`);
+      console.log(`[ai] ${actor.name} cannot reach ${targetParticipant.name} (${finalDist} cells away)`);
     }
   }
 
@@ -370,16 +404,16 @@ async function applyDamageToCreature(cid: string, targetId: string, damage: numb
 
       setTimeout(() => {
         combatState.set(cid, false);
-        void listCharacters(cid).then(chars => Promise.all(
-          chars.map(c => {
-            const p = encounter.players.find(pp => pp.id === c.id);
-            return p ? writeCharacter(cid, c.id, { ...c, currentHp: p.currentHp, maxHp: p.maxHp }) : Promise.resolve();
-          })
-        ));
         encounter.teardown();
         encounters.delete(cid);
         void clearEncounter(cid);
         io.to(ROOM).emit('combat:state', false);
+
+        const kills = enemyStatBlocks.map(e => e.name).join(', ');
+        const summary = `[Combat over — party victorious. Defeated: ${kills}. ${xpPerPlayer} XP awarded per player. Describe the immediate aftermath and give the party something to act on.]`;
+        void appendChatLog(cid, { text: summary, senderName: 'System', timestamp: Date.now() }).then(() => {
+          dispatchDMResponse(cid);
+        });
       }, 7000);
     }
   }
@@ -389,11 +423,14 @@ function advanceTurn(cid: string) {
   if (!combatState.get(cid)) return;
   const encounter = encounters.get(cid);
   if (!encounter?.turnOrder.length) return;
+  const before = encounter.currentActor?.name ?? '?';
   encounter.advanceTurn();
+  const after = encounter.currentActor?.name ?? '?';
+  console.log(`[turn] advanceTurn: ${before} → ${after} (order=[${encounter.turnOrder.map(p => p.name).join(',')}])`);
   emitTurn(cid);
 }
 
-function rollPlayerInitiatives(cid: string, chars: Character[]): void {
+async function rollPlayerInitiatives(cid: string, chars: Character[]): Promise<void> {
   const encounter = encounters.get(cid);
   if (!encounter) return;
 
@@ -403,7 +440,7 @@ function rollPlayerInitiatives(cid: string, chars: Character[]): void {
     encounter.addTeam(playerTeam);
   }
 
-  const players = campaignPlayers.get(cid) ?? [];
+  const players = (campaignPlayers.get(cid) ?? []).filter(name => connected.has(name));
   encounter.expectedParticipantCount += players.length;
 
   const entries: Participant[] = players.map(name => {
@@ -413,8 +450,9 @@ function rollPlayerInitiatives(cid: string, chars: Character[]): void {
     const participant = new Participant({
       id: char?.id ?? name,
       name,
-      initiative: d20() + mod,
+      initiative: new D20Roll().roll() + mod,
       isPlayer: true,
+      teamId: 'players',
       currentHp: char?.currentHp ?? maxHp,
       maxHp,
     });
@@ -423,6 +461,26 @@ function rollPlayerInitiatives(cid: string, chars: Character[]): void {
   });
 
   addToTurnOrder(cid, entries);
+
+  // Add any persistent party allies to initiative alongside players
+  const allies = await loadPartyAllies(cid);
+  if (allies.length) {
+    const allyEntries = allies.map(sb => {
+      const creature = Creature.from(sb);
+      const p = new Participant({
+        id: creature.id,
+        name: creature.name,
+        initiative: new D20Roll().roll() + statMod(creature.stats.dex),
+        isPlayer: false,
+        teamId: 'players',
+        creature,
+      });
+      playerTeam!.addParticipant(p);
+      return p;
+    });
+    encounter.expectedParticipantCount += allyEntries.length;
+    addToTurnOrder(cid, allyEntries, entries.length * 500);
+  }
 }
 
 function rollEnemyInitiatives(cid: string): void {
@@ -430,7 +488,7 @@ function rollEnemyInitiatives(cid: string): void {
   if (!encounter) return;
   const existing = encounter.turnOrder.length;
   const entries = encounter.enemies.map(p => {
-    p.initiative = d20() + statMod(p.creature?.stats.dex ?? 10);
+    p.initiative = new D20Roll().roll() + statMod(p.creature?.stats.dex ?? 10);
     return p;
   });
   addToTurnOrder(cid, entries, existing * 500);
@@ -462,15 +520,20 @@ function queueDMResponse(campaignId: string, fn: () => Promise<void>): void {
 
 async function generateAndBroadcastMap(campaignId: string): Promise<void> {
   try {
-    const stubMapId = process.env.STUB_MAP_ID;
-    if (stubMapId) {
-      console.log('[map] STUB_MAP_ID set, skipping generation — loading:', stubMapId);
-      io.to(ROOM).emit('map:generated', stubMapId);
+    const config = await getConfig();
+
+    if (!config.image.generateMaps) {
+      const premade = await listPremadeMaps();
+      if (premade.length) {
+        const pick = premade[Math.floor(Math.random() * premade.length)]!;
+        io.to(ROOM).emit('map:generated', pick);
+        console.log('[map] generation disabled — using premade:', pick);
+      }
       return;
     }
 
-    const config = await getConfig();
-    const { apiKey, model } = config.image;
+    const { model } = config.image;
+    const apiKey = config.apiKeys.openai;
     if (!apiKey) { console.warn('[map] no image API key configured, skipping map generation'); return; }
 
     io.to(ROOM).emit('map:generating');
@@ -496,7 +559,8 @@ async function generateAndBroadcastEnemies(campaignId: string): Promise<void> {
   try {
     io.to(ROOM).emit('encounter:generating');
     const config = await getConfig();
-    const { model, apiKey } = config.combat;
+    const { model, provider } = config.tiers[config.tasks.combat];
+    const apiKey = getTierApiKey(config.apiKeys, provider);
     if (!apiKey) console.warn('[encounter] no combat API key, using fallback');
 
     const [messages, characters] = await Promise.all([
@@ -515,20 +579,24 @@ async function generateAndBroadcastEnemies(campaignId: string): Promise<void> {
       encounter.addTeam(enemyTeam);
     }
 
-    for (const sb of statBlocks) {
+    // Assign a fresh UUID per combat slot so duplicate-name enemies have unique IDs
+    const uniqueStatBlocks = statBlocks.map(sb => ({ ...sb, id: randomUUID() }));
+
+    for (const sb of uniqueStatBlocks) {
       const creature = Creature.from(sb);
       enemyTeam.addParticipant(new Participant({
         id: creature.id,
         name: creature.name,
         initiative: 0,
         isPlayer: false,
+        teamId: 'enemies',
         creature,
       }));
     }
 
-    encounter.expectedParticipantCount += statBlocks.length;
+    encounter.expectedParticipantCount += uniqueStatBlocks.length;
     await saveEncounter(campaignId, encounter);
-    io.to(ROOM).emit('encounter:ready', statBlocks);
+    io.to(ROOM).emit('encounter:ready', uniqueStatBlocks);
     console.log('[encounter] ready:', statBlocks.map(e => `${e.name} (CR ${e.cr})`).join(', '));
 
     if (combatState.get(campaignId)) rollEnemyInitiatives(campaignId);
@@ -540,7 +608,7 @@ async function generateAndBroadcastEnemies(campaignId: string): Promise<void> {
 async function buildEntitySummaries(campaignId: string): Promise<string> {
   const types = ['npc', 'faction', 'location', 'character'] as const;
   const lines: string[] = [];
-  for (const filename of ['world.md', 'locations.md', 'npcs.md', 'factions.md']) {
+  for (const filename of ['world.md', 'factions.md']) {
     try {
       const content = await readFile(path.join(CAMPAIGNS_DIR, campaignId, filename), 'utf-8');
       lines.push(`### ${filename}\n${content}`);
@@ -610,9 +678,231 @@ const SAVE_PROFS: Record<string, string[]> = {
   Sorcerer:  ['CON', 'CHA'], Warlock: ['WIS', 'CHA'], Wizard:   ['INT', 'WIS'],
 };
 
-function d20() { return Math.floor(Math.random() * 20) + 1; }
+class D20Roll {
+  withAdvantage: boolean;
+  withDisadvantage: boolean;
+
+  constructor(opts?: { withAdvantage?: boolean; withDisadvantage?: boolean }) {
+    this.withAdvantage = opts?.withAdvantage ?? false;
+    this.withDisadvantage = opts?.withDisadvantage ?? false;
+  }
+
+  roll(): number {
+    const raw = () => Math.floor(Math.random() * 20) + 1;
+    const adv = this.withAdvantage && !this.withDisadvantage;
+    const dis = this.withDisadvantage && !this.withAdvantage;
+    const r1 = raw();
+    if (!adv && !dis) return r1;
+    const r2 = raw();
+    return adv ? Math.max(r1, r2) : Math.min(r1, r2);
+  }
+}
 function statMod(score: number) { return Math.floor((score - 10) / 2); }
 function fmtMod(n: number) { return n >= 0 ? `+${n}` : `${n}`; }
+
+async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
+  await Promise.all(consolidateEffects(effects).map(async effect => {
+    if (effect.type === 'combat_init' && !combatState.get(cid)) {
+      combatState.set(cid, true);
+      encounters.set(cid, Encounter.empty(cid));
+      io.to(ROOM).emit('combat:state', true);
+      void listCharacters(cid).then(chars => rollPlayerInitiatives(cid, chars));
+      void generateAndBroadcastMap(cid);
+      void generateAndBroadcastEnemies(cid);
+    } else if (effect.type === 'inventory_add') {
+      const chars = await listCharacters(cid);
+      const char = chars.find(c => c.name === effect.player);
+      if (!char) return;
+      const updated = { ...char, inventory: [...(char.inventory ?? []), ...effect.items] };
+      await writeCharacter(cid, char.id, updated);
+      const sid = playerSocketIds.get(effect.player);
+      if (sid) io.to(sid).emit('character:inventory:add', effect.items);
+    } else if (effect.type === 'scene_build') {
+      const locationSlug = effect.locationName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const existing = await readEntity(cid, 'location', locationSlug);
+      const updated = existing
+        ? `${existing.trimEnd()}\n- ${effect.detail}`
+        : `# ${effect.locationName}\n\n## Scene Notes\n- ${effect.detail}`;
+      await writeEntity(cid, 'location', locationSlug, updated);
+      console.log(`[scene] updated location notes: ${locationSlug}`);
+    } else if (effect.type === 'npc_build') {
+      const npcSlug = effect.npcName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const existing = await readEntity(cid, 'npc', npcSlug);
+      const updated = existing
+        ? `${existing.trimEnd()}\n- ${effect.detail}`
+        : `# ${effect.npcName}\n\n## Observed\n- ${effect.detail}`;
+      await writeEntity(cid, 'npc', npcSlug, updated);
+      console.log(`[npc] updated npc notes: ${npcSlug}`);
+    } else if (effect.type === 'party_join') {
+      const currentAllies = await loadPartyAllies(cid);
+      const alreadyPresent = currentAllies.some(a => a.name === effect.ally.name);
+      if (alreadyPresent) return;
+      await savePartyAllies(cid, [...currentAllies, effect.ally]);
+
+      const encounter = encounters.get(cid);
+      if (encounter && combatState.get(cid)) {
+        const playerTeam = encounter.teams.find(t => t.name === 'Players');
+        if (!playerTeam) return;
+        const creature = Creature.from(effect.ally);
+        const p = new Participant({
+          id: creature.id,
+          name: creature.name,
+          initiative: new D20Roll().roll() + statMod(creature.stats.dex),
+          isPlayer: false,
+          teamId: 'players',
+          creature,
+        });
+        playerTeam.addParticipant(p);
+        encounter.expectedParticipantCount += 1;
+        addToTurnOrder(cid, [p]);
+        const joinMsg = { text: `${creature.name} joins the fight!`, senderName: 'Combat', timestamp: Date.now() };
+        io.to(ROOM).emit('chat:message', joinMsg);
+        void appendChatLog(cid, joinMsg);
+      }
+    }
+  }));
+}
+
+function buildAdminEffect(tagType: string, name: string, detail: string, player: string): TagEffect | null {
+  const id = randomUUID();
+  switch (tagType) {
+    case 'ADD_INVENTORY_CONSUMABLE':
+      return { type: 'inventory_add', player, items: [{ id, type: 'consumable', name, description: detail, quantity: 1, effect: detail, actionCost: 'action' } as AcquiredItem] };
+    case 'ADD_INVENTORY_ITEM':
+      return { type: 'inventory_add', player, items: [{ id, type: 'item', name, description: detail, quantity: 1 } as AcquiredItem] };
+    case 'ADD_INVENTORY_WEAPON':
+      return { type: 'inventory_add', player, items: [{ id, type: 'weapon', name, description: detail, quantity: 1, damage: '1d4', damageType: 'bludgeoning', attackBonus: 0, range: 5, properties: [], isFinesse: false } as AcquiredItem] };
+    case 'ADD_INVENTORY_AMMO':
+      return { type: 'inventory_add', player, items: [{ id, type: 'ammunition', name, description: detail, quantity: parseInt(detail) || 20 } as AcquiredItem] };
+    default:
+      return null;
+  }
+}
+
+const ADMIN_HELP = `Admin commands:
+• /admin help — show this list
+• /admin say "text" — force the Virtual DM to say exactly that text
+• /admin [[ADD_INVENTORY_CONSUMABLE:name|description]] — add a consumable to your inventory
+• /admin [[ADD_INVENTORY_ITEM:name|description]] — add a generic item to your inventory
+• /admin [[ADD_INVENTORY_WEAPON:name|description]] — add a weapon (1d4 bludgeoning, range 5) to your inventory
+• /admin [[ADD_INVENTORY_AMMO:name|quantity]] — add ammunition to your inventory
+
+World-building (written to entity files, injected into future DM context):
+• [[SCENE_BUILD:Location Name:physical details]] — add spatial facts to a location
+• [[NPC_BUILD:NPC Name:observed detail]] — add observed facts to an NPC`;
+
+async function handleAdminCommand(cid: string, senderName: string, command: string): Promise<void> {
+  if (command === 'help') {
+    const sid = playerSocketIds.get(senderName);
+    if (sid) io.to(sid).emit('chat:message', { text: ADMIN_HELP, senderName: 'System', timestamp: Date.now() });
+    return;
+  }
+
+  const sayMatch = command.match(/^say\s+"([^"]+)"/);
+  if (sayMatch) {
+    const payload = { text: sayMatch[1]!, senderName: 'Virtual DM', timestamp: Date.now() };
+    await appendChatLog(cid, payload);
+    io.to(ROOM).emit('chat:message', payload);
+    console.log(`[admin] say: "${sayMatch[1]}"`);
+    return;
+  }
+
+  const ADMIN_TAG_RE = /\[\[([A-Z_]+):([^|[\]]+)\|([^\]]*)\]\]/g;
+  const matches = [...command.matchAll(ADMIN_TAG_RE)];
+  if (!matches.length) {
+    console.log(`[admin] unrecognised command from ${senderName}: ${command}`);
+    return;
+  }
+
+  const effects: TagEffect[] = [];
+  for (const match of matches) {
+    const tagType = match[1]!;
+    const name = match[2]!.trim();
+    const detail = match[3]!.trim();
+    const effect = buildAdminEffect(tagType, name, detail, senderName);
+    if (effect) effects.push(effect);
+    else console.log(`[admin] unknown tag type: ${tagType}`);
+  }
+
+  if (effects.length) {
+    await applyEffects(cid, effects);
+    console.log(`[admin] applied ${effects.length} effect(s) for ${senderName}`);
+  }
+}
+
+function consolidateEffects(effects: TagEffect[]): TagEffect[] {
+  const result: TagEffect[] = [];
+  const inventoryByPlayer = new Map<string, AcquiredItem[]>();
+  const sceneByLocation = new Map<string, string[]>();
+  const npcByName = new Map<string, string[]>();
+  let hasCombatInit = false;
+
+  for (const effect of effects) {
+    if (effect.type === 'combat_init') {
+      hasCombatInit = true;
+    } else if (effect.type === 'inventory_add') {
+      const existing = inventoryByPlayer.get(effect.player) ?? [];
+      inventoryByPlayer.set(effect.player, [...existing, ...effect.items]);
+    } else if (effect.type === 'scene_build') {
+      const existing = sceneByLocation.get(effect.locationName) ?? [];
+      sceneByLocation.set(effect.locationName, [...existing, effect.detail]);
+    } else if (effect.type === 'npc_build') {
+      const existing = npcByName.get(effect.npcName) ?? [];
+      npcByName.set(effect.npcName, [...existing, effect.detail]);
+    } else {
+      result.push(effect);
+    }
+  }
+
+  if (hasCombatInit) result.unshift({ type: 'combat_init' });
+  for (const [player, items] of inventoryByPlayer) result.push({ type: 'inventory_add', player, items });
+  for (const [locationName, details] of sceneByLocation) result.push({ type: 'scene_build', locationName, detail: details.join('\n- ') });
+  for (const [npcName, details] of npcByName) result.push({ type: 'npc_build', npcName, detail: details.join('\n- ') });
+
+  return result;
+}
+
+function dispatchDMResponse(cid: string): void {
+  if (!sessionState.get(cid)) return;
+  io.to(ROOM).emit('dm:thinking', true);
+  queueDMResponse(cid, async () => {
+    try {
+      const response = await getDMResponse(cid);
+      if (!response) return;
+
+      if (response.includes('[COMBAT END]') && combatState.get(cid)) {
+        combatState.set(cid, false);
+        const enc = encounters.get(cid);
+        if (enc) {
+          enc.teardown();
+          encounters.delete(cid);
+        }
+        void clearEncounter(cid);
+        io.to(ROOM).emit('combat:state', false);
+      }
+
+      const rawResponse = response.replace(/\[COMBAT END\]/g, '').trim();
+      const config = await getConfig();
+      const { model: tagsModel, provider: tagsProvider } = config.tiers[config.tasks.combat];
+      const tagsApiKey = getTierApiKey(config.apiKeys, tagsProvider);
+      const { text: cleanResponse, effects, speakingAs } = tagsApiKey
+        ? await processVdmResponse(rawResponse, tagsApiKey, tagsModel)
+        : { text: rawResponse, effects: [], speakingAs: undefined };
+
+      await applyEffects(cid, effects);
+
+      const senderName = speakingAs ? `${speakingAs} (Virtual DM)` : 'Virtual DM';
+      const dmPayload = { text: cleanResponse, senderName, timestamp: Date.now() };
+      await appendChatLog(cid, dmPayload);
+      io.to(ROOM).emit('session:recap', cleanResponse);
+    } catch (err) {
+      console.error('[dm] response error:', err);
+      io.to(ROOM).emit('chat:message', { text: `[DM error: ${(err as Error).message}]`, senderName: 'System', timestamp: Date.now() });
+    } finally {
+      io.to(ROOM).emit('dm:thinking', false);
+    }
+  });
+}
 
 io.on('connection', (socket) => {
   socket.on('player:join', ({ name: player, campaignId }) => {
@@ -626,6 +916,12 @@ io.on('connection', (socket) => {
     void readChatLog(campaignId).then(history => socket.emit('chat:history', history));
     socket.emit('session:state', sessionState.get(campaignId) ?? false);
     socket.emit('combat:state', combatState.get(campaignId) ?? false);
+
+    void listCharacters(campaignId).then(chars => {
+      const map: Record<string, string> = {};
+      for (const c of chars) map[c.name] = c.id;
+      io.to(ROOM).emit('players:characters', map);
+    });
 
     if (combatState.get(campaignId)) {
       void listMaps(campaignId).then(maps => {
@@ -678,53 +974,6 @@ io.on('connection', (socket) => {
 
     socket.on('session:end', ({ campaignId: cid }) => { endSession(cid); });
 
-    function dispatchDMResponse(cid: string): void {
-      if (!sessionState.get(cid)) return;
-      io.to(ROOM).emit('dm:thinking', true);
-      queueDMResponse(cid, async () => {
-        try {
-          const response = await getDMResponse(cid);
-          if (!response) return;
-
-          if ((response.includes('[BEGIN COMBAT]') || /roll\s+(?:for\s+)?initiative/i.test(response)) && !combatState.get(cid)) {
-            combatState.set(cid, true);
-            encounters.set(cid, Encounter.empty(cid));
-            io.to(ROOM).emit('combat:state', true);
-            void listCharacters(cid).then(chars => rollPlayerInitiatives(cid, chars));
-            void generateAndBroadcastMap(cid);
-            void generateAndBroadcastEnemies(cid);
-          }
-
-          if (response.includes('[COMBAT END]') && combatState.get(cid)) {
-            combatState.set(cid, false);
-            const enc = encounters.get(cid);
-            if (enc) {
-              void listCharacters(cid).then(chars => Promise.all(
-                chars.map(c => {
-                  const p = enc.players.find(pp => pp.id === c.id);
-                  return p ? writeCharacter(cid, c.id, { ...c, currentHp: p.currentHp, maxHp: p.maxHp }) : Promise.resolve();
-                })
-              ));
-              enc.teardown();
-              encounters.delete(cid);
-            }
-            void clearEncounter(cid);
-            io.to(ROOM).emit('combat:state', false);
-          }
-
-          const cleanResponse = response.replace(/\[BEGIN COMBAT\]/g, '').replace(/\[COMBAT END\]/g, '').trim();
-          const dmPayload = { text: cleanResponse, senderName: 'Virtual DM', timestamp: Date.now() };
-          await appendChatLog(cid, dmPayload);
-          io.to(ROOM).emit('session:recap', cleanResponse);
-        } catch (err) {
-          console.error('[dm] response error:', err);
-          io.to(ROOM).emit('chat:message', { text: `[DM error: ${(err as Error).message}]`, senderName: 'System', timestamp: Date.now() });
-        } finally {
-          io.to(ROOM).emit('dm:thinking', false);
-        }
-      });
-    }
-
     socket.on('roll:check', ({ campaignId, characterId, stat, skill }) => {
       void (async () => {
         const char = await getCharacter(campaignId, characterId);
@@ -736,7 +985,7 @@ io.on('connection', (socket) => {
           (BG_SKILLS[char.background] ?? []).includes(skill)
         ) : false;
         const modifier = base + (proficient ? 2 : 0);
-        const roll = d20();
+        const roll = new D20Roll().roll();
         const total = roll + modifier;
         const label = skill ?? (STAT_FULL[stat.toUpperCase()] ?? stat.toUpperCase());
         console.log(`[roll] ${char.name} rolls ${label}: ${total} | proficient=${proficient}`);
@@ -756,7 +1005,7 @@ io.on('connection', (socket) => {
         const base = statMod(char.stats[statKey]);
         const proficient = (SAVE_PROFS[char.class] ?? []).includes(statUpper);
         const modifier = base + (proficient ? 2 : 0);
-        const roll = d20();
+        const roll = new D20Roll().roll();
         const total = roll + modifier;
         const statLabel = STAT_FULL[statUpper] ?? statUpper;
         console.log(`[roll] ${char.name} rolls ${statLabel} Save: ${total}`);
@@ -768,6 +1017,11 @@ io.on('connection', (socket) => {
     });
 
     socket.on('chat:message', ({ text, senderName }) => {
+      if (text.startsWith('/admin ')) {
+        void handleAdminCommand(campaignId, senderName, text.slice(7).trim());
+        return;
+      }
+
       void (async () => {
         const payload = { text, senderName, timestamp: Date.now() };
         await appendChatLog(campaignId, payload);
@@ -780,7 +1034,8 @@ io.on('connection', (socket) => {
             void (async () => {
               try {
                 const config = await getConfig();
-                const { model, apiKey } = config.combat;
+                const { model, provider } = config.tiers[config.tasks.combat];
+                const apiKey = getTierApiKey(config.apiKeys, provider);
                 if (!apiKey) return;
                 const recent = (await readChatLog(campaignId)).slice(-10).map(m => `[${m.senderName}]: ${m.text}`).join('\n');
                 const char = await listCharacters(campaignId).then(cs => cs.find(c => c.name === senderName));
@@ -803,7 +1058,7 @@ io.on('connection', (socket) => {
 
                 if (result.type === 'attack' && result.dc && result.damageFormula && result.targetId && char) {
                   const statKey = (result.stat ?? 'str') as keyof CharacterStats;
-                  const roll = d20();
+                  const roll = new D20Roll().roll();
                   const mod = statMod(char.stats[statKey]);
                   const total = roll + mod;
                   const hit = total >= result.dc;
@@ -908,14 +1163,24 @@ io.on('connection', (socket) => {
         if (!char || !creature || creature.isDead()) return;
 
         const strMod = statMod(char.stats.str);
-        const attackBonus = strMod + (weapon.attackBonus ?? 0);
-        const roll = d20();
+        const dexMod = statMod(char.stats.dex);
+        const isMelee = weapon.range <= 5;
+        const statBonus = weapon.isFinesse ? Math.max(strMod, dexMod) : isMelee ? strMod : dexMod;
+        const attackBonus = statBonus + (weapon.attackBonus ?? 0);
+
+        const positions = tokenPositions.get(cid) ?? {};
+        const attackerPos = positions[attackerName];
+        const targetPos = positions[targetId];
+        const inExtendedRange = !!(weapon.extendedRange && attackerPos && targetPos &&
+          Math.max(Math.abs(targetPos.gx - attackerPos.gx), Math.abs(targetPos.gy - attackerPos.gy)) > Math.floor(weapon.range / 5));
+
+        const roll = new D20Roll({ withDisadvantage: inExtendedRange }).roll();
         const total = roll + attackBonus;
         const hit = total >= creature.ac;
 
         let damage: number | undefined;
         if (hit) {
-          damage = rollDice(weapon.damage);
+          damage = rollDice(weapon.damage) + statBonus;
           await applyDamageToCreature(cid, targetId, damage);
         }
 
@@ -940,7 +1205,7 @@ io.on('connection', (socket) => {
         void (async () => {
           try {
             const config = await getConfig();
-            const { model, apiKey } = config.combat;
+            const { model, apiKey } = config.tiers[config.tasks.combat];
             if (!apiKey) return;
             const flavour = await generateCombatFlavour(atkResult, apiKey, model);
             if (!flavour) return;
@@ -954,7 +1219,9 @@ io.on('connection', (socket) => {
 
     socket.on('combat:turn:end', () => {
       const encounter = encounters.get(campaignId);
-      if (encounter?.currentActor?.isPlayer) advanceTurn(campaignId);
+      const actor = encounter?.currentActor;
+      console.log(`[turn] combat:turn:end received — currentActor=${actor?.name ?? 'none'} isPlayer=${actor?.isPlayer}`);
+      if (actor?.isPlayer) advanceTurn(campaignId);
     });
 
     socket.on('disconnect', () => {

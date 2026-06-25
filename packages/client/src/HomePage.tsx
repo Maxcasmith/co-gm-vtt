@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Campaign, Character } from 'shared';
-import SettingsSidebar from './SettingsSidebar.tsx';
 import CreateCampaignModal from './CreateCampaignModal.tsx';
 import './app.css';
 
@@ -30,7 +29,6 @@ export default function HomePage() {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [selectedGame, setSelectedGame] = useState<Game | null>(null);
   const [password, setPassword] = useState('');
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [campaignOpen, setCampaignOpen] = useState(false);
   const [games, setGames] = useState<Game[] | null>(null);
   const [sessions] = useState<Character[]>(readSessions);
@@ -76,7 +74,9 @@ export default function HomePage() {
       <div className="home">
         <header className="home-header">
           <h1 className="home-title">Games</h1>
-          <button className="btn-icon" onClick={() => setSettingsOpen(true)} aria-label="Settings">⚙</button>
+          <div className="home-header-actions">
+            <a className="btn-secondary" href="/admin">Admin</a>
+          </div>
         </header>
 
         {/* ── campaigns ── */}
@@ -178,7 +178,6 @@ export default function HomePage() {
         </dialog>
       </div>
 
-      <SettingsSidebar open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <CreateCampaignModal
         open={campaignOpen}
         onClose={() => setCampaignOpen(false)}

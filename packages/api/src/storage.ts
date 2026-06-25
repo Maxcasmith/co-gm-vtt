@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, WorldState } from 'shared';
+import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, WorldState, EnemyStatBlock } from 'shared';
 import { Encounter } from './domain/encounter.ts';
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
@@ -10,12 +10,14 @@ const STORAGE_DIR = path.resolve(__dir, '../storage');
 const CONFIG_PATH = path.join(STORAGE_DIR, 'config.json');
 
 export const CAMPAIGNS_DIR = path.join(STORAGE_DIR, 'campaigns');
+export const PREMADE_DIR   = path.join(STORAGE_DIR, 'premade');
 
 const DEFAULT_CONFIG: AppConfig = {
-  story:     { provider: 'claude', model: 'claude-sonnet-4-6', apiKey: '' },
-  image:     { model: 'gpt-image-1', apiKey: '' },
-  combat:    { model: 'gpt-4o-mini', apiKey: '' },
-  narration: { model: 'none', voice: 'onyx', apiKey: '' },
+  tiers:    { light: { provider: 'openai', model: 'gpt-4o-mini' }, thinking: { provider: 'claude', model: 'claude-sonnet-4-6' } },
+  tasks:    { story: 'thinking', combat: 'light' },
+  apiKeys:  { openai: '', anthropic: '', deepseek: '' },
+  image:    { model: 'gpt-image-1', generateMaps: true },
+  narration: { model: 'none', voice: 'onyx' },
 };
 
 export async function getConfig(): Promise<AppConfig> {
@@ -151,6 +153,12 @@ export async function writeEntity(slug: string, type: string, entitySlug: string
   await writeFile(path.join(dir, `${entitySlug}.md`), content, 'utf-8');
 }
 
+export async function listPremadeMaps(): Promise<string[]> {
+  if (!existsSync(PREMADE_DIR)) return [];
+  const entries = await readdir(PREMADE_DIR);
+  return entries.filter(f => f.endsWith('.jpg')).map(f => f.replace(/\.jpg$/, ''));
+}
+
 export async function saveMap(slug: string, mapId: string, buffer: Buffer): Promise<void> {
   const dir = path.join(CAMPAIGNS_DIR, slug, 'maps');
   await mkdir(dir, { recursive: true });
@@ -207,6 +215,18 @@ export async function readCampaignFile(slug: string, filename: string): Promise<
   try {
     return await readFile(path.join(CAMPAIGNS_DIR, slug, filename), 'utf-8');
   } catch { return null; }
+}
+
+export async function loadPartyAllies(slug: string): Promise<EnemyStatBlock[]> {
+  try {
+    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'party-allies.json'), 'utf-8');
+    return JSON.parse(raw) as EnemyStatBlock[];
+  } catch { return []; }
+}
+
+export async function savePartyAllies(slug: string, allies: EnemyStatBlock[]): Promise<void> {
+  await mkdir(path.join(CAMPAIGNS_DIR, slug), { recursive: true });
+  await writeFile(path.join(CAMPAIGNS_DIR, slug, 'party-allies.json'), JSON.stringify(allies, null, 2), 'utf-8');
 }
 
 export async function archiveChatLog(slug: string): Promise<void> {

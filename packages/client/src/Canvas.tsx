@@ -17,7 +17,7 @@ interface Props {
   connected: Player[];
   showBattleMap?: boolean;
   encounter?: EnemyStatBlock[] | null;
-  tokenUrl?: string;
+  tokenUrls?: Record<string, string>;
   tokenPositions?: Record<string, { gx: number; gy: number }>;
   movementRemaining?: number;
   deadCreatureIds?: Set<string>;
@@ -62,10 +62,10 @@ function drawToken(
   ctx.fillText(name.length > 10 ? name.slice(0, 9) + '…' : name, x, y + TOKEN_R + 12);
 }
 
-export default function Canvas({ player, characterId, connected, showBattleMap, encounter, tokenUrl, tokenPositions, movementRemaining = 0, deadCreatureIds, downPlayerNames, deadPlayerNames }: Props) {
-  const ref         = useRef<HTMLCanvasElement>(null);
-  const tokenImg    = useRef<HTMLImageElement | null>(null);
-  const [tokenReady, setTokenReady] = useState(false);
+export default function Canvas({ player, characterId, connected, showBattleMap, encounter, tokenUrls, tokenPositions, movementRemaining = 0, deadCreatureIds, downPlayerNames, deadPlayerNames }: Props) {
+  const ref            = useRef<HTMLCanvasElement>(null);
+  const tokenImgCache  = useRef<Record<string, HTMLImageElement>>({});
+  const [tokenCacheVer, setTokenCacheVer] = useState(0);
 
   // Refs to give window-level handlers (empty deps) access to latest prop values
   const playerRef           = useRef(player);
@@ -130,12 +130,17 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
   useEffect(() => on('vtt:combat:turn', ({ actorName }) => { isMyTurnRef.current = actorName === playerRef.current; }), []);
 
   useEffect(() => {
-    if (!tokenUrl) return;
-    const img = new Image();
-    img.onload = () => { tokenImg.current = img; setTokenReady(true); };
-    img.onerror = () => { tokenImg.current = null; };
-    img.src = tokenUrl;
-  }, [tokenUrl]);
+    if (!tokenUrls) return;
+    let pending = Object.keys(tokenUrls).length;
+    if (pending === 0) return;
+    Object.entries(tokenUrls).forEach(([name, url]) => {
+      if (tokenImgCache.current[name]) { pending--; return; }
+      const img = new Image();
+      img.onload = () => { tokenImgCache.current[name] = img; pending--; if (pending === 0) setTokenCacheVer(v => v + 1); };
+      img.onerror = () => { pending--; };
+      img.src = url;
+    });
+  }, [tokenUrls]);
 
   // Subscribe to targeting events (registered once)
   useEffect(() => {
@@ -270,6 +275,27 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
         // Targeting range highlights (drawn under tokens)
         if (targeting && playerPos) {
           const rangeCells = Math.floor(targeting.range / 5);
+          const extRangeCells = targeting.extendedRange ? Math.floor(targeting.extendedRange / 5) : 0;
+
+          // Extended range cells (dimmer) — drawn first so normal range overpaints them
+          if (extRangeCells > rangeCells) {
+            for (let dx = -extRangeCells; dx <= extRangeCells; dx++) {
+              for (let dy = -extRangeCells; dy <= extRangeCells; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                if (Math.abs(dx) <= rangeCells && Math.abs(dy) <= rangeCells) continue;
+                const tx = playerPos.gx + dx;
+                const ty = playerPos.gy + dy;
+                if (tx < 0 || ty < 0) continue;
+                ctx.fillStyle = 'rgba(255, 200, 50, 0.06)';
+                ctx.fillRect(tx * CELL, ty * CELL, CELL, CELL);
+                ctx.strokeStyle = 'rgba(255, 200, 50, 0.18)';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(tx * CELL + 1, ty * CELL + 1, CELL - 2, CELL - 2);
+              }
+            }
+          }
+
+          // Normal range cells (brighter)
           for (let dx = -rangeCells; dx <= rangeCells; dx++) {
             for (let dy = -rangeCells; dy <= rangeCells; dy++) {
               if (dx === 0 && dy === 0) continue;
@@ -292,7 +318,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           const isDragged = drag?.id === name;
           const x = isDragged ? drag!.x : pos.gx * CELL + CELL / 2;
           const y = isDragged ? drag!.y : pos.gy * CELL + CELL / 2;
-          const img = name === player ? tokenImg.current ?? undefined : undefined;
+          const img = tokenImgCache.current[name];
           const isDead = deadPlayerNames?.has(name) ?? false;
           const isDown = !isDead && (downPlayerNames?.has(name) ?? false);
 
@@ -343,14 +369,26 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           const y = isDragged ? drag!.y : pos.gy * CELL + CELL / 2;
 
           // Red targeting ring for enemies in weapon range
-          const inWeaponRange = targeting && playerPos &&
-            Math.max(Math.abs(pos.gx - playerPos.gx), Math.abs(pos.gy - playerPos.gy)) <= Math.floor(targeting.range / 5);
-          if (inWeaponRange) {
-            ctx.beginPath();
-            ctx.arc(x, y, TOKEN_R + 6, 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(255, 60, 60, 0.85)';
-            ctx.lineWidth = 2.5;
-            ctx.stroke();
+          if (targeting && playerPos) {
+            const dist = Math.max(Math.abs(pos.gx - playerPos.gx), Math.abs(pos.gy - playerPos.gy));
+            const inNormal = dist <= Math.floor(targeting.range / 5);
+            const inExtended = !inNormal && !!targeting.extendedRange && dist <= Math.floor(targeting.extendedRange / 5);
+            if (inNormal) {
+              ctx.beginPath();
+              ctx.arc(x, y, TOKEN_R + 6, 0, Math.PI * 2);
+              ctx.strokeStyle = 'rgba(255, 60, 60, 0.85)';
+              ctx.lineWidth = 2.5;
+              ctx.stroke();
+            } else if (inExtended) {
+              ctx.save();
+              ctx.setLineDash([4, 4]);
+              ctx.beginPath();
+              ctx.arc(x, y, TOKEN_R + 6, 0, Math.PI * 2);
+              ctx.strokeStyle = 'rgba(255, 60, 60, 0.45)';
+              ctx.lineWidth = 2;
+              ctx.stroke();
+              ctx.restore();
+            }
           }
 
           const isDead = deadCreatureIds?.has(enemy.id);
@@ -445,7 +483,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
         ctx.fillText(`• ${p}`, 20, 100 + i * 24);
       });
     }
-  }, [player, connected, showBattleMap, encounter, tokenReady, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick]);
+  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick]);
 
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!showBattleMap || !encounter || !tokenPositions) return;
@@ -461,11 +499,13 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
       const weapon = targetingRef.current;
       const playerPos = tokenPositions[player];
       if (playerPos) {
-        const rangeCells = Math.floor(weapon.range / 5);
+        const maxRangeCells = weapon.extendedRange
+          ? Math.floor(weapon.extendedRange / 5)
+          : Math.floor(weapon.range / 5);
         for (const enemy of encounter) {
           const epos = tokenPositions[enemy.id];
           if (!epos) continue;
-          if (Math.max(Math.abs(epos.gx - playerPos.gx), Math.abs(epos.gy - playerPos.gy)) > rangeCells) continue;
+          if (Math.max(Math.abs(epos.gx - playerPos.gx), Math.abs(epos.gy - playerPos.gy)) > maxRangeCells) continue;
           const ex = epos.gx * CELL + CELL / 2;
           const ey = epos.gy * CELL + CELL / 2;
           if (Math.hypot(mx - ex, my - ey) <= TOKEN_R) {
@@ -518,10 +558,12 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
       const my = e.clientY - rect.top;
       const playerPos = tokenPositions[player];
       if (playerPos) {
-        const rangeCells = Math.floor(targetingRef.current.range / 5);
+        const maxRangeCells = targetingRef.current.extendedRange
+          ? Math.floor(targetingRef.current.extendedRange / 5)
+          : Math.floor(targetingRef.current.range / 5);
         for (const enemy of encounter) {
           const epos = tokenPositions[enemy.id];
-          if (!epos || Math.max(Math.abs(epos.gx - playerPos.gx), Math.abs(epos.gy - playerPos.gy)) > rangeCells) continue;
+          if (!epos || Math.max(Math.abs(epos.gx - playerPos.gx), Math.abs(epos.gy - playerPos.gy)) > maxRangeCells) continue;
           const ex = epos.gx * CELL + CELL / 2;
           const ey = epos.gy * CELL + CELL / 2;
           if (Math.hypot(mx - ex, my - ey) <= TOKEN_R) {

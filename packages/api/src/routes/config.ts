@@ -17,12 +17,12 @@ configRouter.put('/', async (req, res) => {
 });
 
 configRouter.post('/test', async (req, res) => {
-  const { type } = req.body as { type: 'story' | 'image' | 'combat' };
+  const { type } = req.body as { type: 'thinking' | 'light' | 'image' };
   const config = await getConfig();
   try {
-    const ok = type === 'image'  ? await getImageProvider(config).validateKey()
-             : type === 'combat' ? await getCombatProvider(config).validateKey()
-             :                     await getStoryProvider(config).validateKey();
+    const ok = type === 'image'    ? await getImageProvider(config).validateKey()
+             : type === 'light'    ? await getCombatProvider(config).validateKey()
+             :                       await getStoryProvider(config).validateKey();
     res.json({ ok, message: ok ? 'Connection successful' : 'Invalid API key' });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Connection failed';

@@ -164,6 +164,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
 
     <button
       className={`combat-end-turn-btn${!isMyTurn ? ' combat-end-turn-btn--waiting' : ''}`}
+      onKeyDown={e => e.code === 'Space' && e.preventDefault()}
       onClick={() => isMyTurn && dispatch('vtt:combat:turn:end', {})}
     >
       {isMyTurn ? 'End Turn' : 'Waiting…'}

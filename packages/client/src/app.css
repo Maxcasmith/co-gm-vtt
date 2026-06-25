@@ -506,6 +506,43 @@
   margin: 4px 0 12px;
 }
 
+.settings-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.settings-toggle-text { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+.settings-toggle-label { font-size: 13px; color: var(--text); }
+.settings-toggle-desc  { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+
+.settings-toggle {
+  flex-shrink: 0;
+  position: relative;
+  width: 40px;
+  height: 22px;
+  border-radius: 11px;
+  border: none;
+  background: var(--border);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s;
+  margin-top: 2px;
+}
+.settings-toggle--on { background: var(--gold); }
+.settings-toggle-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s;
+}
+.settings-toggle--on .settings-toggle-thumb { transform: translateX(18px); }
+
 .settings-test-row {
   display: flex;
   align-items: center;
@@ -2190,6 +2227,13 @@ button.sheet-save-row {
   color: var(--gold);
 }
 
+.vdm-tag {
+  color: #5b9bd5;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .journal-msg--system .journal-msg-sender {
   color: var(--text-muted);
 }
@@ -2264,6 +2308,29 @@ button.sheet-save-row {
   transition: border-color 80ms;
 }
 .journal-input:focus { border-color: var(--gold); }
+
+/* ── Combat log overlay ──────────────────────────────────────────────────── */
+
+.combat-log-panel { font-family: monospace; }
+
+.combat-log-messages { background: #0a0a0a; }
+
+.combat-log-entry {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+  border-bottom: none;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.combat-log-time {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.combat-log-text { color: #c8c8c8; word-break: break-word; }
 
 /* ── Chat widget (floating quote) ────────────────────────────────────────── */
 
@@ -3078,6 +3145,8 @@ button.sheet-save-row {
 
 /* ── Admin panel ─────────────────────────────────────────────────────────── */
 
+.home-header-actions { display: flex; align-items: center; gap: 10px; }
+
 .admin-gate {
   min-height: 100vh;
   display: flex;
@@ -3086,6 +3155,13 @@ button.sheet-save-row {
   justify-content: center;
   gap: 16px;
   background: var(--bg);
+}
+
+.admin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 32px;
 }
 
 .admin-title {
@@ -3107,8 +3183,6 @@ button.sheet-save-row {
   background: var(--bg);
   color: var(--text);
 }
-
-.admin-panel .admin-title { margin-bottom: 32px; }
 
 .admin-table {
   width: 100%;
@@ -3465,4 +3539,48 @@ button.sheet-save-row {
   background: #22c55e;
   flex-shrink: 0;
   margin-top: 1px;
+}
+
+/* ── item acquisition notifications ── */
+@keyframes item-notif {
+  0%   { opacity: 0; transform: translateX(1.5rem); }
+  12%  { opacity: 1; transform: translateX(0); }
+  75%  { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(0); }
+}
+
+.item-notifications {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  z-index: 9500;
+  pointer-events: none;
+}
+
+.item-notification {
+  background: var(--surface);
+  border: 1px solid var(--gold);
+  color: var(--text);
+  padding: 0.6rem 1rem;
+  border-radius: 4px;
+  font-family: 'Crimson Pro', Georgia, serif;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  animation: item-notif 3.5s ease-out forwards;
+  min-width: 160px;
+}
+
+.item-notification-label {
+  font-size: 0.7rem;
+  color: var(--gold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.item-notification-name {
+  font-size: 1rem;
 }

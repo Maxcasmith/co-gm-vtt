@@ -1,4 +1,4 @@
-import type { AppConfig, StoryProvider } from 'shared';
+import type { AppConfig, StoryProvider, ModelTier, ApiKeys } from 'shared';
 import { claudeComplete, claudeStream, claudeValidateKey, claudeChat } from './claude.ts';
 import { openaiComplete, openaiStream, openaiValidateKey, openaiValidateImageKey, openaiChat } from './openai.ts';
 import { deepseekComplete, deepseekStream, deepseekValidateKey, deepseekChat } from './deepseek.ts';
@@ -12,8 +12,18 @@ export interface StoryProviderAdapter {
   validateKey: () => Promise<boolean>;
 }
 
-export function getStoryProvider(config: AppConfig): StoryProviderAdapter {
-  const { provider, model, apiKey } = config.story;
+const PROVIDER_KEY_MAP: Record<StoryProvider, keyof ApiKeys> = {
+  claude: 'anthropic',
+  openai: 'openai',
+  deepseek: 'deepseek',
+};
+
+export function getTierApiKey(apiKeys: AppConfig['apiKeys'], provider: StoryProvider): string {
+  return apiKeys[PROVIDER_KEY_MAP[provider]] ?? '';
+}
+
+function buildAdapter(tier: ModelTier, apiKey: string): StoryProviderAdapter {
+  const { provider, model } = tier;
   const adapters: Record<StoryProvider, StoryProviderAdapter> = {
     claude: {
       complete: p => claudeComplete(p, apiKey, model),
@@ -37,14 +47,18 @@ export function getStoryProvider(config: AppConfig): StoryProviderAdapter {
   return adapters[provider];
 }
 
-export function getImageProvider(config: AppConfig) {
-  return {
-    validateKey: () => openaiValidateImageKey(config.image.apiKey),
-  };
+export function getStoryProvider(config: AppConfig): StoryProviderAdapter {
+  const tier = config.tiers[config.tasks.story];
+  return buildAdapter(tier, getTierApiKey(config.apiKeys, tier.provider));
 }
 
-export function getCombatProvider(config: AppConfig) {
+export function getCombatProvider(config: AppConfig): StoryProviderAdapter {
+  const tier = config.tiers[config.tasks.combat];
+  return buildAdapter(tier, getTierApiKey(config.apiKeys, tier.provider));
+}
+
+export function getImageProvider(config: AppConfig) {
   return {
-    validateKey: () => openaiValidateKey(config.combat.apiKey),
+    validateKey: () => openaiValidateImageKey(config.apiKeys.openai),
   };
 }

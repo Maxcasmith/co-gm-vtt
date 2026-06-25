@@ -6,6 +6,7 @@ import EncounterLoadingOverlay from './EncounterLoadingOverlay.tsx';
 import CommandPalette from './CommandPalette.tsx';
 import CharacterSheetOverlay from './CharacterSheetOverlay.tsx';
 import JournalOverlay from './JournalOverlay.tsx';
+import CombatLogOverlay from './CombatLogOverlay.tsx';
 import ChatWidget from './ChatWidget.tsx';
 import QuickChat from './QuickChat.tsx';
 import ShortcutsOverlay from './ShortcutsOverlay.tsx';
@@ -35,10 +36,11 @@ function readSession(campaignId: string): Character | null {
 
 const DOUBLE_TAP_MS = 350;
 
-function GameCanvas({ character }: { character: Character }) {
+function GameCanvas({ character, onCharacterUpdate }: { character: Character; onCharacterUpdate: (c: Character) => void }) {
   const [connected, setConnected] = useState<Player[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [journalOpen, setJournalOpen] = useState(false);
+  const [combatLogOpen, setCombatLogOpen] = useState(false);
   const [quickChatOpen, setQuickChatOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [sessionActive, setSessionActive] = useState(false);
@@ -54,8 +56,13 @@ function GameCanvas({ character }: { character: Character }) {
   const [downPlayerNames, setDownPlayerNames] = useState<Set<string>>(new Set());
   const [deadPlayerNames, setDeadPlayerNames] = useState<Set<string>>(new Set());
   const [playerHpState, setPlayerHpState] = useState<{ current: number; max: number } | null>(null);
+  const [tokenUrls, setTokenUrls] = useState<Record<string, string>>({});
+  const [acquisitions, setAcquisitions] = useState<Character['inventory']>([]);
+  const [itemNotifications, setItemNotifications] = useState<{ id: string; name: string }[]>([]);
   const lastSpaceRef = useRef<number>(0);
   const socketRef = useRef<ReturnType<typeof io> | null>(null);
+  const onCharacterUpdateRef = useRef(onCharacterUpdate);
+  useEffect(() => { onCharacterUpdateRef.current = onCharacterUpdate; });
 
   useEffect(() => {
     fetch(`${API}/api/config`)
@@ -76,6 +83,18 @@ function GameCanvas({ character }: { character: Character }) {
     socketRef.current = socket;
     socket.emit('player:join', { name: character.name, campaignId: character.campaignId });
     socket.on('players:update', setConnected);
+    socket.on('players:characters', map => {
+      setTokenUrls(Object.fromEntries(
+        Object.entries(map).map(([name, charId]) => [name, `${API}/api/campaigns/${character.campaignId}/party/${charId}/token`])
+      ));
+    });
+    socket.on('character:inventory:add', items => {
+      const acquired = items as NonNullable<Character['inventory']>;
+      setAcquisitions(prev => [...(prev ?? []), ...acquired]);
+      const notifs = acquired.map(item => ({ id: crypto.randomUUID(), name: item.name }));
+      setItemNotifications(prev => [...prev, ...notifs]);
+      notifs.forEach(n => setTimeout(() => setItemNotifications(prev => prev.filter(x => x.id !== n.id)), 3500));
+    });
 
     // Bridge roll events from the UI → socket
     const unsubCheck = on('vtt:roll:check', payload => socket.emit('roll:check', payload));
@@ -132,7 +151,16 @@ function GameCanvas({ character }: { character: Character }) {
       dispatch('vtt:creature:update', data);
       if (data.effects.includes('Dead')) setDeadCreatureIds(prev => new Set([...prev, data.id]));
     });
-    socket.on('combat:victory', data => { dispatch('vtt:combat:victory', data); setVictory(data); });
+    socket.on('combat:victory', data => {
+      dispatch('vtt:combat:victory', data);
+      setVictory(data);
+      setTimeout(() => {
+        fetch(`${API}/api/campaigns/${character.campaignId}/party/${character.id}`)
+          .then(r => r.json())
+          .then((c: Character) => onCharacterUpdateRef.current(c))
+          .catch(() => {});
+      }, 500);
+    });
     socket.on('token:moved', (pos: TokenPosition) => {
       setTokenPositions(prev => ({ ...prev, [pos.tokenId]: { gx: pos.gx, gy: pos.gy } }));
     });
@@ -143,6 +171,7 @@ function GameCanvas({ character }: { character: Character }) {
     socket.on('session:recap', text => {
       dispatch('vtt:chat:message-received', { text, senderName: 'Virtual DM', timestamp: Date.now(), variant: 'recap' });
     });
+    socket.on('combat:log', data => dispatch('vtt:combat:log', data));
 
     const unsubTokenMove = on('vtt:token:move', pos => {
       socket.emit('token:move', pos);
@@ -162,10 +191,11 @@ function GameCanvas({ character }: { character: Character }) {
       unsubInitRoll();
       unsubRest();
     };
-  }, [character.name]);
+  }, [character.name]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => on('vtt:combat:state', ({ active }) => {
     setCombatActive(active);
+    if (active) { setJournalOpen(false); setQuickChatOpen(false); }
     if (!active) { setIsMyTurn(false); setVictory(null); setDefeated(false); setDeadCreatureIds(new Set()); setDownPlayerNames(new Set()); setDeadPlayerNames(new Set()); setPlayerHpState(null); }
   }), []);
   useEffect(() => on('vtt:combat:turn', ({ actorName }) => setIsMyTurn(actorName === character.name)), [character.name]);
@@ -243,6 +273,11 @@ function GameCanvas({ character }: { character: Character }) {
       onSelect: () => setJournalOpen(true),
     },
     {
+      label: 'Combat Log',
+      description: 'Technical combat output',
+      onSelect: () => setCombatLogOpen(true),
+    },
+    {
       label: 'Shortcuts',
       description: 'View keyboard shortcuts',
       onSelect: () => setShortcutsOpen(true),
@@ -268,7 +303,7 @@ function GameCanvas({ character }: { character: Character }) {
         connected={connected}
         showBattleMap={combatActive}
         encounter={combatActive ? encounter : null}
-        tokenUrl={`${API}/api/campaigns/${character.campaignId}/party/${character.id}/token`}
+        tokenUrls={tokenUrls}
         tokenPositions={tokenPositions}
         movementRemaining={movementRemaining}
         deadCreatureIds={deadCreatureIds}
@@ -279,8 +314,9 @@ function GameCanvas({ character }: { character: Character }) {
       <CombatDock character={character} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} />
       <EncounterLoadingOverlay />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} />
-      <CharacterSheetOverlay character={character} currentHp={playerHpState?.current} maxHp={playerHpState?.max} />
+      <CharacterSheetOverlay character={{ ...character, inventory: [...(character.inventory ?? []), ...(acquisitions ?? [])] }} currentHp={playerHpState?.current} maxHp={playerHpState?.max} />
       <JournalOverlay open={journalOpen} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} />
+      <CombatLogOverlay open={combatLogOpen} onClose={() => setCombatLogOpen(false)} />
       <ChatWidget />
       <QuickChat open={quickChatOpen} onClose={() => setQuickChatOpen(false)} senderName={character.name} sessionActive={sessionActive} disabled={combatActive && !isMyTurn} />
       {victory && <VictoryScreen data={victory} onDismiss={() => setVictory(null)} />}
@@ -288,6 +324,14 @@ function GameCanvas({ character }: { character: Character }) {
       <ShortcutsOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <RestModal character={character} />
       <BattleMapBackground campaignId={character.campaignId} />
+      <div className="item-notifications">
+        {itemNotifications.map(n => (
+          <div key={n.id} className="item-notification">
+            <span className="item-notification-label">Item received</span>
+            <span className="item-notification-name">{n.name}</span>
+          </div>
+        ))}
+      </div>
     </>
   );
 }
@@ -332,7 +376,15 @@ export default function GamePage({ campaignId }: { campaignId: string }) {
     }
   }
 
-  if (character) return <GameCanvas character={character} />;
+  if (character) return (
+    <GameCanvas
+      character={character}
+      onCharacterUpdate={c => {
+        sessionStorage.setItem(sessionKey(campaignId), JSON.stringify(c));
+        setCharacter(c);
+      }}
+    />
+  );
 
   return (
     <div className="auth-gate">

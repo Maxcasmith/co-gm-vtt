@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AppConfig, StoryProvider, ImageModel, CombatConfig, NarrationModel } from 'shared';
+import type { AppConfig, StoryProvider, ImageModel, NarrationModel } from 'shared';
 import { previewVoice } from './narration.ts';
 
 interface Props {
@@ -37,40 +37,36 @@ const STORY_PROVIDERS: { id: StoryProvider; label: string; models: { id: string;
 
 const IMAGE_MODELS: { id: ImageModel; label: string }[] = [
   { id: 'gpt-image-1', label: 'GPT Image 1' },
-  { id: 'dall-e-3',    label: 'DALL·E 3' },
-  { id: 'dall-e-2',    label: 'DALL·E 2' },
+  { id: 'dall-e-3', label: 'DALL·E 3' },
+  { id: 'dall-e-2', label: 'DALL·E 2' },
 ];
 
-const COMBAT_MODELS: { id: CombatConfig['model']; label: string }[] = [
-  { id: 'gpt-4o-mini',  label: 'GPT-4o Mini (Recommended)' },
-  { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
-  { id: 'gpt-4o',       label: 'GPT-4o' },
-];
 
 const NARRATION_MODELS: { id: NarrationModel; label: string }[] = [
-  { id: 'none',     label: 'None' },
-  { id: 'browser',  label: 'Browser Speech Synthesis (Free)' },
-  { id: 'tts-1',    label: 'OpenAI TTS — Standard (tts-1)' },
+  { id: 'none', label: 'None' },
+  { id: 'browser', label: 'Browser Speech Synthesis (Free)' },
+  { id: 'tts-1', label: 'OpenAI TTS — Standard (tts-1)' },
   { id: 'tts-1-hd', label: 'OpenAI TTS — HD (tts-1-hd)' },
 ];
 
 const OPENAI_VOICES = [
-  { id: 'alloy',   label: 'Alloy'   },
-  { id: 'ash',     label: 'Ash'     },
-  { id: 'coral',   label: 'Coral'   },
-  { id: 'echo',    label: 'Echo'    },
-  { id: 'fable',   label: 'Fable'   },
-  { id: 'nova',    label: 'Nova'    },
-  { id: 'onyx',    label: 'Onyx'    },
-  { id: 'sage',    label: 'Sage'    },
+  { id: 'alloy', label: 'Alloy' },
+  { id: 'ash', label: 'Ash' },
+  { id: 'coral', label: 'Coral' },
+  { id: 'echo', label: 'Echo' },
+  { id: 'fable', label: 'Fable' },
+  { id: 'nova', label: 'Nova' },
+  { id: 'onyx', label: 'Onyx' },
+  { id: 'sage', label: 'Sage' },
   { id: 'shimmer', label: 'Shimmer' },
 ];
 
 const DEFAULT_CONFIG: AppConfig = {
-  story:     { provider: 'claude', model: 'claude-sonnet-4-6', apiKey: '' },
-  image:     { model: 'gpt-image-1', apiKey: '' },
-  combat:    { model: 'gpt-4o-mini', apiKey: '' },
-  narration: { model: 'none', voice: 'onyx', apiKey: '' },
+  tiers: { light: { provider: 'openai', model: 'gpt-4o-mini' }, thinking: { provider: 'claude', model: 'claude-sonnet-4-6' } },
+  tasks: { story: 'thinking', combat: 'light' },
+  apiKeys: { openai: '', anthropic: '', deepseek: '' },
+  image: { model: 'gpt-image-1', generateMaps: true },
+  narration: { model: 'none', voice: 'onyx' },
 };
 
 const API = `http://${window.location.hostname}:3001`;
@@ -78,9 +74,9 @@ const API = `http://${window.location.hostname}:3001`;
 export default function SettingsSidebar({ open, onClose }: Props) {
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
   const [saved, setSaved] = useState<AppConfig>(DEFAULT_CONFIG);
-  const [storyStatus, setStoryStatus]       = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
-  const [imageStatus, setImageStatus]       = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
-  const [combatStatus, setCombatStatus]     = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [thinkingStatus, setThinkingStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [lightStatus, setLightStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [imageStatus, setImageStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [narrationPreviewing, setNarrationPreviewing] = useState(false);
   const discardRef = useRef<HTMLDialogElement>(null);
 
@@ -89,7 +85,7 @@ export default function SettingsSidebar({ open, onClose }: Props) {
     fetch(`${API}/api/config`)
       .then(r => r.json())
       .then((c: AppConfig) => { setConfig(c); setSaved(c); })
-      .catch(() => {});
+      .catch(() => { });
   }, [open]);
 
   const isDirty = JSON.stringify(config) !== JSON.stringify(saved);
@@ -115,8 +111,8 @@ export default function SettingsSidebar({ open, onClose }: Props) {
     onClose();
   }
 
-  async function testConnection(type: 'story' | 'image' | 'combat') {
-    const set = type === 'story' ? setStoryStatus : type === 'image' ? setImageStatus : setCombatStatus;
+  async function testConnection(type: 'thinking' | 'light' | 'image') {
+    const set = type === 'thinking' ? setThinkingStatus : type === 'light' ? setLightStatus : setImageStatus;
     set('testing');
     try {
       const r = await fetch(`${API}/api/config/test`, {
@@ -139,12 +135,13 @@ export default function SettingsSidebar({ open, onClose }: Props) {
     await previewVoice(
       config.narration.model as 'tts-1' | 'tts-1-hd',
       config.narration.voice,
-      config.narration.apiKey,
+      config.apiKeys.openai,
     );
     setNarrationPreviewing(false);
   }
 
-  const storyProvider = STORY_PROVIDERS.find(p => p.id === config.story.provider) ?? STORY_PROVIDERS[0]!;
+  const thinkingProvider = STORY_PROVIDERS.find(p => p.id === config.tiers.thinking.provider) ?? STORY_PROVIDERS[0]!;
+  const lightProvider = STORY_PROVIDERS.find(p => p.id === config.tiers.light.provider) ?? STORY_PROVIDERS[0]!;
 
   return (
     <>
@@ -156,18 +153,58 @@ export default function SettingsSidebar({ open, onClose }: Props) {
 
         <div className="settings-body">
           <section className="settings-section">
-            <h3 className="settings-section-title">Story Generation</h3>
+            <h3 className="settings-section-title">API Keys</h3>
+            <label className="modal-label">
+              ChatGPT (OpenAI)
+              <input
+                className="modal-input"
+                type="password"
+                value={config.apiKeys.openai}
+                onChange={e => setConfig(c => ({ ...c, apiKeys: { ...c.apiKeys, openai: e.target.value } }))}
+                placeholder="sk-..."
+              />
+            </label>
+            <label className="modal-label">
+              Anthropic
+              <input
+                className="modal-input"
+                type="password"
+                value={config.apiKeys.anthropic}
+                onChange={e => setConfig(c => ({ ...c, apiKeys: { ...c.apiKeys, anthropic: e.target.value } }))}
+                placeholder="sk-ant-..."
+              />
+            </label>
+            <label className="modal-label">
+              DeepSeek
+              <input
+                className="modal-input"
+                type="password"
+                value={config.apiKeys.deepseek}
+                onChange={e => setConfig(c => ({ ...c, apiKeys: { ...c.apiKeys, deepseek: e.target.value } }))}
+                placeholder="sk-..."
+              />
+            </label>
+          </section>
+
+          <div className="settings-divider" />
+
+          <section className="settings-section">
+            <h3 className="settings-section-title">Thinking</h3>
+            <p className="settings-section-note">Used for story generation, DM responses, and world building — tasks that need reasoning and creativity.</p>
             <label className="modal-label">
               Provider
               <select
                 className="modal-select"
-                value={config.story.provider}
+                value={config.tiers.thinking.provider}
                 onChange={e => setConfig(c => ({
                   ...c,
-                  story: {
-                    ...c.story,
-                    provider: e.target.value as StoryProvider,
-                    model: STORY_PROVIDERS.find(p => p.id === e.target.value)?.models[0]?.id ?? '',
+                  tiers: {
+                    ...c.tiers,
+                    thinking: {
+                      ...c.tiers.thinking,
+                      provider: e.target.value as StoryProvider,
+                      model: STORY_PROVIDERS.find(p => p.id === e.target.value)?.models[0]?.id ?? '',
+                    },
                   },
                 }))}
               >
@@ -178,29 +215,66 @@ export default function SettingsSidebar({ open, onClose }: Props) {
               Model
               <select
                 className="modal-select"
-                value={config.story.model}
-                onChange={e => setConfig(c => ({ ...c, story: { ...c.story, model: e.target.value } }))}
+                value={config.tiers.thinking.model}
+                onChange={e => setConfig(c => ({ ...c, tiers: { ...c.tiers, thinking: { ...c.tiers.thinking, model: e.target.value } } }))}
               >
-                {storyProvider.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                {thinkingProvider.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+            </label>
+            <div className="settings-test-row">
+              <button className="btn-test" onClick={() => testConnection('thinking')} disabled={thinkingStatus === 'testing'}>
+                {thinkingStatus === 'testing' ? 'Testing…' : 'Test Connection'}
+              </button>
+              {thinkingStatus !== 'idle' && thinkingStatus !== 'testing' && (
+                <span className={`status-badge status-badge--${thinkingStatus}`}>
+                  {thinkingStatus === 'ok' ? '● Connected' : '● Failed'}
+                </span>
+              )}
+            </div>
+          </section>
+
+          <div className="settings-divider" />
+
+          <section className="settings-section">
+            <h3 className="settings-section-title">Light</h3>
+            <p className="settings-section-note">Used for combat AI, item structuring, and other fast structured tasks. A cheaper model works well here.</p>
+            <label className="modal-label">
+              Provider
+              <select
+                className="modal-select"
+                value={config.tiers.light.provider}
+                onChange={e => setConfig(c => ({
+                  ...c,
+                  tiers: {
+                    ...c.tiers,
+                    light: {
+                      ...c.tiers.light,
+                      provider: e.target.value as StoryProvider,
+                      model: STORY_PROVIDERS.find(p => p.id === e.target.value)?.models[0]?.id ?? '',
+                    },
+                  },
+                }))}
+              >
+                {STORY_PROVIDERS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
               </select>
             </label>
             <label className="modal-label">
-              API Key
-              <input
-                className="modal-input"
-                type="password"
-                value={config.story.apiKey}
-                onChange={e => setConfig(c => ({ ...c, story: { ...c.story, apiKey: e.target.value } }))}
-                placeholder="sk-..."
-              />
+              Model
+              <select
+                className="modal-select"
+                value={config.tiers.light.model}
+                onChange={e => setConfig(c => ({ ...c, tiers: { ...c.tiers, light: { ...c.tiers.light, model: e.target.value } } }))}
+              >
+                {lightProvider.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
             </label>
             <div className="settings-test-row">
-              <button className="btn-test" onClick={() => testConnection('story')} disabled={storyStatus === 'testing'}>
-                {storyStatus === 'testing' ? 'Testing…' : 'Test Connection'}
+              <button className="btn-test" onClick={() => testConnection('light')} disabled={lightStatus === 'testing'}>
+                {lightStatus === 'testing' ? 'Testing…' : 'Test Connection'}
               </button>
-              {storyStatus !== 'idle' && storyStatus !== 'testing' && (
-                <span className={`status-badge status-badge--${storyStatus}`}>
-                  {storyStatus === 'ok' ? '● Connected' : '● Failed'}
+              {lightStatus !== 'idle' && lightStatus !== 'testing' && (
+                <span className={`status-badge status-badge--${lightStatus}`}>
+                  {lightStatus === 'ok' ? '● Connected' : '● Failed'}
                 </span>
               )}
             </div>
@@ -210,6 +284,23 @@ export default function SettingsSidebar({ open, onClose }: Props) {
 
           <section className="settings-section">
             <h3 className="settings-section-title">Image Generation</h3>
+            <div className="settings-toggle-row">
+              <div className="settings-toggle-text">
+                <span className="settings-toggle-label">Generate on the fly battle maps</span>
+                <span className="settings-toggle-desc">
+                  {config.image.generateMaps
+                    ? 'A new battle map is generated using AI when combat starts, based on the current scene. Will increase combat load times'
+                    : 'A random pre-generated map from this campaign is used instead. Falls back to a blank grid if none exist. Maps can be tagged in future to better match scenes.'}
+                </span>
+              </div>
+              <button
+                className={`settings-toggle ${config.image.generateMaps ? 'settings-toggle--on' : ''}`}
+                onClick={() => setConfig(c => ({ ...c, image: { ...c.image, generateMaps: !c.image.generateMaps } }))}
+                aria-pressed={config.image.generateMaps}
+              >
+                <span className="settings-toggle-thumb" />
+              </button>
+            </div>
             <label className="modal-label">
               Model
               <select
@@ -219,16 +310,6 @@ export default function SettingsSidebar({ open, onClose }: Props) {
               >
                 {IMAGE_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
               </select>
-            </label>
-            <label className="modal-label">
-              OpenAI API Key
-              <input
-                className="modal-input"
-                type="password"
-                value={config.image.apiKey}
-                onChange={e => setConfig(c => ({ ...c, image: { ...c.image, apiKey: e.target.value } }))}
-                placeholder="sk-..."
-              />
             </label>
             <div className="settings-test-row">
               <button className="btn-test" onClick={() => testConnection('image')} disabled={imageStatus === 'testing'}>
@@ -245,39 +326,37 @@ export default function SettingsSidebar({ open, onClose }: Props) {
           <div className="settings-divider" />
 
           <section className="settings-section">
-            <h3 className="settings-section-title">Combat AI</h3>
-            <p className="settings-section-note">We recommend a lower-cost model here — encounter generation is a simple structured task that doesn't need frontier reasoning.</p>
+            <h3 className="settings-section-title">Story Generation</h3>
             <label className="modal-label">
-              Model
+              Model tier
               <select
                 className="modal-select"
-                value={config.combat.model}
-                onChange={e => setConfig(c => ({ ...c, combat: { ...c.combat, model: e.target.value } }))}
+                value={config.tasks.story}
+                onChange={e => setConfig(c => ({ ...c, tasks: { ...c.tasks, story: e.target.value as 'light' | 'thinking' } }))}
               >
-                {COMBAT_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                <option value="thinking">Thinking</option>
+                <option value="light">Light</option>
               </select>
             </label>
-            <label className="modal-label">
-              OpenAI API Key
-              <input
-                className="modal-input"
-                type="password"
-                value={config.combat.apiKey}
-                onChange={e => setConfig(c => ({ ...c, combat: { ...c.combat, apiKey: e.target.value } }))}
-                placeholder="sk-…"
-              />
-            </label>
-            <div className="settings-test-row">
-              <button className="btn-test" onClick={() => testConnection('combat')} disabled={combatStatus === 'testing'}>
-                {combatStatus === 'testing' ? 'Testing…' : 'Test Connection'}
-              </button>
-              {combatStatus !== 'idle' && combatStatus !== 'testing' && (
-                <span className={`status-badge status-badge--${combatStatus}`}>
-                  {combatStatus === 'ok' ? '● Connected' : '● Failed'}
-                </span>
-              )}
-            </div>
           </section>
+
+          <div className="settings-divider" />
+
+          <section className="settings-section">
+            <h3 className="settings-section-title">Combat AI</h3>
+            <label className="modal-label">
+              Model tier
+              <select
+                className="modal-select"
+                value={config.tasks.combat}
+                onChange={e => setConfig(c => ({ ...c, tasks: { ...c.tasks, combat: e.target.value as 'light' | 'thinking' } }))}
+              >
+                <option value="light">Light</option>
+                <option value="thinking">Thinking</option>
+              </select>
+            </label>
+          </section>
+
           <div className="settings-divider" />
 
           <section className="settings-section">
@@ -307,21 +386,11 @@ export default function SettingsSidebar({ open, onClose }: Props) {
                     <button
                       className="btn-test"
                       onClick={() => void handleNarrationPreview()}
-                      disabled={narrationPreviewing || !config.narration.apiKey}
+                      disabled={narrationPreviewing || !config.apiKeys.openai}
                     >
                       {narrationPreviewing ? '▶ Playing…' : '▶ Preview'}
                     </button>
                   </div>
-                </label>
-                <label className="modal-label">
-                  OpenAI API Key
-                  <input
-                    className="modal-input"
-                    type="password"
-                    value={config.narration.apiKey}
-                    onChange={e => setConfig(c => ({ ...c, narration: { ...c.narration, apiKey: e.target.value } }))}
-                    placeholder="sk-…"
-                  />
                 </label>
               </>
             )}
@@ -342,6 +411,7 @@ export default function SettingsSidebar({ open, onClose }: Props) {
           <button className="btn-primary" onClick={handleDiscard}>Discard</button>
         </div>
       </dialog>
+
     </>
   );
 }

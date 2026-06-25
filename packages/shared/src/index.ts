@@ -38,6 +38,7 @@ export interface TurnOrderEntry {
   name: string;
   initiative: number;
   isPlayer: boolean;
+  teamId: string;
 }
 
 export interface TokenPosition {
@@ -93,6 +94,9 @@ export interface ServerToClientEvents {
   'combat:death:save': (data: { characterName: string; roll: number; isNatural20: boolean; isNatural1: boolean; success: boolean; successes: number; failures: number; stable: boolean; dead: boolean }) => void;
   'combat:defeat': () => void;
   'combat:player:dead': (data: { characterId: string; characterName: string }) => void;
+  'combat:log': (data: { text: string; timestamp: number }) => void;
+  'players:characters': (map: Record<string, string>) => void;
+  'character:inventory:add': (items: unknown[]) => void;
 }
 
 export interface ClientToServerEvents {
@@ -111,20 +115,14 @@ export interface ClientToServerEvents {
 export type StoryProvider = 'claude' | 'openai' | 'deepseek';
 export type ImageModel = 'gpt-image-1' | 'dall-e-3' | 'dall-e-2';
 
-export interface StoryConfig {
+export interface ModelTier {
   provider: StoryProvider;
   model: string;
-  apiKey: string;
 }
 
 export interface ImageConfig {
   model: ImageModel;
-  apiKey: string;
-}
-
-export interface CombatConfig {
-  model: string;
-  apiKey: string;
+  generateMaps: boolean;
 }
 
 export type NarrationModel = 'none' | 'browser' | 'tts-1' | 'tts-1-hd';
@@ -132,13 +130,19 @@ export type NarrationModel = 'none' | 'browser' | 'tts-1' | 'tts-1-hd';
 export interface NarrationConfig {
   model: NarrationModel;
   voice: string;
-  apiKey: string;
+}
+
+export interface ApiKeys {
+  openai: string;
+  anthropic: string;
+  deepseek: string;
 }
 
 export interface AppConfig {
-  story: StoryConfig;
+  tiers: { light: ModelTier; thinking: ModelTier };
+  tasks: { story: 'light' | 'thinking'; combat: 'light' | 'thinking' };
+  apiKeys: ApiKeys;
   image: ImageConfig;
-  combat: CombatConfig;
   narration: NarrationConfig;
 }
 
@@ -196,15 +200,21 @@ export class Weapon extends Item {
   damageType: string;
   attackBonus: number;
   range: number;
+  extendedRange?: number;
   properties: string[];
+  isFinesse: boolean;
+  mastery?: string;
 
-  constructor(props: { id: string; name: string; description: string; quantity: number; damage: string; damageType: string; attackBonus: number; range: number; properties: string[] }) {
+  constructor(props: { id: string; name: string; description: string; quantity: number; damage: string; damageType: string; attackBonus: number; range: number; extendedRange?: number; properties: string[]; isFinesse?: boolean; mastery?: string }) {
     super({ ...props, type: 'weapon' as const });
     this.damage = props.damage;
     this.damageType = props.damageType;
     this.attackBonus = props.attackBonus;
     this.range = props.range;
+    this.extendedRange = props.extendedRange;
     this.properties = props.properties;
+    this.isFinesse = props.isFinesse ?? false;
+    this.mastery = props.mastery;
   }
 }
 

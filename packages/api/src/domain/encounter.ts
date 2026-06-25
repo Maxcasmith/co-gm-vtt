@@ -50,6 +50,7 @@ export class Participant {
   name: string;
   initiative: number;
   isPlayer: boolean;
+  teamId: string;
   creature?: Creature;
 
   // Player-only HP tracking
@@ -67,6 +68,7 @@ export class Participant {
     name: string;
     initiative: number;
     isPlayer: boolean;
+    teamId?: string;
     creature?: Creature;
     currentHp?: number;
     maxHp?: number;
@@ -75,6 +77,7 @@ export class Participant {
     this.name = props.name;
     this.initiative = props.initiative;
     this.isPlayer = props.isPlayer;
+    this.teamId = props.teamId ?? (props.isPlayer ? 'players' : 'enemies');
     if (props.creature !== undefined) this.creature = props.creature;
     this.currentHp = props.currentHp ?? (props.creature?.currentHp ?? 0);
     this.maxHp = props.maxHp ?? (props.creature?.hp ?? 0);
@@ -112,6 +115,7 @@ export class Participant {
       name: this.name,
       initiative: this.initiative,
       isPlayer: this.isPlayer,
+      teamId: this.teamId,
     };
   }
 }
@@ -196,6 +200,7 @@ export class Encounter {
   addToTurnOrder(p: Participant): void {
     // Remember the current actor before mutating the order — sorting can shift indices
     const currentId = this.currentRound ? this.currentActor?.id : undefined;
+    const currentName = this.currentRound ? this.currentActor?.name : undefined;
 
     const idx = this.turnOrder.findIndex(e => e.id === p.id);
     if (idx !== -1) {
@@ -208,7 +213,12 @@ export class Encounter {
     // Re-anchor the turn index to the same actor after the sort
     if (currentId !== undefined) {
       const newIdx = this.turnOrder.findIndex(e => e.id === currentId);
-      if (newIdx !== -1) this._turnIndex = newIdx;
+      if (newIdx !== -1) {
+        if (newIdx !== this._turnIndex) console.log(`[turn] re-anchor: ${currentName} ${this._turnIndex}→${newIdx} after adding ${p.name} order=[${this.turnOrder.map(e => e.name).join(',')}]`);
+        this._turnIndex = newIdx;
+      } else {
+        console.log(`[turn] re-anchor MISS: could not find ${currentName} after adding ${p.name}`);
+      }
     }
   }
 
@@ -279,6 +289,11 @@ export class Encounter {
   allPlayersDead(): boolean {
     const playerTeam = this.teams.find(t => t.name === 'Players');
     return (playerTeam?.participants.length ?? 0) > 0 && (playerTeam?.allDead() ?? false);
+  }
+
+  allPlayersDown(): boolean {
+    const humanPlayers = this.teams.find(t => t.name === 'Players')?.participants.filter(p => p.isPlayer) ?? [];
+    return humanPlayers.length > 0 && humanPlayers.every(p => p.isDown());
   }
 
   // ── Serialization ───────────────────────────────────────────────────────────

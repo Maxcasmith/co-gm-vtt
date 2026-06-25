@@ -10,9 +10,10 @@ export default function ShopTab() {
     if (!item || c.gold < item.cost) return;
 
     const existing = c.inventory.find(i => i.id === item.id);
+    const { cost: _cost, ...itemData } = item;
     const next: InventoryItem[] = existing
       ? c.inventory.map(i => i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i)
-      : [...c.inventory, { id: item.id, name: item.name, quantity: 1, description: item.description }];
+      : [...c.inventory, { ...itemData, quantity: 1 } as InventoryItem];
 
     c.set('inventory', next);
     c.set('gold', c.gold - item.cost);

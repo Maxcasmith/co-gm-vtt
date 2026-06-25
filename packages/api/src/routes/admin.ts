@@ -27,6 +27,17 @@ adminRouter.get('/campaigns', async (req, res) => {
   res.json(await listCampaigns());
 });
 
+adminRouter.delete('/campaigns/:id', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const campaignDir = path.join(CAMPAIGNS_DIR, req.params['id']!);
+  try {
+    if (existsSync(campaignDir)) await rm(campaignDir, { recursive: true });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
 adminRouter.delete('/campaigns/:id/chat', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const chatPath = path.join(CAMPAIGNS_DIR, req.params['id']!, 'chat.json');

@@ -6,9 +6,9 @@ import {
   getConfig, writeCampaignFile, listCampaigns,
   getWorldMeta, writeWorldMeta,
   writeCharacter, getCharacter, listCharacters, findCharacterByPassword, writeCharacterImage,
-  readWorldState, writeWorldState, readCampaignFile,
+  readWorldState, writeWorldState, readCampaignFile, writeEntity,
 } from '../storage.ts';
-import { getStoryProvider } from '../providers/index.ts';
+import { getStoryProvider, getTierApiKey } from '../providers/index.ts';
 import { buildConceptsPrompt, buildWorldGenPrompt } from '../prompts.ts';
 import { processSession } from '../session-processor/index.ts';
 import { processPortrait } from '../utils/image.ts';
@@ -185,36 +185,66 @@ campaignsRouter.post('/:id/party/portrait', async (req, res) => {
 // ── vault writer ──────────────────────────────────────────────────────────────
 
 interface WorldData {
-  world?: { name?: string; overview?: string; history?: string; currentState?: string };
+  world?: { name?: string; overview?: string; history?: string; currentState?: string; hooks?: string[]; countdown?: string };
   geography?: { regions?: unknown[]; startingLocation?: { name?: string; description?: string } };
   factions?: Array<{ name?: string; description?: string; goals?: string; methods?: string }>;
-  npcs?: Array<{ name?: string; role?: string; race?: string; occupation?: string; personality?: string; motivation?: string; secret?: string; factionAffiliation?: string | null }>;
+  npcs?: Array<{ name?: string; role?: string; race?: string; occupation?: string; personality?: string; motivation?: string; secret?: string; factionAffiliation?: string | null; crossFactionTie?: string | null }>;
+  scenario?: { objective?: string; climax?: string; resolution?: string };
 }
 
 async function writeVault(slug: string, data: Record<string, unknown>, tags: string[], concept: WorldConcept): Promise<void> {
   const w = data as WorldData;
 
-  const worldMd = `# ${w.world?.name ?? 'World'}\n\n## Overview\n${w.world?.overview ?? ''}\n\n## History\n${w.world?.history ?? ''}\n\n## Current State\n${w.world?.currentState ?? ''}\n`;
+  const hooksSection = (w.world?.hooks?.length)
+    ? `\n## Hooks\n${w.world.hooks.map(h => `- ${h}`).join('\n')}\n`
+    : '';
+  const countdownSection = w.world?.countdown
+    ? `\n## Countdown\n${w.world.countdown}\n`
+    : '';
+
+  const worldMd = `# ${w.world?.name ?? 'World'}\n\n## Overview\n${w.world?.overview ?? ''}\n\n## History\n${w.world?.history ?? ''}\n\n## Current State\n${w.world?.currentState ?? ''}${hooksSection}${countdownSection}`;
 
   const factionsMd = `# Factions\n\n${(w.factions ?? []).map(f =>
     `## ${f.name ?? 'Unknown'}\n${f.description ?? ''}\n\n**Goals:** ${f.goals ?? ''}\n**Methods:** ${f.methods ?? ''}\n`
   ).join('\n')}`;
 
-  const npcsMd = `# NPCs\n\n${(w.npcs ?? []).map(n =>
-    `## ${n.name ?? 'Unknown'}\n**Role:** ${n.role ?? ''} | **Race:** ${n.race ?? ''} | **Occupation:** ${n.occupation ?? ''}\n\n**Personality:** ${n.personality ?? ''}\n**Motivation:** ${n.motivation ?? ''}\n**Secret:** ${n.secret ?? ''}\n**Faction:** ${n.factionAffiliation ?? 'Independent'}\n`
-  ).join('\n')}`;
+  const toSlug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+  const npcFiles = (w.npcs ?? []).map(n => {
+    const name = n.name ?? 'Unknown';
+    const crossTie = n.crossFactionTie ? `\n**Cross-faction tie:** ${n.crossFactionTie}` : '';
+    const content = `# ${name}\n\n**Role:** ${n.role ?? ''} | **Race:** ${n.race ?? ''} | **Occupation:** ${n.occupation ?? ''}\n\n**Personality:** ${n.personality ?? ''}\n**Motivation:** ${n.motivation ?? ''}\n**Secret:** ${n.secret ?? ''}\n**Faction:** ${n.factionAffiliation ?? 'Independent'}${crossTie}\n\n## Observed\n`;
+    return writeEntity(slug, 'npc', toSlug(name), content);
+  });
 
   const geo = w.geography;
-  const locationsMd = `# Locations\n\n## Starting Location\n**${geo?.startingLocation?.name ?? ''}**\n${geo?.startingLocation?.description ?? ''}\n\n## Regions\n${(geo?.regions ?? []).map((r: unknown) => {
+  const allLocations: Array<{ name: string; description: string }> = [];
+  if (geo?.startingLocation?.name) allLocations.push({ name: geo.startingLocation.name, description: geo.startingLocation.description ?? '' });
+  for (const r of geo?.regions ?? []) {
     const region = r as { name?: string; description?: string; keyLocations?: Array<{ name?: string; description?: string }> };
-    return `### ${region.name ?? ''}\n${region.description ?? ''}\n\n${(region.keyLocations ?? []).map(l => `- **${l.name ?? ''}**: ${l.description ?? ''}`).join('\n')}\n`;
-  }).join('\n')}`;
+    if (region.name) allLocations.push({ name: region.name, description: region.description ?? '' });
+    for (const l of region.keyLocations ?? []) {
+      if (l.name) allLocations.push({ name: l.name, description: l.description ?? '' });
+    }
+  }
+  const locationFiles = allLocations.map(({ name, description }) => {
+    const content = `# ${name}\n\n${description}\n\n## Scene Notes\n`;
+    return writeEntity(slug, 'location', toSlug(name), content);
+  });
+
+  const scenarioFiles: Promise<void>[] = [];
+  if (w.scenario) {
+    const s = w.scenario;
+    const scenarioMd = `# Scenario\n\n## Objective\n${s.objective ?? ''}\n\n## Climax\n${s.climax ?? ''}\n\n## Resolution\n${s.resolution ?? ''}\n`;
+    scenarioFiles.push(writeCampaignFile(slug, 'scenario.md', scenarioMd));
+  }
 
   await Promise.all([
     writeCampaignFile(slug, 'world.md', worldMd),
     writeCampaignFile(slug, 'factions.md', factionsMd),
-    writeCampaignFile(slug, 'npcs.md', npcsMd),
-    writeCampaignFile(slug, 'locations.md', locationsMd),
+    ...npcFiles,
+    ...locationFiles,
+    ...scenarioFiles,
     writeCampaignFile(slug, 'meta.json', JSON.stringify({ tags, concept, createdAt: new Date().toISOString() }, null, 2)),
   ]);
 }
@@ -272,7 +302,8 @@ campaignsRouter.post('/:id/rest/long', async (req, res) => {
     let state = await readWorldState(id);
 
     const config = await getConfig();
-    const { model, apiKey } = config.combat;
+    const { model, provider } = config.tiers[config.tasks.combat];
+    const apiKey = getTierApiKey(config.apiKeys, provider);
 
     if (!state && apiKey) {
       const [worldMd, factionsMd] = await Promise.all([
