@@ -12,9 +12,10 @@ const CONFIG_PATH = path.join(STORAGE_DIR, 'config.json');
 export const CAMPAIGNS_DIR = path.join(STORAGE_DIR, 'campaigns');
 
 const DEFAULT_CONFIG: AppConfig = {
-  story:  { provider: 'claude', model: 'claude-sonnet-4-6', apiKey: '' },
-  image:  { model: 'gpt-image-1', apiKey: '' },
-  combat: { model: 'gpt-4o-mini', apiKey: '' },
+  story:     { provider: 'claude', model: 'claude-sonnet-4-6', apiKey: '' },
+  image:     { model: 'gpt-image-1', apiKey: '' },
+  combat:    { model: 'gpt-4o-mini', apiKey: '' },
+  narration: { model: 'none', voice: 'onyx', apiKey: '' },
 };
 
 export async function getConfig(): Promise<AppConfig> {

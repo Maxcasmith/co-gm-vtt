@@ -16,6 +16,7 @@ import TurnOrderBar from './TurnOrderBar.tsx';
 import VictoryScreen from './VictoryScreen.tsx';
 import DefeatScreen from './DefeatScreen.tsx';
 import { dispatch, on } from './events.ts';
+import { initNarration, narrate } from './narration.ts';
 import './app.css';
 
 const API = `http://${window.location.hostname}:3001`;
@@ -55,6 +56,20 @@ function GameCanvas({ character }: { character: Character }) {
   const [playerHpState, setPlayerHpState] = useState<{ current: number; max: number } | null>(null);
   const lastSpaceRef = useRef<number>(0);
   const socketRef = useRef<ReturnType<typeof io> | null>(null);
+
+  useEffect(() => {
+    fetch(`${API}/api/config`)
+      .then(r => r.json())
+      .then((c: import('shared').AppConfig) => {
+        const { model, voice, apiKey } = c.narration;
+        initNarration(model, voice, apiKey);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => on('vtt:chat:message-received', ({ text, senderName }) => {
+    if (senderName === 'Virtual DM') narrate(text);
+  }), []);
 
   useEffect(() => {
     const socket = io(API);

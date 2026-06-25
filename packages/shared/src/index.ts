@@ -127,10 +127,19 @@ export interface CombatConfig {
   apiKey: string;
 }
 
+export type NarrationModel = 'none' | 'browser' | 'tts-1' | 'tts-1-hd';
+
+export interface NarrationConfig {
+  model: NarrationModel;
+  voice: string;
+  apiKey: string;
+}
+
 export interface AppConfig {
   story: StoryConfig;
   image: ImageConfig;
   combat: CombatConfig;
+  narration: NarrationConfig;
 }
 
 export interface WorldConcept {

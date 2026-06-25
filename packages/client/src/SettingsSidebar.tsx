@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AppConfig, StoryProvider, ImageModel, CombatConfig } from 'shared';
+import type { AppConfig, StoryProvider, ImageModel, CombatConfig, NarrationModel } from 'shared';
+import { previewVoice } from './narration.ts';
 
 interface Props {
   open: boolean;
@@ -46,10 +47,30 @@ const COMBAT_MODELS: { id: CombatConfig['model']; label: string }[] = [
   { id: 'gpt-4o',       label: 'GPT-4o' },
 ];
 
+const NARRATION_MODELS: { id: NarrationModel; label: string }[] = [
+  { id: 'none',     label: 'None' },
+  { id: 'browser',  label: 'Browser Speech Synthesis (Free)' },
+  { id: 'tts-1',    label: 'OpenAI TTS — Standard (tts-1)' },
+  { id: 'tts-1-hd', label: 'OpenAI TTS — HD (tts-1-hd)' },
+];
+
+const OPENAI_VOICES = [
+  { id: 'alloy',   label: 'Alloy'   },
+  { id: 'ash',     label: 'Ash'     },
+  { id: 'coral',   label: 'Coral'   },
+  { id: 'echo',    label: 'Echo'    },
+  { id: 'fable',   label: 'Fable'   },
+  { id: 'nova',    label: 'Nova'    },
+  { id: 'onyx',    label: 'Onyx'    },
+  { id: 'sage',    label: 'Sage'    },
+  { id: 'shimmer', label: 'Shimmer' },
+];
+
 const DEFAULT_CONFIG: AppConfig = {
-  story:  { provider: 'claude', model: 'claude-sonnet-4-6', apiKey: '' },
-  image:  { model: 'gpt-image-1', apiKey: '' },
-  combat: { model: 'gpt-4o-mini', apiKey: '' },
+  story:     { provider: 'claude', model: 'claude-sonnet-4-6', apiKey: '' },
+  image:     { model: 'gpt-image-1', apiKey: '' },
+  combat:    { model: 'gpt-4o-mini', apiKey: '' },
+  narration: { model: 'none', voice: 'onyx', apiKey: '' },
 };
 
 const API = `http://${window.location.hostname}:3001`;
@@ -57,9 +78,10 @@ const API = `http://${window.location.hostname}:3001`;
 export default function SettingsSidebar({ open, onClose }: Props) {
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
   const [saved, setSaved] = useState<AppConfig>(DEFAULT_CONFIG);
-  const [storyStatus, setStoryStatus]   = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
-  const [imageStatus, setImageStatus]   = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
-  const [combatStatus, setCombatStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [storyStatus, setStoryStatus]       = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [imageStatus, setImageStatus]       = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [combatStatus, setCombatStatus]     = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [narrationPreviewing, setNarrationPreviewing] = useState(false);
   const discardRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -107,6 +129,19 @@ export default function SettingsSidebar({ open, onClose }: Props) {
     } catch {
       set('fail');
     }
+  }
+
+  const isOpenAIVoice = config.narration.model === 'tts-1' || config.narration.model === 'tts-1-hd';
+
+  async function handleNarrationPreview() {
+    if (!isOpenAIVoice || narrationPreviewing) return;
+    setNarrationPreviewing(true);
+    await previewVoice(
+      config.narration.model as 'tts-1' | 'tts-1-hd',
+      config.narration.voice,
+      config.narration.apiKey,
+    );
+    setNarrationPreviewing(false);
   }
 
   const storyProvider = STORY_PROVIDERS.find(p => p.id === config.story.provider) ?? STORY_PROVIDERS[0]!;
@@ -242,6 +277,54 @@ export default function SettingsSidebar({ open, onClose }: Props) {
                 </span>
               )}
             </div>
+          </section>
+          <div className="settings-divider" />
+
+          <section className="settings-section">
+            <h3 className="settings-section-title">Narration</h3>
+            <label className="modal-label">
+              Voice Provider
+              <select
+                className="modal-select"
+                value={config.narration.model}
+                onChange={e => setConfig(c => ({ ...c, narration: { ...c.narration, model: e.target.value as NarrationModel } }))}
+              >
+                {NARRATION_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+            </label>
+            {isOpenAIVoice && (
+              <>
+                <label className="modal-label">
+                  Voice
+                  <div className="settings-voice-row">
+                    <select
+                      className="modal-select"
+                      value={config.narration.voice}
+                      onChange={e => setConfig(c => ({ ...c, narration: { ...c.narration, voice: e.target.value } }))}
+                    >
+                      {OPENAI_VOICES.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
+                    </select>
+                    <button
+                      className="btn-test"
+                      onClick={() => void handleNarrationPreview()}
+                      disabled={narrationPreviewing || !config.narration.apiKey}
+                    >
+                      {narrationPreviewing ? '▶ Playing…' : '▶ Preview'}
+                    </button>
+                  </div>
+                </label>
+                <label className="modal-label">
+                  OpenAI API Key
+                  <input
+                    className="modal-input"
+                    type="password"
+                    value={config.narration.apiKey}
+                    onChange={e => setConfig(c => ({ ...c, narration: { ...c.narration, apiKey: e.target.value } }))}
+                    placeholder="sk-…"
+                  />
+                </label>
+              </>
+            )}
           </section>
         </div>
 
