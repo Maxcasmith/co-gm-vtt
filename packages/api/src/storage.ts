@@ -2,7 +2,8 @@ import { readFile, writeFile, mkdir, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, EnemyStatBlock, WorldState } from 'shared';
+import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, WorldState } from 'shared';
+import { Encounter } from './domain/encounter.ts';
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const STORAGE_DIR = path.resolve(__dir, '../storage');
@@ -172,14 +173,14 @@ export async function listMaps(slug: string): Promise<BattleMap[]> {
   }
 }
 
-export async function saveEncounter(slug: string, enemies: EnemyStatBlock[]): Promise<void> {
-  await writeCampaignFile(slug, 'encounter.json', JSON.stringify(enemies, null, 2));
+export async function saveEncounter(slug: string, encounter: Encounter): Promise<void> {
+  await writeCampaignFile(slug, 'encounter.json', JSON.stringify(encounter.toJSON(), null, 2));
 }
 
-export async function loadEncounter(slug: string): Promise<EnemyStatBlock[] | null> {
+export async function loadEncounter(slug: string): Promise<Encounter | null> {
   try {
     const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'encounter.json'), 'utf-8');
-    return JSON.parse(raw) as EnemyStatBlock[];
+    return Encounter.fromJSON(JSON.parse(raw));
   } catch {
     return null;
   }
@@ -187,7 +188,7 @@ export async function loadEncounter(slug: string): Promise<EnemyStatBlock[] | nu
 
 export async function clearEncounter(slug: string): Promise<void> {
   const p = path.join(CAMPAIGNS_DIR, slug, 'encounter.json');
-  try { if (existsSync(p)) await writeFile(p, '[]', 'utf-8'); } catch { /* ignore */ }
+  try { if (existsSync(p)) await writeFile(p, JSON.stringify({ enemies: [] }), 'utf-8'); } catch { /* ignore */ }
 }
 
 export async function readWorldState(slug: string): Promise<WorldState | null> {

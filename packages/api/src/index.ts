@@ -2,13 +2,14 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import type { ServerToClientEvents, ClientToServerEvents, Player, CharacterStats, EnemyStatBlock, TurnOrderEntry, Character, Weapon } from 'shared';
+import type { ServerToClientEvents, ClientToServerEvents, Player, CharacterStats, TurnOrderEntry, Character, Weapon } from 'shared';
+import { Weapon as WeaponClass } from 'shared';
 import { configRouter } from './routes/config.ts';
 import { campaignsRouter } from './routes/campaigns.ts';
 import { readdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { getCharacter, writeCharacter, readChatLog, appendChatLog, listEntitySlugs, readEntity, getWorldMeta, getConfig, CAMPAIGNS_DIR, saveMap, appendMapIndex, listMaps, listCharacters, saveEncounter, loadEncounter, clearEncounter, readWorldState, writeWorldState, readCampaignFile } from './storage.ts';
+import { getCharacter, writeCharacter, readChatLog, appendChatLog, listEntitySlugs, readEntity, getWorldMeta, getConfig, CAMPAIGNS_DIR, saveMap, appendMapIndex, listMaps, saveEncounter, loadEncounter, clearEncounter, readWorldState, writeWorldState, readCampaignFile, listCharacters } from './storage.ts';
 import { getStoryProvider } from './providers/index.ts';
 import { buildRecapPrompt } from './session-processor/prompts.ts';
 import { processSession, getDMResponse } from './session-processor/index.ts';
@@ -17,6 +18,8 @@ import { generateBattleMap } from './providers/openai.ts';
 import { mapsRouter } from './routes/maps.ts';
 import { adminRouter } from './routes/admin.ts';
 import { randomUUID } from 'crypto';
+import { Encounter, Team, Participant } from './domain/encounter.ts';
+import { Creature } from './domain/creature.ts';
 
 const app = express();
 app.use(cors());
@@ -35,17 +38,10 @@ const ROOM = 'sandbox';
 const connected = new Set<Player>();
 const sessionState = new Map<string, boolean>();
 const combatState = new Map<string, boolean>();
-const encounterState = new Map<string, EnemyStatBlock[]>();
+const encounters = new Map<string, Encounter>();
 const tokenPositions = new Map<string, Record<string, { gx: number; gy: number }>>();
 const dmQueue = new Map<string, Promise<void>>();
 const campaignPlayers = new Map<string, string[]>();
-const turnIndex = new Map<string, number>();
-const turnOrders = new Map<string, TurnOrderEntry[]>();
-const expectedTurnCount = new Map<string, number>();
-const creatureState = new Map<string, Map<string, { currentHp: number; effects: string[] }>>();
-const playerHp = new Map<string, Map<string, { current: number; max: number }>>();
-const playerCharIdByName = new Map<string, Map<string, string>>();
-const deathSaves = new Map<string, Map<string, { successes: number; failures: number; stable: boolean }>>();
 const playerSocketIds = new Map<string, string>(); // playerName → socketId (for private events)
 
 const HIT_DICE: Record<string, number> = {
@@ -74,28 +70,22 @@ function rollDice(formula: string): number {
 
 function emitTurn(cid: string) {
   if (!combatState.get(cid)) return;
+  const encounter = encounters.get(cid);
+  if (!encounter) return;
 
-  // TPK: if every tracked player is at 0 HP, end now — before anyone acts
-  const hpMap = playerHp.get(cid);
-  if (hpMap && hpMap.size > 0 && [...hpMap.values()].every(e => e.current <= 0)) {
+  if (encounter.allPlayersDead()) {
     endCombatDefeated(cid);
     return;
   }
 
-  const order = turnOrders.get(cid) ?? [];
-  if (!order.length) return;
-  const idx = (turnIndex.get(cid) ?? 0) % order.length;
-  const actor = order[idx]!;
+  const actor = encounter.currentActor;
+  if (!actor) return;
   io.to(ROOM).emit('combat:turn', { actorName: actor.name });
+
   if (!actor.isPlayer) {
     setTimeout(() => void runEnemyAI(cid, actor), 800);
-  } else {
-    // Auto-resolve death save if this player is at 0 HP
-    const charId = playerCharIdByName.get(cid)?.get(actor.name);
-    const entry  = charId ? playerHp.get(cid)?.get(charId) : undefined;
-    if (entry && entry.current <= 0) {
-      setTimeout(() => void runDeathSave(cid, actor), 800);
-    }
+  } else if (actor.isDown()) {
+    setTimeout(() => void runDeathSave(cid, actor), 800);
   }
 }
 
@@ -107,28 +97,32 @@ function isOccupied(positions: Record<string, { gx: number; gy: number }>, gx: n
   return Object.entries(positions).some(([id, p]) => id !== excludeId && p.gx === gx && p.gy === gy);
 }
 
-async function runDeathSave(cid: string, actor: TurnOrderEntry): Promise<void> {
+async function runDeathSave(cid: string, actor: Participant): Promise<void> {
   if (!combatState.get(cid)) return;
-  if (!deathSaves.has(cid)) deathSaves.set(cid, new Map());
-  const savesMap = deathSaves.get(cid)!;
-  if (!savesMap.has(actor.name)) savesMap.set(actor.name, { successes: 0, failures: 0, stable: false });
-  const saves = savesMap.get(actor.name)!;
+  const encounter = encounters.get(cid);
+  if (!encounter) return;
+
+  const participant = encounter.findParticipant(actor.id);
+  if (!participant) return;
+  const saves = participant.deathSaves;
 
   if (saves.stable) { advanceTurn(cid); return; }
 
-  const charId   = playerCharIdByName.get(cid)?.get(actor.name);
-  const roll     = d20();
-  const isNat20  = roll === 20;
-  const isNat1   = roll === 1;
+  const roll = d20();
+  const isNat20 = roll === 20;
+  const isNat1 = roll === 1;
   let stable = false;
-  let dead   = false;
+  let dead = false;
 
   if (isNat20) {
-    const entry = charId ? playerHp.get(cid)?.get(charId) : undefined;
-    if (entry && charId) {
-      entry.current = 1;
-      io.to(ROOM).emit('combat:player:damage', { characterId: charId, characterName: actor.name, damage: -1, currentHp: 1, maxHp: entry.max });
-    }
+    participant.currentHp = 1;
+    io.to(ROOM).emit('combat:player:damage', {
+      characterId: actor.id,
+      characterName: actor.name,
+      damage: -1,
+      currentHp: 1,
+      maxHp: participant.maxHp,
+    });
     saves.successes = 3;
     stable = true;
     saves.stable = true;
@@ -143,15 +137,16 @@ async function runDeathSave(cid: string, actor: TurnOrderEntry): Promise<void> {
   if (!stable && saves.successes >= 3) { stable = true; saves.stable = true; }
   if (saves.failures >= 3) dead = true;
 
-  // Private: only the rolling player sees their save result
-  const saveData = { characterName: actor.name, roll, isNatural20: isNat20, isNatural1: isNat1, success: roll >= 10, successes: saves.successes, failures: saves.failures, stable, dead };
+  const saveData = {
+    characterName: actor.name, roll, isNatural20: isNat20, isNatural1: isNat1,
+    success: roll >= 10, successes: saves.successes, failures: saves.failures, stable, dead,
+  };
   const socketId = playerSocketIds.get(actor.name);
   if (socketId) io.to(socketId).emit('combat:death:save', saveData);
 
-  // Broadcast visible outcomes only
-  if (dead && charId) {
+  if (dead) {
     const deadMsg = { text: `${actor.name} has perished.`, senderName: 'Combat', timestamp: Date.now() };
-    io.to(ROOM).emit('combat:player:dead', { characterId: charId, characterName: actor.name });
+    io.to(ROOM).emit('combat:player:dead', { characterId: actor.id, characterName: actor.name });
     io.to(ROOM).emit('chat:message', deadMsg);
     void appendChatLog(cid, deadMsg);
   } else if (stable && !isNat20) {
@@ -165,14 +160,16 @@ async function runDeathSave(cid: string, actor: TurnOrderEntry): Promise<void> {
   }
 
   await delay(1500);
-  advanceTurn(cid); // TPK check happens inside emitTurn
+  advanceTurn(cid);
 }
 
-async function runEnemyAI(cid: string, actor: TurnOrderEntry): Promise<void> {
+async function runEnemyAI(cid: string, actor: Participant): Promise<void> {
   if (!combatState.get(cid)) return;
+  const encounter = encounters.get(cid);
+  if (!encounter) return;
 
-  const statBlock = encounterState.get(cid)?.find(e => e.id === actor.id);
-  if (!statBlock) return advanceTurn(cid);
+  const creature = encounter.findCreature(actor.id);
+  if (!creature) return advanceTurn(cid);
 
   const positions = tokenPositions.get(cid) ?? {};
   const epos = positions[actor.id];
@@ -196,24 +193,23 @@ async function runEnemyAI(cid: string, actor: TurnOrderEntry): Promise<void> {
   if (!target) return advanceTurn(cid);
 
   let { gx, gy } = epos;
-  const maxSteps = Math.floor(statBlock.speed / 5);
+  const maxSteps = Math.floor(creature.speed / 5);
 
   for (let step = 0; step < maxSteps; step++) {
     const dist = Math.max(Math.abs(target.gx - gx), Math.abs(target.gy - gy));
     if (dist <= 1) break;
 
-    // Prefer diagonal, fall back to cardinal if blocked
     const dx = Math.sign(target.gx - gx);
     const dy = Math.sign(target.gy - gy);
     const pos = tokenPositions.get(cid) ?? {};
     const candidates = [
-      { gx: gx + dx, gy: gy + dy },  // diagonal (preferred)
-      { gx: gx + dx, gy },            // horizontal only
-      { gx,          gy: gy + dy },   // vertical only
+      { gx: gx + dx, gy: gy + dy },
+      { gx: gx + dx, gy },
+      { gx,          gy: gy + dy },
     ].filter(c => c.gx >= 0 && c.gy >= 0 && !isOccupied(pos, c.gx, c.gy, actor.id));
 
     const next = candidates[0];
-    if (!next) break; // Blocked on all sides
+    if (!next) break;
 
     gx = next.gx;
     gy = next.gy;
@@ -228,76 +224,74 @@ async function runEnemyAI(cid: string, actor: TurnOrderEntry): Promise<void> {
   }
 
   // Attack
-  if (statBlock.attacks.length > 0) {
-    const atk      = statBlock.attacks[Math.floor(Math.random() * statBlock.attacks.length)]!;
+  if (creature.attacks.length > 0) {
+    const atk = creature.attacks[Math.floor(Math.random() * creature.attacks.length)]!;
     const finalDist = Math.max(Math.abs(target.gx - gx), Math.abs(target.gy - gy));
     if (finalDist <= 1) {
-      const chars      = await listCharacters(cid);
-      const targetChar = chars.find(c => c.name === target.name);
-      const targetAc   = targetChar ? (10 + statMod(targetChar.stats.dex)) : 10;
-      const roll  = d20();
+      const chars = await listCharacters(cid);
+      const targetChar = chars.find(c => c.name === target!.name);
+      const targetAc = targetChar ? (10 + statMod(targetChar.stats.dex)) : 10;
+      const roll = d20();
       const total = roll + atk.bonus;
-      const hit   = total >= targetAc;
+      const hit = total >= targetAc;
       let damage: number | undefined;
       let remainingHp: number | undefined;
       let targetDead = false;
+
       if (hit && targetChar) {
         damage = rollDice(atk.damage);
-        const hpMap = playerHp.get(cid);
-        const entry = hpMap?.get(targetChar.id);
-        if (entry) {
-          const wasDown = entry.current <= 0;
-          entry.current = Math.max(0, entry.current - damage);
-          remainingHp = entry.current;
-          targetDead  = entry.current <= 0;
+        const playerParticipant = encounter.players.find(p => p.id === targetChar.id);
+        if (playerParticipant) {
+          const wasDown = playerParticipant.isDown();
+          playerParticipant.takeDamage(damage);
+          remainingHp = playerParticipant.currentHp;
+          targetDead = playerParticipant.currentHp <= 0;
           io.to(ROOM).emit('combat:player:damage', {
             characterId: targetChar.id,
-            characterName: target.name,
+            characterName: target!.name,
             damage,
-            currentHp: entry.current,
-            maxHp: entry.max,
+            currentHp: playerParticipant.currentHp,
+            maxHp: playerParticipant.maxHp,
           });
-          console.log(`[ai] ${actor.name} attacks ${target.name} with ${atk.name}: ${roll}${fmtMod(atk.bonus)} = ${total} vs AC ${targetAc} — HIT ${damage} (${entry.current}/${entry.max} HP)`);
+          console.log(`[ai] ${actor.name} attacks ${target!.name} with ${atk.name}: ${roll}${fmtMod(atk.bonus)} = ${total} vs AC ${targetAc} — HIT ${damage} (${playerParticipant.currentHp}/${playerParticipant.maxHp} HP)`);
 
-          // Hitting a downed player: 2 automatic death save failures
           if (wasDown) {
-            if (!deathSaves.has(cid)) deathSaves.set(cid, new Map());
-            const savesMap = deathSaves.get(cid)!;
-            if (!savesMap.has(target.name)) savesMap.set(target.name, { successes: 0, failures: 0, stable: false });
-            const saves = savesMap.get(target.name)!;
-            saves.failures = Math.min(3, saves.failures + 2);
-            saves.stable = false;
-            const nowDead = saves.failures >= 3;
-            // Private save update
-            const socketId = playerSocketIds.get(target.name);
+            playerParticipant.deathSaves.failures = Math.min(3, playerParticipant.deathSaves.failures + 2);
+            playerParticipant.deathSaves.stable = false;
+            const nowDead = playerParticipant.deathSaves.failures >= 3;
+            const socketId = playerSocketIds.get(target!.name);
             if (socketId) {
               io.to(socketId).emit('combat:death:save', {
-                characterName: target.name, roll: 0, isNatural20: false, isNatural1: false,
-                success: false, successes: saves.successes, failures: saves.failures, stable: false, dead: nowDead,
+                characterName: target!.name, roll: 0, isNatural20: false, isNatural1: false,
+                success: false, successes: playerParticipant.deathSaves.successes,
+                failures: playerParticipant.deathSaves.failures, stable: false, dead: nowDead,
               });
             }
             if (nowDead) {
-              io.to(ROOM).emit('combat:player:dead', { characterId: targetChar.id, characterName: target.name });
-              const deadMsg = { text: `${target.name} has perished.`, senderName: 'Combat', timestamp: Date.now() };
+              io.to(ROOM).emit('combat:player:dead', { characterId: targetChar.id, characterName: target!.name });
+              const deadMsg = { text: `${target!.name} has perished.`, senderName: 'Combat', timestamp: Date.now() };
               io.to(ROOM).emit('chat:message', deadMsg);
               void appendChatLog(cid, deadMsg);
             }
           }
         }
       } else {
-        console.log(`[ai] ${actor.name} attacks ${target.name} with ${atk.name}: ${roll}${fmtMod(atk.bonus)} = ${total} vs AC ${targetAc} — MISS`);
+        console.log(`[ai] ${actor.name} attacks ${target!.name} with ${atk.name}: ${roll}${fmtMod(atk.bonus)} = ${total} vs AC ${targetAc} — MISS`);
       }
-      // Broadcast the attack result so clients can show hit/miss effects
+
       io.to(ROOM).emit('combat:attack:result', {
-        attackerName: actor.name, targetName: target.name, targetId: targetChar?.id ?? target.name,
+        attackerName: actor.name, targetName: target!.name, targetId: targetChar?.id ?? target!.name,
         weaponName: atk.name, d20: roll, attackBonus: atk.bonus, total, ac: targetAc,
         hit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
       });
 
-      // Blocking flavour text — resolve before advancing turn to prevent stacking
       const cfg = await getConfig();
       if (cfg.combat.apiKey) {
-        const atkResult = { attackerName: actor.name, targetName: target.name, targetId: target.name, weaponName: atk.name, d20: roll, attackBonus: atk.bonus, total, ac: targetAc, hit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead };
+        const atkResult = {
+          attackerName: actor.name, targetName: target!.name, targetId: target!.name,
+          weaponName: atk.name, d20: roll, attackBonus: atk.bonus, total, ac: targetAc,
+          hit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
+        };
         const flavour = await generateCombatFlavour(atkResult, cfg.combat.apiKey, cfg.combat.model);
         if (flavour) {
           const msg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
@@ -305,9 +299,8 @@ async function runEnemyAI(cid: string, actor: TurnOrderEntry): Promise<void> {
           void appendChatLog(cid, msg);
         }
       }
-
     } else {
-      console.log(`[ai] ${actor.name} cannot reach ${target.name} (${finalDist} cells away)`);
+      console.log(`[ai] ${actor.name} cannot reach ${target!.name} (${finalDist} cells away)`);
     }
   }
 
@@ -333,15 +326,9 @@ function endCombatDefeated(cid: string): void {
   combatState.set(cid, false);
   io.to(ROOM).emit('combat:defeat');
   setTimeout(() => {
-    encounterState.delete(cid);
-    creatureState.delete(cid);
-    tokenPositions.delete(cid);
-    turnIndex.delete(cid);
-    turnOrders.delete(cid);
-    expectedTurnCount.delete(cid);
-    playerHp.delete(cid);
-    playerCharIdByName.delete(cid);
-    deathSaves.delete(cid);
+    const encounter = encounters.get(cid);
+    encounter?.teardown();
+    encounters.delete(cid);
     void clearEncounter(cid);
     io.to(ROOM).emit('combat:state', false);
     endSession(cid);
@@ -349,61 +336,48 @@ function endCombatDefeated(cid: string): void {
 }
 
 async function applyDamageToCreature(cid: string, targetId: string, damage: number): Promise<void> {
-  const enemies = encounterState.get(cid) ?? [];
-  const target  = enemies.find(e => e.id === targetId);
-  if (!target) return;
-  const creatures = creatureState.get(cid);
-  const creature  = creatures?.get(targetId);
-  if (!creature || creature.effects.includes('Dead')) return;
+  const encounter = encounters.get(cid);
+  if (!encounter) return;
 
-  creature.currentHp = Math.max(0, creature.currentHp - damage);
-  io.to(ROOM).emit('creature:update', { id: targetId, currentHp: creature.currentHp, maxHp: target.hp, effects: creature.effects });
+  const creature = encounter.findCreature(targetId);
+  if (!creature || creature.isDead()) return;
 
-  if (creature.currentHp <= 0) {
-    creature.effects.push('Dead');
-    io.to(ROOM).emit('creature:update', { id: targetId, currentHp: 0, maxHp: target.hp, effects: creature.effects });
-    console.log(`[combat] ${target.name} is dead`);
+  creature.takeDamage(damage);
+  io.to(ROOM).emit('creature:update', {
+    id: targetId,
+    currentHp: creature.currentHp,
+    maxHp: creature.hp,
+    effects: creature.effects,
+  });
 
-    // Remove from turn order; adjust index if needed
-    const order   = turnOrders.get(cid) ?? [];
-    const deadIdx = order.findIndex(e => e.id === targetId);
-    const idx     = turnIndex.get(cid) ?? 0;
-    if (deadIdx !== -1 && deadIdx < idx) turnIndex.set(cid, Math.max(0, idx - 1));
-    turnOrders.set(cid, order.filter(e => e.id !== targetId));
+  if (creature.isDead()) {
+    console.log(`[combat] ${creature.name} is dead`);
+    encounter.removeFromTurnOrder(targetId);
 
-    // Victory check
-    const allDead = [...(creatures?.values() ?? [])].every(c => c.effects.includes('Dead'));
-    if (allDead) {
-      const totalXp      = enemies.reduce((sum, e) => sum + crToXp(e.cr), 0);
-      const playerCount  = campaignPlayers.get(cid)?.length ?? 1;
-      const xpPerPlayer  = Math.floor(totalXp / playerCount);
-      io.to(ROOM).emit('combat:victory', { xpPerPlayer, totalXp, kills: enemies.map(e => e.name) });
+    if (encounter.allEnemiesDead()) {
+      const enemyStatBlocks = encounter.enemies
+        .filter(p => p.creature)
+        .map(p => p.creature!.toStatBlock());
+      const totalXp = enemyStatBlocks.reduce((sum, e) => sum + crToXp(e.cr), 0);
+      const playerCount = campaignPlayers.get(cid)?.length ?? 1;
+      const xpPerPlayer = Math.floor(totalXp / playerCount);
+      io.to(ROOM).emit('combat:victory', { xpPerPlayer, totalXp, kills: enemyStatBlocks.map(e => e.name) });
       console.log(`[combat] victory! ${totalXp} XP total, ${xpPerPlayer} per player`);
-      // Persist XP to each player's character file
+
       void listCharacters(cid).then(chars => Promise.all(
         chars.map(char => writeCharacter(cid, char.id, { ...char, xp: (char.xp ?? 0) + xpPerPlayer }))
       ));
-      // Give the victory screen a moment then end combat
+
       setTimeout(() => {
         combatState.set(cid, false);
-        encounterState.delete(cid);
-        creatureState.delete(cid);
-        tokenPositions.delete(cid);
-        turnIndex.delete(cid);
-        turnOrders.delete(cid);
-        expectedTurnCount.delete(cid);
-        const hpMap = playerHp.get(cid);
-        if (hpMap) {
-          void listCharacters(cid).then(chars => Promise.all(
-            chars.map(c => {
-              const entry = hpMap.get(c.id);
-              return entry ? writeCharacter(cid, c.id, { ...c, currentHp: entry.current, maxHp: entry.max }) : Promise.resolve();
-            })
-          ));
-        }
-        playerHp.delete(cid);
-        playerCharIdByName.delete(cid);
-        deathSaves.delete(cid);
+        void listCharacters(cid).then(chars => Promise.all(
+          chars.map(c => {
+            const p = encounter.players.find(pp => pp.id === c.id);
+            return p ? writeCharacter(cid, c.id, { ...c, currentHp: p.currentHp, maxHp: p.maxHp }) : Promise.resolve();
+          })
+        ));
+        encounter.teardown();
+        encounters.delete(cid);
         void clearEncounter(cid);
         io.to(ROOM).emit('combat:state', false);
       }, 7000);
@@ -413,51 +387,68 @@ async function applyDamageToCreature(cid: string, targetId: string, damage: numb
 
 function advanceTurn(cid: string) {
   if (!combatState.get(cid)) return;
-  const order = turnOrders.get(cid) ?? [];
-  if (!order.length) return;
-  const next = ((turnIndex.get(cid) ?? 0) + 1) % order.length;
-  turnIndex.set(cid, next);
+  const encounter = encounters.get(cid);
+  if (!encounter?.turnOrder.length) return;
+  encounter.advanceTurn();
   emitTurn(cid);
 }
 
 function rollPlayerInitiatives(cid: string, chars: Character[]): void {
+  const encounter = encounters.get(cid);
+  if (!encounter) return;
+
+  let playerTeam = encounter.teams.find(t => t.name === 'Players');
+  if (!playerTeam) {
+    playerTeam = new Team('players', 'Players');
+    encounter.addTeam(playerTeam);
+  }
+
   const players = campaignPlayers.get(cid) ?? [];
-  expectedTurnCount.set(cid, (expectedTurnCount.get(cid) ?? 0) + players.length);
-  const hpMap = new Map(chars.map(c => {
-    const max = calcMaxHp(c);
-    return [c.id, { current: c.currentHp ?? max, max }];
-  }));
-  playerHp.set(cid, hpMap);
-  playerCharIdByName.set(cid, new Map(chars.map(c => [c.name, c.id])));
-  const entries: TurnOrderEntry[] = players.map(name => {
+  encounter.expectedParticipantCount += players.length;
+
+  const entries: Participant[] = players.map(name => {
     const char = chars.find(c => c.name === name);
-    const mod  = (char ? statMod(char.stats.dex) : 0) + (char?.initiativeBonus ?? 0);
-    return { id: char?.id ?? name, name, initiative: d20() + mod, isPlayer: true };
+    const mod = (char ? statMod(char.stats.dex) : 0) + (char?.initiativeBonus ?? 0);
+    const maxHp = char ? calcMaxHp(char) : 0;
+    const participant = new Participant({
+      id: char?.id ?? name,
+      name,
+      initiative: d20() + mod,
+      isPlayer: true,
+      currentHp: char?.currentHp ?? maxHp,
+      maxHp,
+    });
+    playerTeam!.addParticipant(participant);
+    return participant;
   });
+
   addToTurnOrder(cid, entries);
 }
 
-function rollEnemyInitiatives(cid: string, enemies: EnemyStatBlock[]): void {
-  const existing = turnOrders.get(cid)?.length ?? 0;
-  expectedTurnCount.set(cid, (expectedTurnCount.get(cid) ?? 0) + enemies.length);
-  const entries: TurnOrderEntry[] = enemies.map(e => ({
-    id: e.id, name: e.name, initiative: d20() + statMod(e.stats.dex), isPlayer: false,
-  }));
+function rollEnemyInitiatives(cid: string): void {
+  const encounter = encounters.get(cid);
+  if (!encounter) return;
+  const existing = encounter.turnOrder.length;
+  const entries = encounter.enemies.map(p => {
+    p.initiative = d20() + statMod(p.creature?.stats.dex ?? 10);
+    return p;
+  });
   addToTurnOrder(cid, entries, existing * 500);
 }
 
-function addToTurnOrder(cid: string, entries: TurnOrderEntry[], baseDelay = 0): void {
+function addToTurnOrder(cid: string, entries: Participant[], baseDelay = 0): void {
+  const encounter = encounters.get(cid);
+  if (!encounter) return;
+
   entries.forEach((entry, i) => {
     setTimeout(() => {
-      const current = turnOrders.get(cid) ?? [];
-      // Upsert — replace existing entry for this id if re-rolling
-      const updated = [...current.filter(e => e.id !== entry.id), entry];
-      updated.sort((a, b) => b.initiative - a.initiative);
-      turnOrders.set(cid, updated);
-      io.to(ROOM).emit('combat:initiative', entry);
-      // Start the first turn only once the full roster is in
-      const expected = expectedTurnCount.get(cid) ?? 0;
-      if (updated.length >= expected && expected > 0 && (turnIndex.get(cid) ?? 0) === 0) {
+      if (!combatState.get(cid)) return;
+      encounter.addToTurnOrder(entry);
+      io.to(ROOM).emit('combat:initiative', entry.toTurnOrderEntry());
+
+      const expected = encounter.expectedParticipantCount;
+      if (encounter.turnOrder.length >= expected && expected > 0 && !encounter.currentRound) {
+        encounter.beginCombat();
         emitTurn(cid);
       }
     }, baseDelay + i * 500);
@@ -506,22 +497,41 @@ async function generateAndBroadcastEnemies(campaignId: string): Promise<void> {
     io.to(ROOM).emit('encounter:generating');
     const config = await getConfig();
     const { model, apiKey } = config.combat;
-    if (!apiKey) { console.warn('[encounter] no combat API key, using fallback'); }
+    if (!apiKey) console.warn('[encounter] no combat API key, using fallback');
 
     const [messages, characters] = await Promise.all([
       readChatLog(campaignId),
       listCharacters(campaignId),
     ]);
 
-    const enemies = await generateEncounterEnemies(messages, characters, apiKey, model);
-    encounterState.set(campaignId, enemies);
-    await saveEncounter(campaignId, enemies);
-    io.to(ROOM).emit('encounter:ready', enemies);
-    // Initialise live creature state (currentHp, effects)
-    const creatures = new Map(enemies.map(e => [e.id, { currentHp: e.hp, effects: [] as string[] }]));
-    creatureState.set(campaignId, creatures);
-    console.log('[encounter] ready:', enemies.map(e => `${e.name} (CR ${e.cr})`).join(', '));
-    if (combatState.get(campaignId)) rollEnemyInitiatives(campaignId, enemies);
+    const statBlocks = await generateEncounterEnemies(messages, characters, apiKey, model);
+
+    const encounter = encounters.get(campaignId);
+    if (!encounter) return;
+
+    let enemyTeam = encounter.teams.find(t => t.name === 'Enemies');
+    if (!enemyTeam) {
+      enemyTeam = new Team('enemies', 'Enemies');
+      encounter.addTeam(enemyTeam);
+    }
+
+    for (const sb of statBlocks) {
+      const creature = Creature.from(sb);
+      enemyTeam.addParticipant(new Participant({
+        id: creature.id,
+        name: creature.name,
+        initiative: 0,
+        isPlayer: false,
+        creature,
+      }));
+    }
+
+    encounter.expectedParticipantCount += statBlocks.length;
+    await saveEncounter(campaignId, encounter);
+    io.to(ROOM).emit('encounter:ready', statBlocks);
+    console.log('[encounter] ready:', statBlocks.map(e => `${e.name} (CR ${e.cr})`).join(', '));
+
+    if (combatState.get(campaignId)) rollEnemyInitiatives(campaignId);
   } catch (err) {
     console.error('[encounter] generation failed:', err);
   }
@@ -616,26 +626,35 @@ io.on('connection', (socket) => {
     void readChatLog(campaignId).then(history => socket.emit('chat:history', history));
     socket.emit('session:state', sessionState.get(campaignId) ?? false);
     socket.emit('combat:state', combatState.get(campaignId) ?? false);
+
     if (combatState.get(campaignId)) {
       void listMaps(campaignId).then(maps => {
         const latest = maps[maps.length - 1];
         if (latest) socket.emit('map:generated', latest.id);
       });
-      const enemies = encounterState.get(campaignId);
-      if (enemies) {
-        socket.emit('encounter:ready', enemies);
+
+      const encounter = encounters.get(campaignId);
+      if (encounter && encounter.enemies.length > 0) {
+        socket.emit('encounter:ready', encounter.enemies
+          .filter(p => p.creature)
+          .map(p => p.creature!.toStatBlock()));
       } else {
         void loadEncounter(campaignId).then(saved => {
-          if (saved?.length) socket.emit('encounter:ready', saved);
+          if (saved && saved.enemies.length > 0) {
+            socket.emit('encounter:ready', saved.enemies
+              .filter(p => p.creature)
+              .map(p => p.creature!.toStatBlock()));
+          }
         });
       }
+
       const positions = tokenPositions.get(campaignId) ?? {};
       Object.entries(positions).forEach(([tokenId, pos]) => socket.emit('token:moved', { tokenId, ...pos }));
-      const order = turnOrders.get(campaignId) ?? [];
-      if (order.length) {
-        socket.emit('combat:turn:order', order);
-        const idx = (turnIndex.get(campaignId) ?? 0) % order.length;
-        socket.emit('combat:turn', { actorName: order[idx]!.name });
+
+      if (encounter?.turnOrder.length) {
+        socket.emit('combat:turn:order', encounter.turnOrder.map(p => p.toTurnOrderEntry()));
+        const actor = encounter.currentActor;
+        if (actor) socket.emit('combat:turn', { actorName: actor.name });
       }
     }
 
@@ -669,34 +688,26 @@ io.on('connection', (socket) => {
 
           if ((response.includes('[BEGIN COMBAT]') || /roll\s+(?:for\s+)?initiative/i.test(response)) && !combatState.get(cid)) {
             combatState.set(cid, true);
-            turnIndex.set(cid, 0);
-            turnOrders.set(cid, []);
+            encounters.set(cid, Encounter.empty(cid));
             io.to(ROOM).emit('combat:state', true);
             void listCharacters(cid).then(chars => rollPlayerInitiatives(cid, chars));
             void generateAndBroadcastMap(cid);
             void generateAndBroadcastEnemies(cid);
           }
+
           if (response.includes('[COMBAT END]') && combatState.get(cid)) {
             combatState.set(cid, false);
-            encounterState.delete(cid);
-            tokenPositions.delete(cid);
-            turnIndex.delete(cid);
-            turnOrders.delete(cid);
-            expectedTurnCount.delete(cid);
-            creatureState.delete(cid);
-            // Persist updated player HP
-            const hpMap = playerHp.get(cid);
-            if (hpMap) {
+            const enc = encounters.get(cid);
+            if (enc) {
               void listCharacters(cid).then(chars => Promise.all(
                 chars.map(c => {
-                  const entry = hpMap.get(c.id);
-                  return entry ? writeCharacter(cid, c.id, { ...c, currentHp: entry.current, maxHp: entry.max }) : Promise.resolve();
+                  const p = enc.players.find(pp => pp.id === c.id);
+                  return p ? writeCharacter(cid, c.id, { ...c, currentHp: p.currentHp, maxHp: p.maxHp }) : Promise.resolve();
                 })
               ));
+              enc.teardown();
+              encounters.delete(cid);
             }
-            playerHp.delete(cid);
-            playerCharIdByName.delete(cid);
-            deathSaves.delete(cid);
             void clearEncounter(cid);
             io.to(ROOM).emit('combat:state', false);
           }
@@ -762,10 +773,9 @@ io.on('connection', (socket) => {
         await appendChatLog(campaignId, payload);
         io.to(ROOM).emit('chat:message', payload);
 
-        // During combat, if it's this sender's turn, check for improvised action
         if (combatState.get(campaignId)) {
-          const order = turnOrders.get(campaignId) ?? [];
-          const currentActor = order[(turnIndex.get(campaignId) ?? 0) % order.length];
+          const encounter = encounters.get(campaignId);
+          const currentActor = encounter?.currentActor;
           if (currentActor?.name === senderName && currentActor.isPlayer) {
             void (async () => {
               try {
@@ -774,10 +784,10 @@ io.on('connection', (socket) => {
                 if (!apiKey) return;
                 const recent = (await readChatLog(campaignId)).slice(-10).map(m => `[${m.senderName}]: ${m.text}`).join('\n');
                 const char = await listCharacters(campaignId).then(cs => cs.find(c => c.name === senderName));
-                const enemies = (encounterState.get(campaignId) ?? []).filter(e => {
-                  const cs = creatureState.get(campaignId)?.get(e.id);
-                  return !cs?.effects.includes('Dead');
-                });
+                const enemies = encounter!.enemies
+                  .filter(p => p.creature && !p.creature.isDead())
+                  .map(p => p.creature!.toStatBlock());
+
                 const result = await resolveImprovisedAction({
                   playerName: senderName,
                   playerClass: char?.class ?? 'Adventurer',
@@ -792,26 +802,47 @@ io.on('connection', (socket) => {
                 io.to(ROOM).emit('chat:message', dmMsg);
 
                 if (result.type === 'attack' && result.dc && result.damageFormula && result.targetId && char) {
-                  // Auto-roll the ability check
                   const statKey = (result.stat ?? 'str') as keyof CharacterStats;
                   const roll = d20();
-                  const mod  = statMod(char.stats[statKey]);
+                  const mod = statMod(char.stats[statKey]);
                   const total = roll + mod;
-                  const hit   = total >= result.dc;
+                  const hit = total >= result.dc;
                   const dmgRoll = hit ? rollDice(result.damageFormula) : undefined;
 
                   const rollMsg = { text: `${senderName} rolls ${result.stat?.toUpperCase() ?? 'STR'}: ${roll}${fmtMod(mod)} = ${total} vs DC ${result.dc} — ${hit ? `HIT! ${dmgRoll} ${result.damageType ?? ''} damage` : 'MISS'}.`, senderName: 'System', timestamp: Date.now() };
                   await appendChatLog(campaignId, rollMsg);
                   io.to(ROOM).emit('chat:message', rollMsg);
 
-                  // Apply damage to target
                   if (hit && dmgRoll) {
                     void applyDamageToCreature(campaignId, result.targetId, dmgRoll);
                   }
 
-                  // Flavour
-                  const weapon = { name: 'improvised action', damage: result.damageFormula ?? '', damageType: result.damageType ?? '', attackBonus: 0, range: 5, properties: [] } as Weapon & { id: string; description: string; quantity: number };
-                  const atkResult = { attackerName: senderName, targetName: enemies.find(e => e.id === result.targetId)?.name ?? 'target', targetId: result.targetId, weaponName: 'improvised action', d20: roll, attackBonus: mod, total, ac: result.dc, hit, damage: dmgRoll, damageFormula: result.damageFormula, remainingHp: creatureState.get(campaignId)?.get(result.targetId)?.currentHp, targetDead: creatureState.get(campaignId)?.get(result.targetId)?.effects.includes('Dead') ?? false };
+                  const weapon = new WeaponClass({
+                    id: 'improvised',
+                    name: 'improvised action',
+                    description: '',
+                    quantity: 1,
+                    damage: result.damageFormula ?? '',
+                    damageType: result.damageType ?? '',
+                    attackBonus: 0,
+                    range: 5,
+                    properties: [],
+                  });
+                  const atkResult = {
+                    attackerName: senderName,
+                    targetName: enemies.find(e => e.id === result.targetId)?.name ?? 'target',
+                    targetId: result.targetId,
+                    weaponName: weapon.name,
+                    d20: roll,
+                    attackBonus: mod,
+                    total,
+                    ac: result.dc,
+                    hit,
+                    damage: dmgRoll,
+                    damageFormula: result.damageFormula,
+                    remainingHp: encounter!.findCreature(result.targetId)?.currentHp,
+                    targetDead: encounter!.findCreature(result.targetId)?.isDead() ?? false,
+                  };
                   const flavour = await generateCombatFlavour(atkResult, apiKey, model);
                   if (flavour) {
                     const flavourMsg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
@@ -821,7 +852,7 @@ io.on('connection', (socket) => {
                 }
               } catch (err) { console.error('[improvised]', err); }
             })();
-            return; // Don't call story DM during combat
+            return;
           }
         }
 
@@ -839,15 +870,28 @@ io.on('connection', (socket) => {
     socket.on('combat:initiative:roll', (entry: TurnOrderEntry) => {
       const cid = campaignId;
       if (!combatState.get(cid)) return;
-      const current  = turnOrders.get(cid) ?? [];
-      const isNew    = !current.find(e => e.id === entry.id);
-      if (isNew) expectedTurnCount.set(cid, (expectedTurnCount.get(cid) ?? 0) + 1);
-      const updated  = [...current.filter(e => e.id !== entry.id), entry]
-        .sort((a, b) => b.initiative - a.initiative);
-      turnOrders.set(cid, updated);
+      const encounter = encounters.get(cid);
+      if (!encounter) return;
+
+      let participant = encounter.findParticipant(entry.id);
+      if (!participant) {
+        encounter.expectedParticipantCount++;
+        participant = new Participant({
+          id: entry.id,
+          name: entry.name,
+          initiative: entry.initiative,
+          isPlayer: entry.isPlayer,
+        });
+      } else {
+        participant.initiative = entry.initiative;
+      }
+
+      encounter.addToTurnOrder(participant);
       io.to(ROOM).emit('combat:initiative', entry);
-      const expected = expectedTurnCount.get(cid) ?? 0;
-      if (updated.length >= expected && expected > 0 && (turnIndex.get(cid) ?? 0) === 0) {
+
+      const expected = encounter.expectedParticipantCount;
+      if (encounter.turnOrder.length >= expected && expected > 0 && !encounter.currentRound) {
+        encounter.beginCombat();
         emitTurn(cid);
       }
     });
@@ -856,18 +900,18 @@ io.on('connection', (socket) => {
       void (async () => {
         const cid = campaignId;
         if (!combatState.get(cid)) return;
+        const encounter = encounters.get(cid);
+        if (!encounter) return;
 
-        const char    = await getCharacter(cid, attackerId);
-        const enemies = encounterState.get(cid) ?? [];
-        const target  = enemies.find(e => e.id === targetId);
-        const creature = creatureState.get(cid)?.get(targetId);
-        if (!char || !target || !creature || creature.effects.includes('Dead')) return;
+        const char = await getCharacter(cid, attackerId);
+        const creature = encounter.findCreature(targetId);
+        if (!char || !creature || creature.isDead()) return;
 
-        const strMod     = statMod(char.stats.str);
+        const strMod = statMod(char.stats.str);
         const attackBonus = strMod + (weapon.attackBonus ?? 0);
-        const roll       = d20();
-        const total      = roll + attackBonus;
-        const hit        = total >= target.ac;
+        const roll = d20();
+        const total = roll + attackBonus;
+        const hit = total >= creature.ac;
 
         let damage: number | undefined;
         if (hit) {
@@ -877,26 +921,25 @@ io.on('connection', (socket) => {
 
         const atkResult = {
           attackerName,
-          targetName: target.name,
+          targetName: creature.name,
           targetId,
           weaponName: weapon.name,
           d20: roll,
           attackBonus,
           total,
-          ac: target.ac,
+          ac: creature.ac,
           hit,
           damage,
           damageFormula: weapon.damage,
-          remainingHp: hit ? creatureState.get(cid)?.get(targetId)?.currentHp : undefined,
-          targetDead: creatureState.get(cid)?.get(targetId)?.effects.includes('Dead') ?? false,
+          remainingHp: hit ? encounter.findCreature(targetId)?.currentHp : undefined,
+          targetDead: encounter.findCreature(targetId)?.isDead() ?? false,
         };
         io.to(ROOM).emit('combat:attack:result', atkResult);
-        console.log(`[combat] ${attackerName} attacks ${target.name}: ${roll}${fmtMod(attackBonus)} = ${total} vs AC ${target.ac} — ${hit ? `HIT ${damage}` : 'MISS'}`);
+        console.log(`[combat] ${attackerName} attacks ${creature.name}: ${roll}${fmtMod(attackBonus)} = ${total} vs AC ${creature.ac} — ${hit ? `HIT ${damage}` : 'MISS'}`);
 
-        // Flavour text async — non-blocking
         void (async () => {
           try {
-            const config  = await getConfig();
+            const config = await getConfig();
             const { model, apiKey } = config.combat;
             if (!apiKey) return;
             const flavour = await generateCombatFlavour(atkResult, apiKey, model);
@@ -910,10 +953,8 @@ io.on('connection', (socket) => {
     });
 
     socket.on('combat:turn:end', () => {
-      const order = turnOrders.get(campaignId) ?? [];
-      const idx   = (turnIndex.get(campaignId) ?? 0) % order.length;
-      // Ignore stray turn:end events during NPC turns — runEnemyAI calls advanceTurn itself
-      if (order[idx]?.isPlayer) advanceTurn(campaignId);
+      const encounter = encounters.get(campaignId);
+      if (encounter?.currentActor?.isPlayer) advanceTurn(campaignId);
     });
 
     socket.on('disconnect', () => {

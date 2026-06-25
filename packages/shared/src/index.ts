@@ -46,11 +46,6 @@ export interface TokenPosition {
   gy: number;
 }
 
-export interface Creature extends EnemyStatBlock {
-  currentHp: number;
-  effects: string[];
-}
-
 export interface AttackResult {
   attackerName: string;
   targetName: string;
@@ -61,9 +56,9 @@ export interface AttackResult {
   total: number;
   ac: number;
   hit: boolean;
-  damage?: number;
-  damageFormula?: string;
-  remainingHp?: number;
+  damage?: number | undefined;
+  damageFormula?: string | undefined;
+  remainingHp?: number | undefined;
   targetDead: boolean;
 }
 
@@ -99,7 +94,6 @@ export interface ServerToClientEvents {
   'combat:defeat': () => void;
   'combat:player:dead': (data: { characterId: string; characterName: string }) => void;
 }
-
 
 export interface ClientToServerEvents {
   'player:join':    (payload: { name: Player; campaignId: string }) => void;
@@ -167,36 +161,86 @@ export interface CharacterStats {
   cha: number;
 }
 
-export interface Item {
+// ── Item class hierarchy ──────────────────────────────────────────────────────
+// All item subtypes extend Item. Plain-object constructors (single props arg)
+// so instances serialize cleanly to/from JSON without custom toJSON logic.
+
+export class Item {
   id: string;
   name: string;
   description: string;
   quantity: number;
   type?: string;
+
+  constructor(props: { id: string; name: string; description: string; quantity: number; type?: string }) {
+    this.id = props.id;
+    this.name = props.name;
+    this.description = props.description;
+    this.quantity = props.quantity;
+    this.type = props.type;
+  }
 }
 
-export interface Weapon extends Item {
-  type: 'weapon';
+export class Weapon extends Item {
+  declare type: 'weapon';
   damage: string;
   damageType: string;
   attackBonus: number;
   range: number;
   properties: string[];
+
+  constructor(props: { id: string; name: string; description: string; quantity: number; damage: string; damageType: string; attackBonus: number; range: number; properties: string[] }) {
+    super({ ...props, type: 'weapon' as const });
+    this.damage = props.damage;
+    this.damageType = props.damageType;
+    this.attackBonus = props.attackBonus;
+    this.range = props.range;
+    this.properties = props.properties;
+  }
 }
 
-export function isWeapon(item: Item | Weapon | Consumable): item is Weapon {
-  return item.type === 'weapon';
+export class Armor extends Item {
+  declare type: 'armor';
+  armorType: 'light' | 'medium' | 'heavy' | 'none';
+  acBonus: number;
+  isShield: boolean;
+
+  constructor(props: { id: string; name: string; description: string; quantity: number; armorType: 'light' | 'medium' | 'heavy' | 'none'; acBonus: number; isShield: boolean }) {
+    super({ ...props, type: 'armor' as const });
+    this.armorType = props.armorType;
+    this.acBonus = props.acBonus;
+    this.isShield = props.isShield;
+  }
 }
 
-export interface Consumable extends Item {
-  type: 'consumable';
+export class Consumable extends Item {
+  declare type: 'consumable';
   effect: string;
   actionCost: 'action' | 'bonusAction';
+
+  constructor(props: { id: string; name: string; description: string; quantity: number; effect: string; actionCost: 'action' | 'bonusAction' }) {
+    super({ ...props, type: 'consumable' as const });
+    this.effect = props.effect;
+    this.actionCost = props.actionCost;
+  }
 }
 
-export function isConsumable(item: Item | Weapon | Consumable): item is Consumable {
-  return item.type === 'consumable';
+export class Ammunition extends Item {
+  declare type: 'ammunition';
+  usableBySlug: string;
+
+  constructor(props: { id: string; name: string; description: string; quantity: number; usableBySlug: string }) {
+    super({ ...props, type: 'ammunition' as const });
+    this.usableBySlug = props.usableBySlug;
+  }
 }
+
+// Discriminant-based guards — not instanceof, since items cross the socket/JSON
+// boundary as plain objects and won't satisfy instanceof on the receiving side.
+export function isWeapon(item: Item): item is Weapon { return item.type === 'weapon'; }
+export function isArmor(item: Item): item is Armor { return item.type === 'armor'; }
+export function isConsumable(item: Item): item is Consumable { return item.type === 'consumable'; }
+export function isAmmunition(item: Item): item is Ammunition { return item.type === 'ammunition'; }
 
 export type InventoryItem = Item;
 
@@ -238,7 +282,7 @@ export interface Character {
   portraitPath: string;
   tokenPath: string;
   createdAt: string;
-  inventory?: Array<Item | Weapon | Consumable>;
+  inventory?: Array<Item | Weapon | Armor | Consumable | Ammunition>;
   gold?: number;
   speed?: number;
   initiativeBonus?: number;
