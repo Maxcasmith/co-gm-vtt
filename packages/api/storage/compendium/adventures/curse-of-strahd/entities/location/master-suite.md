@@ -1,0 +1,1 @@
+The double doors to this room have dusty panes of stained glass set into them. The dusty, cobweb-filled master bedroom (area 12A) has burgundy drapes covering the windows. Furnishings include a four-poster bed with embroidered curtains and tattered gossamer veils, a matching pair of empty wardrobes, a vanity with a wood-framed mirror and jewelry box, and a padded chair.

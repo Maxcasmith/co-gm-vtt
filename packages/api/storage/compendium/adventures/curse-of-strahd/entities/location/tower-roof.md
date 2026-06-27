@@ -1,0 +1,1 @@
+>>The sixty-foot-diameter tower roof is rimmed with battlements. A slender stone bridge with no railing spans the gap between this tower and the slightly taller tower to the north. To the east, the high tower of Ravenloft thrusts skyward with no apparent opening at this level. Black, boiling clouds hurl rain down from above.

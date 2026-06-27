@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, WorldState, EnemyStatBlock } from 'shared';
+import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, WorldState, EnemyStatBlock, Dungeon, SessionManifest, Quest } from 'shared';
 import { Encounter } from './domain/encounter.ts';
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
@@ -227,6 +227,52 @@ export async function loadPartyAllies(slug: string): Promise<EnemyStatBlock[]> {
 export async function savePartyAllies(slug: string, allies: EnemyStatBlock[]): Promise<void> {
   await mkdir(path.join(CAMPAIGNS_DIR, slug), { recursive: true });
   await writeFile(path.join(CAMPAIGNS_DIR, slug, 'party-allies.json'), JSON.stringify(allies, null, 2), 'utf-8');
+}
+
+export async function saveDungeon(slug: string, dungeon: Dungeon): Promise<void> {
+  await writeCampaignFile(slug, 'dungeon.json', JSON.stringify(dungeon, null, 2));
+}
+
+export async function loadDungeon(slug: string): Promise<Dungeon | null> {
+  try {
+    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'dungeon.json'), 'utf-8');
+    return JSON.parse(raw) as Dungeon;
+  } catch { return null; }
+}
+
+export async function readManifest(slug: string): Promise<SessionManifest | null> {
+  try {
+    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'manifest.json'), 'utf-8');
+    return JSON.parse(raw) as SessionManifest;
+  } catch { return null; }
+}
+
+export async function writeManifest(slug: string, manifest: SessionManifest): Promise<void> {
+  await writeCampaignFile(slug, 'manifest.json', JSON.stringify(manifest, null, 2));
+}
+
+export function emptyManifest(): SessionManifest {
+  return { currentLocation: null, npcs: [], factions: [], connectedZones: [], updatedAt: new Date().toISOString(), act: 1, worldTimeSecs: 43200 };
+}
+
+export async function readQuests(slug: string): Promise<Quest[]> {
+  try {
+    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'quests.json'), 'utf-8');
+    return JSON.parse(raw) as Quest[];
+  } catch { return []; }
+}
+
+export async function writeQuests(slug: string, quests: Quest[]): Promise<void> {
+  await writeCampaignFile(slug, 'quests.json', JSON.stringify(quests, null, 2));
+}
+
+// Parse [[NPC:slug]], [[Location:slug]], [[Faction:slug]] links from entity file content.
+export function parseEntityLinks(content: string): { npcs: string[]; locations: string[]; factions: string[] } {
+  const toSlug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const npcs      = [...content.matchAll(/\[\[NPC:([^\]]+)\]\]/g)].map(m => toSlug(m[1]!));
+  const locations = [...content.matchAll(/\[\[Location:([^\]]+)\]\]/g)].map(m => toSlug(m[1]!));
+  const factions  = [...content.matchAll(/\[\[Faction:([^\]]+)\]\]/g)].map(m => toSlug(m[1]!));
+  return { npcs, locations, factions };
 }
 
 export async function archiveChatLog(slug: string): Promise<void> {

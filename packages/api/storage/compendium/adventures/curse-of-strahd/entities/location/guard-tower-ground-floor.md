@@ -1,0 +1,1 @@
+>>A cold hearth stands across from the door, the wind howling down its chimney. A stone staircase is on the south wall. Three windows look out over a foggy sea.

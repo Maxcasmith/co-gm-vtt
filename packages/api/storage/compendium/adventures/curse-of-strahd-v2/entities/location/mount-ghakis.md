@@ -1,0 +1,1 @@
+Baratok's slightly smaller twin, Mount Ghakis, is mostly bald with tufts of trees here and there.

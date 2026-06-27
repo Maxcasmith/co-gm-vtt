@@ -7,11 +7,14 @@ import {
   getWorldMeta, writeWorldMeta,
   writeCharacter, getCharacter, listCharacters, findCharacterByPassword, writeCharacterImage,
   readWorldState, writeWorldState, readCampaignFile, writeEntity,
-  listEntitySlugs, readEntity,
+  listEntitySlugs, readEntity, saveDungeon, writeManifest, readManifest, emptyManifest, writeQuests,
 } from '../storage.ts';
+import { generateGrid } from '../dungeon/generator.ts';
+import { placeEntities } from '../dungeon/placer.ts';
 import { getStoryProvider, getTierApiKey } from '../providers/index.ts';
+import { copyCompendiumToCampaign } from '../compendium/storage.ts';
 import { buildConceptsPrompt, buildWorldGenPrompt } from '../prompts.ts';
-import { processSession } from '../session-processor/index.ts';
+import { processSession, generateDmBrief } from '../session-processor/index.ts';
 import { processPortrait } from '../utils/image.ts';
 import { generateWorldState, tickWorldNarrative, buildWorldMapPrompt } from '../session-processor/imagePrompts.ts';
 import { generateBattleMap } from '../providers/openai.ts';
@@ -91,9 +94,10 @@ campaignsRouter.post('/generate', async (req, res) => {
   try {
     let accumulated = '';
     const config = await getConfig();
+    send({ type: 'progress', message: 'Generating world…' });
     await getStoryProvider(config).stream(
       buildWorldGenPrompt(tags, concept.name, concept.description, type),
-      token => { accumulated += token; send({ type: 'token', content: token }); },
+      token => { accumulated += token; },
     );
 
     const start = accumulated.indexOf('{');
@@ -102,8 +106,7 @@ campaignsRouter.post('/generate', async (req, res) => {
     const jsonStr = accumulated.slice(start, end + 1).replace(/,(\s*[}\]])/g, '$1');
     const world = JSON.parse(jsonStr) as Record<string, unknown> & { world?: { name?: string } };
 
-    send({ type: 'progress', message: 'Writing vault...' });
-    await writeVault(slug, world, tags, concept);
+    await writeVault(slug, world, tags, concept, msg => send({ type: 'progress', message: msg }));
 
     // write world.json with stable id + display name
     const campaignName = world.world?.name ?? name ?? concept.name;
@@ -114,6 +117,12 @@ campaignsRouter.post('/generate', async (req, res) => {
       type,
       concept: { name: concept.name, description: concept.description },
     });
+
+    if (type === 'dungeon-crawl') {
+      const { cells, rooms } = generateGrid(null);
+      const entities = placeEntities(rooms, null);
+      await saveDungeon(slug, { id: randomUUID(), name: concept.name, width: 50, height: 50, cells, rooms, entities });
+    }
 
     if (type === 'campaign' && config.image.generateWorldMap) {
       const apiKey = config.apiKeys.openai;
@@ -142,6 +151,60 @@ campaignsRouter.post('/generate', async (req, res) => {
     send({ type: 'complete', id: slug, name: campaignName });
   } catch (err) {
     send({ type: 'error', message: err instanceof Error ? err.message : 'Generation failed' });
+  } finally {
+    res.end();
+  }
+});
+
+// ── create from module ────────────────────────────────────────────────────────
+
+campaignsRouter.post('/from-module', async (req, res) => {
+  const { adventureSlug, campaignName } = req.body as { adventureSlug?: string; campaignName?: string };
+  if (!adventureSlug || !campaignName) {
+    res.status(400).json({ error: 'adventureSlug and campaignName are required' });
+    return;
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  function send(data: object) { res.write(`data: ${JSON.stringify(data)}\n\n`); }
+
+  const slug = campaignName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  try {
+    send({ type: 'progress', message: 'Copying module entities…' });
+    await copyCompendiumToCampaign(adventureSlug, slug, campaignName);
+
+    send({ type: 'progress', message: 'Generating DM brief…' });
+    const locationSlugs = await listEntitySlugs(slug, 'location');
+    const npcSlugs = await listEntitySlugs(slug, 'npc');
+    const factionSlugs = await listEntitySlugs(slug, 'faction');
+    const brief = await generateDmBrief(campaignName, locationSlugs, npcSlugs, factionSlugs);
+
+    send({ type: 'progress', message: 'Writing campaign files…' });
+    const today = new Date().toISOString().slice(0, 10);
+    const initialQuests = (brief.initialQuests ?? []).map(q => ({
+      id: q.id, name: q.name, description: q.description,
+      status: 'undiscovered' as const, log: [], addedAt: today,
+    }));
+
+    const manifest = (await readManifest(slug)) ?? emptyManifest();
+    if (brief.startingLocationSlug) {
+      manifest.currentLocation = brief.startingLocationSlug;
+      manifest.updatedAt = new Date().toISOString();
+    }
+
+    await Promise.all([
+      writeFile(path.join(CAMPAIGNS_DIR, slug, 'dm-brief.md'), brief.dmBrief, 'utf-8'),
+      writeManifest(slug, manifest),
+      writeQuests(slug, initialQuests),
+      writeCampaignFile(slug, 'acts.json', JSON.stringify(brief.acts ?? [], null, 2)),
+    ]);
+
+    send({ type: 'complete', id: slug, name: campaignName });
+  } catch (err) {
+    send({ type: 'error', message: err instanceof Error ? err.message : 'Failed to create campaign' });
   } finally {
     res.end();
   }
@@ -232,7 +295,7 @@ interface WorldData {
   scenario?: { objective?: string; climax?: string; resolution?: string };
 }
 
-async function writeVault(slug: string, data: Record<string, unknown>, tags: string[], concept: WorldConcept): Promise<void> {
+async function writeVault(slug: string, data: Record<string, unknown>, tags: string[], concept: WorldConcept, onProgress: (msg: string) => void = () => {}): Promise<void> {
   const w = data as WorldData;
 
   const hooksSection = (w.world?.hooks?.length)
@@ -250,7 +313,8 @@ async function writeVault(slug: string, data: Record<string, unknown>, tags: str
 
   const toSlug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-  const npcFiles = (w.npcs ?? []).map(n => {
+  const npcs = w.npcs ?? [];
+  const npcFiles = npcs.map(n => {
     const name = n.name ?? 'Unknown';
     const crossTie = n.crossFactionTie ? `\n**Cross-faction tie:** ${n.crossFactionTie}` : '';
     const content = `# ${name}\n\n**Role:** ${n.role ?? ''} | **Race:** ${n.race ?? ''} | **Occupation:** ${n.occupation ?? ''}\n\n**Personality:** ${n.personality ?? ''}\n**Motivation:** ${n.motivation ?? ''}\n**Secret:** ${n.secret ?? ''}\n**Faction:** ${n.factionAffiliation ?? 'Independent'}${crossTie}\n\n## Observed\n`;
@@ -279,9 +343,51 @@ async function writeVault(slug: string, data: Record<string, unknown>, tags: str
     scenarioFiles.push(writeCampaignFile(slug, 'scenario.md', scenarioMd));
   }
 
+  const startingLocationSlug = geo?.startingLocation?.name ? toSlug(geo.startingLocation.name) : null;
+  const manifest = emptyManifest();
+  if (startingLocationSlug) manifest.currentLocation = startingLocationSlug;
+  const rawStartingTime = (w as Record<string, unknown>).startingTime as string | undefined;
+  if (rawStartingTime) {
+    const [hh, mm] = rawStartingTime.split(':').map(Number);
+    if (!isNaN(hh!) && !isNaN(mm!)) manifest.worldTimeSecs = hh! * 3600 + mm! * 60;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  type InitialQuest = { id: string; name: string; description: string };
+  type ActDef = { act: number; conditions: string[] };
+  const rawQuests = (w as Record<string, unknown>).initialQuests as InitialQuest[] | undefined ?? [];
+  const rawActs = (w as Record<string, unknown>).acts as ActDef[] | undefined ?? [];
+  const initialQuests = rawQuests.map(q => ({
+    id: q.id, name: q.name, description: q.description,
+    status: 'undiscovered' as const, log: [], addedAt: today,
+  }));
+
+  console.log(`[worldgen] initial quests (${initialQuests.length}):\n${initialQuests.map(q => `  ${q.id}: ${q.name} — ${q.description}`).join('\n')}`);
+
+  // Report what's being created before writing
+  onProgress(`World: ${w.world?.name ?? concept.name}`);
+  if (npcs.length) {
+    const preview = npcs.slice(0, 4).map(n => n.name ?? '?').join(', ');
+    onProgress(`${npcs.length} NPCs — ${preview}${npcs.length > 4 ? '…' : ''}`);
+  }
+  if (allLocations.length) {
+    const preview = allLocations.slice(0, 4).map(l => l.name).join(', ');
+    onProgress(`${allLocations.length} locations — ${preview}${allLocations.length > 4 ? '…' : ''}`);
+  }
+  const factions = w.factions ?? [];
+  if (factions.length) {
+    const preview = factions.slice(0, 3).map(f => f.name ?? '?').join(', ');
+    onProgress(`${factions.length} factions — ${preview}${factions.length > 3 ? '…' : ''}`);
+  }
+  if (rawQuests.length) onProgress(`${rawQuests.length} quests`);
+  if (w.scenario) onProgress('Scenario and hooks');
+
   await Promise.all([
     writeCampaignFile(slug, 'world.md', worldMd),
     writeCampaignFile(slug, 'factions.md', factionsMd),
+    writeCampaignFile(slug, 'manifest.json', JSON.stringify(manifest, null, 2)),
+    writeQuests(slug, initialQuests),
+    writeCampaignFile(slug, 'acts.json', JSON.stringify(rawActs, null, 2)),
     ...npcFiles,
     ...locationFiles,
     ...scenarioFiles,

@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import type { Campaign } from 'shared';
+import type { Campaign, CompendiumMeta } from 'shared';
 import SettingsSidebar from './SettingsSidebar.tsx';
+import UploadModuleModal from './UploadModuleModal.tsx';
+import CreateFromModuleModal from './CreateFromModuleModal.tsx';
 import './app.css';
 
 const API = `http://${window.location.hostname}:3001`;
@@ -14,8 +16,18 @@ export default function AdminPage() {
   const [authed, setAuthed]         = useState(false);
   const [error, setError]           = useState('');
   const [campaigns, setCampaigns]   = useState<Campaign[]>([]);
+  const [adventures, setAdventures] = useState<CompendiumMeta[]>([]);
   const [feedback, setFeedback]     = useState<Record<string, string>>({});
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen]     = useState(false);
+  const [uploadOpen, setUploadOpen]         = useState(false);
+  const [selectedAdventure, setSelectedAdventure] = useState<CompendiumMeta | null>(null);
+
+  function fetchAdventures() {
+    fetch(`${API}/api/compendium`)
+      .then(r => r.json())
+      .then((data: CompendiumMeta[]) => setAdventures(data))
+      .catch(() => setAdventures([]));
+  }
 
   async function handleAuth() {
     const r = await fetch(`${API}/api/admin/auth`, {
@@ -26,6 +38,7 @@ export default function AdminPage() {
     if (r.ok) {
       const list = await fetch(`${API}/api/admin/campaigns`, { headers: adminHeaders(password) });
       setCampaigns(await list.json() as Campaign[]);
+      fetchAdventures();
       setAuthed(true);
     } else {
       setError('Invalid password');
@@ -40,6 +53,13 @@ export default function AdminPage() {
     });
     if (r.ok) setCampaigns(cs => cs.filter(c => c.id !== campaignId));
     else setFeedback(f => ({ ...f, [`${campaignId}:delete`]: 'Failed' }));
+  }
+
+  async function deleteAdventure(slug: string, name: string) {
+    if (!window.confirm(`Permanently delete the module "${name}"? This cannot be undone.`)) return;
+    const r = await fetch(`${API}/api/compendium/${slug}`, { method: 'DELETE' });
+    if (r.ok) setAdventures(a => a.filter(x => x.slug !== slug));
+    else setFeedback(f => ({ ...f, [`module:${slug}`]: 'Failed' }));
   }
 
   async function erase(campaignId: string, type: 'chat' | 'sessions') {
@@ -82,6 +102,8 @@ export default function AdminPage() {
         <h1 className="admin-title">Admin</h1>
         <button className="btn-secondary" onClick={() => setSettingsOpen(true)}>Settings</button>
       </div>
+
+      <h2 className="admin-section-title">Campaigns</h2>
       <table className="admin-table">
         <thead>
           <tr>
@@ -104,14 +126,67 @@ export default function AdminPage() {
                 {feedback[`${c.id}:sessions`] && <span className="admin-feedback">{feedback[`${c.id}:sessions`]}</span>}
               </td>
               <td>
-                <button className="btn-danger" onClick={() => void deleteCampaign(c.id, c.name)}>Delete Campaign</button>
+                <button className="btn-danger" onClick={() => void deleteCampaign(c.id, c.name)}>Delete</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div className="admin-modules-header">
+        <h2 className="admin-section-title">Adventure Modules</h2>
+        <button className="btn-primary" onClick={() => setUploadOpen(true)}>+ Upload Module</button>
+      </div>
+      <table className="admin-table">
+        <thead>
+          <tr>
+            <th>Module</th>
+            <th>Create Campaign</th>
+            <th>Delete</th>
+          </tr>
+        </thead>
+        <tbody>
+          {adventures.length === 0 && (
+            <tr><td colSpan={3} className="admin-empty">No modules uploaded yet.</td></tr>
+          )}
+          {adventures.map(adv => (
+            <tr key={adv.slug}>
+              <td className="admin-campaign-name">
+                {adv.name}
+                <span className="admin-campaign-id">{adv.slug}</span>
+                <span className="admin-module-counts">
+                  {[
+                    adv.entityCount.npc > 0 && `${adv.entityCount.npc} NPCs`,
+                    adv.entityCount.creature > 0 && `${adv.entityCount.creature} creatures`,
+                    adv.entityCount.location > 0 && `${adv.entityCount.location} locations`,
+                  ].filter(Boolean).join(' · ')}
+                </span>
+              </td>
+              <td>
+                <button className="btn-secondary" onClick={() => setSelectedAdventure(adv)}>Create</button>
+              </td>
+              <td>
+                <button className="btn-danger" onClick={() => void deleteAdventure(adv.slug, adv.name)}>Delete</button>
+                {feedback[`module:${adv.slug}`] && <span className="admin-feedback">{feedback[`module:${adv.slug}`]}</span>}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+
     <SettingsSidebar open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+    <UploadModuleModal
+      open={uploadOpen}
+      onClose={() => setUploadOpen(false)}
+      onUploaded={fetchAdventures}
+    />
+    <CreateFromModuleModal
+      open={selectedAdventure !== null}
+      adventure={selectedAdventure}
+      onClose={() => setSelectedAdventure(null)}
+      onCreated={() => { /* campaign created — nothing to refresh here */ }}
+    />
     </>
   );
 }

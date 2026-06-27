@@ -16,6 +16,33 @@ export interface CheckRequest {
   type: 'check' | 'save';
 }
 
+export interface DungeonRoom {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface DungeonEntity {
+  id: string;
+  type: 'creature' | 'loot';
+  x: number;
+  y: number;
+  name: string;
+}
+
+export interface Dungeon {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  cells: number[][];
+  rooms: DungeonRoom[];
+  entities: DungeonEntity[];
+}
+
 export interface ChatPayload {
   text: string;
   senderName: string;
@@ -104,6 +131,9 @@ export interface ServerToClientEvents {
   'combat:log': (data: { text: string; timestamp: number }) => void;
   'players:characters': (map: Record<string, string>) => void;
   'character:inventory:add': (items: unknown[]) => void;
+  'dungeon:loaded': (dungeon: Dungeon) => void;
+  'quest:update': (data: { quests: Quest[]; act: number }) => void;
+  'clock:update': (data: { worldTimeSecs: number }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -168,9 +198,37 @@ export interface WorldMeta {
   id: string;
   name: string;
   campaignDir: string;
-  type: 'campaign' | 'one-shot' | 'dungeon-crawl';
+  type: 'campaign' | 'one-shot' | 'dungeon-crawl' | 'module';
   concept?: { name: string; description: string };
   tags?: string[];
+  adventureSlug?: string;
+}
+
+export interface Quest {
+  id: string;
+  name: string;
+  description: string;
+  status: 'undiscovered' | 'open' | 'resolved';
+  log: Array<{ date: string; text: string }>;
+  addedAt: string;
+}
+
+export interface SessionManifest {
+  currentLocation: string | null;
+  npcs: string[];
+  factions: string[];
+  connectedZones: string[];
+  updatedAt: string;
+  act: number;
+  worldTimeSecs: number;
+}
+
+export interface CompendiumMeta {
+  slug: string;
+  name: string;
+  source: string;
+  createdAt: string;
+  entityCount: { npc: number; creature: number; faction: number; location: number };
 }
 
 export interface CharacterStats {

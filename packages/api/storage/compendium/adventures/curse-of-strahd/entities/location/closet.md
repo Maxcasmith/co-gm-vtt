@@ -1,0 +1,1 @@
+>>This small, wood-paneled room reeks of mildew and has a ten-foot-high ceiling. Iron hooks line the walls, and a dusty black cloak hangs from one hook in the center of the south wall.

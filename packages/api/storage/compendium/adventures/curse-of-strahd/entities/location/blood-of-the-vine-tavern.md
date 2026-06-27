@@ -1,0 +1,3 @@
+>>A single shaft of light thrusts illumination into the main square, its brightness looking like a solid pillar in the heavy fog. Above the gaping doorway, a sign hangs precariously askew, proclaiming this to be the Blood on the Vine tavern.
+
+The tavern building is about 60 feet square. Close inspection of the sign reveals that it originally read "Blood of the Vine." (An "n" has been scratched over with the "f.") This once finely appointed tavern has grown shoddy over the years. A blazing fire in the hearth gives scant warmth to the few huddled souls within. They include the barkeep, three Vistani sitting together, and a man named **Ismark Kolyanovich**—who happens to be the son of the village burgomaster, Kolyan Indirovich.

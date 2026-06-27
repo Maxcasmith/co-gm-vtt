@@ -9,6 +9,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^5.2.1",
+    "rot-js": "^2.2.0",
     "sharp": "^0.34.2",
     "socket.io": "^4.8.1",
     "shared": "workspace:*"

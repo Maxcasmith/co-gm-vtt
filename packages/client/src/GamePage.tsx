@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
-import type { Character, Player, EnemyStatBlock, TokenPosition } from 'shared';
+import type { Character, Player, EnemyStatBlock, TokenPosition, Dungeon, Quest } from 'shared';
 import Canvas from './Canvas.tsx';
 import EncounterLoadingOverlay from './EncounterLoadingOverlay.tsx';
 import CommandPalette from './CommandPalette.tsx';
 import CharacterSheetOverlay from './CharacterSheetOverlay.tsx';
 import JournalOverlay from './JournalOverlay.tsx';
+import QuestLog from './QuestLog.tsx';
 import CombatLogOverlay from './CombatLogOverlay.tsx';
 import ChatWidget from './ChatWidget.tsx';
 import QuickChat from './QuickChat.tsx';
@@ -36,6 +37,15 @@ function readSession(campaignId: string): Character | null {
 
 const DOUBLE_TAP_MS = 350;
 
+function formatWorldTime(secs: number): string {
+  const day = Math.floor(secs / 86400) + 1;
+  const h = Math.floor((secs % 86400) / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const period = h < 12 ? 'AM' : 'PM';
+  const h12 = h % 12 || 12;
+  return `Day ${day}  •  ${h12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
 function GameCanvas({ character, onCharacterUpdate }: { character: Character; onCharacterUpdate: (c: Character) => void }) {
   const [connected, setConnected] = useState<Player[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -60,6 +70,11 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [acquisitions, setAcquisitions] = useState<Character['inventory']>([]);
   const [itemNotifications, setItemNotifications] = useState<{ id: string; name: string }[]>([]);
   const [worldMapUrl, setWorldMapUrl] = useState<string | undefined>(undefined);
+  const [dungeon, setDungeon] = useState<Dungeon | null>(null);
+  const [questLogOpen, setQuestLogOpen] = useState(false);
+  const [quests, setQuests] = useState<Quest[]>([]);
+  const [act, setAct] = useState(1);
+  const [worldTimeSecs, setWorldTimeSecs] = useState(43200);
   const lastSpaceRef = useRef<number>(0);
   const socketRef = useRef<ReturnType<typeof io> | null>(null);
   const onCharacterUpdateRef = useRef(onCharacterUpdate);
@@ -181,6 +196,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       dispatch('vtt:chat:message-received', { text, senderName, timestamp: Date.now(), variant: 'recap', checkRequests });
     });
     socket.on('combat:log', data => dispatch('vtt:combat:log', data));
+    socket.on('dungeon:loaded', dungeon => { setDungeon(dungeon); dispatch('vtt:dungeon:loaded', dungeon); });
+    socket.on('quest:update', ({ quests: q, act: a }) => { setQuests(q); setAct(a); });
+    socket.on('clock:update', ({ worldTimeSecs: t }) => { setWorldTimeSecs(t); });
 
     const unsubTokenMove = on('vtt:token:move', pos => {
       socket.emit('token:move', pos);
@@ -282,6 +300,11 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       onSelect: () => setJournalOpen(true),
     },
     {
+      label: 'Quest Log',
+      description: 'Active quests and story progress',
+      onSelect: () => setQuestLogOpen(true),
+    },
+    {
       label: 'Combat Log',
       description: 'Technical combat output',
       onSelect: () => setCombatLogOpen(true),
@@ -310,7 +333,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         player={character.name}
         characterId={character.id}
         connected={connected}
-        showBattleMap={combatActive}
+        showBattleMap={combatActive || dungeon != null}
         encounter={combatActive ? encounter : null}
         tokenUrls={tokenUrls}
         tokenPositions={tokenPositions}
@@ -318,13 +341,15 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         deadCreatureIds={deadCreatureIds}
         downPlayerNames={downPlayerNames}
         deadPlayerNames={deadPlayerNames}
+        dungeon={dungeon ?? undefined}
       />
       <TurnOrderBar campaignId={character.campaignId} />
       <CombatDock character={character} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} />
       <EncounterLoadingOverlay />
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} header={<span className="palette-clock">{formatWorldTime(worldTimeSecs)}</span>} />
       <CharacterSheetOverlay character={{ ...character, inventory: [...(character.inventory ?? []), ...(acquisitions ?? [])] }} currentHp={playerHpState?.current} maxHp={playerHpState?.max} />
       <JournalOverlay open={journalOpen} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} />
+      <QuestLog open={questLogOpen} onClose={() => setQuestLogOpen(false)} quests={quests} act={act} />
       <CombatLogOverlay open={combatLogOpen} onClose={() => setCombatLogOpen(false)} />
       <ChatWidget />
       <QuickChat open={quickChatOpen} onClose={() => setQuickChatOpen(false)} senderName={character.name} sessionActive={sessionActive} disabled={combatActive && !isMyTurn} />

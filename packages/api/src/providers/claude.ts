@@ -12,6 +12,7 @@ export async function claudeChat(system: string, messages: ChatMessage[], apiKey
       'anthropic-version': ANTHROPIC_VERSION,
     },
     body: JSON.stringify({ model, max_tokens: 1024, system, messages }),
+    signal: AbortSignal.timeout(60000),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
@@ -34,6 +35,7 @@ export async function claudeComplete(prompt: string, apiKey: string, model: stri
       max_tokens: 8000,
       messages: [{ role: 'user', content: prompt }],
     }),
+    signal: AbortSignal.timeout(120000),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
@@ -62,6 +64,7 @@ export async function claudeStream(
       stream: true,
       messages: [{ role: 'user', content: prompt }],
     }),
+    signal: AbortSignal.timeout(180000),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };

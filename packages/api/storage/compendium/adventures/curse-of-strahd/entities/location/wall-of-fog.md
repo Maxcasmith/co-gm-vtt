@@ -1,0 +1,3 @@
+>>As you look west into the curtain of fog, you see a white fortress on a hill above a great city. The city appears quite distant, maybe a mile away. The fog obscures all detail, but you can hear what sounds like the echo of a church bell.
+
+The Dark Powers have created a false image of Strahd's ancestral home within the fog, just beyond reach. Strahd comes to the hill on occasion to gaze upon the city, even though he knows it can't be real.

@@ -1,0 +1,1 @@
+The Priests of Osybus are a cult engaged in dark rituals and summoning practices. Their goals revolve around the pursuit of power through nefarious means. They are known to perform gruesome sacrifices in hopes of gaining favor from dark entities.

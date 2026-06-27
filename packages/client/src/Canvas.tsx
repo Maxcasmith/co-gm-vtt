@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Player, EnemyStatBlock, Weapon } from 'shared';
+import type { Player, EnemyStatBlock, Weapon, Dungeon } from 'shared';
 import { dispatch, on } from './events.ts';
 import './app.css';
 
 const CELL = 64;
 const TOKEN_R = 24;
+const DUNGEON_ENTITY_R = 10;
 const FLOAT_DUR  = 950;   // ms for floating text
 const FLASH_DUR  = 220;   // ms for token flash
 
@@ -23,6 +24,7 @@ interface Props {
   deadCreatureIds?: Set<string>;
   downPlayerNames?: Set<string>;
   deadPlayerNames?: Set<string>;
+  dungeon?: Dungeon;
 }
 
 function drawToken(
@@ -62,7 +64,7 @@ function drawToken(
   ctx.fillText(name.length > 10 ? name.slice(0, 9) + '…' : name, x, y + TOKEN_R + 12);
 }
 
-export default function Canvas({ player, characterId, connected, showBattleMap, encounter, tokenUrls, tokenPositions, movementRemaining = 0, deadCreatureIds, downPlayerNames, deadPlayerNames }: Props) {
+export default function Canvas({ player, characterId, connected, showBattleMap, encounter, tokenUrls, tokenPositions, movementRemaining = 0, deadCreatureIds, downPlayerNames, deadPlayerNames, dungeon }: Props) {
   const ref            = useRef<HTMLCanvasElement>(null);
   const tokenImgCache  = useRef<Record<string, HTMLImageElement>>({});
   const [tokenCacheVer, setTokenCacheVer] = useState(0);
@@ -71,9 +73,17 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
   const playerRef           = useRef(player);
   const tokenPositionsRef   = useRef(tokenPositions);
   const movementRef         = useRef(movementRemaining);
+  const dungeonRef          = useRef(dungeon);
   useEffect(() => { playerRef.current = player; },               [player]);
   useEffect(() => { tokenPositionsRef.current = tokenPositions; }, [tokenPositions]);
   useEffect(() => { movementRef.current = movementRemaining; },   [movementRemaining]);
+  useEffect(() => { dungeonRef.current = dungeon; },              [dungeon]);
+
+  // Pan + zoom state for dungeon navigation
+  const dungeonPanRef  = useRef({ x: 0, y: 0 });
+  const dungeonZoomRef = useRef(1.0);
+  const isPanningRef   = useRef(false);
+  const panStartRef    = useRef({ mx: 0, my: 0, px: 0, py: 0 });
 
   // Hit/miss visual effects
   const floatEffectsRef = useRef<FloatEffect[]>([]);
@@ -163,6 +173,12 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
   // Window-level drag move + drop + Esc-cancel (registered once)
   useEffect(() => {
     function onMove(e: MouseEvent) {
+      if (isPanningRef.current) {
+        const { mx, my, px, py } = panStartRef.current;
+        dungeonPanRef.current = { x: px + (e.clientX - mx), y: py + (e.clientY - my) };
+        setDragTick(t => t + 1);
+        return;
+      }
       const drag = dragRef.current;
       if (!drag) return;
       const rect = ref.current?.getBoundingClientRect();
@@ -172,10 +188,17 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     }
 
     function onUp() {
+      if (isPanningRef.current) {
+        isPanningRef.current = false;
+        if (ref.current) ref.current.style.cursor = 'default';
+        return;
+      }
       const drag = dragRef.current;
       if (!drag) return;
-      const gx = Math.max(0, Math.floor(drag.x / CELL));
-      const gy = Math.max(0, Math.floor(drag.y / CELL));
+      const pan = dungeonRef.current ? dungeonPanRef.current : { x: 0, y: 0 };
+      const dropCellSz = dungeonRef.current ? CELL * dungeonZoomRef.current : CELL;
+      const gx = Math.max(0, Math.floor((drag.x - pan.x) / dropCellSz));
+      const gy = Math.max(0, Math.floor((drag.y - pan.y) / dropCellSz));
 
       // Movement accounting for the player's own token
       if (drag.id === playerRef.current) {
@@ -209,13 +232,35 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
       }
     }
 
+    function onWheel(e: WheelEvent) {
+      if (!dungeonRef.current) return;
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      const oldZoom = dungeonZoomRef.current;
+      const newZoom = Math.max(0.5, Math.min(2.0, oldZoom * factor));
+      const rect = ref.current?.getBoundingClientRect();
+      if (!rect) return;
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const { x: px, y: py } = dungeonPanRef.current;
+      dungeonPanRef.current = {
+        x: mx - (mx - px) * (newZoom / oldZoom),
+        y: my - (my - py) * (newZoom / oldZoom),
+      };
+      dungeonZoomRef.current = newZoom;
+      setDragTick(t => t + 1);
+    }
+
+    const canvasEl = ref.current;
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     window.addEventListener('keydown', onKey);
+    if (canvasEl) canvasEl.addEventListener('wheel', onWheel, { passive: false });
     return () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
       window.removeEventListener('keydown', onKey);
+      if (canvasEl) canvasEl.removeEventListener('wheel', onWheel);
     };
   }, []);
 
@@ -232,13 +277,57 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     if (showBattleMap) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Grid
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let x = 0; x <= canvas.width;  x += CELL) { ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, canvas.height); }
-      for (let y = 0; y <= canvas.height; y += CELL) { ctx.moveTo(0, y + 0.5); ctx.lineTo(canvas.width, y + 0.5); }
-      ctx.stroke();
+      const panX = dungeon ? dungeonPanRef.current.x : 0;
+      const panY = dungeon ? dungeonPanRef.current.y : 0;
+      const cellSz = dungeon ? CELL * dungeonZoomRef.current : CELL;
+
+      if (dungeon) {
+        // Dungeon grid: wall background, then floor cells, then entity markers
+        ctx.fillStyle = '#0e0c14';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = '#2d2b42';
+        for (let row = 0; row < dungeon.height; row++) {
+          for (let col = 0; col < dungeon.width; col++) {
+            if (dungeon.cells[row]?.[col] === 1) {
+              ctx.fillRect(col * cellSz + panX, row * cellSz + panY, cellSz, cellSz);
+            }
+          }
+        }
+
+        // Subtle grid lines on floor only
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = 0.5;
+        for (let row = 0; row < dungeon.height; row++) {
+          for (let col = 0; col < dungeon.width; col++) {
+            if (dungeon.cells[row]?.[col] === 1) {
+              ctx.strokeRect(col * cellSz + panX + 0.5, row * cellSz + panY + 0.5, cellSz - 1, cellSz - 1);
+            }
+          }
+        }
+
+        // Entity markers
+        const entityR = DUNGEON_ENTITY_R * dungeonZoomRef.current;
+        for (const entity of dungeon.entities) {
+          const ex = entity.x * cellSz + cellSz / 2 + panX;
+          const ey = entity.y * cellSz + cellSz / 2 + panY;
+          ctx.beginPath();
+          ctx.arc(ex, ey, entityR, 0, Math.PI * 2);
+          ctx.fillStyle = entity.type === 'creature' ? 'rgba(192,57,43,0.8)' : 'rgba(212,172,13,0.8)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      } else {
+        // Plain battle map grid
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = 0; x <= canvas.width;  x += CELL) { ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, canvas.height); }
+        for (let y = 0; y <= canvas.height; y += CELL) { ctx.moveTo(0, y + 0.5); ctx.lineTo(canvas.width, y + 0.5); }
+        ctx.stroke();
+      }
 
       if (encounter && tokenPositions) {
         const drag = dragRef.current;
@@ -254,7 +343,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
               const tx = playerPos.gx + dx;
               const ty = playerPos.gy + dy;
               if (tx < 0 || ty < 0) continue;
-              ctx.fillRect(tx * CELL, ty * CELL, CELL, CELL);
+              ctx.fillRect(tx * cellSz + panX, ty * cellSz + panY, cellSz, cellSz);
             }
           }
           // Subtle border around the range edge
@@ -267,7 +356,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
               if (tx < 0 || ty < 0) continue;
               const onEdge = Math.abs(dx) === reach || Math.abs(dy) === reach;
               if (!onEdge) continue;
-              ctx.strokeRect(tx * CELL + 0.5, ty * CELL + 0.5, CELL - 1, CELL - 1);
+              ctx.strokeRect(tx * cellSz + panX + 0.5, ty * cellSz + panY + 0.5, cellSz - 1, cellSz - 1);
             }
           }
         }
@@ -287,10 +376,10 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
                 const ty = playerPos.gy + dy;
                 if (tx < 0 || ty < 0) continue;
                 ctx.fillStyle = 'rgba(255, 200, 50, 0.06)';
-                ctx.fillRect(tx * CELL, ty * CELL, CELL, CELL);
+                ctx.fillRect(tx * cellSz + panX, ty * cellSz + panY, cellSz, cellSz);
                 ctx.strokeStyle = 'rgba(255, 200, 50, 0.18)';
                 ctx.lineWidth = 1;
-                ctx.strokeRect(tx * CELL + 1, ty * CELL + 1, CELL - 2, CELL - 2);
+                ctx.strokeRect(tx * cellSz + panX + 1, ty * cellSz + panY + 1, cellSz - 2, cellSz - 2);
               }
             }
           }
@@ -303,10 +392,10 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
               const ty = playerPos.gy + dy;
               if (tx < 0 || ty < 0) continue;
               ctx.fillStyle = 'rgba(255, 200, 50, 0.18)';
-              ctx.fillRect(tx * CELL, ty * CELL, CELL, CELL);
+              ctx.fillRect(tx * cellSz + panX, ty * cellSz + panY, cellSz, cellSz);
               ctx.strokeStyle = 'rgba(255, 200, 50, 0.55)';
               ctx.lineWidth = 1.5;
-              ctx.strokeRect(tx * CELL + 1, ty * CELL + 1, CELL - 2, CELL - 2);
+              ctx.strokeRect(tx * cellSz + panX + 1, ty * cellSz + panY + 1, cellSz - 2, cellSz - 2);
             }
           }
         }
@@ -316,8 +405,8 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           const pos = tokenPositions[name];
           if (!pos) return;
           const isDragged = drag?.id === name;
-          const x = isDragged ? drag!.x : pos.gx * CELL + CELL / 2;
-          const y = isDragged ? drag!.y : pos.gy * CELL + CELL / 2;
+          const x = isDragged ? drag!.x : pos.gx * cellSz + cellSz / 2 + panX;
+          const y = isDragged ? drag!.y : pos.gy * cellSz + cellSz / 2 + panY;
           const img = tokenImgCache.current[name];
           const isDead = deadPlayerNames?.has(name) ?? false;
           const isDown = !isDead && (downPlayerNames?.has(name) ?? false);
@@ -365,8 +454,8 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           const pos = tokenPositions[enemy.id];
           if (!pos) return;
           const isDragged = drag?.id === enemy.id;
-          const x = isDragged ? drag!.x : pos.gx * CELL + CELL / 2;
-          const y = isDragged ? drag!.y : pos.gy * CELL + CELL / 2;
+          const x = isDragged ? drag!.x : pos.gx * cellSz + cellSz / 2 + panX;
+          const y = isDragged ? drag!.y : pos.gy * cellSz + cellSz / 2 + panY;
 
           // Red targeting ring for enemies in weapon range
           if (targeting && playerPos) {
@@ -410,12 +499,12 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
 
         // Drag line: origin → cursor with distance label at midpoint
         if (drag?.id === player && playerPos) {
-          const ox = playerPos.gx * CELL + CELL / 2;
-          const oy = playerPos.gy * CELL + CELL / 2;
+          const ox = playerPos.gx * cellSz + cellSz / 2 + panX;
+          const oy = playerPos.gy * cellSz + cellSz / 2 + panY;
           const cx = drag.x;
           const cy = drag.y;
-          const snapGx = Math.max(0, Math.floor(cx / CELL));
-          const snapGy = Math.max(0, Math.floor(cy / CELL));
+          const snapGx = Math.max(0, Math.floor((cx - panX) / cellSz));
+          const snapGy = Math.max(0, Math.floor((cy - panY) / cellSz));
           const dist = Math.max(Math.abs(snapGx - playerPos.gx), Math.abs(snapGy - playerPos.gy)) * 5;
 
           if (dist > 0) {
@@ -456,7 +545,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           const rot     = Math.sin(t * Math.PI * 2.5) * 0.13;
           ctx.save();
           ctx.globalAlpha = alpha;
-          ctx.translate(eff.x, eff.y + yOff);
+          ctx.translate(eff.x + panX, eff.y + yOff + panY);
           ctx.rotate(rot);
           ctx.scale(scale, scale);
           ctx.font = 'bold 21px monospace';
@@ -482,13 +571,29 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
         ctx.fillText(`• ${p}`, 20, 100 + i * 24);
       });
     }
-  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick]);
+  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon]);
 
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
-    if (!showBattleMap || !encounter || !tokenPositions) return;
+    if (!showBattleMap) return;
+
+    // Right-mouse: start pan (dungeon navigation)
+    if (e.button === 2 && dungeon) {
+      isPanningRef.current = true;
+      panStartRef.current = { mx: e.clientX, my: e.clientY, px: dungeonPanRef.current.x, py: dungeonPanRef.current.y };
+      e.currentTarget.style.cursor = 'grabbing';
+      e.preventDefault();
+      return;
+    }
+
+    if (!encounter || !tokenPositions) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
+    const rawMx = e.clientX - rect.left;
+    const rawMy = e.clientY - rect.top;
+    const panX = dungeon ? dungeonPanRef.current.x : 0;
+    const panY = dungeon ? dungeonPanRef.current.y : 0;
+    const hdCellSz = dungeon ? CELL * dungeonZoomRef.current : CELL;
+    const mx = rawMx - panX;
+    const my = rawMy - panY;
 
     // Block all interaction when it's not this player's turn
     if (!isMyTurnRef.current) return;
@@ -505,8 +610,8 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           const epos = tokenPositions[enemy.id];
           if (!epos) continue;
           if (Math.max(Math.abs(epos.gx - playerPos.gx), Math.abs(epos.gy - playerPos.gy)) > maxRangeCells) continue;
-          const ex = epos.gx * CELL + CELL / 2;
-          const ey = epos.gy * CELL + CELL / 2;
+          const ex = epos.gx * hdCellSz + hdCellSz / 2;
+          const ey = epos.gy * hdCellSz + hdCellSz / 2;
           if (Math.hypot(mx - ex, my - ey) <= TOKEN_R) {
             dispatch('vtt:combat:attack', { attackerName: player, attackerId: characterId, targetId: enemy.id, targetName: enemy.name, weapon });
             e.preventDefault();
@@ -523,11 +628,12 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     // Drag mode: own token only
     const pos = tokenPositions[player];
     if (!pos) return;
-    const cx = pos.gx * CELL + CELL / 2;
-    const cy = pos.gy * CELL + CELL / 2;
+    const cx = pos.gx * hdCellSz + hdCellSz / 2;
+    const cy = pos.gy * hdCellSz + hdCellSz / 2;
     if (Math.hypot(mx - cx, my - cy) <= TOKEN_R) {
-      dragRef.current = { id: player, x: cx, y: cy };
-      dragOffset.current = { x: mx - cx, y: my - cy };
+      // Store drag position in screen space (includes pan so drag line renders correctly)
+      dragRef.current = { id: player, x: cx + panX, y: cy + panY };
+      dragOffset.current = { x: rawMx - (cx + panX), y: rawMy - (cy + panY) };
       e.currentTarget.style.cursor = 'grabbing';
       e.preventDefault();
     }
@@ -538,10 +644,13 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     const pos = tokenPositions[player];
     if (!pos) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const cx = pos.gx * CELL + CELL / 2;
-    const cy = pos.gy * CELL + CELL / 2;
+    const panX = dungeon ? dungeonPanRef.current.x : 0;
+    const panY = dungeon ? dungeonPanRef.current.y : 0;
+    const dcCellSz = dungeon ? CELL * dungeonZoomRef.current : CELL;
+    const mx = e.clientX - rect.left - panX;
+    const my = e.clientY - rect.top - panY;
+    const cx = pos.gx * dcCellSz + dcCellSz / 2;
+    const cy = pos.gy * dcCellSz + dcCellSz / 2;
     if (Math.hypot(mx - cx, my - cy) <= TOKEN_R) {
       dispatch('vtt:sheet:opened', { characterId });
     }
@@ -553,8 +662,11 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     // Targeting mode cursor
     if (targetingRef.current && showBattleMap && encounter && tokenPositions) {
       const rect = e.currentTarget.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
+      const panX = dungeon ? dungeonPanRef.current.x : 0;
+      const panY = dungeon ? dungeonPanRef.current.y : 0;
+      const mmCellSz = dungeon ? CELL * dungeonZoomRef.current : CELL;
+      const mx = e.clientX - rect.left - panX;
+      const my = e.clientY - rect.top - panY;
       const playerPos = tokenPositions[player];
       if (playerPos) {
         const maxRangeCells = targetingRef.current.extendedRange
@@ -563,8 +675,8 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
         for (const enemy of encounter) {
           const epos = tokenPositions[enemy.id];
           if (!epos || Math.max(Math.abs(epos.gx - playerPos.gx), Math.abs(epos.gy - playerPos.gy)) > maxRangeCells) continue;
-          const ex = epos.gx * CELL + CELL / 2;
-          const ey = epos.gy * CELL + CELL / 2;
+          const ex = epos.gx * mmCellSz + mmCellSz / 2;
+          const ey = epos.gy * mmCellSz + mmCellSz / 2;
           if (Math.hypot(mx - ex, my - ey) <= TOKEN_R) {
             e.currentTarget.style.cursor = 'crosshair';
             return;
@@ -578,12 +690,15 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     // Normal: grab cursor over own token
     if (!showBattleMap || !tokenPositions) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
+    const panX = dungeon ? dungeonPanRef.current.x : 0;
+    const panY = dungeon ? dungeonPanRef.current.y : 0;
+    const grabCellSz = dungeon ? CELL * dungeonZoomRef.current : CELL;
+    const mx = e.clientX - rect.left - panX;
+    const my = e.clientY - rect.top - panY;
     const pos = tokenPositions[player];
     if (!pos) return;
-    const cx = pos.gx * CELL + CELL / 2;
-    const cy = pos.gy * CELL + CELL / 2;
+    const cx = pos.gx * grabCellSz + grabCellSz / 2;
+    const cy = pos.gy * grabCellSz + grabCellSz / 2;
     e.currentTarget.style.cursor = Math.hypot(mx - cx, my - cy) <= TOKEN_R ? 'grab' : 'default';
   }
 
@@ -594,6 +709,8 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onDoubleClick={handleDoubleClick}
+      onAuxClick={e => e.preventDefault()}
+      onContextMenu={e => { if (dungeon) e.preventDefault(); }}
     />
   );
 }

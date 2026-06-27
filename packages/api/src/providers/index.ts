@@ -22,7 +22,7 @@ export function getTierApiKey(apiKeys: AppConfig['apiKeys'], provider: StoryProv
   return apiKeys[PROVIDER_KEY_MAP[provider]] ?? '';
 }
 
-function buildAdapter(tier: ModelTier, apiKey: string): StoryProviderAdapter {
+export function buildAdapter(tier: ModelTier, apiKey: string): StoryProviderAdapter {
   const { provider, model } = tier;
   const adapters: Record<StoryProvider, StoryProviderAdapter> = {
     claude: {

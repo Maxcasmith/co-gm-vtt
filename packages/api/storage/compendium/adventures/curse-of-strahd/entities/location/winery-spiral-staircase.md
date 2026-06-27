@@ -1,0 +1,3 @@
+>>This turret contains a stone spiral staircase. Windows in the outer wall allow light to enter.
+
+The stairs connect all three levels of the winery.

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 
 export interface PaletteItem {
   label: string;
@@ -10,9 +11,10 @@ interface Props {
   open: boolean;
   onClose: () => void;
   items: PaletteItem[];
+  header?: ReactNode;
 }
 
-export default function CommandPalette({ open, onClose, items }: Props) {
+export default function CommandPalette({ open, onClose, items, header }: Props) {
   const [active, setActive] = useState(0);
 
   useEffect(() => { if (open) setActive(0); }, [open]);
@@ -34,6 +36,7 @@ export default function CommandPalette({ open, onClose, items }: Props) {
   return (
     <div className="palette-scrim" onClick={onClose}>
       <div className="palette" onClick={e => e.stopPropagation()}>
+        {header && <div className="palette-header">{header}</div>}
         {items.map((item, i) => (
           <button
             key={item.label}

@@ -1,0 +1,1 @@
+>>The low ceiling of this twenty-foot-square room presses down on you. Torn and broken couches lie in heaps, haphazardly strewn about. Deep claw marks cover the hardwood furniture, and the once lush upholstery has been sliced to shreds. From the dark shadows amid the rubble, three pairs of green eyes stare back at you.

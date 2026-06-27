@@ -1,0 +1,3 @@
+>>The low walls that enclose the stone bridge have fallen away in a couple of places, but the bridge appears intact. A black-cloaked rider on a charcoal-colored horse guards the middle of the bridge.
+
+The cloaked rider is a manifestation of **Strahd von Zarovich**—a grim warning to proceed no further. If the characters interact with the manifestation in any way, the rider and horse disperse like ash in the wind.

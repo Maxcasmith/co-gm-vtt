@@ -79,7 +79,6 @@ export default function HomePage() {
           </div>
         </header>
 
-        {/* ── campaigns ── */}
         {games === null && (
           <ul className="game-list">
             {[0, 1, 2].map(i => (
@@ -94,7 +93,7 @@ export default function HomePage() {
         )}
 
         {games !== null && games.length === 0 && (
-          <p className="empty-state">No campaigns yet — click Create Campaign to create one.</p>
+          <p className="empty-state">No campaigns yet — ask your GM to create one.</p>
         )}
 
         {games !== null && games.length > 0 && (
@@ -115,15 +114,12 @@ export default function HomePage() {
           + Create Campaign
         </button>
 
-        {/* ── continue as ── */}
         {sessions.length > 0 && (
           <section className="continue-section">
             <h2 className="continue-title">Continue as</h2>
             <div className="continue-row">
               {sessions.map(char => {
                 const campaignName = games?.find(g => g.id === char.campaignId)?.name ?? char.campaignId;
-                // portraitPath is "party/{uuid}/portrait.jpg" — use that uuid, not char.id
-                // (they differed on old characters before the client-id fix)
                 const portraitCharId = char.portraitPath
                   ? char.portraitPath.split('/')[1] ?? char.id
                   : char.id;

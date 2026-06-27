@@ -1,0 +1,1 @@
+Strahd is the dark lord of Barovia and has dominion over the land and its inhabitants.

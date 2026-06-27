@@ -1,0 +1,11 @@
+---
+type: creature
+name: Artifact
+cr: 0
+hp: 0
+ac: 0
+source: module
+last_updated: 2026-06-26
+---
+
+The importance of some physical object that must be obtained, protected, or destroyed at all costs.

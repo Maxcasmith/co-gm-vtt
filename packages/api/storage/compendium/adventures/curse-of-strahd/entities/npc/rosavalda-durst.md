@@ -1,0 +1,1 @@
+Rosavalda, known as Rose, is a ten-year-old girl who appears to be a living child but is actually an illusion created by Death House. She tries to care for her younger brother, Thorn, and is fearful of the 'monster' in their house. The children died of starvation centuries ago but their spirits remain trapped in a form that lures adventurers.

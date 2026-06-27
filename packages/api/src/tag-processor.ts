@@ -8,7 +8,12 @@ export type TagEffect =
   | { type: 'party_join'; ally: EnemyStatBlock }
   | { type: 'combat_init' }
   | { type: 'scene_build'; locationName: string; detail: string }
-  | { type: 'npc_build'; npcName: string; detail: string };
+  | { type: 'npc_build'; npcName: string; detail: string }
+  | { type: 'dungeon_gen'; name: string; dungeonType: string }
+  | { type: 'quest_add'; id: string; name: string; description: string }
+  | { type: 'quest_update'; id: string; entry: string }
+  | { type: 'quest_resolve'; id: string }
+  | { type: 'clock'; secs: number };
 
 interface ProcessResult {
   text: string;
@@ -171,6 +176,50 @@ export async function processVdmResponse(
     ...[...text.matchAll(SAVE_RE)].map(m =>  ({ player: m[1]!.trim(), skill: m[2]!.trim(), type: 'save'  as const })),
   ];
 
+  const DUNGEON_GEN_RE = /\[\[DUNGEON_GEN:([^:[\]]+):([^\]]+)\]\]/g;
+  const dungeonGenMatches = [...text.matchAll(DUNGEON_GEN_RE)];
+  for (const match of dungeonGenMatches) {
+    const name = match[1]?.trim();
+    const dungeonType = match[2]?.trim();
+    if (name && dungeonType) effects.push({ type: 'dungeon_gen', name, dungeonType });
+  }
+
+  const QUEST_ADD_RE = /\[\[QUEST_ADD:([^|[\]]+)\|([^|[\]]+)\|([^\]]+)\]\]/g;
+  for (const match of [...text.matchAll(QUEST_ADD_RE)]) {
+    const id = match[1]?.trim();
+    const name = match[2]?.trim();
+    const description = match[3]?.trim();
+    if (id && name && description) {
+      console.log(`[tag] QUEST_ADD: ${id}`);
+      effects.push({ type: 'quest_add', id, name, description });
+    }
+  }
+
+  const QUEST_UPDATE_RE = /\[\[QUEST_UPDATE:([^|[\]]+)\|([^\]]+)\]\]/g;
+  for (const match of [...text.matchAll(QUEST_UPDATE_RE)]) {
+    const id = match[1]?.trim();
+    const entry = match[2]?.trim();
+    if (id && entry) {
+      console.log(`[tag] QUEST_UPDATE: ${id}`);
+      effects.push({ type: 'quest_update', id, entry });
+    }
+  }
+
+  const QUEST_RESOLVE_RE = /\[\[QUEST_RESOLVE:([^\]]+)\]\]/g;
+  for (const match of [...text.matchAll(QUEST_RESOLVE_RE)]) {
+    const id = match[1]?.trim();
+    if (id) {
+      console.log(`[tag] QUEST_RESOLVE: ${id}`);
+      effects.push({ type: 'quest_resolve', id });
+    }
+  }
+
+  const CLOCK_RE = /\[\[CLOCK:(\d+)\]\]/g;
+  for (const match of [...text.matchAll(CLOCK_RE)]) {
+    const secs = parseInt(match[1]!, 10);
+    if (!isNaN(secs) && secs > 0) effects.push({ type: 'clock', secs });
+  }
+
   const COMBAT_INIT_RE = /\[\[COMBAT_INIT\]\]/g;
   if (text.includes('[[COMBAT_INIT]]')) {
     console.log('[tag] COMBAT_INIT detected');
@@ -214,6 +263,6 @@ export async function processVdmResponse(
     }),
   ]);
 
-  const strippedText = text.replace(TAG_RE, '').replace(PARTY_JOIN_RE, '').replace(SCENE_BUILD_RE, '').replace(NPC_BUILD_RE, '').replace(COMBAT_INIT_RE, '').replace(SPEAKING_AS_RE, '').replace(CHECK_RE, '').replace(SAVE_RE, '').replace(/\s{2,}/g, ' ').trim();
+  const strippedText = text.replace(TAG_RE, '').replace(PARTY_JOIN_RE, '').replace(SCENE_BUILD_RE, '').replace(NPC_BUILD_RE, '').replace(COMBAT_INIT_RE, '').replace(SPEAKING_AS_RE, '').replace(CHECK_RE, '').replace(SAVE_RE, '').replace(DUNGEON_GEN_RE, '').replace(QUEST_ADD_RE, '').replace(QUEST_UPDATE_RE, '').replace(QUEST_RESOLVE_RE, '').replace(CLOCK_RE, '').replace(/\s{2,}/g, ' ').trim();
   return { text: strippedText, effects, checkRequests, ...(speakingAs !== undefined ? { speakingAs } : {}) };
 }

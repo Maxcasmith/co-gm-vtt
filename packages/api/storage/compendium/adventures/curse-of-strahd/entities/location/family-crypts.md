@@ -1,0 +1,1 @@
+Several crypts have been hewn from the earth. Each crypt is sealed with a stone slab unless noted otherwise. Removing a slab from its fitting requires a successful DC 15 Strength (Athletics) check; using a crowbar or the like grants advantage on the check.

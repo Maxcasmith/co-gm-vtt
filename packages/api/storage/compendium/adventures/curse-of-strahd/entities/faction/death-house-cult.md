@@ -1,0 +1,1 @@
+The cult that resided in Death House practiced dark arts and sought to summon malevolent extraplanar entities. They indulged in debauchery and ritualized murders, eventually leading to their downfall when Strahd turned his back on them.

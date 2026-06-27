@@ -6,13 +6,15 @@ import type { ServerToClientEvents, ClientToServerEvents, Player, CharacterStats
 import { Weapon as WeaponClass } from 'shared';
 import { configRouter } from './routes/config.ts';
 import { campaignsRouter } from './routes/campaigns.ts';
+import { compendiumRouter } from './routes/compendium.ts';
 import { readdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { getCharacter, writeCharacter, readChatLog, appendChatLog, listEntitySlugs, readEntity, writeEntity, getWorldMeta, getConfig, CAMPAIGNS_DIR, saveMap, appendMapIndex, listMaps, listPremadeMaps, saveEncounter, loadEncounter, clearEncounter, readWorldState, writeWorldState, readCampaignFile, listCharacters, loadPartyAllies, savePartyAllies } from './storage.ts';
+import { getCharacter, writeCharacter, readChatLog, appendChatLog, listEntitySlugs, readEntity, writeEntity, getWorldMeta, getConfig, CAMPAIGNS_DIR, saveMap, appendMapIndex, listMaps, listPremadeMaps, saveEncounter, loadEncounter, clearEncounter, readWorldState, writeWorldState, readCampaignFile, listCharacters, loadPartyAllies, savePartyAllies, saveDungeon, loadDungeon, readManifest, writeManifest, emptyManifest, parseEntityLinks, readQuests, writeQuests } from './storage.ts';
+import { generateDungeon } from './dungeon/index.ts';
 import { getStoryProvider, getTierApiKey } from './providers/index.ts';
 import { buildRecapPrompt } from './session-processor/prompts.ts';
-import { processSession, getDMResponse } from './session-processor/index.ts';
+import { processSession, getDMResponse, ensureSessionQuests } from './session-processor/index.ts';
 import { parseLocationContext, buildBattleMapPrompt, generateEncounterEnemies, generateCombatFlavour, resolveImprovisedAction, generateWorldState, tickWorldNarrative } from './session-processor/imagePrompts.ts';
 import { generateBattleMap } from './providers/openai.ts';
 import { mapsRouter } from './routes/maps.ts';
@@ -29,6 +31,7 @@ app.use('/api/config', configRouter);
 app.use('/api/campaigns', campaignsRouter);
 app.use('/api/campaigns', mapsRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/compendium', compendiumRouter);
 
 const httpServer = createServer(app);
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
@@ -41,8 +44,10 @@ const ROOM = 'sandbox';
 const _origLog = console.log;
 console.log = (...args: unknown[]) => {
   _origLog(...args);
-  const text = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-  io.to(ROOM).emit('combat:log', { text, timestamp: Date.now() });
+  try {
+    const text = args.map(a => { if (typeof a === 'string') return a; try { return JSON.stringify(a); } catch { return String(a); } }).join(' ');
+    io.to(ROOM).emit('combat:log', { text, timestamp: Date.now() });
+  } catch { /* never let log broadcast crash the server */ }
 };
 
 const connected = new Set<Player>();
@@ -346,12 +351,14 @@ function endSession(cid: string): void {
   if (!sessionState.get(cid)) return;
   sessionState.set(cid, false);
   io.to(ROOM).emit('session:state', false);
-  void processSession(cid).then(result => {
+  void processSession(cid).then(async result => {
     const names = [...(result.updated ?? []), ...(result.created ?? []), ...(result.cascaded ?? [])];
     const text = result.skipped
       ? 'Session ended — no chat to process.'
       : `Session ended — notes updated: ${names.join(', ') || 'nothing new'}`;
     io.to(ROOM).emit('chat:message', { text, senderName: 'System', timestamp: Date.now() });
+    const [quests, manifest] = await Promise.all([readQuests(cid), readManifest(cid)]);
+    io.to(ROOM).emit('quest:update', { quests, act: manifest?.act ?? 1 });
   });
 }
 
@@ -606,21 +613,47 @@ async function generateAndBroadcastEnemies(campaignId: string): Promise<void> {
 }
 
 async function buildEntitySummaries(campaignId: string): Promise<string> {
-  const types = ['npc', 'faction', 'location', 'character'] as const;
   const lines: string[] = [];
+
+  // World bible — generated campaigns; absent for modules, that's fine
   for (const filename of ['world.md', 'factions.md']) {
     try {
       const content = await readFile(path.join(CAMPAIGNS_DIR, campaignId, filename), 'utf-8');
-      lines.push(`### ${filename}\n${content}`);
-    } catch { /* missing world file — skip */ }
+      lines.push(`### ${filename}\n${content.slice(0, 1000)}`);
+    } catch { /* skip */ }
   }
-  for (const type of types) {
-    const slugs = await listEntitySlugs(campaignId, type);
-    for (const slug of slugs) {
-      const content = await readEntity(campaignId, type, slug);
-      if (content) lines.push(`### ${type}/${slug}\n${content.slice(0, 600)}`);
-    }
+
+  // Characters — always load (the active party)
+  const charSlugs = await listEntitySlugs(campaignId, 'character');
+  for (const slug of charSlugs) {
+    const content = await readEntity(campaignId, 'character', slug);
+    if (content) lines.push(`### character/${slug}\n${content.slice(0, 500)}`);
   }
+
+  const manifest = await readManifest(campaignId);
+  if (!manifest) return lines.join('\n\n') || '(no entity notes yet)';
+
+  // Current location — full content (scene text + DM notes)
+  if (manifest.currentLocation) {
+    const content = await readEntity(campaignId, 'location', manifest.currentLocation);
+    if (content) lines.push(`### location/${manifest.currentLocation} [CURRENT]\n${content}`);
+  }
+
+  // NPCs and factions in current scene
+  for (const slug of manifest.npcs) {
+    const content = await readEntity(campaignId, 'npc', slug);
+    if (content) lines.push(`### npc/${slug}\n${content.slice(0, 800)}`);
+  }
+  for (const slug of manifest.factions) {
+    const content = await readEntity(campaignId, 'faction', slug);
+    if (content) lines.push(`### faction/${slug}\n${content.slice(0, 600)}`);
+  }
+
+  // Adjacent zones — names only so DM can narrate transitions
+  if (manifest.connectedZones.length) {
+    lines.push(`### Connected zones\n${manifest.connectedZones.join(', ')}`);
+  }
+
   return lines.join('\n\n') || '(no entity notes yet)';
 }
 
@@ -725,6 +758,17 @@ async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
         : `# ${effect.locationName}\n\n## Scene Notes\n- ${effect.detail}`;
       await writeEntity(cid, 'location', locationSlug, updated);
       console.log(`[scene] updated location notes: ${locationSlug}`);
+
+      // Update manifest: new current location, parse linked entities from the file
+      const links = parseEntityLinks(updated);
+      const manifest = await readManifest(cid) ?? emptyManifest();
+      manifest.currentLocation = locationSlug;
+      manifest.connectedZones = links.locations;
+      for (const npc of links.npcs) { if (!manifest.npcs.includes(npc)) manifest.npcs.push(npc); }
+      for (const faction of links.factions) { if (!manifest.factions.includes(faction)) manifest.factions.push(faction); }
+      manifest.updatedAt = new Date().toISOString();
+      await writeManifest(cid, manifest);
+      console.log(`[manifest] location → ${locationSlug}, zones: [${links.locations.join(', ')}]`);
     } else if (effect.type === 'npc_build') {
       const npcSlug = effect.npcName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       const existing = await readEntity(cid, 'npc', npcSlug);
@@ -733,6 +777,24 @@ async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
         : `# ${effect.npcName}\n\n## Observed\n- ${effect.detail}`;
       await writeEntity(cid, 'npc', npcSlug, updated);
       console.log(`[npc] updated npc notes: ${npcSlug}`);
+
+      // Add to manifest so this NPC loads in future prompts
+      const manifest = await readManifest(cid) ?? emptyManifest();
+      if (!manifest.npcs.includes(npcSlug)) {
+        manifest.npcs.push(npcSlug);
+        manifest.updatedAt = new Date().toISOString();
+        await writeManifest(cid, manifest);
+      }
+    } else if (effect.type === 'dungeon_gen') {
+      const config = await getConfig();
+      const { model, provider } = config.tiers[config.tasks.combat];
+      const apiKey = getTierApiKey(config.apiKeys, provider);
+      if (!apiKey) { console.warn('[dungeon] no API key — skipping dungeon generation'); return; }
+      console.log(`[dungeon] generating: ${effect.name}`);
+      const dungeon = await generateDungeon(effect.name, effect.dungeonType, apiKey, model);
+      await saveDungeon(cid, dungeon);
+      io.to(ROOM).emit('dungeon:loaded', dungeon);
+      console.log(`[dungeon] generated and broadcast: ${dungeon.name} (${dungeon.rooms.length} rooms, ${dungeon.entities.length} entities)`);
     } else if (effect.type === 'party_join') {
       const currentAllies = await loadPartyAllies(cid);
       const alreadyPresent = currentAllies.some(a => a.name === effect.ally.name);
@@ -759,6 +821,34 @@ async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
         io.to(ROOM).emit('chat:message', joinMsg);
         void appendChatLog(cid, joinMsg);
       }
+    } else if (effect.type === 'quest_add' || effect.type === 'quest_update' || effect.type === 'quest_resolve') {
+      const quests = await readQuests(cid);
+      const today = new Date().toISOString().slice(0, 10);
+
+      if (effect.type === 'quest_add') {
+        const existing = quests.find(q => q.id === effect.id);
+        if (existing) {
+          existing.status = 'open';
+        } else {
+          quests.push({ id: effect.id, name: effect.name, description: effect.description, status: 'open', log: [], addedAt: today });
+        }
+      } else if (effect.type === 'quest_update') {
+        const q = quests.find(q => q.id === effect.id);
+        if (q) q.log.push({ date: today, text: effect.entry });
+      } else if (effect.type === 'quest_resolve') {
+        const q = quests.find(q => q.id === effect.id);
+        if (q) q.status = 'resolved';
+      }
+
+      await writeQuests(cid, quests);
+      const manifest = await readManifest(cid);
+      io.to(ROOM).emit('quest:update', { quests, act: manifest?.act ?? 1 });
+    } else if (effect.type === 'clock') {
+      const manifest = await readManifest(cid) ?? emptyManifest();
+      manifest.worldTimeSecs = (manifest.worldTimeSecs ?? 43200) + effect.secs;
+      manifest.updatedAt = new Date().toISOString();
+      await writeManifest(cid, manifest);
+      io.to(ROOM).emit('clock:update', { worldTimeSecs: manifest.worldTimeSecs });
     }
   }));
 }
@@ -915,6 +1005,10 @@ io.on('connection', (socket) => {
     void readChatLog(campaignId).then(history => socket.emit('chat:history', history));
     socket.emit('session:state', sessionState.get(campaignId) ?? false);
     socket.emit('combat:state', combatState.get(campaignId) ?? false);
+    void Promise.all([readQuests(campaignId), readManifest(campaignId)]).then(([quests, manifest]) => {
+      socket.emit('quest:update', { quests, act: manifest?.act ?? 1 });
+      socket.emit('clock:update', { worldTimeSecs: manifest?.worldTimeSecs ?? 43200 });
+    });
 
     void listCharacters(campaignId).then(chars => {
       const map: Record<string, string> = {};
@@ -953,13 +1047,22 @@ io.on('connection', (socket) => {
       }
     }
 
+    // Send current dungeon state to reconnecting player
+    void loadDungeon(campaignId).then(dungeon => {
+      if (dungeon) socket.emit('dungeon:loaded', dungeon);
+    });
+
     socket.on('session:start', ({ campaignId: cid }) => {
       sessionState.set(cid, true);
       io.to(ROOM).emit('session:state', true);
       io.to(ROOM).emit('dm:thinking', true);
       void (async () => {
         try {
-          const { text, isFirstSession } = await runRecap(cid);
+          await ensureSessionQuests(cid);
+          const [quests, manifest] = await Promise.all([readQuests(cid), readManifest(cid)]);
+          io.to(ROOM).emit('quest:update', { quests, act: manifest?.act ?? 1 });
+
+          const { text } = await runRecap(cid);
           await appendChatLog(cid, { text, senderName: 'Virtual DM', timestamp: Date.now() });
           io.to(ROOM).emit('session:recap', { text, senderName: 'Virtual DM' });
         } catch (err) {

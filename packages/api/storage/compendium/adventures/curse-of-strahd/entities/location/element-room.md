@@ -1,0 +1,1 @@
+>>Heavy beams support the ceiling of this large room, the outer wall of which curves to follow the shape of the tower. Dim light filters into the room through the steel lattice squares of two leaded glass windows. Several tables stand throughout the room, weighed down by stacks of glass jars and bottles, all of them bearing labels.

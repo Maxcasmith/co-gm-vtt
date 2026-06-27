@@ -1,0 +1,1 @@
+A ring of tight-fitting, moss-covered stones encloses this 40-foot-deep well.

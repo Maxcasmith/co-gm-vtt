@@ -1,4 +1,4 @@
-import type { EnemyStatBlock, TokenPosition, Weapon, Consumable, TurnOrderEntry, AttackResult, CombatVictory, CheckRequest, RollResult } from 'shared';
+import type { EnemyStatBlock, TokenPosition, Weapon, Consumable, TurnOrderEntry, AttackResult, CombatVictory, CheckRequest, RollResult, Dungeon } from 'shared';
 
 // ── Payload types ─────────────────────────────────────────────────────────────
 //
@@ -119,6 +119,7 @@ export interface VTTEventMap {
   'vtt:movement:gained':        MovementGainedPayload;
   'vtt:combat:action:spent':    CombatActionSpentPayload;
   'vtt:combat:log':             CombatLogPayload;
+  'vtt:dungeon:loaded':         Dungeon;
 }
 
 // ── Core API ──────────────────────────────────────────────────────────────────

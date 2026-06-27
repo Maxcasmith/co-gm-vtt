@@ -1,0 +1,3 @@
+>>Atop the hill is a wide ring of black boulders and smaller rocks that collectively form a makeshift wall enclosing a field of dead grass. Lightning strikes the edge of the ring from time to time, illuminating a ghastly, fifty-foot-tall statue made of tightly woven twigs and packed with black earth. The statue resembles a towering, cloaked man with fangs.
+
+The ring of boulders that surrounds the field is 250 feet in diameter and ranges from 5 to 10 feet high. Any creature that climbs over the black boulders has a 10 percent chance of being struck by lightning, taking 44 (8d10) lightning damage. Characters can avoid the damage by sticking to the two trails that pass through the ring.

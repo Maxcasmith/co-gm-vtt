@@ -78,10 +78,18 @@ Return ONLY a single valid JSON object — no markdown fences, no explanation:
     "objective": "string — the clear, concrete goal players must achieve to end the session successfully",
     "climax": "string — the specific confrontation or revelation that ends the adventure",
     "resolution": "string — what a successful outcome looks like and what one thing is deliberately left open"
-  }
+  },
+  "acts": [
+    { "act": 1, "conditions": ["string — concrete, observable story event that must occur to advance (e.g. 'The villain's identity revealed to the players')"] },
+    { "act": 2, "conditions": ["string — final act completion condition"] }
+  ],
+  "initialQuests": [
+    { "id": "kebab-slug", "name": "Quest Name", "description": "string — 1-2 sentences, player-facing, what the party knows or is being asked to do" }
+  ],
+  "startingTime": "HH:MM — the in-world time when play begins (e.g. '09:00' for morning, '20:30' for evening)"
 }
 
-Requirements: 2–3 factions, 4–6 NPCs. Keep scope tight — one location cluster, one central conflict, one session. Every element should directly serve the scenario objective. Do NOT pad with backstory that has no bearing on the session.`;
+Requirements: 2–3 factions, 4–6 NPCs. Keep scope tight — one location cluster, one central conflict, one session. Every element should directly serve the scenario objective. Do NOT pad with backstory that has no bearing on the session. initialQuests: 2–4 hooks the DM will surface during play.`;
   }
 
   return `You are a master world-builder for tabletop RPGs. Build a rich, specific sandbox world based on this concept.
@@ -123,10 +131,19 @@ Return ONLY a single valid JSON object — no markdown fences, no explanation:
       "factionAffiliation": "string or null",
       "crossFactionTie": "string or null — a named relationship, debt, or tension with a specific person outside their own faction"
     }
-  ]
+  ],
+  "acts": [
+    { "act": 1, "conditions": ["string — a concrete, observable scene-level event signalling the opening arc is complete"] },
+    { "act": 2, "conditions": ["string — the escalation arc's turning point has occurred"] },
+    { "act": 3, "conditions": ["string — the climax arc is resolved"] }
+  ],
+  "initialQuests": [
+    { "id": "kebab-slug", "name": "Quest Name", "description": "string — 1-2 sentences, player-facing, what the party knows or is being asked to do" }
+  ],
+  "startingTime": "HH:MM — the in-world time when play begins (e.g. '09:00' for morning, '20:30' for evening)"
 }
 
-Requirements: at least 3 factions, at least 6 NPCs. Include at least 2 NPCs with no faction affiliation or whose loyalty is genuinely divided. Factions should have conflicting goals that create natural drama without the GM needing to force it.
+Requirements: at least 3 factions, at least 6 NPCs. Include at least 2 NPCs with no faction affiliation or whose loyalty is genuinely divided. Factions should have conflicting goals that create natural drama without the GM needing to force it. initialQuests: 3–5 opening hooks written as pending story beats the DM will surface in early sessions.
 
 Do NOT generate a plot or overarching story — the players will create that. Generate world state, not narrative. Every NPC and faction should be pursuable independently.`;
 }

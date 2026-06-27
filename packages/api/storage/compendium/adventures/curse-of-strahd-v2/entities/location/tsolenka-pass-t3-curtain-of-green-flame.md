@@ -1,0 +1,3 @@
+A curtain of green flame fills the eastern archway of the gatehouse. Any creature that enters the curtain for the first time on a turn or starts its turn in the green flame takes 33 (6d10) fire damage.
+
+A successful casting of *dispel magic* (DC 16) suppresses the curtain for 1 minute. The curtain is also suppressed within an *antimagic field*.

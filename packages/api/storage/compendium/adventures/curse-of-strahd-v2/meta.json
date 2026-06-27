@@ -1,0 +1,12 @@
+{
+  "slug": "curse-of-strahd-v2",
+  "name": "Curse of Strahd v2",
+  "source": "Curse of Strahd v2",
+  "createdAt": "2026-06-26T10:32:04.665Z",
+  "entityCount": {
+    "npc": 99,
+    "creature": 138,
+    "faction": 16,
+    "location": 67
+  }
+}

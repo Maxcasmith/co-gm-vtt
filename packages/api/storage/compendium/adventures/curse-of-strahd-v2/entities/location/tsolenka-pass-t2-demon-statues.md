@@ -1,0 +1,1 @@
+These statues are actually two petrified **vrocks**. If they are attacked, or if the characters bypass the gatehouse, the vrocks revert to flesh and attack, pursuing prey that flees and fighting until slain.

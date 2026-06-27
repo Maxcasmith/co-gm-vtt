@@ -1,0 +1,3 @@
+>>A dirty window in the south wall allows dim light to enter this room. Wine bottles are manufactured here, as evidenced by the tools lying about, the wooden rack full of freshly blown glass bottles along the south wall, the hearth built into the southwest corner, and the barrel of sand standing next to it. A staircase descends underground, and between it and the rack of bottles stands a barred door.
+
+The stairs lead down to area W13. The bottles stored in the rack don't have labels. The east door is barred from the inside.

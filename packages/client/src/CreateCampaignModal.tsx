@@ -26,8 +26,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
   const [loadingConcepts, setLoadingConcepts] = useState(false);
   const [concepts, setConcepts] = useState<WorldConcept[]>([]);
   const [selectedConcept, setSelectedConcept] = useState<WorldConcept | null>(null);
-  const [streamContent, setStreamContent] = useState('');
-  const [progressMsg, setProgressMsg] = useState('');
+  const [progressLines, setProgressLines] = useState<string[]>([]);
   const [done, setDone] = useState(false);
   const [campaignId, setCampaignId] = useState('');
   const [error, setError] = useState('');
@@ -40,8 +39,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
     setLoadingConcepts(false);
     setConcepts([]);
     setSelectedConcept(null);
-    setStreamContent('');
-    setProgressMsg('');
+    setProgressLines([]);
     setDone(false);
     setCampaignId('');
     setError('');
@@ -74,6 +72,13 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
 
   async function generateConcepts(force = false) {
     if (!tags.length) return;
+
+    if (campaignType === 'dungeon-crawl') {
+      const concept: WorldConcept = { name: tags[0] ?? 'Dungeon Crawl', description: tags.join(', ') };
+      await generate(concept);
+      return;
+    }
+
     const key = cacheKey(tags);
     if (!force) {
       const cached = conceptsCache.current.get(key);
@@ -105,48 +110,50 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
     void generateConcepts(true);
   }
 
-  async function generate() {
-    if (!selectedConcept) return;
+  async function generate(conceptOverride?: WorldConcept) {
+    const concept = conceptOverride ?? selectedConcept;
+    if (!concept) return;
     setStep('generating');
-    setStreamContent('');
-    setProgressMsg('');
+    setProgressLines([]);
     setDone(false);
     setError('');
 
-    const res = await fetch(`${API}/api/campaigns/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tags, concept: selectedConcept, name: selectedConcept.name, type: campaignType }),
-    });
+    try {
+      const res = await fetch(`${API}/api/campaigns/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags, concept, name: concept.name, type: campaignType }),
+      });
 
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
 
-    while (true) {
-      const { done: streamDone, value } = await reader.read();
-      if (streamDone) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        try {
-          const evt = JSON.parse(line.slice(6)) as { type: string; content?: string; id?: string; message?: string };
-          if (evt.type === 'token' && evt.content) {
-            setStreamContent(s => s + evt.content);
-            if (streamRef.current) streamRef.current.scrollTop = streamRef.current.scrollHeight;
-          } else if (evt.type === 'progress') {
-            setProgressMsg(evt.message ?? '');
-          } else if (evt.type === 'complete') {
-            setCampaignId(evt.id ?? '');
-            setDone(true);
-            onCreated();
-          } else if (evt.type === 'error') {
-            setError(evt.message ?? 'Generation failed');
-          }
-        } catch { /* skip malformed */ }
+      while (true) {
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const evt = JSON.parse(line.slice(6)) as { type: string; id?: string; message?: string };
+            if (evt.type === 'progress') {
+              setProgressLines(l => [...l, evt.message ?? '']);
+              if (streamRef.current) streamRef.current.scrollTop = streamRef.current.scrollHeight;
+            } else if (evt.type === 'complete') {
+              setCampaignId(evt.id ?? '');
+              setDone(true);
+              onCreated();
+            } else if (evt.type === 'error') {
+              setError(evt.message ?? 'Generation failed');
+            }
+          } catch { /* skip malformed */ }
+        }
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Connection failed');
     }
   }
 
@@ -202,7 +209,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
                 onClick={generateConcepts}
                 disabled={!tags.length || loadingConcepts}
               >
-                {loadingConcepts ? 'Generating…' : 'Generate Concepts'}
+                {loadingConcepts ? 'Generating…' : campaignType === 'dungeon-crawl' ? 'Generate' : 'Generate Concepts'}
               </button>
             </div>
           </>
@@ -244,15 +251,11 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
           <>
             <div className="modal-header">
               <h2 className="modal-title">{done ? 'World Created' : 'Forging the World…'}</h2>
-              {!done && <p className="modal-hint">The lore is being written. This may take a moment.</p>}
+              {!done && !error && <p className="modal-hint">Building your campaign — this may take a moment.</p>}
             </div>
-            <pre ref={streamRef} className="stream-output">{streamContent}</pre>
-            {progressMsg && !done && (
-              <div className="world-gen-progress">
-                <span className="world-gen-progress-dot" /><span className="world-gen-progress-dot" /><span className="world-gen-progress-dot" />
-                {progressMsg}
-              </div>
-            )}
+            <pre ref={streamRef} className="stream-output">
+              {progressLines.join('\n') || 'Generating world…'}
+            </pre>
             {error && <p className="modal-error">{error}</p>}
             {done && (
               <p className="modal-success">

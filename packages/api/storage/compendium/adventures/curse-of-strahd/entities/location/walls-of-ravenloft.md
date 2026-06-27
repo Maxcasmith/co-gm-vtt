@@ -1,0 +1,5 @@
+>>Thick, cold fog swirls in this courtyard. Sporadic flashes of lightning lance the weeping clouds overhead as thunder shakes the ground. Through the drizzle, you see torch flames fluttering on each side of the keep's open main doors. Warm light spills out of the entrance, flooding the courtyard. High above the entrance is a round window with shards of broken glass lodged in its iron frame.
+
+The walls that enclose the courtyard are 90 feet high. The dark towers of the castle rise even higher. Doors in the gate towers on each side of the tunnel entrance are shut against the rain, and a howling wind rushes through the courtyard.
+
+The open main doors to the keep lead to area K7. The large, shattered window overlooking the main entrance is 50 feet above the courtyard and leads to area K25. No light can be seen through the great window.

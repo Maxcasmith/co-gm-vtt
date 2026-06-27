@@ -1,0 +1,1 @@
+The basement of Death House is where the 'monster' is said to be kept, according to the children. In reality, it serves as a grim reminder of the cult's dark history and the fate of its victims.

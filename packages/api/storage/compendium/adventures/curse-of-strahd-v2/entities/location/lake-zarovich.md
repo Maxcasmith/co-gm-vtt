@@ -1,0 +1,1 @@
+Between these two mountains stands Lake Zarovich, which is fed by streams of ice-cold water pouring down the face of Mount Baratok.

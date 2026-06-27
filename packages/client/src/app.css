@@ -100,6 +100,28 @@
   margin-top: 12px;
 }
 
+/* ── home two-column layout ── */
+.home-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 40px;
+  align-items: start;
+}
+
+@media (max-width: 700px) {
+  .home-columns { grid-template-columns: 1fr; }
+}
+
+.home-column-title {
+  font-family: 'Cinzel', serif;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted, #888);
+  margin-bottom: 16px;
+}
+
 /* ── skeleton ── */
 @keyframes shimmer {
   0%   { background-position: -600px 0; }
@@ -607,7 +629,7 @@
   gap: 20px;
 }
 
-.modal-header { margin-bottom: 0; }
+.modal-header { margin-bottom: 0; display: flex; align-items: center; }
 
 .modal-hint {
   font-family: 'Crimson Pro', Georgia, serif;
@@ -670,6 +692,101 @@
   background: var(--bg);
   padding: 1px 5px;
   border-radius: 2px;
+}
+
+/* ── Quest Log ─────────────────────────────────────────────────────────────── */
+
+.quest-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.quest-act-badge {
+  font-family: 'Cinzel', serif;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--gold);
+  border: 1px solid var(--gold);
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.quest-item {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.quest-header-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 10px 14px;
+  text-align: left;
+}
+.quest-header-btn:hover { background: rgba(255,255,255,0.03); }
+
+.quest-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.quest-dot--open     { background: var(--gold); }
+.quest-dot--resolved { background: #6dbf7e; }
+
+.quest-name {
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  flex: 1;
+}
+
+.quest-chevron {
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.quest-detail {
+  padding: 0 14px 12px 32px;
+  border-top: 1px solid var(--border);
+}
+
+.quest-description {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  color: var(--text-muted);
+  margin: 10px 0 8px;
+}
+
+.quest-log-entries {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.quest-log-entry {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.quest-log-date {
+  font-size: 10px;
+  font-style: normal;
+  color: var(--text-muted);
+  margin-right: 6px;
+  opacity: 0.6;
 }
 
 /* ── tag input ── */
@@ -1809,6 +1926,8 @@
 .palette-item--active { background: var(--surface-hover); }
 .palette-item-label { color: var(--text); font-size: 15px; font-weight: 500; }
 .palette-item-desc { color: var(--text-muted); font-size: 12px; }
+.palette-header { padding: 10px 16px 8px; border-bottom: 1px solid var(--border); }
+.palette-clock { color: var(--text-muted); font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; }
 
 /* ── Character Sheet Overlay ─────────────────────────────────────────────── */
 
@@ -3294,6 +3413,36 @@ button.sheet-save-row {
   font-size: 11px;
   color: var(--text-muted);
   margin-left: 10px;
+}
+
+.admin-section-title {
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 32px 0 12px;
+}
+
+.admin-modules-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.admin-modules-header .admin-section-title {
+  margin-bottom: 0;
+}
+
+.admin-module-counts {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.admin-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 16px 0;
 }
 
 /* ── combat dock ── */

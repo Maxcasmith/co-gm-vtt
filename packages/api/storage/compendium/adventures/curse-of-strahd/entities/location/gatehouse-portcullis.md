@@ -1,0 +1,3 @@
+>>The shelf of rock on which the mountain road clings grows narrow. To your left, the icy cliffs rise sharply toward dark, rolling clouds. To your right, the ground falls away into a sea of fog. Ahead, through the wind and snow, you see a high wall of black stone lined with spikes and topped by statues of demonic vultures with horned heads. Set in the center of the wall is a closed iron portcullis, behind which burns a curtain of green flame.
+>>
+>>On the other side of the dark wall, gripping the mountain's edge, is a guard tower of white stone topped by golden statues of mighty warriors.

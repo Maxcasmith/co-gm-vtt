@@ -1,0 +1,1 @@
+>>This courtyard northeast of the keep is enclosed by towering walls. A stone carriage house with hinged wooden doors stands silent in the corner where the outer walls meet. Across from the carriage house, a slender wooden door reinforced with iron bands leads into the keep.

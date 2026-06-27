@@ -1,0 +1,3 @@
+>>Thick moss covers the walls of this underground staircase. At the foot of the steps is a landing with an arched wooden door set into the north wall.
+
+This staircase connects areas W10 and W14.

@@ -1,0 +1,1 @@
+>>Ten-foot-tall, gold-plated statues stand atop the battlements, facing outward. Each one depicts a female human knight holding a lance. The cold wind stirs the snow, under which you see human skeletons clad in rusty mail.

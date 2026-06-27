@@ -1,0 +1,1 @@
+Strahd's wolves patrol the dark woods of Barovia.
