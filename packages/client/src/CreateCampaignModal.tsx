@@ -240,7 +240,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
             </div>
             <div className="modal-actions">
               <button className="btn-secondary" onClick={() => setStep('tags')}>Back</button>
-              <button className="btn-primary" onClick={generate} disabled={!selectedConcept}>
+              <button className="btn-primary" onClick={() => void generate()} disabled={!selectedConcept}>
                 Generate
               </button>
             </div>

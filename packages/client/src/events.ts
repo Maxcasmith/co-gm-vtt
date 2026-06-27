@@ -54,6 +54,7 @@ export interface CombatInitiativeRollPayload { entry: TurnOrderEntry }
 export interface CombatTurnOrderPayload { entries: TurnOrderEntry[] }
 export interface MovementUsedPayload  { ft: number }
 export interface MovementGainedPayload { ft: number }
+export interface ViewportChangedPayload { x: number; y: number; zoom: number }
 export type CombatActionSpentPayload = Record<string, never>
 export interface CombatLogPayload { text: string; timestamp: number }
 
@@ -120,6 +121,7 @@ export interface VTTEventMap {
   'vtt:combat:action:spent':    CombatActionSpentPayload;
   'vtt:combat:log':             CombatLogPayload;
   'vtt:dungeon:loaded':         Dungeon;
+  'vtt:viewport:changed':       ViewportChangedPayload;
 }
 
 // ── Core API ──────────────────────────────────────────────────────────────────

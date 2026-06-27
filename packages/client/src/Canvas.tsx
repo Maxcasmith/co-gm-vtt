@@ -177,6 +177,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
         const { mx, my, px, py } = panStartRef.current;
         dungeonPanRef.current = { x: px + (e.clientX - mx), y: py + (e.clientY - my) };
         setDragTick(t => t + 1);
+        dispatch('vtt:viewport:changed', { ...dungeonPanRef.current, zoom: dungeonZoomRef.current });
         return;
       }
       const drag = dragRef.current;
@@ -195,8 +196,8 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
       }
       const drag = dragRef.current;
       if (!drag) return;
-      const pan = dungeonRef.current ? dungeonPanRef.current : { x: 0, y: 0 };
-      const dropCellSz = dungeonRef.current ? CELL * dungeonZoomRef.current : CELL;
+      const pan = dungeonPanRef.current;
+      const dropCellSz = CELL * dungeonZoomRef.current;
       const gx = Math.max(0, Math.floor((drag.x - pan.x) / dropCellSz));
       const gy = Math.max(0, Math.floor((drag.y - pan.y) / dropCellSz));
 
@@ -233,7 +234,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     }
 
     function onWheel(e: WheelEvent) {
-      if (!dungeonRef.current) return;
+      if (!showBattleMap) return;
       e.preventDefault();
       const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
       const oldZoom = dungeonZoomRef.current;
@@ -249,6 +250,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
       };
       dungeonZoomRef.current = newZoom;
       setDragTick(t => t + 1);
+      dispatch('vtt:viewport:changed', { x: dungeonPanRef.current.x, y: dungeonPanRef.current.y, zoom: newZoom });
     }
 
     const canvasEl = ref.current;
@@ -277,9 +279,9 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     if (showBattleMap) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const panX = dungeon ? dungeonPanRef.current.x : 0;
-      const panY = dungeon ? dungeonPanRef.current.y : 0;
-      const cellSz = dungeon ? CELL * dungeonZoomRef.current : CELL;
+      const panX = dungeonPanRef.current.x;
+      const panY = dungeonPanRef.current.y;
+      const cellSz = CELL * dungeonZoomRef.current;
 
       if (dungeon) {
         // Dungeon grid: wall background, then floor cells, then entity markers
@@ -320,12 +322,14 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           ctx.stroke();
         }
       } else {
-        // Plain battle map grid
+        // Plain battle map grid with pan/zoom
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        for (let x = 0; x <= canvas.width;  x += CELL) { ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, canvas.height); }
-        for (let y = 0; y <= canvas.height; y += CELL) { ctx.moveTo(0, y + 0.5); ctx.lineTo(canvas.width, y + 0.5); }
+        const offX = ((panX % cellSz) + cellSz) % cellSz;
+        const offY = ((panY % cellSz) + cellSz) % cellSz;
+        for (let x = offX; x <= canvas.width;  x += cellSz) { ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, canvas.height); }
+        for (let y = offY; y <= canvas.height; y += cellSz) { ctx.moveTo(0, y + 0.5); ctx.lineTo(canvas.width, y + 0.5); }
         ctx.stroke();
       }
 
@@ -576,8 +580,8 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!showBattleMap) return;
 
-    // Right-mouse: start pan (dungeon navigation)
-    if (e.button === 2 && dungeon) {
+    // Right-mouse: start pan
+    if (e.button === 2) {
       isPanningRef.current = true;
       panStartRef.current = { mx: e.clientX, my: e.clientY, px: dungeonPanRef.current.x, py: dungeonPanRef.current.y };
       e.currentTarget.style.cursor = 'grabbing';
@@ -589,9 +593,9 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     const rect = e.currentTarget.getBoundingClientRect();
     const rawMx = e.clientX - rect.left;
     const rawMy = e.clientY - rect.top;
-    const panX = dungeon ? dungeonPanRef.current.x : 0;
-    const panY = dungeon ? dungeonPanRef.current.y : 0;
-    const hdCellSz = dungeon ? CELL * dungeonZoomRef.current : CELL;
+    const panX = dungeonPanRef.current.x;
+    const panY = dungeonPanRef.current.y;
+    const hdCellSz = CELL * dungeonZoomRef.current;
     const mx = rawMx - panX;
     const my = rawMy - panY;
 
@@ -644,9 +648,9 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     const pos = tokenPositions[player];
     if (!pos) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const panX = dungeon ? dungeonPanRef.current.x : 0;
-    const panY = dungeon ? dungeonPanRef.current.y : 0;
-    const dcCellSz = dungeon ? CELL * dungeonZoomRef.current : CELL;
+    const panX = dungeonPanRef.current.x;
+    const panY = dungeonPanRef.current.y;
+    const dcCellSz = CELL * dungeonZoomRef.current;
     const mx = e.clientX - rect.left - panX;
     const my = e.clientY - rect.top - panY;
     const cx = pos.gx * dcCellSz + dcCellSz / 2;
@@ -662,9 +666,9 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     // Targeting mode cursor
     if (targetingRef.current && showBattleMap && encounter && tokenPositions) {
       const rect = e.currentTarget.getBoundingClientRect();
-      const panX = dungeon ? dungeonPanRef.current.x : 0;
-      const panY = dungeon ? dungeonPanRef.current.y : 0;
-      const mmCellSz = dungeon ? CELL * dungeonZoomRef.current : CELL;
+      const panX = dungeonPanRef.current.x;
+      const panY = dungeonPanRef.current.y;
+      const mmCellSz = CELL * dungeonZoomRef.current;
       const mx = e.clientX - rect.left - panX;
       const my = e.clientY - rect.top - panY;
       const playerPos = tokenPositions[player];
@@ -690,9 +694,9 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     // Normal: grab cursor over own token
     if (!showBattleMap || !tokenPositions) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const panX = dungeon ? dungeonPanRef.current.x : 0;
-    const panY = dungeon ? dungeonPanRef.current.y : 0;
-    const grabCellSz = dungeon ? CELL * dungeonZoomRef.current : CELL;
+    const panX = dungeonPanRef.current.x;
+    const panY = dungeonPanRef.current.y;
+    const grabCellSz = CELL * dungeonZoomRef.current;
     const mx = e.clientX - rect.left - panX;
     const my = e.clientY - rect.top - panY;
     const pos = tokenPositions[player];
@@ -705,12 +709,12 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
   return (
     <canvas
       ref={ref}
-      className="canvas"
+      className={showBattleMap ? 'canvas' : 'canvas canvas--inactive'}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onDoubleClick={handleDoubleClick}
       onAuxClick={e => e.preventDefault()}
-      onContextMenu={e => { if (dungeon) e.preventDefault(); }}
+      onContextMenu={e => { if (showBattleMap) e.preventDefault(); }}
     />
   );
 }

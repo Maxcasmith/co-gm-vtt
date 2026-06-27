@@ -32,6 +32,7 @@ export default function HomePage() {
   const [campaignOpen, setCampaignOpen] = useState(false);
   const [games, setGames] = useState<Game[] | null>(null);
   const [sessions] = useState<Character[]>(readSessions);
+  const [party, setParty] = useState<Character[]>([]);
 
   function fetchCampaigns() {
     fetch(`${API}/api/campaigns`)
@@ -44,9 +45,14 @@ export default function HomePage() {
 
   function openModal(game: Game) {
     setSelectedGame(game);
+    setParty([]);
     const store = JSON.parse(localStorage.getItem('vtt-passwords') ?? '{}') as Record<string, string>;
     const saved = Object.entries(store).find(([k]) => k.startsWith(`${game.id}:`));
     setPassword(saved?.[1] ?? '');
+    fetch(`${API}/api/campaigns/${game.id}/party`)
+      .then(r => r.json())
+      .then((chars: Character[]) => setParty(chars))
+      .catch(() => {});
     dialogRef.current?.showModal();
   }
 
@@ -146,6 +152,25 @@ export default function HomePage() {
 
         <dialog ref={dialogRef} className="modal">
           <h2 className="modal-title">{selectedGame?.name}</h2>
+          {party.length === 0 && (
+            <p className="party-empty">There are currently no adventurers in the party.</p>
+          )}
+          {party.length > 0 && (
+            <ul className="party-list">
+              {party.map(char => (
+                <li key={char.id} className="party-list-item">
+                  <div className="party-list-portrait">
+                    {char.portraitPath
+                      ? <img src={`${API}/api/campaigns/${char.campaignId}/party/${char.id}/portrait`} alt={char.name} />
+                      : <span>{char.name[0]?.toUpperCase()}</span>
+                    }
+                  </div>
+                  <span className="party-list-name">{char.name}</span>
+                  {char.class && <span className="party-list-meta">{char.race} {char.class}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
           <div className="modal-form">
             <label className="modal-label">
               Password

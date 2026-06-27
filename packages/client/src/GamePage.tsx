@@ -325,6 +325,11 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
           description: 'Begin session and get a recap from the Virtual DM',
           onSelect: () => socketRef.current?.emit('session:start', { campaignId: character.campaignId }),
         },
+    {
+      label: 'Leave',
+      description: 'Disconnect and return to the main menu',
+      onSelect: () => { socketRef.current?.disconnect(); window.location.href = '/'; },
+    },
   ];
 
   return (
