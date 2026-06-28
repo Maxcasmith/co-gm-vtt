@@ -9,7 +9,7 @@ const DUNGEON_ENTITY_R = 10;
 const FLOAT_DUR  = 950;   // ms for floating text
 const FLASH_DUR  = 220;   // ms for token flash
 
-interface FloatEffect { id: number; x: number; y: number; text: string; isHit: boolean; startTime: number }
+interface FloatEffect { id: number; gx: number; gy: number; text: string; isHit: boolean; startTime: number }
 interface FlashEffect { tokenKey: string; startTime: number }
 
 interface Props {
@@ -32,36 +32,37 @@ function drawToken(
   x: number, y: number,
   label: string, name: string,
   color: string,
+  tokenR: number,
   img?: HTMLImageElement,
 ) {
   if (img) {
     ctx.save();
     ctx.beginPath();
-    ctx.arc(x, y, TOKEN_R, 0, Math.PI * 2);
+    ctx.arc(x, y, tokenR, 0, Math.PI * 2);
     ctx.clip();
-    ctx.drawImage(img, x - TOKEN_R, y - TOKEN_R, TOKEN_R * 2, TOKEN_R * 2);
+    ctx.drawImage(img, x - tokenR, y - tokenR, tokenR * 2, tokenR * 2);
     ctx.restore();
   } else {
     ctx.beginPath();
-    ctx.arc(x, y, TOKEN_R, 0, Math.PI * 2);
+    ctx.arc(x, y, tokenR, 0, Math.PI * 2);
     ctx.fillStyle = color;
     ctx.fill();
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 18px monospace';
+    ctx.font = `bold ${Math.round(18 * (tokenR / TOKEN_R))}px monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, x, y);
   }
   ctx.beginPath();
-  ctx.arc(x, y, TOKEN_R, 0, Math.PI * 2);
+  ctx.arc(x, y, tokenR, 0, Math.PI * 2);
   ctx.strokeStyle = 'rgba(255,255,255,0.8)';
   ctx.lineWidth = 2;
   ctx.stroke();
   ctx.fillStyle = '#fff';
-  ctx.font = '11px monospace';
+  ctx.font = `${Math.round(11 * (tokenR / TOKEN_R))}px monospace`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText(name.length > 10 ? name.slice(0, 9) + '…' : name, x, y + TOKEN_R + 12);
+  ctx.fillText(name.length > 10 ? name.slice(0, 9) + '…' : name, x, y + tokenR + 12 * (tokenR / TOKEN_R));
 }
 
 export default function Canvas({ player, characterId, connected, showBattleMap, encounter, tokenUrls, tokenPositions, movementRemaining = 0, deadCreatureIds, downPlayerNames, deadPlayerNames, dungeon }: Props) {
@@ -74,10 +75,12 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
   const tokenPositionsRef   = useRef(tokenPositions);
   const movementRef         = useRef(movementRemaining);
   const dungeonRef          = useRef(dungeon);
+  const showBattleMapRef    = useRef(showBattleMap);
   useEffect(() => { playerRef.current = player; },               [player]);
   useEffect(() => { tokenPositionsRef.current = tokenPositions; }, [tokenPositions]);
   useEffect(() => { movementRef.current = movementRemaining; },   [movementRemaining]);
   useEffect(() => { dungeonRef.current = dungeon; },              [dungeon]);
+  useEffect(() => { showBattleMapRef.current = showBattleMap; },  [showBattleMap]);
 
   // Pan + zoom state for dungeon navigation
   const dungeonPanRef  = useRef({ x: 0, y: 0 });
@@ -113,14 +116,12 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     const pos       = posById ?? posByName;
     const tokenKey  = posById ? result.targetId : result.targetName;
     if (!pos) return;
-    const x = pos.gx * CELL + CELL / 2;
-    const y = pos.gy * CELL + CELL / 2;
     const now = Date.now();
     if (result.hit && result.damage != null) {
       flashEffectsRef.current.push({ tokenKey, startTime: now });
-      floatEffectsRef.current.push({ id: now, x, y, text: `-${result.damage}`, isHit: true, startTime: now });
+      floatEffectsRef.current.push({ id: now, gx: pos.gx, gy: pos.gy, text: `-${result.damage}`, isHit: true, startTime: now });
     } else if (!result.hit) {
-      floatEffectsRef.current.push({ id: now, x, y, text: 'Miss', isHit: false, startTime: now });
+      floatEffectsRef.current.push({ id: now, gx: pos.gx, gy: pos.gy, text: 'Miss', isHit: false, startTime: now });
     }
     kickAnimLoop();
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -234,7 +235,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     }
 
     function onWheel(e: WheelEvent) {
-      if (!showBattleMap) return;
+      if (!showBattleMapRef.current) return;
       e.preventDefault();
       const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
       const oldZoom = dungeonZoomRef.current;
@@ -281,7 +282,9 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
 
       const panX = dungeonPanRef.current.x;
       const panY = dungeonPanRef.current.y;
-      const cellSz = CELL * dungeonZoomRef.current;
+      const zoom = dungeonZoomRef.current;
+      const cellSz = CELL * zoom;
+      const tokenR = TOKEN_R * zoom;
 
       if (dungeon) {
         // Dungeon grid: wall background, then floor cells, then entity markers
@@ -417,7 +420,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
 
           if (name === player && !isDown && !isDead) {
             ctx.beginPath();
-            ctx.arc(x, y, TOKEN_R + 4, 0, Math.PI * 2);
+            ctx.arc(x, y, tokenR + 4, 0, Math.PI * 2);
             ctx.strokeStyle = isDragged ? 'rgba(255,220,50,0.9)' : 'rgba(255,220,50,0.4)';
             ctx.lineWidth = 2;
             ctx.stroke();
@@ -425,7 +428,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
 
           if (isDead) ctx.filter = 'grayscale(1) opacity(0.25)';
           else if (isDown) ctx.filter = 'grayscale(1) opacity(0.55)';
-          drawToken(ctx, x, y, (name[0] ?? '?').toUpperCase(), name, name === player ? '#3a7bd5' : '#5a9ff5', img);
+          drawToken(ctx, x, y, (name[0] ?? '?').toUpperCase(), name, name === player ? '#3a7bd5' : '#5a9ff5', tokenR, img);
           ctx.filter = 'none';
 
           // Hit flash overlay
@@ -435,13 +438,13 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
             ctx.save();
             ctx.globalAlpha = Math.sin(ft * Math.PI) * 0.6;
             ctx.fillStyle = '#ff2222';
-            ctx.beginPath(); ctx.arc(x, y, TOKEN_R, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(x, y, tokenR, 0, Math.PI * 2); ctx.fill();
             ctx.restore();
           }
 
           // Dead marker: a red × over the token
           if (isDead) {
-            const r = TOKEN_R * 0.45;
+            const r = tokenR * 0.45;
             ctx.save();
             ctx.globalAlpha = 0.85;
             ctx.strokeStyle = '#c0392b';
@@ -468,7 +471,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
             const inExtended = !inNormal && !!targeting.extendedRange && dist <= Math.floor(targeting.extendedRange / 5);
             if (inNormal) {
               ctx.beginPath();
-              ctx.arc(x, y, TOKEN_R + 6, 0, Math.PI * 2);
+              ctx.arc(x, y, tokenR + 6, 0, Math.PI * 2);
               ctx.strokeStyle = 'rgba(255, 60, 60, 0.85)';
               ctx.lineWidth = 2.5;
               ctx.stroke();
@@ -476,7 +479,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
               ctx.save();
               ctx.setLineDash([4, 4]);
               ctx.beginPath();
-              ctx.arc(x, y, TOKEN_R + 6, 0, Math.PI * 2);
+              ctx.arc(x, y, tokenR + 6, 0, Math.PI * 2);
               ctx.strokeStyle = 'rgba(255, 60, 60, 0.45)';
               ctx.lineWidth = 2;
               ctx.stroke();
@@ -486,7 +489,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
 
           const isDead = deadCreatureIds?.has(enemy.id);
           if (isDead) ctx.filter = 'grayscale(1) opacity(0.45)';
-          drawToken(ctx, x, y, (enemy.name[0] ?? '?').toUpperCase(), enemy.name, isDead ? '#555' : '#c0392b');
+          drawToken(ctx, x, y, (enemy.name[0] ?? '?').toUpperCase(), enemy.name, isDead ? '#555' : '#c0392b', tokenR);
           if (isDead) ctx.filter = 'none';
 
           // Hit flash overlay
@@ -496,7 +499,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
             ctx.save();
             ctx.globalAlpha = Math.sin(ft * Math.PI) * 0.6;
             ctx.fillStyle = '#ff2222';
-            ctx.beginPath(); ctx.arc(x, y, TOKEN_R, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(x, y, tokenR, 0, Math.PI * 2); ctx.fill();
             ctx.restore();
           }
         });
@@ -525,7 +528,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
             const mx = (ox + cx) / 2;
             const my = (oy + cy) / 2;
             const label = `${dist}ft`;
-            ctx.font = 'bold 11px monospace';
+            ctx.font = `bold ${Math.round(11 * zoom)}px monospace`;
             const tw = ctx.measureText(label).width;
             ctx.fillStyle = 'rgba(14, 12, 20, 0.75)';
             ctx.beginPath();
@@ -549,10 +552,10 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           const rot     = Math.sin(t * Math.PI * 2.5) * 0.13;
           ctx.save();
           ctx.globalAlpha = alpha;
-          ctx.translate(eff.x + panX, eff.y + yOff + panY);
+          ctx.translate(eff.gx * cellSz + cellSz / 2 + panX, eff.gy * cellSz + cellSz / 2 + yOff + panY);
           ctx.rotate(rot);
           ctx.scale(scale, scale);
-          ctx.font = 'bold 21px monospace';
+          ctx.font = `bold ${Math.round(21 * zoom)}px monospace`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.shadowColor = 'rgba(0,0,0,0.95)';

@@ -56,7 +56,26 @@ export interface MovementUsedPayload  { ft: number }
 export interface MovementGainedPayload { ft: number }
 export interface ViewportChangedPayload { x: number; y: number; zoom: number }
 export type CombatActionSpentPayload = Record<string, never>
-export interface CombatLogPayload { text: string; timestamp: number }
+export interface CombatLogTextPayload { kind: 'text'; text: string; timestamp: number }
+export interface CombatLogAttackPayload {
+  kind: 'attack';
+  timestamp: number;
+  attackerName: string;
+  weaponName: string;
+  d20: number;
+  statBonus: number;
+  statName: string;
+  weaponBonus: number;
+  total: number;
+  ac: number;
+  hit: boolean;
+  damage?: number;
+  damageRoll?: number;
+  damageType?: string;
+  damageFormula?: string;
+  targetName: string;
+}
+export type CombatLogPayload = CombatLogTextPayload | CombatLogAttackPayload;
 
 export interface RollRequestPayload {
   characterId: string;

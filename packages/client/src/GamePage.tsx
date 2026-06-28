@@ -75,10 +75,40 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [quests, setQuests] = useState<Quest[]>([]);
   const [act, setAct] = useState(1);
   const [worldTimeSecs, setWorldTimeSecs] = useState(43200);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const lastSpaceRef = useRef<number>(0);
   const socketRef = useRef<ReturnType<typeof io> | null>(null);
   const onCharacterUpdateRef = useRef(onCharacterUpdate);
   useEffect(() => { onCharacterUpdateRef.current = onCharacterUpdate; });
+
+  // Ref so navigation interceptors always see the latest values without re-registering
+  const shouldConfirmRef = useRef(false);
+  shouldConfirmRef.current = sessionActive && connected.length <= 1;
+
+  // Block refresh/close when session is live and we're the last one
+  useEffect(() => {
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      if (shouldConfirmRef.current) { e.preventDefault(); e.returnValue = ''; }
+    }
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
+
+  // Block browser back button — push a sentinel state so we can intercept popstate
+  useEffect(() => {
+    history.pushState(null, '', window.location.href);
+    function onPopState() {
+      history.pushState(null, '', window.location.href); // re-push to stay on page
+      if (shouldConfirmRef.current) {
+        setShowLeaveConfirm(true);
+      } else {
+        socketRef.current?.disconnect();
+        window.location.href = '/';
+      }
+    }
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   useEffect(() => {
     fetch(`${API}/api/config`)
@@ -195,7 +225,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('session:recap', ({ text, senderName, checkRequests }) => {
       dispatch('vtt:chat:message-received', { text, senderName, timestamp: Date.now(), variant: 'recap', checkRequests });
     });
-    socket.on('combat:log', data => dispatch('vtt:combat:log', data));
+    socket.on('combat:log', data => dispatch('vtt:combat:log', { kind: 'text', ...data }));
     socket.on('dungeon:loaded', dungeon => { setDungeon(dungeon); dispatch('vtt:dungeon:loaded', dungeon); });
     socket.on('quest:update', ({ quests: q, act: a }) => { setQuests(q); setAct(a); });
     socket.on('clock:update', ({ worldTimeSecs: t }) => { setWorldTimeSecs(t); });
@@ -328,7 +358,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     {
       label: 'Leave',
       description: 'Disconnect and return to the main menu',
-      onSelect: () => { socketRef.current?.disconnect(); window.location.href = '/'; },
+      onSelect: () => {
+        if (shouldConfirmRef.current) { setShowLeaveConfirm(true); }
+        else { socketRef.current?.disconnect(); window.location.href = '/'; }
+      },
     },
   ];
 
@@ -371,6 +404,23 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
           </div>
         ))}
       </div>
+      {showLeaveConfirm && (
+        <div className="modal-overlay" onClick={() => setShowLeaveConfirm(false)}>
+          <dialog className="modal" open onClick={e => e.stopPropagation()}>
+            <h2 className="modal-title">Adventure still ongoing</h2>
+            <p className="modal-hint">Your adventure is still ongoing, would you like to end the session and leave?</p>
+            <div className="modal-actions">
+              <button className="btn-secondary" onClick={() => setShowLeaveConfirm(false)}>Cancel</button>
+              <button className="btn-primary" onClick={() => {
+                socketRef.current?.emit('session:end', { campaignId: character.campaignId });
+                setTimeout(() => { socketRef.current?.disconnect(); window.location.href = '/'; }, 400);
+              }}>
+                End Session &amp; Leave
+              </button>
+            </div>
+          </dialog>
+        </div>
+      )}
     </>
   );
 }

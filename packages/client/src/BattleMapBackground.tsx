@@ -75,6 +75,7 @@ export default function BattleMapBackground({ campaignId, worldMapUrl }: Props) 
     }
     function onWheel(e: WheelEvent) {
       if (!worldImgRef.current) return;
+      if (divRef.current && !divRef.current.contains(e.target as Node)) return;
       e.preventDefault();
       const { x: px, y: py, zoom: oz } = worldVpRef.current;
       const nz = Math.max(0.5, Math.min(2, oz * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));

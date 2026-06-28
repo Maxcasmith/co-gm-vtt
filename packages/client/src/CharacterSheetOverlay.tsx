@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Character, Weapon, Consumable, TurnOrderEntry } from 'shared';
-import { isWeapon, isConsumable } from 'shared';
+import { isWeapon, isConsumable, CLASS_WEAPON_PROFS, CLASS_ARMOR_TRAINING, calcAC } from 'shared';
 import { on, dispatch } from './events.ts';
 import {
   STAT_NAMES,
@@ -14,7 +14,14 @@ import {
 } from './character-creation/srd.ts';
 
 const API = `http://${window.location.hostname}:3001`;
-const PROF = 2;
+
+function profBonusForLevel(level: number): number {
+  if (level >= 17) return 6;
+  if (level >= 13) return 5;
+  if (level >= 9)  return 4;
+  if (level >= 5)  return 3;
+  return 2;
+}
 
 function mod(score: number): string {
   const m = Math.floor((score - 10) / 2);
@@ -31,6 +38,7 @@ interface Props { character: Character; currentHp?: number; maxHp?: number; }
 // ── Abilities ─────────────────────────────────────────────────────────────────
 
 function AbilitiesTab({ character }: { character: Character }) {
+  const PROF = character.proficiencyBonus ?? profBonusForLevel(character.level ?? 1);
   const [deathSuccesses, setDeathSuccesses] = useState(0);
   const [deathFailures, setDeathFailures]   = useState(0);
 
@@ -108,6 +116,26 @@ function AbilitiesTab({ character }: { character: Character }) {
             <progress className="sheet-death-bar sheet-death-bar--life"  max={3} value={deathSuccesses} />
             <progress className="sheet-death-bar sheet-death-bar--death" max={3} value={deathFailures} />
           </div>
+
+          <p className="sheet-section-title" style={{ paddingTop: '15px' }}>Proficiencies &amp; Training</p>
+          <div className="sheet-proficiency-block">
+            <div className="sheet-proficiency-row">
+              <span className="sheet-proficiency-label">Weapons</span>
+              <span className="sheet-proficiency-value">
+                {(CLASS_WEAPON_PROFS[character.class] ?? []).length > 0
+                  ? (CLASS_WEAPON_PROFS[character.class] ?? []).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' & ') + ' weapons'
+                  : 'None'}
+              </span>
+            </div>
+            <div className="sheet-proficiency-row">
+              <span className="sheet-proficiency-label">Armor</span>
+              <span className="sheet-proficiency-value">
+                {(CLASS_ARMOR_TRAINING[character.class] ?? []).length > 0
+                  ? (CLASS_ARMOR_TRAINING[character.class] ?? []).map(a => a.charAt(0).toUpperCase() + a.slice(1)).join(', ')
+                  : 'None'}
+              </span>
+            </div>
+          </div>
         </div>
 
         <div>
@@ -132,6 +160,7 @@ function AbilitiesTab({ character }: { character: Character }) {
           })}
         </div>
       </div>
+
     </>
   );
 }
@@ -290,7 +319,8 @@ const TABS: { id: SheetTab; label: string }[] = [
   { id: 'inventory', label: 'Inventory' },
 ];
 
-const NEXT_LEVEL_XP = 100;
+// XP required to reach each level (index = level, so index 1 = 300 XP to reach level 2)
+const XP_THRESHOLDS = [0, 300, 900, 2700, 6500, 14000, 23000, 34000, 48000, 64000, 85000, 100000, 120000, 140000, 165000, 195000, 225000, 265000, 305000, 355000];
 
 export default function CharacterSheetOverlay({ character, currentHp, maxHp }: Props) {
   const [visible, setVisible] = useState(false);
@@ -308,10 +338,26 @@ export default function CharacterSheetOverlay({ character, currentHp, maxHp }: P
     if (mine) setActionAvailable(true);
   }), [character.name]);
   useEffect(() => on('vtt:combat:action:spent', () => setActionAvailable(false)), []);
-  const [currentXp, setCurrentXp] = useState(() => {
-    const stored = sessionStorage.getItem(`vtt-xp:${character.id}`);
-    return stored ? parseInt(stored, 10) : 0;
-  });
+  const [currentXp, setCurrentXp] = useState(character.xp ?? 0);
+  const [currentLevel, setCurrentLevel] = useState(character.level ?? 1);
+  const [profBonus, setProfBonus] = useState(character.proficiencyBonus ?? profBonusForLevel(character.level ?? 1));
+  useEffect(() => { setCurrentXp(character.xp ?? 0); }, [character.xp]);
+  useEffect(() => {
+    setCurrentLevel(character.level ?? 1);
+    setProfBonus(character.proficiencyBonus ?? profBonusForLevel(character.level ?? 1));
+  }, [character.level, character.proficiencyBonus]);
+
+  async function handleLevelUp() {
+    const newLevel = currentLevel + 1;
+    const newProf = profBonusForLevel(newLevel);
+    setCurrentLevel(newLevel);
+    setProfBonus(newProf);
+    await fetch(`${API}/api/campaigns/${character.campaignId}/party/${character.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level: newLevel, proficiencyBonus: newProf }),
+    });
+  }
 
   useEffect(() => {
     const unsubOpen  = on('vtt:sheet:opened', () => setVisible(true));
@@ -335,12 +381,7 @@ export default function CharacterSheetOverlay({ character, currentHp, maxHp }: P
   const displayMax     = maxHp     ?? derivedMaxHp;
   const displayCurrent = currentHp ?? displayMax;
 
-  const dexMod = modNum(character.stats.dex);
-  const ac = character.class === 'Barbarian'
-    ? 10 + dexMod + modNum(character.stats.con)
-    : character.class === 'Monk'
-      ? 10 + dexMod + modNum(character.stats.wis)
-      : 10 + dexMod;
+  const ac = calcAC(character);
 
   const portraitCharId = character.portraitPath
     ? character.portraitPath.split('/')[1] ?? character.id
@@ -393,15 +434,31 @@ export default function CharacterSheetOverlay({ character, currentHp, maxHp }: P
           <span className="sheet-hp-strip-sep" />
           <span className="sheet-hp-strip-label">INIT</span>
           <span className="sheet-hp-strip-value">{(() => { const n = modNum(character.stats.dex) + (character.initiativeBonus ?? 0); return n >= 0 ? `+${n}` : `${n}`; })()}</span>
-          <div className="sheet-xp">
-            <progress className="sheet-xp-bar" max={NEXT_LEVEL_XP} value={currentXp} />
-            <span className="sheet-xp-label">{currentXp} / {NEXT_LEVEL_XP} XP</span>
-            <button
-              className={`sheet-levelup-btn${currentXp >= NEXT_LEVEL_XP ? ' sheet-levelup-btn--ready' : ''}`}
-              disabled={currentXp < NEXT_LEVEL_XP}
-              onClick={() => { setCurrentXp(0); sessionStorage.setItem(`vtt-xp:${character.id}`, '0'); }}
-            >LEVEL UP</button>
-          </div>
+          <span className="sheet-hp-strip-sep" />
+          <span className="sheet-hp-strip-label">PROF</span>
+          <span className="sheet-hp-strip-value">+{profBonus}</span>
+          {(() => {
+            const nextThreshold = XP_THRESHOLDS[currentLevel] ?? null;
+            const canLevel = nextThreshold !== null && currentXp >= nextThreshold && currentLevel < 20;
+            const levelFloor = XP_THRESHOLDS[currentLevel - 1] ?? 0;
+            const barMax = nextThreshold !== null ? nextThreshold - levelFloor : 1;
+            const barVal = nextThreshold !== null ? Math.min(currentXp - levelFloor, barMax) : barMax;
+            return (
+              <div className="sheet-xp">
+                <progress className="sheet-xp-bar" max={barMax} value={barVal} />
+                <span className="sheet-xp-label">
+                  {currentXp.toLocaleString()} / {nextThreshold !== null ? nextThreshold.toLocaleString() : '—'} XP
+                </span>
+                {currentLevel < 20 && (
+                  <button
+                    className={`sheet-levelup-btn${canLevel ? ' sheet-levelup-btn--ready' : ''}`}
+                    disabled={!canLevel}
+                    onClick={() => void handleLevelUp()}
+                  >LEVEL UP</button>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         <div className="sheet-tabs">

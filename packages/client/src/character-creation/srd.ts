@@ -352,6 +352,10 @@ export interface ShopItem {
   attackBonus?: number;
   range?: number;
   extendedRange?: number;
+  // armor fields — stored to inventory verbatim when bought
+  armorType?: 'light' | 'medium' | 'heavy' | 'none';
+  acBonus?: number;
+  isShield?: boolean;
   properties?: string[];
   isFinesse?: boolean;
   mastery?: string;
@@ -359,9 +363,9 @@ export interface ShopItem {
 
 export const SHOP_ITEMS: ShopItem[] = [
   { id: 'longsword',         name: 'Longsword',          cost: 15, description: '1d8 slashing. Versatile (1d10).',                  type: 'weapon', damage: '1d8', damageType: 'slashing',  attackBonus: 0, range:  5, properties: ['versatile', 'martial'] },
-  { id: 'shield',            name: 'Shield',              cost: 10, description: '+2 AC bonus.' },
+  { id: 'shield',            name: 'Shield',              cost: 10, description: '+2 AC bonus.',                                                                            type: 'armor', armorType: 'none', acBonus: 2,  isShield: true  },
   { id: 'handaxe',           name: 'Handaxe',             cost:  5, description: '1d6 slashing. Light, thrown (20/60 ft).',          type: 'weapon', damage: '1d6', damageType: 'slashing',  attackBonus: 0, range:  5, properties: ['light', 'thrown', 'simple'] },
-  { id: 'leather-armour',    name: 'Leather Armour',      cost: 10, description: 'AC 11 + DEX modifier.' },
+  { id: 'leather-armour',    name: 'Leather Armour',      cost: 10, description: 'AC 11 + DEX modifier. Light armor.',                                            type: 'armor', armorType: 'light', acBonus: 11, isShield: false },
   { id: 'potion-of-healing', name: 'Potion of Healing',   cost: 50, description: 'Restores 2d4+2 HP.' },
   { id: 'shortbow',          name: 'Shortbow',            cost: 25, description: '1d6 piercing. Ammunition (arrow), two-handed. Range 80/320 ft.', type: 'weapon', damage: '1d6', damageType: 'piercing', attackBonus: 0, range: 80, extendedRange: 320, properties: ['ammunition', 'two-handed', 'simple'], mastery: 'Vex' },
   { id: 'arrows',            name: 'Arrows (20)',         cost:  1, description: 'Ammunition for shortbows and longbows. Bundle of 20.' },

@@ -3,7 +3,7 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import type { ServerToClientEvents, ClientToServerEvents, Player, CharacterStats, TurnOrderEntry, Character, Weapon } from 'shared';
-import { Weapon as WeaponClass } from 'shared';
+import { Weapon as WeaponClass, CLASS_WEAPON_PROFS, calcAC } from 'shared';
 import { configRouter } from './routes/config.ts';
 import { campaignsRouter } from './routes/campaigns.ts';
 import { compendiumRouter } from './routes/compendium.ts';
@@ -58,6 +58,7 @@ const tokenPositions = new Map<string, Record<string, { gx: number; gy: number }
 const dmQueue = new Map<string, Promise<void>>();
 const campaignPlayers = new Map<string, string[]>();
 const playerSocketIds = new Map<string, string>(); // charId → socketId (for private events)
+const enemiesReady   = new Map<string, boolean>();  // true once rollEnemyInitiatives has fired
 
 const HIT_DICE: Record<string, number> = {
   Artificer: 8, Barbarian: 12, Bard: 8, Cleric: 8, Druid: 8,
@@ -254,7 +255,7 @@ async function runEnemyAI(cid: string, actor: Participant): Promise<void> {
       if (targetParticipant.isPlayer) {
         const chars = await listCharacters(cid);
         targetCharForAttack = chars.find(c => c.name === targetParticipant.name);
-        targetAc = targetCharForAttack ? (10 + statMod(targetCharForAttack.stats.dex)) : 10;
+        targetAc = targetCharForAttack ? calcAC(targetCharForAttack) : 10;
       } else {
         targetAc = encounter.findCreature(targetParticipant.id)?.ac ?? 10;
       }
@@ -318,7 +319,7 @@ async function runEnemyAI(cid: string, actor: Participant): Promise<void> {
       const targetId = targetParticipant.isPlayer ? (targetCharForAttack?.id ?? targetParticipant.name) : targetParticipant.id;
       io.to(ROOM).emit('combat:attack:result', {
         attackerName: actor.name, targetName: targetParticipant.name, targetId,
-        weaponName: atk.name, d20: roll, attackBonus: atk.bonus, total, ac: targetAc,
+        weaponName: atk.name, d20: roll, attackBonus: atk.bonus, statBonus: atk.bonus, statName: 'Attack', weaponBonus: 0, total, ac: targetAc,
         hit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
       });
 
@@ -328,7 +329,7 @@ async function runEnemyAI(cid: string, actor: Participant): Promise<void> {
       if (cfgApiKey) {
         const atkResult = {
           attackerName: actor.name, targetName: targetParticipant.name, targetId,
-          weaponName: atk.name, d20: roll, attackBonus: atk.bonus, total, ac: targetAc,
+          weaponName: atk.name, d20: roll, attackBonus: atk.bonus, statBonus: atk.bonus, statName: 'Attack', weaponBonus: 0, total, ac: targetAc,
           hit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
         };
         const flavour = await generateCombatFlavour(atkResult, cfgApiKey, cfgTier.model);
@@ -365,6 +366,7 @@ function endSession(cid: string): void {
 function endCombatDefeated(cid: string): void {
   if (!combatState.get(cid)) return;
   combatState.set(cid, false);
+  enemiesReady.delete(cid);
   io.to(ROOM).emit('combat:defeat');
   setTimeout(() => {
     const encounter = encounters.get(cid);
@@ -493,6 +495,7 @@ async function rollPlayerInitiatives(cid: string, chars: Character[]): Promise<v
 function rollEnemyInitiatives(cid: string): void {
   const encounter = encounters.get(cid);
   if (!encounter) return;
+  enemiesReady.set(cid, true);
   const existing = encounter.turnOrder.length;
   const entries = encounter.enemies.map(p => {
     p.initiative = new D20Roll().roll() + statMod(p.creature?.stats.dex ?? 10);
@@ -512,7 +515,7 @@ function addToTurnOrder(cid: string, entries: Participant[], baseDelay = 0): voi
       io.to(ROOM).emit('combat:initiative', entry.toTurnOrderEntry());
 
       const expected = encounter.expectedParticipantCount;
-      if (encounter.turnOrder.length >= expected && expected > 0 && !encounter.currentRound) {
+      if (encounter.turnOrder.length >= expected && expected > 0 && !encounter.currentRound && enemiesReady.get(cid)) {
         encounter.beginCombat();
         emitTurn(cid);
       }
@@ -737,6 +740,7 @@ async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
   await Promise.all(consolidateEffects(effects).map(async effect => {
     if (effect.type === 'combat_init' && !combatState.get(cid)) {
       combatState.set(cid, true);
+      enemiesReady.set(cid, false);
       encounters.set(cid, Encounter.empty(cid));
       io.to(ROOM).emit('combat:state', true);
       void listCharacters(cid).then(chars => rollPlayerInitiatives(cid, chars));
@@ -1192,6 +1196,9 @@ io.on('connection', (socket) => {
                     weaponName: weapon.name,
                     d20: roll,
                     attackBonus: mod,
+                    statBonus: mod,
+                    statName: 'Attack',
+                    weaponBonus: 0,
                     total,
                     ac: result.dc,
                     hit,
@@ -1247,7 +1254,7 @@ io.on('connection', (socket) => {
       io.to(ROOM).emit('combat:initiative', entry);
 
       const expected = encounter.expectedParticipantCount;
-      if (encounter.turnOrder.length >= expected && expected > 0 && !encounter.currentRound) {
+      if (encounter.turnOrder.length >= expected && expected > 0 && !encounter.currentRound && enemiesReady.get(cid)) {
         encounter.beginCombat();
         emitTurn(cid);
       }
@@ -1267,8 +1274,14 @@ io.on('connection', (socket) => {
         const strMod = statMod(char.stats.str);
         const dexMod = statMod(char.stats.dex);
         const isMelee = weapon.range <= 5;
-        const statBonus = weapon.isFinesse ? Math.max(strMod, dexMod) : isMelee ? strMod : dexMod;
-        const attackBonus = statBonus + (weapon.attackBonus ?? 0);
+        const useDex = !isMelee || (weapon.isFinesse && dexMod > strMod);
+        const statBonus = useDex ? dexMod : strMod;
+        const statName = useDex ? 'Dexterity' : 'Strength';
+        const charProf = char.proficiencyBonus ?? 2;
+        const classWeaponProfs = CLASS_WEAPON_PROFS[char.class] ?? [];
+        const isProficient = weapon.properties?.some(p => classWeaponProfs.includes(p as 'simple' | 'martial'));
+        const weaponBonus = (weapon.attackBonus ?? 0) + (isProficient ? charProf : 0);
+        const attackBonus = statBonus + weaponBonus;
 
         const positions = tokenPositions.get(cid) ?? {};
         const attackerPos = positions[attackerName];
@@ -1281,8 +1294,10 @@ io.on('connection', (socket) => {
         const hit = total >= creature.ac;
 
         let damage: number | undefined;
+        let damageRoll: number | undefined;
         if (hit) {
-          damage = rollDice(weapon.damage) + statBonus;
+          damageRoll = rollDice(weapon.damage);
+          damage = damageRoll + statBonus;
           await applyDamageToCreature(cid, targetId, damage);
         }
 
@@ -1293,16 +1308,20 @@ io.on('connection', (socket) => {
           weaponName: weapon.name,
           d20: roll,
           attackBonus,
+          statBonus,
+          statName,
+          weaponBonus,
           total,
           ac: creature.ac,
           hit,
           damage,
+          damageRoll,
+          damageType: weapon.damageType,
           damageFormula: weapon.damage,
           remainingHp: hit ? encounter.findCreature(targetId)?.currentHp : undefined,
           targetDead: encounter.findCreature(targetId)?.isDead() ?? false,
         };
         io.to(ROOM).emit('combat:attack:result', atkResult);
-        console.log(`[combat] ${attackerName} attacks ${creature.name}: ${roll}${fmtMod(attackBonus)} = ${total} vs AC ${creature.ac} — ${hit ? `HIT ${damage}` : 'MISS'}`);
 
         void (async () => {
           try {

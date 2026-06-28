@@ -88,10 +88,15 @@ export interface AttackResult {
   weaponName: string;
   d20: number;
   attackBonus: number;
+  statBonus: number;
+  statName: string;
+  weaponBonus: number;
   total: number;
   ac: number;
   hit: boolean;
   damage?: number | undefined;
+  damageRoll?: number | undefined;
+  damageType?: string | undefined;
   damageFormula?: string | undefined;
   remainingHp?: number | undefined;
   targetDead: boolean;
@@ -372,6 +377,71 @@ export interface Character {
   speed?: number;
   initiativeBonus?: number;
   xp?: number;
+  level?: number;
+  proficiencyBonus?: number;
   maxHp?: number;
   currentHp?: number;
+}
+
+export type WeaponProficiency = 'simple' | 'martial';
+export type ArmorTraining = 'light' | 'medium' | 'heavy' | 'shield';
+
+export const CLASS_WEAPON_PROFS: Record<string, WeaponProficiency[]> = {
+  Artificer:  ['simple'],
+  Barbarian:  ['simple', 'martial'],
+  Bard:       ['simple'],
+  Cleric:     ['simple'],
+  Druid:      ['simple'],
+  Fighter:    ['simple', 'martial'],
+  Monk:       ['simple'],
+  Paladin:    ['simple', 'martial'],
+  Ranger:     ['simple', 'martial'],
+  Rogue:      ['simple'],
+  Sorcerer:   ['simple'],
+  Warlock:    ['simple'],
+  Wizard:     ['simple'],
+};
+
+export const CLASS_ARMOR_TRAINING: Record<string, ArmorTraining[]> = {
+  Artificer:  ['light', 'medium', 'shield'],
+  Barbarian:  ['light', 'medium', 'shield'],
+  Bard:       ['light'],
+  Cleric:     ['light', 'medium', 'shield'],
+  Druid:      ['light', 'medium', 'shield'],
+  Fighter:    ['light', 'medium', 'heavy', 'shield'],
+  Monk:       [],
+  Paladin:    ['light', 'medium', 'heavy', 'shield'],
+  Ranger:     ['light', 'medium', 'shield'],
+  Rogue:      ['light'],
+  Sorcerer:   [],
+  Warlock:    ['light'],
+  Wizard:     [],
+};
+
+function statMod(score: number) { return Math.floor((score - 10) / 2); }
+
+/** Compute a character's AC from their inventory armor, applying D&D 5e dex-mod rules per armor type. */
+export function calcAC(character: Character): number {
+  const dex = statMod(character.stats.dex);
+  const inv = character.inventory ?? [];
+
+  // Find the first non-shield armor and any shield
+  const bodyArmor = inv.find((i): i is Armor => i.type === 'armor' && !(i as Armor).isShield) as Armor | undefined;
+  const shield    = inv.find((i): i is Armor => i.type === 'armor' && (i as Armor).isShield)  as Armor | undefined;
+  const shieldAc  = shield ? (shield as Armor).acBonus : 0;
+
+  if (!bodyArmor) {
+    // Unarmored — class special cases
+    if (character.class === 'Barbarian') return 10 + dex + statMod(character.stats.con) + shieldAc;
+    if (character.class === 'Monk')      return 10 + dex + statMod(character.stats.wis);
+    return 10 + dex + shieldAc;
+  }
+
+  const base = (bodyArmor as Armor).acBonus;
+  switch ((bodyArmor as Armor).armorType) {
+    case 'light':  return base + dex + shieldAc;
+    case 'medium': return base + Math.min(dex, 2) + shieldAc;
+    case 'heavy':  return base + shieldAc;
+    default:       return base + dex + shieldAc;
+  }
 }

@@ -237,6 +237,16 @@ campaignsRouter.get('/:id/party/:charId', async (req, res) => {
   res.json(char);
 });
 
+campaignsRouter.patch('/:id/party/:charId', async (req, res) => {
+  const { id, charId } = req.params as { id: string; charId: string };
+  const char = await getCharacter(id, charId);
+  if (!char) { res.status(404).json({ error: 'Character not found' }); return; }
+  const allowed = ['xp', 'level', 'proficiencyBonus'] as const;
+  const patch = Object.fromEntries(allowed.filter(k => k in req.body).map(k => [k, (req.body as Record<string, unknown>)[k]]));
+  await writeCharacter(id, charId, { ...char, ...patch });
+  res.json({ ok: true });
+});
+
 campaignsRouter.get('/:id/party/:charId/portrait', (req, res) => {
   const { id, charId } = req.params as { id: string; charId: string };
   // try .jpg first (new), fall back to .png (legacy)

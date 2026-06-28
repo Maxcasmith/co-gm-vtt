@@ -51,8 +51,22 @@ export default function AdminPage() {
       method: 'DELETE',
       headers: adminHeaders(password),
     });
-    if (r.ok) setCampaigns(cs => cs.filter(c => c.id !== campaignId));
-    else setFeedback(f => ({ ...f, [`${campaignId}:delete`]: 'Failed' }));
+    if (r.ok) {
+      // Clear any session/local storage the player may have for this campaign
+      try {
+        const sessionRaw = sessionStorage.getItem(`vtt-session:${campaignId}`);
+        if (sessionRaw) {
+          const char = JSON.parse(sessionRaw) as { id?: string };
+          if (char.id) {
+            const passwords = JSON.parse(localStorage.getItem('vtt-passwords') ?? '{}') as Record<string, string>;
+            delete passwords[`${campaignId}:${char.id}`];
+            localStorage.setItem('vtt-passwords', JSON.stringify(passwords));
+          }
+        }
+      } catch { /* ignore */ }
+      sessionStorage.removeItem(`vtt-session:${campaignId}`);
+      setCampaigns(cs => cs.filter(c => c.id !== campaignId));
+    } else setFeedback(f => ({ ...f, [`${campaignId}:delete`]: 'Failed' }));
   }
 
   async function deleteAdventure(slug: string, name: string) {
