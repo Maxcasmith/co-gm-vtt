@@ -1,5 +1,0 @@
->>This slouching, centuries-old stone church has a bulging steeple in the back and walls lined with cracked, stained glass windows depicting pious saints. A fence of wrought iron encloses a garden of gravestones next to the church. A thin mist creeps among the graves.
-
-This church is dedicated to the Morninglord and named after St. Andral, whose bones once rested under the altar.
-
-The characters can prevent this special event from occurring by returning the bones of St. Andral to the church (area N1) or by destroying the vampire spawn hiding in the coffin maker's shop (area N6). If the characters stay in Vallaki for three days or more and don't retrieve the bones or destroy the vampire spawn, Strahd visits the coffin maker's shop the following evening and orchestrates an attack on the church.

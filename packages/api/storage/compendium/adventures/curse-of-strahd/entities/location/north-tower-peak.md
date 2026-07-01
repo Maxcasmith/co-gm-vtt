@@ -1,1 +1,0 @@
->>The stairs end at a dark and dreary room with manacles attached to the walls. In the middle of the room is a wood-framed bed fitted with leather restraints. At the foot of the bed rests a closed iron chest, is lid sculpted with an emblem.

@@ -385,3 +385,28 @@ export const ORIGIN_FEAT_DETAILS: Record<string, BackgroundFeat> = {
   'Tavern Brawler':           { name: "Tavern Brawler", description: "Your unarmed strikes deal 1d4 + STR damage. You can use improvised weapons. Once per turn when you hit with an unarmed strike or improvised weapon, you can attempt to grapple as a Bonus Action." },
   'Tough':                    { name: "Tough", description: "Your hit point maximum increases by 2 for every character level you have, and increases by 2 again each time you gain a level." },
 };
+
+// ── Spell allowances at level 1 ───────────────────────────────────────────────
+// cantrips: max cantrips learnable; spells: max 1st-level spells learnable.
+// Classes not listed (Barbarian, Fighter, Monk, Rogue) have no spellcasting at level 1.
+export interface SpellAllowance { cantrips: number; spells: number; spellLevels: number[] }
+
+export const CLASS_SPELL_ALLOWANCE: Record<string, SpellAllowance> = {
+  Artificer: { cantrips: 2, spells: 2, spellLevels: [1] },
+  Bard:      { cantrips: 2, spells: 4, spellLevels: [1] },
+  Cleric:    { cantrips: 3, spells: 2, spellLevels: [1] },
+  Druid:     { cantrips: 2, spells: 2, spellLevels: [1] },
+  Paladin:   { cantrips: 0, spells: 2, spellLevels: [1] },
+  Ranger:    { cantrips: 0, spells: 2, spellLevels: [1] },
+  Sorcerer:  { cantrips: 4, spells: 2, spellLevels: [1] },
+  Warlock:   { cantrips: 2, spells: 2, spellLevels: [1] },
+  Wizard:    { cantrips: 3, spells: 6, spellLevels: [1] },
+};
+
+// Feats that grant extra spells (beyond class allowance)
+// Values are additive on top of the class allowance.
+export const FEAT_SPELL_GRANTS: Record<string, { cantrips: number; spells: number; forClass: string }> = {
+  'Magic Initiate (Cleric)': { cantrips: 2, spells: 1, forClass: 'Cleric' },
+  'Magic Initiate (Druid)':  { cantrips: 2, spells: 1, forClass: 'Druid'  },
+  'Magic Initiate (Wizard)': { cantrips: 2, spells: 1, forClass: 'Wizard' },
+};

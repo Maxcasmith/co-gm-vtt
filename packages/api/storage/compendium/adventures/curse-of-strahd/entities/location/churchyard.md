@@ -1,1 +1,0 @@
->>Through the fog you see the empty shell an old stone church, north of which is a cemetery of leaning gravestones enclosed by a disintegrating iron fence. Half of the cemetery has sunk into the mire.

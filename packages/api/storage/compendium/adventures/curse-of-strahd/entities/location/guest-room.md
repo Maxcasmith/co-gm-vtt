@@ -1,1 +1,0 @@
->>A large bed sits in the center of this room, its four corner posts supporting a black canopy trimmed with gold tassels. Several comfortable divans are placed about the room. There is a banded door in the west wall and a smaller unbanded door in the east wall.

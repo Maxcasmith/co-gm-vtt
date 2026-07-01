@@ -381,6 +381,23 @@ export interface Character {
   proficiencyBonus?: number;
   maxHp?: number;
   currentHp?: number;
+  spells?: string[]; // learned spell names
+}
+
+export interface Spell {
+  name: string;
+  source: string;
+  level: number;       // 0 = cantrip, 1–9 = spell level
+  levelLabel: string;  // 'Cantrip' | '1st' | '2nd' | …
+  castingTime: string;
+  duration: string;
+  school: string;      // normalized, e.g. 'Evocation' (ritual stripped out)
+  range: string;
+  components: string;
+  classes: string[];   // canonical class names, e.g. ['Wizard', 'Sorcerer']
+  text: string;
+  atHigherLevels: string;
+  isRitual: boolean;
 }
 
 export type WeaponProficiency = 'simple' | 'martial';

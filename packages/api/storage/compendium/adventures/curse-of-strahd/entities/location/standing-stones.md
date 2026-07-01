@@ -1,1 +1,0 @@
->>A dozen moss-covered menhirs form a near-perfect circle in the spongy earth. These weathered stones range in height from 15 to 18 feet. A couple of them lean inward as if to share some great secret with their inscrutable neighbors.

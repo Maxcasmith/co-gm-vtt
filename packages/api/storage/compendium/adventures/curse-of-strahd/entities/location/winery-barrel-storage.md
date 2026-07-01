@@ -1,3 +1,0 @@
->>Rows of new barrels fill this room. A narrow stone staircase spirals upward in the southwest corner.
-
-The room contains thirteen empty barrels.

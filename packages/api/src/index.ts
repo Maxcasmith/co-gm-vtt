@@ -19,6 +19,7 @@ import { parseLocationContext, buildBattleMapPrompt, generateEncounterEnemies, g
 import { generateBattleMap } from './providers/openai.ts';
 import { mapsRouter } from './routes/maps.ts';
 import { adminRouter } from './routes/admin.ts';
+import { spellsRouter } from './routes/spells.ts';
 import { randomUUID } from 'crypto';
 import { Encounter, Team, Participant } from './domain/encounter.ts';
 import { Creature } from './domain/creature.ts';
@@ -32,6 +33,7 @@ app.use('/api/campaigns', campaignsRouter);
 app.use('/api/campaigns', mapsRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/compendium', compendiumRouter);
+app.use('/api/spells', spellsRouter);
 
 const httpServer = createServer(app);
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {

@@ -1,1 +1,0 @@
->>This spiraling staircase is dark and dusty.

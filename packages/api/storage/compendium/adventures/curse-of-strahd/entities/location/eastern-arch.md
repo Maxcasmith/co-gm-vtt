@@ -1,1 +1,0 @@
->>One of the statues atop this arch has crumbled, leaving only the hindquarters of the horse intact. The mountain pass continues beyond.

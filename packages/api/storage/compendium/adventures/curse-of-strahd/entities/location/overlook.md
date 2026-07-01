@@ -1,1 +1,0 @@
->>Dark clouds overhead drizzle constantly. A flagstone avenue passes between empty outbuildings, leading to a stone-paved overlook. The overlook has a low stone wall adorned with outward-facing gargoyle carvings.

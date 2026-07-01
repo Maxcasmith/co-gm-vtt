@@ -24,6 +24,7 @@ interface CharacterDraft {
   activeTab: 'info' | 'spells' | 'shop';
   gold: number;
   inventory: InventoryItem[];
+  learnedSpells: string[];
 }
 
 interface CharacterContextValue extends CharacterDraft {
@@ -51,6 +52,7 @@ const BLANK: Omit<CharacterDraft, 'id'> = {
   activeTab: 'info',
   gold: 200,
   inventory: [],
+  learnedSpells: [],
 };
 
 const STAT_IDX: Record<StatName, number> = { STR: 0, DEX: 1, CON: 2, INT: 3, WIS: 4, CHA: 5 };

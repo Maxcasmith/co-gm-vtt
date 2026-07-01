@@ -1,1 +1,0 @@
-Rose Durst is the daughter of Gustav and Elisabeth. She is innocent and longed for companionship during her tragic childhood. Her spirit haunts the children's room, bound by her tragic fate and her unresolved feelings of neglect.

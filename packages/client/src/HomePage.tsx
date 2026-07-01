@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Campaign, Character } from 'shared';
-import CreateCampaignModal from './CreateCampaignModal.tsx';
 import './app.css';
 
 interface Game {
@@ -29,7 +28,6 @@ export default function HomePage() {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [selectedGame, setSelectedGame] = useState<Game | null>(null);
   const [password, setPassword] = useState('');
-  const [campaignOpen, setCampaignOpen] = useState(false);
   const [games, setGames] = useState<Game[] | null>(null);
   const [sessions] = useState<Character[]>(readSessions);
   const [party, setParty] = useState<Character[]>([]);
@@ -76,7 +74,6 @@ export default function HomePage() {
   }
 
   return (
-    <>
       <div className="home">
         <header className="home-header">
           <h1 className="home-title">Games</h1>
@@ -115,10 +112,6 @@ export default function HomePage() {
             ))}
           </ul>
         )}
-
-        <button className="btn-create-campaign" onClick={() => setCampaignOpen(true)}>
-          + Create Campaign
-        </button>
 
         {sessions.length > 0 && (
           <section className="continue-section">
@@ -198,12 +191,5 @@ export default function HomePage() {
           </div>
         </dialog>
       </div>
-
-      <CreateCampaignModal
-        open={campaignOpen}
-        onClose={() => setCampaignOpen(false)}
-        onCreated={fetchCampaigns}
-      />
-    </>
   );
 }

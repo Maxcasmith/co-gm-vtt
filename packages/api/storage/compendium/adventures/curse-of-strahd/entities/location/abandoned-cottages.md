@@ -1,2 +1,0 @@
->>As you approach this cluster of ruined cottages separated by low stone walls, you see a short stretch of dirt road that has remained intact.
->>The cottages contain rotted furnishings and nothing of value. The walls that separate the cottages are 3 feet tall and easily scaled or circumvented.

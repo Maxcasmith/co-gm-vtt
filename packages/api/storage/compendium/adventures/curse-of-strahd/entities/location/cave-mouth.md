@@ -1,3 +1,0 @@
->>The open jaws of the wolf's head form a fifteen-foot-high canopy of rock over the cave mouth, held up by natural pillars of rock. The ceiling rises to a height of twenty feet inside the cave. Torches in iron brackets line the walls. From somewhere deep inside, you hear the echoing sounds of a flute. Some of the notes are discordant—painfully so.
-
-The guards in area Z2 spot characters in the cave mouth who aren't hidden. Characters can track the sound of the flute to area Z3.

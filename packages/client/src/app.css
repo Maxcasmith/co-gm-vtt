@@ -7,7 +7,11 @@
   --border:         #2a2535;
   --text:           #ddd0bb;
   --text-muted:     #5c5468;
+  --platinum:       #f0ebde;
   --gold:           #c9a84c;
+  --electrum:       #939dee;
+  --silver:         #b1cbcf;
+  --bronze:         #82413a;
 }
 
 /* ── shared ── */
@@ -1756,6 +1760,395 @@
   margin: 0;
 }
 
+/* ── spells tab ── */
+.spells-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  color: var(--text);
+}
+
+.spells-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.spells-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.spells-section-title {
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--text);
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.spells-section-counts {
+  display: flex;
+  gap: 8px;
+}
+
+.spells-count {
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.spells-count--full {
+  color: #4caf6e;
+  border-color: #4caf6e44;
+  background: #4caf6e11;
+}
+
+.spells-empty {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+  padding: 12px 0;
+}
+
+/* Learned spells chips */
+.spells-learned-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.spells-learned-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+}
+
+.spells-learned-name {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.spells-learned-name:hover { color: var(--accent); }
+
+.spells-learned-level {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.spells-learned-remove {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.spells-learned-remove:hover { color: #e57373; }
+
+/* Filters */
+.spells-filters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.spells-search {
+  flex: 1;
+  min-width: 120px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
+.spells-filter-select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+/* Spell browser rows */
+.spells-browser-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.spells-browser-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--surface);
+  transition: background 0.1s;
+}
+
+.spells-browser-row:hover,
+.spells-browser-row--selected {
+  background: var(--surface-raised, #2a2a2e);
+}
+
+.spells-browser-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+}
+
+.spells-browser-name {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.spells-browser-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.spells-tag {
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.spells-tag--ritual { color: #9c7ae0; border-color: #9c7ae044; background: #9c7ae011; }
+.spells-tag--cast   { color: var(--text); }
+
+.spells-learn-btn {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+}
+
+.spells-learn-btn:hover:not(:disabled) { background: var(--accent); color: #fff; border-color: var(--accent); }
+.spells-learn-btn--learned { color: #e57373; border-color: #e5737344; }
+.spells-learn-btn--learned:hover { background: #e5737322; }
+.spells-learn-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* Spell detail panel */
+.spells-detail-section { border-top: 1px solid var(--border); padding-top: 16px; }
+
+.spells-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.spells-detail-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.spells-detail-name {
+  font-family: 'Cinzel', serif;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.spells-detail-level {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.spells-detail-stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  row-gap: 3px;
+  margin: 0;
+}
+
+.spells-detail-stats dt {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.spells-detail-stats dd {
+  font-size: 12px;
+  color: var(--text);
+  margin: 0;
+}
+
+.spells-detail-text {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.spells-detail-higher {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.spells-detail-source {
+  font-size: 10px;
+  color: var(--muted);
+  margin: 0;
+}
+
+/* ── sheet spells tab ── */
+.sheet-spells-search {
+  width: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 6px 10px;
+  box-sizing: border-box;
+  margin: 8px auto 2em;
+}
+
+.sheet-spell-ritual {
+  font-size: 9px;
+  font-weight: 700;
+  color: #9c7ae0;
+  background: #9c7ae011;
+  border: 1px solid #9c7ae044;
+  border-radius: 3px;
+  padding: 1px 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.sheet-inv-card--spell { cursor: pointer; }
+.sheet-inv-card--spell:hover { background: var(--surface-hover); }
+.sheet-inv-card--spell-active { border-color: #9c7ae0aa; background: #9c7ae00d; }
+
+.sheet-spell-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid #9c7ae044;
+  border-radius: 6px;
+  margin-bottom: 4px;
+}
+
+.sheet-spell-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sheet-spell-detail-name {
+  display: block;
+  font-family: 'Cinzel', serif;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.sheet-spell-detail-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.sheet-spell-detail-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.sheet-spell-detail-close:hover { color: var(--text); }
+
+.sheet-spell-detail-stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  row-gap: 3px;
+  margin: 0;
+}
+
+.sheet-spell-detail-stats dt {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sheet-spell-detail-stats dd {
+  font-size: 12px;
+  color: var(--text);
+  margin: 0;
+}
+
+.sheet-spell-detail-text {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.sheet-spell-detail-higher {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
 /* ── skill picker ── */
 .skill-picker {
   border: 1px solid var(--border);
@@ -3170,7 +3563,6 @@ button.sheet-save-row {
   font-family: 'Crimson Pro', Georgia, serif;
   letter-spacing: 0.05em;
   margin-left: auto;
-  align-self: center;
   white-space: nowrap;
 }
 
@@ -3321,9 +3713,33 @@ button.sheet-save-row {
 
 /* ── Character sheet inventory list ──────────────────────────────────────── */
 
-.sheet-inv-gold { display: flex; align-items: baseline; gap: 8px; padding: 8px 0 12px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
-.sheet-inv-gold-label { font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); }
-.sheet-inv-gold-value { font-size: 18px; font-family: 'Crimson Pro', Georgia, serif; color: var(--gold); }
+.sheet-inv-currency-block {
+  margin-bottom: 1em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 25px;
+}
+
+.sheet-inv-plat { 
+  color: var(--platinum)
+}
+.sheet-inv-gold { 
+  color: var(--gold)
+}
+.sheet-inv-elec { 
+  color: var(--electrum)
+}
+.sheet-inv-silver { 
+  color: var(--silver)
+}
+.sheet-inv-bronze { 
+  color: var(--bronze)
+}
+
+.sheet-inv-block { display: flex; align-items: baseline; gap: 8px; padding: 8px 0 12px; }
+.sheet-inv-label { font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); }
+.sheet-inv-value { font-size: 18px; font-family: 'Crimson Pro', Georgia, serif; }
 
 .sheet-inv-section { margin-bottom: 16px; }
 .sheet-inv-section-title { font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 8px; }

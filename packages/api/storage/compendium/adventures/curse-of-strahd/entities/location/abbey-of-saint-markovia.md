@@ -1,4 +1,0 @@
-West of the two mountains, atop a hill, stands the Abbey of Saint Markovia, around which the Barovians built a walled village named Krezk.
-
->>The road from the village climbs above the mist to the wide ledge on which the abbey is perched. A light dusting of snow covers the trees and the rocky earth.
->>The gravel road passes between two small, stone outbuildings, to either side of which stretches a five-foot-high, three-foot-thick wall of jumbled stones held together with mortar. Blocking the road are iron gates attached to the outbuildings by rusty hinges. They appear to be unlocked. Viewed through the gates, the stone abbey stands quiet. Its two wings are joined by a fifteen-foot-high curtain wall. A belfry protrudes from the rooftop of the closer north wing, which also sports a chimney billowing gray smoke.

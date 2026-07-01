@@ -1,3 +1,0 @@
-Elisabeth Durst is the mother of Rose and Thorn. Alongside Gustav, she is complicit in the horrific fate of her children, locking them away and ensuring their tragic end.
-
-Elisabeth Durst, the matriarch of the family, shares her husband's obsession with maintaining their legacy. She is often portrayed as cold and controlling, having been deeply affected by the dark secrets that reside within their home. Elisabeth's tragic fate is entwined with the history and horrors of Death House.

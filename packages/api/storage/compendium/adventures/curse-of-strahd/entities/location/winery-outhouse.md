@@ -1,3 +1,0 @@
->>Sweet-smelling herbs hang from the eaves of this ramshackle wooden outhouse, which has a small crescent moon carved into its door.
-
-The outhouse contains no surprises.

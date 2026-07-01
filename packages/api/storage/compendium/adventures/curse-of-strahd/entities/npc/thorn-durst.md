@@ -1,1 +1,0 @@
-Thorn Durst is the son of Gustav and Elisabeth. Like his sister Rose, he suffered from the neglect of his parents. His spirit lingers within the children's room, connected to the tragic events that led to their deaths.

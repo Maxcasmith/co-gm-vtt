@@ -130,6 +130,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
   const dragRef     = useRef<{ id: string; x: number; y: number } | null>(null);
   const dragOffset  = useRef({ x: 0, y: 0 });
   const [dragTick, setDragTick] = useState(0);
+  const [sizeTick, setSizeTick] = useState(0);
 
   // Targeting state — ref for window handlers, state for draw trigger
   const targetingRef = useRef<Weapon | null>(null);
@@ -152,6 +153,15 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
       img.src = url;
     });
   }, [tokenUrls]);
+
+  // Resize observer: redraw when canvas element size changes
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const ro = new ResizeObserver(() => setSizeTick(t => t + 1));
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, []);
 
   // Subscribe to targeting events (registered once)
   useEffect(() => {
@@ -578,7 +588,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
         ctx.fillText(`• ${p}`, 20, 100 + i * 24);
       });
     }
-  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon]);
+  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick]);
 
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!showBattleMap) return;

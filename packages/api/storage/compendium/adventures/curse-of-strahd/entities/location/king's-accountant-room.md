@@ -1,3 +1,0 @@
->>Dusty scrolls and tomes line the walls of this room. More scrolls and books lie scattered on the floor, around four heavy wooden chests fitted with study iron locks. The only unobstructed floor space is directly in front of the doors on the east and west walls.
->>
->>In the center of this clutter stands a great black desk. A figure crouches atop a tall stool, scratching on a seemingly endless scroll of paper with a dry quill pen. Nearby a tasseled rope hangs from a hole in the ceiling.

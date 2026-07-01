@@ -1,1 +1,0 @@
->>The upper level of the tower is an icebox with windows set in almost every wall. A rusted iron ladder bolted to the floor and ceiling leads up to a wooden trapdoor. Mounted above the stone hearth is a dire wolf's head. The wind coming down the chimney howls in its stead.

@@ -3,6 +3,7 @@ import type { Campaign, CompendiumMeta } from 'shared';
 import SettingsSidebar from './SettingsSidebar.tsx';
 import UploadModuleModal from './UploadModuleModal.tsx';
 import CreateFromModuleModal from './CreateFromModuleModal.tsx';
+import CreateCampaignModal from './CreateCampaignModal.tsx';
 import './app.css';
 
 const API = `http://${window.location.hostname}:3001`;
@@ -18,9 +19,17 @@ export default function AdminPage() {
   const [campaigns, setCampaigns]   = useState<Campaign[]>([]);
   const [adventures, setAdventures] = useState<CompendiumMeta[]>([]);
   const [feedback, setFeedback]     = useState<Record<string, string>>({});
-  const [settingsOpen, setSettingsOpen]     = useState(false);
-  const [uploadOpen, setUploadOpen]         = useState(false);
-  const [selectedAdventure, setSelectedAdventure] = useState<CompendiumMeta | null>(null);
+  const [settingsOpen, setSettingsOpen]         = useState(false);
+  const [uploadOpen, setUploadOpen]             = useState(false);
+  const [createCampaignOpen, setCreateCampaignOpen] = useState(false);
+  const [selectedAdventure, setSelectedAdventure]   = useState<CompendiumMeta | null>(null);
+
+  function fetchCampaigns() {
+    fetch(`${API}/api/admin/campaigns`, { headers: adminHeaders(password) })
+      .then(r => r.json())
+      .then((data: Campaign[]) => setCampaigns(data))
+      .catch(() => {});
+  }
 
   function fetchAdventures() {
     fetch(`${API}/api/compendium`)
@@ -117,7 +126,10 @@ export default function AdminPage() {
         <button className="btn-secondary" onClick={() => setSettingsOpen(true)}>Settings</button>
       </div>
 
-      <h2 className="admin-section-title">Campaigns</h2>
+      <div className="admin-modules-header">
+        <h2 className="admin-section-title">Campaigns</h2>
+        <button className="btn-primary" onClick={() => setCreateCampaignOpen(true)}>+ Create Campaign</button>
+      </div>
       <table className="admin-table">
         <thead>
           <tr>
@@ -199,7 +211,12 @@ export default function AdminPage() {
       open={selectedAdventure !== null}
       adventure={selectedAdventure}
       onClose={() => setSelectedAdventure(null)}
-      onCreated={() => { /* campaign created — nothing to refresh here */ }}
+      onCreated={fetchCampaigns}
+    />
+    <CreateCampaignModal
+      open={createCampaignOpen}
+      onClose={() => setCreateCampaignOpen(false)}
+      onCreated={fetchCampaigns}
     />
     </>
   );

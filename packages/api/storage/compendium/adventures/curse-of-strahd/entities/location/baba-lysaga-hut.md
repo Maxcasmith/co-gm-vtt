@@ -1,2 +1,0 @@
->>Someone has built a ramshackle wooden hut on the stump of what was once an enormous tree. The rotting roots of the stump thrust up from the mire like the legs of a gigantic spider.
->>An open doorway is visible on one side of the hut, beneath which floats the upside-down, hollowed-out skull of a giant. Flanking the hut's doorway are two iron cages that dangle like hideous ornaments from the eaves. Scores of ravens are trapped in each one. They squawk and flutter their wings excitedly as you approach.

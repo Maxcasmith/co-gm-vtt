@@ -137,7 +137,7 @@ export default function RestModal({ character }: Props) {
               <div className="rest-member-info">
                 <span className="rest-member-name">{member.name}</span>
 
-                {isSelf ? (
+                {isSelf && (
                   <div className="rest-controls">
                     <div className="rest-toggle-group">
                       <button className={`rest-toggle${resting ? ' rest-toggle--active' : ''}`} onClick={() => setResting(true)}>On</button>
@@ -148,8 +148,6 @@ export default function RestModal({ character }: Props) {
                       <button className={`rest-toggle${resting && restType === 'long' ? ' rest-toggle--active' : ''}`} onClick={() => setRestType('long')} disabled={!resting}>Long</button>
                     </div>
                   </div>
-                ) : (
-                  <span className="rest-member-status">No Rest</span>
                 )}
 
                 {isSelf && resting && restType === 'short' && (

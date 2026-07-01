@@ -1,3 +1,0 @@
->>The stairs descend into black, still water that fills an arched hallway before you. The water's surface is like dark, mirrored glass, disturbed only occasionally by the "thwick" of a drop falling from the ceiling. Twenty feet ahead, arched doorways lead downward from each side of the hallway. In each arched doorway, an iron door stands closed and partially submerged. You hear a weak cry for help from beyond the south door.
-
-The water is 3 feet deep in the hallway and opaque. The steps on both sides of the hallway descend another 2 feet before ending at the iron doors to the north and south.

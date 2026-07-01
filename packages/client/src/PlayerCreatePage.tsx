@@ -63,6 +63,7 @@ function CreatePageInner({ campaignId, campaignName }: { campaignId: string; cam
           tokenPath: c.tokenPath,
           inventory: c.inventory,
           gold: c.gold,
+          spells: c.learnedSpells,
           level: 1,
           proficiencyBonus: 2,
           campaignId,

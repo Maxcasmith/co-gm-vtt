@@ -1,2 +1,0 @@
->>The air grows colder as you approach the walled settlement. Two square towers with peaked roofs flank a stone archway into which is set a pair of twelve-foot-tall, ironbound wooden doors. Carved into the arch above the doors is a name: Krezk.
->>The walls that extend from the gatehouse are twenty feet high. Atop the parapet you see four figures wearing fur hats and clutching spears. They watch you nervously.

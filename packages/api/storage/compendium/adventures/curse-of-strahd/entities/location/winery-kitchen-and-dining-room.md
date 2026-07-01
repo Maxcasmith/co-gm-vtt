@@ -1,3 +1,0 @@
->>This room contains a rectangular table surrounded by eight chairs, an L-shaped cupboard, and a floor-to-ceiling closet pantry. Next to the pantry is a small iron stove.
-
-The cupboard holds dishware and eating utensils. The pantry holds cooking ingredients and the winery's stores.

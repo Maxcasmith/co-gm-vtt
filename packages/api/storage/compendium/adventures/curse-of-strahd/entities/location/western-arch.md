@@ -1,1 +1,0 @@
->>The snowy pass comes to a gorge spanned by a stone bridge. At each end of the bridge is a thirty-foot-tall, thirty-foot-wide stone arch. Atop each one are two statues of armored knights on horseback with lances, charging toward one another. The wind bites and howls like wolves as it passes through the gorge.

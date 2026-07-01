@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import type { Character, Weapon, Consumable, TurnOrderEntry } from 'shared';
+import { useEffect, useMemo, useState } from 'react';
+import type { Character, Weapon, Consumable, TurnOrderEntry, Spell } from 'shared';
 import { isWeapon, isConsumable, CLASS_WEAPON_PROFS, CLASS_ARMOR_TRAINING, calcAC } from 'shared';
 import { on, dispatch } from './events.ts';
 import {
@@ -31,7 +31,7 @@ function modNum(score: number) { return Math.floor((score - 10) / 2); }
 
 const STAT_KEYS: Array<keyof Character['stats']> = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 
-type SheetTab = 'abilities' | 'features' | 'inventory';
+type SheetTab = 'abilities' | 'features' | 'inventory' | 'spells';
 
 interface Props { character: Character; currentHp?: number; maxHp?: number; }
 
@@ -265,9 +265,27 @@ function InventoryTab({ character, combatActive, isMyTurn, actionAvailable }: { 
   return (
     <>
       {character.gold != null && (
-        <div className="sheet-inv-gold">
-          <span className="sheet-inv-gold-label">Gold</span>
-          <span className="sheet-inv-gold-value">{character.gold} gp</span>
+        <div className='sheet-inv-currency-block'>
+          <div className="sheet-inv-block sheet-inv-plat">
+            <span className="sheet-inv-label">Platinum</span>
+            <span className="sheet-inv-value">{character.platinum || 0} pp</span>
+          </div>
+          <div className="sheet-inv-block sheet-inv-gold">
+            <span className="sheet-inv-label">Gold</span>
+            <span className="sheet-inv-value">{character.gold || 0} gp</span>
+          </div>
+          <div className='sheet-inv-block sheet-inv-elec'>
+            <span className="sheet-inv-label">Electrum</span>
+            <span className="sheet-inv-value">{character.electrum || 0} ep</span>
+          </div>
+          <div className='sheet-inv-block sheet-inv-silver'>
+            <span className="sheet-inv-label">Silver</span>
+            <span className="sheet-inv-value">{character.silver || 0} sp</span>
+          </div>
+          <div className='sheet-inv-block sheet-inv-bronze'>
+            <span className="sheet-inv-label">Bronze</span>
+            <span className="sheet-inv-value">{character.bronze || 0} bp</span>
+          </div>
         </div>
       )}
       {items.length === 0
@@ -311,9 +329,114 @@ function InventoryTab({ character, combatActive, isMyTurn, actionAvailable }: { 
   );
 }
 
+// ── Spells ────────────────────────────────────────────────────────────────────
+
+const LEVEL_HEADINGS: Record<number, string> = {
+  0: 'Cantrips', 1: 'First Level', 2: 'Second Level', 3: 'Third Level',
+  4: 'Fourth Level', 5: 'Fifth Level', 6: 'Sixth Level', 7: 'Seventh Level',
+  8: 'Eighth Level', 9: 'Ninth Level',
+};
+
+function SpellsTab({ character }: { character: Character }) {
+  const learnedNames = character.spells ?? [];
+  const [spells, setSpells] = useState<Spell[]>([]);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Spell | null>(null);
+
+  useEffect(() => {
+    if (!learnedNames.length) return;
+    fetch(`${API}/api/spells?class=${encodeURIComponent(character.class)}`)
+      .then(r => r.json())
+      .then((all: Spell[]) => setSpells(all.filter(s => learnedNames.includes(s.name))))
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [character.class, learnedNames.join(',')]);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return spells;
+    const q = search.toLowerCase();
+    return spells.filter(s => s.name.toLowerCase().includes(q));
+  }, [spells, search]);
+
+  const byLevel = useMemo(() => {
+    const map = new Map<number, Spell[]>();
+    for (const s of filtered) {
+      const bucket = map.get(s.level) ?? [];
+      bucket.push(s);
+      map.set(s.level, bucket);
+    }
+    return map;
+  }, [filtered]);
+
+  return (
+    <>
+      <input
+        className="sheet-spells-search"
+        placeholder="Search spells…"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+      />
+
+      {selected && (
+        <div className="sheet-spell-detail">
+          <div className="sheet-spell-detail-header">
+            <div>
+              <span className="sheet-spell-detail-name">{selected.name}</span>
+              <span className="sheet-spell-detail-sub">{selected.levelLabel} · {selected.school}{selected.isRitual ? ' · Ritual' : ''}</span>
+            </div>
+            <button className="sheet-spell-detail-close" onClick={() => setSelected(null)}>×</button>
+          </div>
+          <dl className="sheet-spell-detail-stats">
+            <dt>Casting Time</dt><dd>{selected.castingTime}</dd>
+            <dt>Range</dt><dd>{selected.range}</dd>
+            <dt>Components</dt><dd>{selected.components}</dd>
+            <dt>Duration</dt><dd>{selected.duration}</dd>
+          </dl>
+          <p className="sheet-spell-detail-text">{selected.text}</p>
+          {selected.atHigherLevels && (
+            <p className="sheet-spell-detail-higher"><em>At Higher Levels.</em> {selected.atHigherLevels}</p>
+          )}
+        </div>
+      )}
+
+      {byLevel.size === 0 && (
+        <div className="sheet-empty">
+          <p className="sheet-empty-title">No results</p>
+          <p className="sheet-empty-hint">No spells match "{search}"</p>
+        </div>
+      )}
+      {[0,1,2,3,4,5,6,7,8,9].map(level => {
+        const group = byLevel.get(level);
+        if (!group?.length) return null;
+        return (
+          <div key={level} className="sheet-inv-section">
+            <p className="sheet-inv-section-title">{LEVEL_HEADINGS[level]}</p>
+            <div className="sheet-inventory">
+              {group.map(spell => (
+                <div
+                  key={spell.name}
+                  className={`sheet-inv-card sheet-inv-card--spell${selected?.name === spell.name ? ' sheet-inv-card--spell-active' : ''}`}
+                  onClick={() => setSelected(s => s?.name === spell.name ? null : spell)}
+                >
+                  <div className="sheet-inv-card-header">
+                    <span className="sheet-inv-name">{spell.name}</span>
+                    {spell.isRitual && <span className="sheet-spell-ritual">R</span>}
+                  </div>
+                  <p className="sheet-inv-desc">{spell.school} · {spell.castingTime}</p>
+                  <p className="sheet-inv-desc">{spell.range} · {spell.duration}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 // ── Root ──────────────────────────────────────────────────────────────────────
 
-const TABS: { id: SheetTab; label: string }[] = [
+const BASE_TABS: { id: SheetTab; label: string }[] = [
   { id: 'abilities', label: 'Abilities' },
   { id: 'features',  label: 'Features'  },
   { id: 'inventory', label: 'Inventory' },
@@ -325,6 +448,8 @@ const XP_THRESHOLDS = [0, 300, 900, 2700, 6500, 14000, 23000, 34000, 48000, 6400
 export default function CharacterSheetOverlay({ character, currentHp, maxHp }: Props) {
   const [visible, setVisible] = useState(false);
   const [tab, setTab]         = useState<SheetTab>('abilities');
+  const hasSpells = (character.spells?.length ?? 0) > 0;
+  const TABS = hasSpells ? [...BASE_TABS, { id: 'spells' as SheetTab, label: 'Spells' }] : BASE_TABS;
   const [combatActive, setCombatActive]     = useState(false);
   const [isMyTurn, setIsMyTurn]             = useState(false);
   const [actionAvailable, setActionAvailable] = useState(true);
@@ -477,6 +602,7 @@ export default function CharacterSheetOverlay({ character, currentHp, maxHp }: P
           {tab === 'abilities' && <AbilitiesTab character={character} />}
           {tab === 'features'  && <FeaturesTab  character={character} />}
           {tab === 'inventory' && <InventoryTab character={character} combatActive={combatActive} isMyTurn={isMyTurn} actionAvailable={actionAvailable} />}
+          {tab === 'spells'    && <SpellsTab    character={character} />}
         </div>
       </div>
     </div>

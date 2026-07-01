@@ -1,1 +1,0 @@
-Thornboldt, known as Thorn, is a seven-year-old boy who is portrayed as a living child but is actually an illusion created by Death House. He is the younger brother of Rose and is fearful of the 'monster' in their house. Like Rose, he died long ago but his spirit is bound to this deceptive form.

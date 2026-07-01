@@ -1,3 +1,0 @@
-## Dilapidated Stone Windmill
-
->>The onion-domed edifice leans forward and to one side, as though trying to turn away from the stormy gray sky. You see gray brick walls and dirt-covered windows on the upper floors. A decrepit wooden platform encircles the windmill above a flimsy doorway leading to the building's interior. Perched on a wooden beam above the door is a raven. It hops about and squawks at you, seemingly agitated.

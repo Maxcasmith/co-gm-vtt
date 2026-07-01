@@ -1,3 +1,0 @@
-Gustav Durst is the father of Rose and Thorn, who kept his children locked away and led them to starvation. His actions in the house helped to forge a dark history, as their 'monster' story was a part of his cruel methods.
-
-Gustav Durst is the patriarch of the Durst family. He is unyielding and believes that his family's legacy must be preserved at all costs. His motivations drive the disturbing actions that have taken place within Death House, stemming from desperation and madness.

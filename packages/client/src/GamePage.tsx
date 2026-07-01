@@ -307,6 +307,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       } else if (e.key === 'c' && now - lastSpaceRef.current < DOUBLE_TAP_MS) {
         lastSpaceRef.current = 0;
         setQuickChatOpen(true);
+      } else if (e.key === 'q' && now - lastSpaceRef.current < DOUBLE_TAP_MS) {
+        lastSpaceRef.current = 0;
+        setQuestLogOpen(o => !o);
       }
     }
     window.addEventListener('keydown', onKey);

@@ -1,5 +1,0 @@
->>Wooden stairs climb to the tower's peak, which has a stone floor and a thirty-foot-high pitched roof. Ravens roost on crisscrossing rafters, coming and going through small holes in the roof. Ten-foot-high, five-foot-wide arched windows are evenly spaced around the walls. Each window consists of a lead latticework fitted with small panes of transparent glass.
-
-The **ravens** that roost here are harmless, but they watch the characters with great interest. If the characters look out the windows, you can use the following text to describe what they see in the distance.
-
->>To the north and east lies a mist-shrouded valley with dark woods, a small town, and a lonely windmill on a precipice. To the south, a river flows through a foggy marsh. To the west, between rocky hills, you glimpse an abbey perched on a snowy mountainside beyond a long stretch of fog-smothered pines.

@@ -1,1 +1,0 @@
->>A massive wall juts out to connect the outer walls of the castle with the keep. A twenty-foot-wide, twenty-foot-tall archway offers passage through the connecting wall but is blocked by a rusting iron portcullis.

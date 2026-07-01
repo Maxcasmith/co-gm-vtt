@@ -1,1 +1,0 @@
->>Rain splashes against the sagging, sloping rooftop. Flashes of lightning illuminate gargoyles perched on the roof's end peaks, their hideous stares forever fixed on the courtyard some one hundred thirty feet below.

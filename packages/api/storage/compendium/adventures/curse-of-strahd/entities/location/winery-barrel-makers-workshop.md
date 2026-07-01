@@ -1,3 +1,0 @@
->>Strips of iron and wood lie in neat piles on the floor of this workshop, the walls of which are lined with tools. Two worktables stand against the east wall.
-
-Wine barrels are made here. The north door is barred from the inside.

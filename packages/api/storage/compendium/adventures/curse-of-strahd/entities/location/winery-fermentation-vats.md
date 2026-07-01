@@ -1,9 +1,0 @@
->>The rich smell of fermenting wine fills this large, two-story chamber, which is dominated by four enormous wooden casks, each one eight feet wide and twelve feet tall. A wooden staircase in the center of the room climbs to a ten-foot-high wooden balcony that clings to the south wall, which has four windows set into it at balcony level. Stacked against the wall underneath the balcony are old, empty barrels with "The Wizard of Wines" burned into their sides. The balcony climbs another five feet as it continues along the west and east walls, ending at doors leading to the winery's upper level. Underneath these side balconies are several doors, some of which hang open. Beneath the sloping roof stretch thick rafters, upon which scores of ravens have quietly gathered. They watch you with great interest.
-
-Four **swarms of ravens** perch on the rafters but don't attack the characters under any circumstances.
-
-Unless they have been drawn outside, twenty-four **twig blights** and one **druid** (NE female human) are also present. If they are here, read:
-
->>The balcony creaks, drawing your eye to a wild-looking figure hunched over the westernmost cask, pouring a flask of thick syrup into it. She wears a gown made of animal skins and a headdress with goat horns, and her hair is long and unkempt. Suddenly, you see something skittering across the floor. It looks like a tiny creature made of twigs. It moves from its hiding place under the stairs and disappears behind the easternmost cask.
-
-The four containers are fermentation vats, where grape juice is mixed with other ingredients and turned into wine. The easternmost cask has split in the back, creating a 6-inch-wide, 6-foot-high opening through which the twig blights can pass. All twenty-four twig blights are hidden in the cask, ready to emerge and attack when commanded to do so. While inside the cask, they have total cover against attacks that originate outside the cask.

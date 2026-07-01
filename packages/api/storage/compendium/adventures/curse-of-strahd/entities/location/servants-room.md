@@ -1,1 +1,0 @@
-An undecorated bedroom (area 7A) contains a pair of beds with straw-stuffed mattresses. At the foot of each bed is an empty footlocker. Tidy servants' uniforms hang from hooks in the adjoining closet (area 7B). A dumbwaiter in the corner of the west wall has a button on the wall next to it.

@@ -1,1 +1,0 @@
->>A mold-covered ceiling hangs three feet above the still, black water that fills this dungeon corridor. The water is five feet deep. Ten-foot-square cells, their entrances blocked by iron bars, line both sides of the hall. One of the cells is dimly lit.

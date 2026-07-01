@@ -1,1 +1,0 @@
->>A maze of torchlit tunnels and caves expands in front of you. Bones lie strewn upon the floor.

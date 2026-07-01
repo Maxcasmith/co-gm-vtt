@@ -1,1 +1,0 @@
-The largest of these peaks is Mount Baratok, with its snow-covered cap and rugged slopes.

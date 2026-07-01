@@ -1,1 +1,0 @@
->>A twenty-foot-diameter ring of stones dominates a rocky ledge on the mountainside. Within the ring, you see spattered blood and small, gnawed bones. Lying on the ground outside the circle are several spears stained with dry blood.

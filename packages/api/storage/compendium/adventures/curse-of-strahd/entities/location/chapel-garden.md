@@ -1,1 +1,0 @@
->>At the back of the keep, behind towering buttresses and tall, boarded-up stained-glass windows, a small garden struggles to survive. Small flowers press skyward against the gloom. A pair of large iron gates blocks the way to some kind of overlook.
