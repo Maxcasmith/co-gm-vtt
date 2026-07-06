@@ -2149,6 +2149,30 @@
   line-height: 1.5;
 }
 
+.sheet-spell-cast-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 6px 12px;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: #86efac;
+  background: rgba(22, 163, 74, 0.12);
+  border: 1px solid #16a34a;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.sheet-spell-cast-btn:hover:not(:disabled) { background: rgba(22, 163, 74, 0.22); }
+.sheet-spell-cast-btn--disabled,
+.sheet-spell-cast-btn:disabled {
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--border);
+  cursor: not-allowed;
+}
+
 /* ── skill picker ── */
 .skill-picker {
   border: 1px solid var(--border);
@@ -3803,6 +3827,13 @@ button.sheet-save-row {
   line-height: 1.3;
 }
 
+.sheet-inv-card-header-right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
 .sheet-inv-qty {
   font-size: 10px;
   color: var(--text-muted);
@@ -3843,6 +3874,20 @@ button.sheet-save-row {
   align-self: flex-start;
   margin-top: auto;
 }
+
+/* Action-economy cost dot — same palette as .combat-pip so weapon/spell cards
+   read at a glance against the CombatDock pips. */
+.sheet-cost-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.sheet-cost-dot--action      { background: #16a34a; border-color: #22c55e; }
+.sheet-cost-dot--bonusAction { background: #c2410c; border-color: #f97316; }
+.sheet-cost-dot--reaction    { background: #be185d; border-color: #ec4899; }
 
 /* ── Encounter loading overlay ───────────────────────────────────────────── */
 

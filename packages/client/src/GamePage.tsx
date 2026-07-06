@@ -187,6 +187,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('combat:initiative', entry => dispatch('vtt:combat:initiative', { entry }));
     socket.on('combat:turn:order', entries => dispatch('vtt:combat:turn:order', { entries }));
     socket.on('combat:attack:result', result => dispatch('vtt:combat:attack:result', result));
+    socket.on('combat:spell:attack:result', result => dispatch('vtt:combat:spell:attack:result', result));
+    socket.on('combat:spell:save:result', result => dispatch('vtt:combat:spell:save:result', result));
     socket.on('combat:player:damage', data => {
       dispatch('vtt:combat:player:damage', data);
       if (data.characterId === character.id) setPlayerHpState({ current: data.currentHp, max: data.maxHp });
@@ -258,6 +260,12 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   useEffect(() => on('vtt:combat:turn', ({ actorName }) => setIsMyTurn(actorName === character.name)), [character.name]);
   useEffect(() => on('vtt:combat:attack', ({ attackerId, attackerName, targetId, weapon }) => {
     socketRef.current?.emit('combat:attack', { attackerId, attackerName, targetId, weapon });
+  }), []);
+  useEffect(() => on('vtt:combat:spell:attack', ({ casterId, casterName, targetId, spell, slotLevel }) => {
+    socketRef.current?.emit('combat:spell:attack', { casterId, casterName, targetId, spell, slotLevel });
+  }), []);
+  useEffect(() => on('vtt:combat:spell:cast', ({ casterId, casterName, spell, slotLevel, targetIds }) => {
+    socketRef.current?.emit('combat:spell:cast', { casterId, casterName, spell, slotLevel, targetIds });
   }), []);
   // Movement resets to full only at the START of this player's turn, not on combat start
   useEffect(() => { if (!combatActive) setMovementRemaining(0); }, [combatActive]);

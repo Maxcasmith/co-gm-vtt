@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Character, Weapon, Consumable, TurnOrderEntry, Spell } from 'shared';
-import { isWeapon, isConsumable, CLASS_WEAPON_PROFS, CLASS_ARMOR_TRAINING, calcAC } from 'shared';
+import { isWeapon, isConsumable, CLASS_WEAPON_PROFS, CLASS_ARMOR_TRAINING, calcAC, actionCostFromCastingTime, parseRangeFeet } from 'shared';
 import { on, dispatch } from './events.ts';
 import {
   STAT_NAMES,
@@ -229,6 +229,12 @@ const SECTIONS = [
   { label: 'Other',       test: () => true                                                                            },
 ] as const;
 
+function ActionCostDot({ cost }: { cost: 'action' | 'bonusAction' | 'reaction' | null }) {
+  if (!cost) return null;
+  const label = cost === 'action' ? 'Action' : cost === 'bonusAction' ? 'Bonus Action' : 'Reaction';
+  return <span className={`sheet-cost-dot sheet-cost-dot--${cost}`} title={label} />;
+}
+
 function asWeapon(item: Item | Weapon | Consumable): Weapon {
   if (isWeapon(item)) return item;
   return { ...item, type: 'weapon' as const, damage: '1d8', damageType: 'slashing', attackBonus: 0, range: 5, properties: [] };
@@ -245,7 +251,7 @@ function InventoryTab({ character, combatActive, isMyTurn, actionAvailable }: { 
   function handleWeaponClick(weapon: Weapon) {
     if (!isMyTurn || !actionAvailable) return;
     dispatch('vtt:sheet:closed', {});
-    dispatch('vtt:targeting:start', { weapon, actionType: 'action' });
+    dispatch('vtt:targeting:start', { kind: 'weapon', weapon, actionType: 'action' });
   }
 
   function handleConsumableClick(item: Consumable) {
@@ -312,7 +318,10 @@ function InventoryTab({ character, combatActive, isMyTurn, actionAvailable }: { 
                       >
                         <div className="sheet-inv-card-header">
                           <span className="sheet-inv-name">{item.name}</span>
-                          {item.quantity > 1 && <span className="sheet-inv-qty">×{item.quantity}</span>}
+                          <div className="sheet-inv-card-header-right">
+                            {weapon && <ActionCostDot cost="action" />}
+                            {item.quantity > 1 && <span className="sheet-inv-qty">×{item.quantity}</span>}
+                          </div>
                         </div>
                         {item.description && <p className="sheet-inv-desc">{item.description}</p>}
                         {weapon     && <span className="sheet-inv-attack">Attack</span>}
@@ -337,11 +346,35 @@ const LEVEL_HEADINGS: Record<number, string> = {
   8: 'Eighth Level', 9: 'Ninth Level',
 };
 
-function SpellsTab({ character }: { character: Character }) {
+function SpellsTab({ character, combatActive, isMyTurn, actionAvailable, bonusActionAvailable, reactionAvailable }: {
+  character: Character;
+  combatActive: boolean;
+  isMyTurn: boolean;
+  actionAvailable: boolean;
+  bonusActionAvailable: boolean;
+  reactionAvailable: boolean;
+}) {
   const learnedNames = character.spells ?? [];
   const [spells, setSpells] = useState<Spell[]>([]);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Spell | null>(null);
+
+  const resourceAvailable: Record<'action' | 'bonusAction' | 'reaction', boolean> = {
+    action: actionAvailable, bonusAction: bonusActionAvailable, reaction: reactionAvailable,
+  };
+
+  function handleCast(spell: Spell) {
+    const cost = actionCostFromCastingTime(spell.castingTime);
+    if (!combatActive || !isMyTurn || !cost || !resourceAvailable[cost]) return;
+    dispatch('vtt:sheet:closed', {});
+
+    // Self-range, no area (pure buff/utility) — nothing to place, just resolve immediately.
+    if (parseRangeFeet(spell.range) === 0 && !spell.combat?.area) {
+      dispatch('vtt:combat:spell:cast', { casterName: character.name, casterId: character.id, spell, slotLevel: spell.level, targetIds: [character.id] });
+      return;
+    }
+    dispatch('vtt:targeting:start', { kind: 'spell', spell, casterId: character.id, actionType: cost });
+  }
 
   useEffect(() => {
     if (!learnedNames.length) return;
@@ -396,6 +429,20 @@ function SpellsTab({ character }: { character: Character }) {
           {selected.atHigherLevels && (
             <p className="sheet-spell-detail-higher"><em>At Higher Levels.</em> {selected.atHigherLevels}</p>
           )}
+          {(() => {
+            const cost = actionCostFromCastingTime(selected.castingTime);
+            const disabled = !combatActive || !isMyTurn || !cost || !resourceAvailable[cost];
+            return (
+              <button
+                className={`sheet-spell-cast-btn${disabled ? ' sheet-spell-cast-btn--disabled' : ''}`}
+                disabled={disabled}
+                onClick={() => handleCast(selected)}
+              >
+                <ActionCostDot cost={cost} />
+                Cast
+              </button>
+            );
+          })()}
         </div>
       )}
 
@@ -420,7 +467,10 @@ function SpellsTab({ character }: { character: Character }) {
                 >
                   <div className="sheet-inv-card-header">
                     <span className="sheet-inv-name">{spell.name}</span>
-                    {spell.isRitual && <span className="sheet-spell-ritual">R</span>}
+                    <div className="sheet-inv-card-header-right">
+                      <ActionCostDot cost={actionCostFromCastingTime(spell.castingTime)} />
+                      {spell.isRitual && <span className="sheet-spell-ritual">R</span>}
+                    </div>
                   </div>
                   <p className="sheet-inv-desc">{spell.school} · {spell.castingTime}</p>
                   <p className="sheet-inv-desc">{spell.range} · {spell.duration}</p>
@@ -453,16 +503,20 @@ export default function CharacterSheetOverlay({ character, currentHp, maxHp }: P
   const [combatActive, setCombatActive]     = useState(false);
   const [isMyTurn, setIsMyTurn]             = useState(false);
   const [actionAvailable, setActionAvailable] = useState(true);
+  const [bonusActionAvailable, setBonusActionAvailable] = useState(true);
+  const [reactionAvailable, setReactionAvailable] = useState(true);
   useEffect(() => on('vtt:combat:state', ({ active }) => {
     setCombatActive(active);
-    if (!active) { setIsMyTurn(false); setActionAvailable(true); }
+    if (!active) { setIsMyTurn(false); setActionAvailable(true); setBonusActionAvailable(true); setReactionAvailable(true); }
   }), []);
   useEffect(() => on('vtt:combat:turn', ({ actorName }) => {
     const mine = actorName === character.name;
     setIsMyTurn(mine);
-    if (mine) setActionAvailable(true);
+    if (mine) { setActionAvailable(true); setBonusActionAvailable(true); setReactionAvailable(true); }
   }), [character.name]);
   useEffect(() => on('vtt:combat:action:spent', () => setActionAvailable(false)), []);
+  useEffect(() => on('vtt:combat:bonusAction:spent', () => setBonusActionAvailable(false)), []);
+  useEffect(() => on('vtt:combat:reaction:spent', () => setReactionAvailable(false)), []);
   const [currentXp, setCurrentXp] = useState(character.xp ?? 0);
   const [currentLevel, setCurrentLevel] = useState(character.level ?? 1);
   const [profBonus, setProfBonus] = useState(character.proficiencyBonus ?? profBonusForLevel(character.level ?? 1));
@@ -602,7 +656,7 @@ export default function CharacterSheetOverlay({ character, currentHp, maxHp }: P
           {tab === 'abilities' && <AbilitiesTab character={character} />}
           {tab === 'features'  && <FeaturesTab  character={character} />}
           {tab === 'inventory' && <InventoryTab character={character} combatActive={combatActive} isMyTurn={isMyTurn} actionAvailable={actionAvailable} />}
-          {tab === 'spells'    && <SpellsTab    character={character} />}
+          {tab === 'spells'    && <SpellsTab    character={character} combatActive={combatActive} isMyTurn={isMyTurn} actionAvailable={actionAvailable} bonusActionAvailable={bonusActionAvailable} reactionAvailable={reactionAvailable} />}
         </div>
       </div>
     </div>

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Player, EnemyStatBlock, Weapon, Dungeon } from 'shared';
+import type { Player, EnemyStatBlock, Spell, Dungeon } from 'shared';
+import { parseRangeFeet } from 'shared';
 import { dispatch, on } from './events.ts';
+import type { TargetingStartPayload } from './events.ts';
 import './app.css';
 
 const CELL = 64;
@@ -8,6 +10,77 @@ const TOKEN_R = 24;
 const DUNGEON_ENTITY_R = 10;
 const FLOAT_DUR  = 950;   // ms for floating text
 const FLASH_DUR  = 220;   // ms for token flash
+
+// ── AoE geometry (grid cells, 1 cell = 5ft) ─────────────────────────────────────
+// Simplified templates: cone/line use a straight-triangle/rectangle approximation
+// (5e's "cone is as wide as it is long" rule of thumb) rather than exact arcs.
+
+type SpellArea = NonNullable<NonNullable<Spell['combat']>['area']>;
+
+function ft2cells(feet: number) { return feet / 5; }
+
+function inArea(
+  area: SpellArea,
+  originGx: number, originGy: number,
+  dirGx: number, dirGy: number,
+  tgx: number, tgy: number,
+): boolean {
+  const dx = tgx - originGx;
+  const dy = tgy - originGy;
+  const sizeCells = ft2cells(area.size);
+  switch (area.shape) {
+    case 'sphere':
+    case 'cylinder':
+    case 'emanation':
+      return Math.hypot(dx, dy) <= sizeCells;
+    case 'cube': {
+      const half = sizeCells / 2;
+      return Math.abs(dx) <= half && Math.abs(dy) <= half;
+    }
+    case 'line': {
+      const len = Math.hypot(dirGx - originGx, dirGy - originGy) || 1;
+      const ux = (dirGx - originGx) / len;
+      const uy = (dirGy - originGy) / len;
+      const forward = dx * ux + dy * uy;
+      const perp = Math.abs(dx * uy - dy * ux);
+      const widthCells = ft2cells(area.width ?? 5);
+      return forward >= 0 && forward <= sizeCells && perp <= widthCells / 2;
+    }
+    case 'cone': {
+      const len = Math.hypot(dirGx - originGx, dirGy - originGy) || 1;
+      const ux = (dirGx - originGx) / len;
+      const uy = (dirGy - originGy) / len;
+      const forward = dx * ux + dy * uy;
+      const perp = Math.abs(dx * uy - dy * ux);
+      return forward >= 0 && forward <= sizeCells && perp <= forward / 2;
+    }
+  }
+}
+
+/**
+ * Where an AoE template currently sits: 'self' origin follows the caster and points
+ * at the mouse (cone/line rotation); 'point' origin follows the mouse, clamped to spell range.
+ */
+function resolveAoeOrigin(
+  area: SpellArea,
+  playerPos: { gx: number; gy: number },
+  mouse: { gx: number; gy: number } | null,
+  rangeFeet: number,
+): { originGx: number; originGy: number; dirGx: number; dirGy: number } {
+  if (area.origin === 'self') {
+    const m = mouse ?? { gx: playerPos.gx + 1, gy: playerPos.gy };
+    return { originGx: playerPos.gx, originGy: playerPos.gy, dirGx: m.gx, dirGy: m.gy };
+  }
+  const rangeCells = ft2cells(rangeFeet);
+  const m = mouse ?? { gx: playerPos.gx, gy: playerPos.gy };
+  const dx = m.gx - playerPos.gx;
+  const dy = m.gy - playerPos.gy;
+  const dist = Math.hypot(dx, dy);
+  const clamped = Number.isFinite(rangeCells) && dist > rangeCells && dist > 0
+    ? { gx: playerPos.gx + (dx / dist) * rangeCells, gy: playerPos.gy + (dy / dist) * rangeCells }
+    : m;
+  return { originGx: clamped.gx, originGy: clamped.gy, dirGx: clamped.gx, dirGy: clamped.gy };
+}
 
 interface FloatEffect { id: number; gx: number; gy: number; text: string; isHit: boolean; startTime: number }
 interface FlashEffect { tokenKey: string; startTime: number }
@@ -133,8 +206,11 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
   const [sizeTick, setSizeTick] = useState(0);
 
   // Targeting state — ref for window handlers, state for draw trigger
-  const targetingRef = useRef<Weapon | null>(null);
-  const [targeting, setTargeting] = useState<Weapon | null>(null);
+  const targetingRef = useRef<TargetingStartPayload | null>(null);
+  const [targeting, setTargeting] = useState<TargetingStartPayload | null>(null);
+  // Live cursor grid position while AoE targeting (point-placement + cone/line rotation)
+  const aoeMouseRef = useRef<{ gx: number; gy: number } | null>(null);
+  const [aoeTick, setAoeTick] = useState(0);
 
   // Turn state — true when no combat active (free movement) or when it's this player's turn
   const isMyTurnRef = useRef(true);
@@ -165,20 +241,33 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
 
   // Subscribe to targeting events (registered once)
   useEffect(() => {
-    const u1 = on('vtt:targeting:start', ({ weapon }) => {
-      targetingRef.current = weapon;
-      setTargeting(weapon);
+    const u1 = on('vtt:targeting:start', payload => {
+      targetingRef.current = payload;
+      aoeMouseRef.current = null;
+      setTargeting(payload);
     });
     const u2 = on('vtt:targeting:cancel', () => {
       targetingRef.current = null;
+      aoeMouseRef.current = null;
       setTargeting(null);
       if (ref.current) ref.current.style.cursor = 'default';
     });
     const u3 = on('vtt:combat:attack', () => {
       targetingRef.current = null;
+      aoeMouseRef.current = null;
       setTargeting(null);
     });
-    return () => { u1(); u2(); u3(); };
+    const u4 = on('vtt:combat:spell:attack', () => {
+      targetingRef.current = null;
+      aoeMouseRef.current = null;
+      setTargeting(null);
+    });
+    const u5 = on('vtt:combat:spell:cast', () => {
+      targetingRef.current = null;
+      aoeMouseRef.current = null;
+      setTargeting(null);
+    });
+    return () => { u1(); u2(); u3(); u4(); u5(); };
   }, []);
 
   // Window-level drag move + drop + Esc-cancel (registered once)
@@ -379,9 +468,12 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
         }
 
         // Targeting range highlights (drawn under tokens)
-        if (targeting && playerPos) {
-          const rangeCells = Math.floor(targeting.range / 5);
-          const extRangeCells = targeting.extendedRange ? Math.floor(targeting.extendedRange / 5) : 0;
+        const spellArea = targeting?.kind === 'spell' ? targeting.spell.combat?.area : undefined;
+        if (targeting && playerPos && !spellArea) {
+          const range = targeting.kind === 'weapon' ? targeting.weapon.range : parseRangeFeet(targeting.spell.range);
+          const extendedRange = targeting.kind === 'weapon' ? targeting.weapon.extendedRange : undefined;
+          const rangeCells = Math.floor(range / 5);
+          const extRangeCells = extendedRange ? Math.floor(extendedRange / 5) : 0;
 
           // Extended range cells (dimmer) — drawn first so normal range overpaints them
           if (extRangeCells > rangeCells) {
@@ -417,6 +509,29 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           }
         }
 
+        // AoE spell template (sphere/cone/cube/line/cylinder/emanation)
+        let aoeOrigin: { originGx: number; originGy: number; dirGx: number; dirGy: number } | null = null;
+        if (targeting?.kind === 'spell' && spellArea && playerPos) {
+          aoeOrigin = resolveAoeOrigin(spellArea, playerPos, aoeMouseRef.current, parseRangeFeet(targeting.spell.range));
+
+          const sizeCells = ft2cells(spellArea.size);
+          const pad = Math.ceil(sizeCells) + 1;
+          const minX = Math.max(0, Math.floor(aoeOrigin.originGx - pad));
+          const maxX = Math.ceil(aoeOrigin.originGx + pad);
+          const minY = Math.max(0, Math.floor(aoeOrigin.originGy - pad));
+          const maxY = Math.ceil(aoeOrigin.originGy + pad);
+          for (let tx = minX; tx <= maxX; tx++) {
+            for (let ty = minY; ty <= maxY; ty++) {
+              if (!inArea(spellArea, aoeOrigin.originGx, aoeOrigin.originGy, aoeOrigin.dirGx, aoeOrigin.dirGy, tx + 0.5, ty + 0.5)) continue;
+              ctx.fillStyle = 'rgba(180, 90, 255, 0.22)';
+              ctx.fillRect(tx * cellSz + panX, ty * cellSz + panY, cellSz, cellSz);
+              ctx.strokeStyle = 'rgba(180, 90, 255, 0.6)';
+              ctx.lineWidth = 1.5;
+              ctx.strokeRect(tx * cellSz + panX + 1, ty * cellSz + panY + 1, cellSz - 2, cellSz - 2);
+            }
+          }
+        }
+
         // Party tokens
         connected.forEach(name => {
           const pos = tokenPositions[name];
@@ -433,6 +548,15 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
             ctx.arc(x, y, tokenR + 4, 0, Math.PI * 2);
             ctx.strokeStyle = isDragged ? 'rgba(255,220,50,0.9)' : 'rgba(255,220,50,0.4)';
             ctx.lineWidth = 2;
+            ctx.stroke();
+          }
+
+          // Ally caught in an AoE template — same red ring as enemies, so friendly fire is visible before confirming
+          if (spellArea && aoeOrigin && inArea(spellArea, aoeOrigin.originGx, aoeOrigin.originGy, aoeOrigin.dirGx, aoeOrigin.dirGy, pos.gx + 0.5, pos.gy + 0.5)) {
+            ctx.beginPath();
+            ctx.arc(x, y, tokenR + 6, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255, 60, 60, 0.85)';
+            ctx.lineWidth = 2.5;
             ctx.stroke();
           }
 
@@ -474,26 +598,38 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           const x = isDragged ? drag!.x : pos.gx * cellSz + cellSz / 2 + panX;
           const y = isDragged ? drag!.y : pos.gy * cellSz + cellSz / 2 + panY;
 
-          // Red targeting ring for enemies in weapon range
+          // Red targeting ring for enemies in weapon/single-target-spell range, or inside an AoE template
           if (targeting && playerPos) {
-            const dist = Math.max(Math.abs(pos.gx - playerPos.gx), Math.abs(pos.gy - playerPos.gy));
-            const inNormal = dist <= Math.floor(targeting.range / 5);
-            const inExtended = !inNormal && !!targeting.extendedRange && dist <= Math.floor(targeting.extendedRange / 5);
-            if (inNormal) {
-              ctx.beginPath();
-              ctx.arc(x, y, tokenR + 6, 0, Math.PI * 2);
-              ctx.strokeStyle = 'rgba(255, 60, 60, 0.85)';
-              ctx.lineWidth = 2.5;
-              ctx.stroke();
-            } else if (inExtended) {
-              ctx.save();
-              ctx.setLineDash([4, 4]);
-              ctx.beginPath();
-              ctx.arc(x, y, tokenR + 6, 0, Math.PI * 2);
-              ctx.strokeStyle = 'rgba(255, 60, 60, 0.45)';
-              ctx.lineWidth = 2;
-              ctx.stroke();
-              ctx.restore();
+            if (spellArea && aoeOrigin) {
+              if (inArea(spellArea, aoeOrigin.originGx, aoeOrigin.originGy, aoeOrigin.dirGx, aoeOrigin.dirGy, pos.gx + 0.5, pos.gy + 0.5)) {
+                ctx.beginPath();
+                ctx.arc(x, y, tokenR + 6, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255, 60, 60, 0.85)';
+                ctx.lineWidth = 2.5;
+                ctx.stroke();
+              }
+            } else if (!spellArea) {
+              const range = targeting.kind === 'weapon' ? targeting.weapon.range : parseRangeFeet(targeting.spell.range);
+              const extendedRange = targeting.kind === 'weapon' ? targeting.weapon.extendedRange : undefined;
+              const dist = Math.max(Math.abs(pos.gx - playerPos.gx), Math.abs(pos.gy - playerPos.gy));
+              const inNormal = dist <= Math.floor(range / 5);
+              const inExtended = !inNormal && !!extendedRange && dist <= Math.floor(extendedRange / 5);
+              if (inNormal) {
+                ctx.beginPath();
+                ctx.arc(x, y, tokenR + 6, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255, 60, 60, 0.85)';
+                ctx.lineWidth = 2.5;
+                ctx.stroke();
+              } else if (inExtended) {
+                ctx.save();
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.arc(x, y, tokenR + 6, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255, 60, 60, 0.45)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.restore();
+              }
             }
           }
 
@@ -588,7 +724,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
         ctx.fillText(`• ${p}`, 20, 100 + i * 24);
       });
     }
-  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick]);
+  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick, aoeTick]);
 
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!showBattleMap) return;
@@ -615,14 +751,32 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     // Block all interaction when it's not this player's turn
     if (!isMyTurnRef.current) return;
 
-    // Targeting mode: resolve attack or cancel
+    // Targeting mode: resolve attack/cast or cancel
     if (targetingRef.current) {
-      const weapon = targetingRef.current;
+      const targetingNow = targetingRef.current;
       const playerPos = tokenPositions[player];
+
+      if (targetingNow.kind === 'spell' && targetingNow.spell.combat?.area && playerPos) {
+        const area = targetingNow.spell.combat.area;
+        const origin = resolveAoeOrigin(area, playerPos, aoeMouseRef.current, parseRangeFeet(targetingNow.spell.range));
+        const targetIds: string[] = [];
+        for (const enemy of encounter) {
+          const epos = tokenPositions[enemy.id];
+          if (epos && inArea(area, origin.originGx, origin.originGy, origin.dirGx, origin.dirGy, epos.gx + 0.5, epos.gy + 0.5)) targetIds.push(enemy.id);
+        }
+        for (const name of connected) {
+          const ppos = tokenPositions[name];
+          if (ppos && inArea(area, origin.originGx, origin.originGy, origin.dirGx, origin.dirGy, ppos.gx + 0.5, ppos.gy + 0.5)) targetIds.push(name);
+        }
+        dispatch('vtt:combat:spell:cast', { casterName: player, casterId: targetingNow.casterId, spell: targetingNow.spell, slotLevel: targetingNow.spell.level, targetIds });
+        e.preventDefault();
+        return;
+      }
+
       if (playerPos) {
-        const maxRangeCells = weapon.extendedRange
-          ? Math.floor(weapon.extendedRange / 5)
-          : Math.floor(weapon.range / 5);
+        const range = targetingNow.kind === 'weapon' ? targetingNow.weapon.range : parseRangeFeet(targetingNow.spell.range);
+        const extendedRange = targetingNow.kind === 'weapon' ? targetingNow.weapon.extendedRange : undefined;
+        const maxRangeCells = extendedRange ? Math.floor(extendedRange / 5) : Math.floor(range / 5);
         for (const enemy of encounter) {
           const epos = tokenPositions[enemy.id];
           if (!epos) continue;
@@ -630,7 +784,13 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           const ex = epos.gx * hdCellSz + hdCellSz / 2;
           const ey = epos.gy * hdCellSz + hdCellSz / 2;
           if (Math.hypot(mx - ex, my - ey) <= TOKEN_R) {
-            dispatch('vtt:combat:attack', { attackerName: player, attackerId: characterId, targetId: enemy.id, targetName: enemy.name, weapon });
+            if (targetingNow.kind === 'weapon') {
+              dispatch('vtt:combat:attack', { attackerName: player, attackerId: characterId, targetId: enemy.id, targetName: enemy.name, weapon: targetingNow.weapon });
+            } else if (targetingNow.spell.combat?.resolution === 'attack') {
+              dispatch('vtt:combat:spell:attack', { casterName: player, casterId: targetingNow.casterId, targetId: enemy.id, targetName: enemy.name, spell: targetingNow.spell, slotLevel: targetingNow.spell.level });
+            } else {
+              dispatch('vtt:combat:spell:cast', { casterName: player, casterId: targetingNow.casterId, spell: targetingNow.spell, slotLevel: targetingNow.spell.level, targetIds: [enemy.id] });
+            }
             e.preventDefault();
             return;
           }
@@ -678,6 +838,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
 
     // Targeting mode cursor
     if (targetingRef.current && showBattleMap && encounter && tokenPositions) {
+      const targetingNow = targetingRef.current;
       const rect = e.currentTarget.getBoundingClientRect();
       const panX = dungeonPanRef.current.x;
       const panY = dungeonPanRef.current.y;
@@ -685,10 +846,19 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
       const mx = e.clientX - rect.left - panX;
       const my = e.clientY - rect.top - panY;
       const playerPos = tokenPositions[player];
+
+      const spellArea = targetingNow.kind === 'spell' ? targetingNow.spell.combat?.area : undefined;
+      if (spellArea && playerPos) {
+        aoeMouseRef.current = { gx: mx / mmCellSz, gy: my / mmCellSz };
+        setAoeTick(t => t + 1);
+        e.currentTarget.style.cursor = 'crosshair';
+        return;
+      }
+
       if (playerPos) {
-        const maxRangeCells = targetingRef.current.extendedRange
-          ? Math.floor(targetingRef.current.extendedRange / 5)
-          : Math.floor(targetingRef.current.range / 5);
+        const range = targetingNow.kind === 'weapon' ? targetingNow.weapon.range : parseRangeFeet(targetingNow.spell.range);
+        const extendedRange = targetingNow.kind === 'weapon' ? targetingNow.weapon.extendedRange : undefined;
+        const maxRangeCells = extendedRange ? Math.floor(extendedRange / 5) : Math.floor(range / 5);
         for (const enemy of encounter) {
           const epos = tokenPositions[enemy.id];
           if (!epos || Math.max(Math.abs(epos.gx - playerPos.gx), Math.abs(epos.gy - playerPos.gy)) > maxRangeCells) continue;

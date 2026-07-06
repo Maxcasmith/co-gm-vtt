@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import type { Spell } from 'shared';
+import type { Spell, SpellCombatMeta } from 'shared';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -53,10 +53,22 @@ function parseClasses(raw: string): string[] {
   )];
 }
 
+// Hand-authored/generated combat metadata, keyed by spell name, layered onto the
+// CSV import at load time so it survives a future re-export of Spells.csv.
+function loadCombatOverrides(): Record<string, SpellCombatMeta> {
+  const path = join(__dir, '../../storage/spells/spell-overrides.json');
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
 function loadSpells(): Spell[] {
   const csvPath = join(__dir, '../../storage/spells/Spells.csv');
   const text = readFileSync(csvPath, 'utf-8');
   const rows = parseCSV(text).slice(1); // skip header
+  const overrides = loadCombatOverrides();
   const spells: Spell[] = [];
 
   for (const fields of rows) {
@@ -65,13 +77,15 @@ function loadSpells(): Spell[] {
     const [name, source, , levelRaw, castingTime, duration, schoolRaw, range, components, classesA, classesB, , spellText, atHigherLevels] = fields;
     if (!name) continue;
 
+    const trimmedName = name.trim();
     const isRitual = (schoolRaw ?? '').includes('(ritual)');
     const school = (schoolRaw ?? '').replace(/\s*\(ritual\)\s*/i, '').trim();
     const levelLabel = (levelRaw ?? '').trim();
     const level = LEVEL_MAP[levelLabel] ?? 0;
     const classes = [...new Set([...parseClasses(classesA ?? ''), ...parseClasses(classesB ?? '')])];
+    const combat = overrides[trimmedName];
 
-    spells.push({ name: name.trim(), source: source?.trim() ?? '', level, levelLabel, castingTime: castingTime?.trim() ?? '', duration: duration?.trim() ?? '', school, range: range?.trim() ?? '', components: components?.trim() ?? '', classes, text: spellText?.trim() ?? '', atHigherLevels: atHigherLevels?.trim() ?? '', isRitual });
+    spells.push({ name: trimmedName, source: source?.trim() ?? '', level, levelLabel, castingTime: castingTime?.trim() ?? '', duration: duration?.trim() ?? '', school, range: range?.trim() ?? '', components: components?.trim() ?? '', classes, text: spellText?.trim() ?? '', atHigherLevels: atHigherLevels?.trim() ?? '', isRitual, ...(combat ? { combat } : {}) });
   }
   return spells;
 }

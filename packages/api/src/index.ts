@@ -2,8 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import type { ServerToClientEvents, ClientToServerEvents, Player, CharacterStats, TurnOrderEntry, Character, Weapon } from 'shared';
-import { Weapon as WeaponClass, CLASS_WEAPON_PROFS, calcAC } from 'shared';
+import type { ServerToClientEvents, ClientToServerEvents, Player, CharacterStats, TurnOrderEntry, Character, Weapon, SpellAttackResult, SpellSaveResult, SpellSaveOutcome } from 'shared';
+import { Weapon as WeaponClass, CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, resolveSpellDamageDice, calcAC } from 'shared';
 import { configRouter } from './routes/config.ts';
 import { campaignsRouter } from './routes/campaigns.ts';
 import { compendiumRouter } from './routes/compendium.ts';
@@ -1337,6 +1337,152 @@ io.on('connection', (socket) => {
             io.to(ROOM).emit('chat:message', msg);
           } catch (err) { console.error('[flavour]', err); }
         })();
+      })();
+    });
+
+    // Single-target spell attack (e.g. Fire Bolt) — mirrors combat:attack but uses the
+    // caster's spellcasting modifier for the attack roll and adds no stat mod to damage.
+    socket.on('combat:spell:attack', ({ casterId, casterName, targetId, spell }) => {
+      void (async () => {
+        const cid = campaignId;
+        if (!combatState.get(cid)) return;
+        const encounter = encounters.get(cid);
+        if (!encounter) return;
+
+        const char = await getCharacter(cid, casterId);
+        const creature = encounter.findCreature(targetId);
+        if (!char || !creature || creature.isDead()) return;
+
+        const spellAbility = CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int';
+        const abilityMod = statMod(char.stats[spellAbility]);
+        const charProf = char.proficiencyBonus ?? 2;
+        const attackBonus = abilityMod + charProf;
+
+        const roll = new D20Roll().roll();
+        const total = roll + attackBonus;
+        const hit = total >= creature.ac;
+
+        const damageEffect = spell.combat?.onHit?.find(e => e.type === 'damage');
+        const dice = resolveSpellDamageDice(damageEffect?.scaling, char.level ?? 1) ?? damageEffect?.scaling?.base;
+
+        let damage: number | undefined;
+        let damageRoll: number | undefined;
+        if (hit && dice) {
+          damageRoll = rollDice(dice);
+          damage = damageRoll; // no spellcasting-mod bonus on spell damage, per 5e rules
+          await applyDamageToCreature(cid, targetId, damage);
+        }
+
+        const atkResult: SpellAttackResult = {
+          attackerName: casterName,
+          targetName: creature.name,
+          targetId,
+          spellName: spell.name,
+          d20: roll,
+          attackBonus,
+          statBonus: abilityMod,
+          statName: 'Spellcasting',
+          total,
+          ac: creature.ac,
+          hit,
+          damage,
+          damageRoll,
+          damageType: damageEffect?.damageType,
+          damageFormula: dice,
+          remainingHp: hit ? encounter.findCreature(targetId)?.currentHp : undefined,
+          targetDead: encounter.findCreature(targetId)?.isDead() ?? false,
+        };
+        io.to(ROOM).emit('combat:spell:attack:result', atkResult);
+      })();
+    });
+
+    // Save-based spell (single-target or AoE) — computes the DC once, then rolls each
+    // affected target's save mechanically and applies damage/conditions behind the curtain.
+    // Full per-target rolls are server-logged only; clients only ever see pass/fail + outcome.
+    socket.on('combat:spell:cast', ({ casterId, casterName, spell, targetIds }) => {
+      void (async () => {
+        const cid = campaignId;
+        if (!combatState.get(cid)) return;
+        const encounter = encounters.get(cid);
+        if (!encounter) return;
+
+        const char = await getCharacter(cid, casterId);
+        if (!char) return;
+
+        const combat = spell.combat;
+        const casterSpellAbility = CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int';
+        const casterAbilityMod = statMod(char.stats[casterSpellAbility]);
+        const charProf = char.proficiencyBonus ?? 2;
+        const dc = 8 + charProf + casterAbilityMod;
+
+        const saveAbility = combat?.save?.ability ?? casterSpellAbility;
+        const halfOnSave = combat?.save?.halfOnSave ?? false;
+        const damageEffect = combat?.onHit?.find(e => e.type === 'damage');
+        const conditionEffects = combat?.onHit?.filter(e => e.type === 'condition') ?? [];
+        const dice = resolveSpellDamageDice(damageEffect?.scaling, char.level ?? 1) ?? damageEffect?.scaling?.base;
+
+        const chars = await listCharacters(cid);
+        const outcomes: SpellSaveOutcome[] = [];
+
+        for (const targetId of targetIds) {
+          const participant = encounter.findParticipant(targetId);
+          if (!participant || participant.isDead()) continue;
+
+          let saveBonus: number;
+          let targetChar: Character | undefined;
+          if (participant.isPlayer) {
+            targetChar = chars.find(c => c.id === targetId || c.name === participant.name);
+            if (!targetChar) continue;
+            const mod = statMod(targetChar.stats[saveAbility]);
+            const classSaves: readonly string[] = CLASS_SAVING_THROWS[targetChar.class] ?? [];
+            const proficient = classSaves.includes(saveAbility);
+            saveBonus = mod + (proficient ? (targetChar.proficiencyBonus ?? 2) : 0);
+          } else {
+            saveBonus = participant.creature ? statMod(participant.creature.stats[saveAbility]) : 0;
+          }
+
+          const roll = new D20Roll().roll();
+          const total = roll + saveBonus;
+          const saved = total >= dc;
+          console.log(`[spell-save] ${participant.name} vs ${spell.name} DC${dc}: d20=${roll}${fmtMod(saveBonus)}=${total} — ${saved ? 'SAVE' : 'FAIL'}`);
+
+          let damage: number | undefined;
+          if (dice && (!saved || halfOnSave)) {
+            const rolled = rollDice(dice);
+            damage = saved ? Math.floor(rolled / 2) : rolled;
+            participant.takeDamage(damage);
+            if (participant.isPlayer && targetChar) {
+              io.to(ROOM).emit('combat:player:damage', {
+                characterId: targetChar.id, characterName: participant.name,
+                damage, currentHp: participant.currentHp, maxHp: participant.maxHp,
+              });
+            } else if (participant.creature) {
+              io.to(ROOM).emit('creature:update', {
+                id: targetId, currentHp: participant.creature.currentHp, maxHp: participant.creature.hp, effects: participant.creature.effects,
+              });
+            }
+          }
+
+          const conditionsApplied = !saved
+            ? conditionEffects.map(e => e.condition).filter((c): c is NonNullable<typeof c> => !!c)
+            : undefined;
+
+          outcomes.push({
+            targetId,
+            targetName: participant.name,
+            isPC: participant.isPlayer,
+            saveBonus,
+            dc,
+            saved,
+            damage,
+            conditionsApplied,
+            remainingHp: participant.isPlayer ? participant.currentHp : participant.creature?.currentHp,
+            targetDead: participant.isDead(),
+          });
+        }
+
+        const result: SpellSaveResult = { casterName, spellName: spell.name, dc, saveAbility, slotLevel: spell.level, outcomes };
+        io.to(ROOM).emit('combat:spell:save:result', result);
       })();
     });
 

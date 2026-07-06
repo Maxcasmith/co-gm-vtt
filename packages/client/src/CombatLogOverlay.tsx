@@ -44,6 +44,41 @@ export default function CombatLogOverlay({ open, onClose }: Props) {
   }, []);
 
   useEffect(() => {
+    return on('vtt:combat:spell:attack:result', result => {
+      setEntries(prev => [...prev, {
+        kind: 'spell-attack',
+        timestamp: Date.now(),
+        attackerName: result.attackerName,
+        spellName: result.spellName,
+        d20: result.d20,
+        statBonus: result.statBonus,
+        statName: result.statName,
+        total: result.total,
+        ac: result.ac,
+        hit: result.hit,
+        damage: result.damage,
+        damageRoll: result.damageRoll,
+        damageType: result.damageType,
+        damageFormula: result.damageFormula,
+        targetName: result.targetName,
+      }]);
+    });
+  }, []);
+
+  useEffect(() => {
+    return on('vtt:combat:spell:save:result', result => {
+      setEntries(prev => [...prev, {
+        kind: 'spell-save',
+        timestamp: Date.now(),
+        casterName: result.casterName,
+        spellName: result.spellName,
+        dc: result.dc,
+        outcomes: result.outcomes,
+      }]);
+    });
+  }, []);
+
+  useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
@@ -133,6 +168,76 @@ export default function CombatLogOverlay({ open, onClose }: Props) {
                       ) : !entry.hit ? (
                         <div className="combat-log-attack-miss">Miss</div>
                       ) : null}
+                    </div>
+                  </div>
+                );
+              }
+              if (entry.kind === 'spell-attack') {
+                return (
+                  <div key={i} className="combat-log-entry combat-log-entry--attack">
+                    <span className="combat-log-time">
+                      {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </span>
+                    <div className="combat-log-attack-card">
+                      <div className="combat-log-attack-header">
+                        <span className="combat-log-attack-action">{entry.attackerName} — {entry.spellName}</span>
+                        <span className={`combat-log-attack-total ${entry.hit ? 'combat-log-attack-total--hit' : 'combat-log-attack-total--miss'}`}>
+                          {entry.total}
+                        </span>
+                      </div>
+
+                      <div className="combat-log-attack-breakdown">
+                        <div className="combat-log-breakdown-row">
+                          <span>Dice roll (d20)</span>
+                          <span className="combat-log-breakdown-box">{entry.d20}</span>
+                        </div>
+                        <div className="combat-log-breakdown-row">
+                          <span>{entry.statName} bonus</span>
+                          <span className="combat-log-breakdown-box">{fmtBonus(entry.statBonus)}</span>
+                        </div>
+
+                        <div className="combat-log-attack-vs">
+                          <span>vs. {entry.targetName}</span>
+                          <span>AC {entry.ac}</span>
+                        </div>
+                      </div>
+
+                      {entry.hit && entry.damage != null && entry.damageRoll != null ? (
+                        <div className="combat-log-damage-section">
+                          <div className="combat-log-damage-total">
+                            {entry.damage} {entry.damageType ?? 'damage'}
+                          </div>
+                          <div className="combat-log-attack-breakdown combat-log-attack-breakdown--damage">
+                            <div className="combat-log-breakdown-row">
+                              <span>{entry.spellName} ({entry.damageFormula ?? 'die'})</span>
+                              <span className="combat-log-breakdown-box">{entry.damageRoll}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : !entry.hit ? (
+                        <div className="combat-log-attack-miss">Miss</div>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              }
+              if (entry.kind === 'spell-save') {
+                return (
+                  <div key={i} className="combat-log-entry combat-log-entry--attack">
+                    <span className="combat-log-time">
+                      {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </span>
+                    <div className="combat-log-attack-card">
+                      <div className="combat-log-attack-header">
+                        <span className="combat-log-attack-action">{entry.casterName} — {entry.spellName}</span>
+                        <span className="combat-log-attack-total">DC {entry.dc}</span>
+                      </div>
+                      {entry.outcomes.map((o, oi) => (
+                        <div key={oi} className="combat-log-breakdown-row">
+                          <span>{o.targetName} — {o.saved ? 'Save' : 'Fail'}{o.conditionsApplied?.length ? ` (${o.conditionsApplied.join(', ')})` : ''}</span>
+                          <span className="combat-log-breakdown-box">{o.damage != null ? `-${o.damage}` : '—'}</span>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 );

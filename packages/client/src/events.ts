@@ -1,4 +1,4 @@
-import type { EnemyStatBlock, TokenPosition, Weapon, Consumable, TurnOrderEntry, AttackResult, CombatVictory, CheckRequest, RollResult, Dungeon } from 'shared';
+import type { EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon } from 'shared';
 
 // ── Payload types ─────────────────────────────────────────────────────────────
 //
@@ -35,10 +35,16 @@ export interface EncounterReadyPayload { enemies: EnemyStatBlock[] }
 
 export interface CombatStatePayload { active: boolean }
 export interface MapGeneratedPayload { mapId: string; campaignId: string }
-export interface TargetingStartPayload { weapon: Weapon; actionType: 'action' | 'bonusAction' }
+export type TargetingStartPayload =
+  | { kind: 'weapon'; weapon: Weapon; actionType: 'action' | 'bonusAction' | 'reaction' }
+  | { kind: 'spell'; spell: Spell; casterId: string; actionType: 'action' | 'bonusAction' | 'reaction' };
 export type TargetingCancelPayload = Record<string, never>;
 export interface CombatAttackPayload { attackerName: string; attackerId: string; targetId: string; targetName: string; weapon: Weapon }
 export interface CombatAttackResultPayload extends AttackResult {}
+export interface CombatSpellAttackPayload { casterName: string; casterId: string; targetId: string; targetName: string; spell: Spell; slotLevel: number }
+export interface CombatSpellAttackResultPayload extends SpellAttackResult {}
+export interface CombatSpellCastPayload { casterName: string; casterId: string; spell: Spell; slotLevel: number; targetIds: string[] }
+export interface CombatSpellSaveResultPayload extends SpellSaveResult {}
 export interface CreatureUpdatePayload { id: string; currentHp: number; maxHp: number; effects: string[] }
 export interface CombatVictoryPayload extends CombatVictory {}
 export interface PlayerDamagePayload { characterId: string; characterName: string; damage: number; currentHp: number; maxHp: number }
@@ -56,6 +62,8 @@ export interface MovementUsedPayload  { ft: number }
 export interface MovementGainedPayload { ft: number }
 export interface ViewportChangedPayload { x: number; y: number; zoom: number }
 export type CombatActionSpentPayload = Record<string, never>
+export type CombatBonusActionSpentPayload = Record<string, never>
+export type CombatReactionSpentPayload = Record<string, never>
 export interface CombatLogTextPayload { kind: 'text'; text: string; timestamp: number }
 export interface CombatLogAttackPayload {
   kind: 'attack';
@@ -75,7 +83,32 @@ export interface CombatLogAttackPayload {
   damageFormula?: string;
   targetName: string;
 }
-export type CombatLogPayload = CombatLogTextPayload | CombatLogAttackPayload;
+export interface CombatLogSpellAttackPayload {
+  kind: 'spell-attack';
+  timestamp: number;
+  attackerName: string;
+  spellName: string;
+  d20: number;
+  statBonus: number;
+  statName: string;
+  total: number;
+  ac: number;
+  hit: boolean;
+  damage?: number;
+  damageRoll?: number;
+  damageType?: string;
+  damageFormula?: string;
+  targetName: string;
+}
+export interface CombatLogSpellSavePayload {
+  kind: 'spell-save';
+  timestamp: number;
+  casterName: string;
+  spellName: string;
+  dc: number;
+  outcomes: SpellSaveOutcome[];
+}
+export type CombatLogPayload = CombatLogTextPayload | CombatLogAttackPayload | CombatLogSpellAttackPayload | CombatLogSpellSavePayload;
 
 export interface RollRequestPayload {
   characterId: string;
@@ -122,6 +155,10 @@ export interface VTTEventMap {
   'vtt:targeting:cancel':       TargetingCancelPayload;
   'vtt:combat:attack':          CombatAttackPayload;
   'vtt:combat:attack:result':   CombatAttackResultPayload;
+  'vtt:combat:spell:attack':        CombatSpellAttackPayload;
+  'vtt:combat:spell:attack:result': CombatSpellAttackResultPayload;
+  'vtt:combat:spell:cast':          CombatSpellCastPayload;
+  'vtt:combat:spell:save:result':   CombatSpellSaveResultPayload;
   'vtt:creature:update':        CreatureUpdatePayload;
   'vtt:combat:victory':         CombatVictoryPayload;
   'vtt:combat:player:damage':   PlayerDamagePayload;
@@ -138,6 +175,8 @@ export interface VTTEventMap {
   'vtt:movement:used':          MovementUsedPayload;
   'vtt:movement:gained':        MovementGainedPayload;
   'vtt:combat:action:spent':    CombatActionSpentPayload;
+  'vtt:combat:bonusAction:spent': CombatBonusActionSpentPayload;
+  'vtt:combat:reaction:spent':    CombatReactionSpentPayload;
   'vtt:combat:log':             CombatLogPayload;
   'vtt:dungeon:loaded':         Dungeon;
   'vtt:viewport:changed':       ViewportChangedPayload;

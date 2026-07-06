@@ -126,6 +126,8 @@ export interface ServerToClientEvents {
   'combat:initiative': (entry: TurnOrderEntry) => void;
   'combat:turn:order': (entries: TurnOrderEntry[]) => void;
   'combat:attack:result': (result: AttackResult) => void;
+  'combat:spell:attack:result': (result: SpellAttackResult) => void;
+  'combat:spell:save:result': (result: SpellSaveResult) => void;
   'creature:update': (data: { id: string; currentHp: number; maxHp: number; effects: string[] }) => void;
   'combat:victory': (data: CombatVictory) => void;
   'combat:player:damage': (data: { characterId: string; characterName: string; damage: number; currentHp: number; maxHp: number }) => void;
@@ -152,6 +154,8 @@ export interface ClientToServerEvents {
   'combat:turn:end': () => void;
   'combat:initiative:roll': (entry: TurnOrderEntry) => void;
   'combat:attack': (payload: { attackerId: string; attackerName: string; targetId: string; weapon: Weapon }) => void;
+  'combat:spell:attack': (payload: { casterId: string; casterName: string; targetId: string; spell: Spell; slotLevel: number }) => void;
+  'combat:spell:cast': (payload: { casterId: string; casterName: string; spell: Spell; slotLevel: number; targetIds: string[] }) => void;
 }
 
 export type StoryProvider = 'claude' | 'openai' | 'deepseek';
@@ -384,6 +388,39 @@ export interface Character {
   spells?: string[]; // learned spell names
 }
 
+export type AbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
+
+// One tier of a scaling progression, e.g. { atLevel: 5, value: '2d10' }
+export interface ScalingTier { atLevel: number; value: string }
+
+// 'cantrip' scales with character level (5/11/17); 'spell-slot' scales with the slot level cast at.
+export interface Scaling { mode: 'cantrip' | 'spell-slot'; base: string; tiers: ScalingTier[] }
+
+export const CONDITIONS = [
+  'Blinded', 'Charmed', 'Deafened', 'Exhaustion', 'Frightened', 'Grappled',
+  'Incapacitated', 'Invisible', 'Paralyzed', 'Petrified', 'Poisoned',
+  'Prone', 'Restrained', 'Stunned', 'Unconscious',
+] as const;
+export type Condition = typeof CONDITIONS[number];
+
+export interface EffectSpec {
+  type: 'damage' | 'condition';
+  damageType?: string;       // Fire, Acid, Force, ...
+  scaling?: Scaling;         // present for damage effects
+  condition?: Condition;
+  duration?: { value: number; unit: 'round' | 'minute' | 'hour' | 'until-save' | 'instant' };
+}
+
+export interface SpellCombatMeta {
+  resolution: 'attack' | 'save' | 'auto' | 'none';
+  attackType?: 'melee' | 'ranged';                        // when resolution === 'attack'
+  save?: { ability: AbilityKey; halfOnSave: boolean };    // when resolution === 'save'
+  area?: { shape: 'sphere' | 'cone' | 'cube' | 'line' | 'cylinder' | 'emanation'; size: number; width?: number; origin: 'point' | 'self' };
+  targets?: number;                                       // discrete non-AoE multi-target (e.g. Magic Missile darts)
+  onHit?: EffectSpec[];
+  onSave?: EffectSpec[];
+}
+
 export interface Spell {
   name: string;
   source: string;
@@ -398,6 +435,113 @@ export interface Spell {
   text: string;
   atHigherLevels: string;
   isRitual: boolean;
+  combat?: SpellCombatMeta; // GM/engine-only metadata; not for player-facing display
+}
+
+export const CLASS_SPELLCASTING_ABILITY: Record<string, AbilityKey> = {
+  Artificer: 'int',
+  Bard:      'cha',
+  Cleric:    'wis',
+  Druid:     'wis',
+  Paladin:   'cha',
+  Ranger:    'wis',
+  Sorcerer:  'cha',
+  Warlock:   'cha',
+  Wizard:    'int',
+};
+
+// Canonical source — client/src/character-creation/srd.ts imports this rather than
+// keeping its own (uppercase-keyed) copy.
+export const CLASS_SAVING_THROWS: Record<string, [AbilityKey, AbilityKey]> = {
+  Artificer:  ['int', 'con'],
+  Barbarian:  ['str', 'con'],
+  Bard:       ['dex', 'cha'],
+  Cleric:     ['wis', 'cha'],
+  Druid:      ['int', 'wis'],
+  Fighter:    ['str', 'con'],
+  Monk:       ['str', 'dex'],
+  Paladin:    ['wis', 'cha'],
+  Ranger:     ['str', 'dex'],
+  Rogue:      ['dex', 'int'],
+  Sorcerer:   ['con', 'cha'],
+  Warlock:    ['wis', 'cha'],
+  Wizard:     ['int', 'wis'],
+};
+
+/** 'Action' → 'action', 'Bonus Action' → 'bonusAction', reactions → 'reaction'; rituals/long casts → null (not castable mid-combat). */
+export function actionCostFromCastingTime(castingTime: string): 'action' | 'bonusAction' | 'reaction' | null {
+  const t = castingTime.trim().toLowerCase();
+  if (t === 'action') return 'action';
+  if (t === 'bonus action') return 'bonusAction';
+  if (t.includes('reaction')) return 'reaction';
+  return null;
+}
+
+/** Parses a spell's `range` field into feet for targeting math. 'Self'→0, 'Touch'→5, 'Sight'/'Unlimited'→Infinity. */
+export function parseRangeFeet(range: string): number {
+  const t = range.trim().toLowerCase();
+  if (t === 'self' || t.startsWith('self (')) return 0;
+  if (t === 'touch') return 5;
+  if (t === 'sight' || t === 'unlimited') return Infinity;
+  const m = t.match(/(\d+)\s*feet/);
+  return m ? Number(m[1]) : 0;
+}
+
+/**
+ * Resolves a Scaling to the dice formula to roll for a caster's level.
+ * No spell-slot upcast support yet (no slot-tracking system exists) — spell-slot
+ * mode always returns base; cantrip mode picks the highest tier the caster qualifies for.
+ */
+export function resolveSpellDamageDice(scaling: Scaling | undefined, casterLevel: number): string | undefined {
+  if (!scaling) return undefined;
+  if (scaling.mode !== 'cantrip') return scaling.base;
+  let value = scaling.base;
+  for (const tier of scaling.tiers) {
+    if (casterLevel >= tier.atLevel) value = tier.value;
+  }
+  return value;
+}
+
+export interface SpellAttackResult {
+  attackerName: string;
+  targetName: string;
+  targetId: string;
+  spellName: string;
+  d20: number;
+  attackBonus: number;
+  statBonus: number;
+  statName: string;
+  total: number;
+  ac: number;
+  hit: boolean;
+  damage?: number | undefined;
+  damageRoll?: number | undefined;
+  damageType?: string | undefined;
+  damageFormula?: string | undefined;
+  remainingHp?: number | undefined;
+  targetDead: boolean;
+}
+
+export interface SpellSaveOutcome {
+  targetId: string;
+  targetName: string;
+  isPC: boolean;
+  saveBonus: number;
+  dc: number;
+  saved: boolean;
+  damage?: number | undefined;
+  conditionsApplied?: string[] | undefined;
+  remainingHp?: number | undefined;
+  targetDead: boolean;
+}
+
+export interface SpellSaveResult {
+  casterName: string;
+  spellName: string;
+  dc: number;
+  saveAbility: AbilityKey;
+  slotLevel: number;
+  outcomes: SpellSaveOutcome[];
 }
 
 export type WeaponProficiency = 'simple' | 'martial';

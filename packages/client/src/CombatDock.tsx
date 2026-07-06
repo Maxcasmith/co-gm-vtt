@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
-import type { Character, Weapon } from 'shared';
+import { useState, useEffect, useRef } from 'react';
+import type { Character } from 'shared';
+import { actionCostFromCastingTime } from 'shared';
 import { dispatch, on } from './events.ts';
+import type { TargetingStartPayload } from './events.ts';
 import './app.css';
 
 interface Props {
@@ -45,7 +47,8 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   const [resources, setResources] = useState<Resources>(() =>
     combatActive ? loadResources(character.id) : ALL_AVAILABLE
   );
-  const [targeting, setTargeting] = useState<Weapon | null>(null);
+  const [targeting, setTargeting] = useState<TargetingStartPayload | null>(null);
+  const targetingRef = useRef<TargetingStartPayload | null>(null);
   const [activeEffects, setActiveEffects] = useState<string[]>([]);
   const [isMyTurn, setIsMyTurn] = useState(false);
 
@@ -53,6 +56,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   useEffect(() => {
     if (!combatActive) {
       sessionStorage.removeItem(storageKey(character.id));
+      targetingRef.current = null;
       setTargeting(null);
       setIsMyTurn(false);
     }
@@ -70,7 +74,17 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   }), [character.name, character.id]);
 
   useEffect(() => on('vtt:combat:attack', () => {
-    spendAction();
+    spendResource(targetingRef.current?.actionType ?? 'action');
+    setTargeting(null);
+  }), [character.id]);
+
+  useEffect(() => on('vtt:combat:spell:attack', ({ spell }) => {
+    spendResource(actionCostFromCastingTime(spell.castingTime) ?? 'action');
+    setTargeting(null);
+  }), [character.id]);
+
+  useEffect(() => on('vtt:combat:spell:cast', ({ spell }) => {
+    spendResource(actionCostFromCastingTime(spell.castingTime) ?? 'action');
     setTargeting(null);
   }), [character.id]);
 
@@ -83,8 +97,8 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     if (item.actionCost === 'action') dispatch('vtt:combat:action:spent', {});
   }), [character.id]);
 
-  useEffect(() => on('vtt:targeting:start', ({ weapon }) => setTargeting(weapon)), []);
-  useEffect(() => on('vtt:targeting:cancel', () => setTargeting(null)), []);
+  useEffect(() => on('vtt:targeting:start', payload => { targetingRef.current = payload; setTargeting(payload); }), []);
+  useEffect(() => on('vtt:targeting:cancel', () => { targetingRef.current = null; setTargeting(null); }), []);
 
   if (!combatActive) return null;
 
@@ -92,18 +106,19 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   const baseSpeed = character.speed ?? 30;
   const actionsDisabled = !isMyTurn || isDown;
 
-  function spendAction() {
+  function spendResource(key: PipKey) {
     setResources(prev => {
-      const next = { ...prev, action: false };
+      const next = { ...prev, [key]: false };
       saveResources(character.id, next);
       return next;
     });
-    dispatch('vtt:combat:action:spent', {});
+    const eventForKey = { action: 'vtt:combat:action:spent', bonusAction: 'vtt:combat:bonusAction:spent', reaction: 'vtt:combat:reaction:spent' } as const;
+    dispatch(eventForKey[key], {});
   }
 
   function handleStandardAction(action: typeof STANDARD_ACTIONS[number]) {
     if (actionsDisabled || !resources.action) return;
-    spendAction();
+    spendResource('action');
     if (action.key === 'dash') {
       dispatch('vtt:movement:gained', { ft: baseSpeed });
     } else if ('effect' in action && action.effect) {
@@ -132,7 +147,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
           <div
             key={pip.key}
             data-resource={pip.key}
-            data-active={targeting !== null && pip.key === 'action' ? 'true' : undefined}
+            data-active={targeting !== null && pip.key === targeting.actionType ? 'true' : undefined}
             className={`combat-pip${!resources[pip.key] ? ' combat-pip--spent' : ''}`}
             title={pip.title}
           />

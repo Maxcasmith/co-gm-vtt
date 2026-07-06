@@ -1,3 +1,5 @@
+import { CLASS_SAVING_THROWS as CLASS_SAVING_THROWS_SHARED } from 'shared';
+
 export const SPECIES = [
   'Aasimar', 'Dragonborn', 'Dwarf', 'Elf', 'Gnome', 'Goliath',
   'Half-Elf', 'Half-Orc', 'Halfling', 'Human', 'Orc', 'Tiefling',
@@ -255,21 +257,13 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
   ],
 };
 
-export const CLASS_SAVING_THROWS: Record<string, [StatName, StatName]> = {
-  Artificer:  ['INT', 'CON'],
-  Barbarian:  ['STR', 'CON'],
-  Bard:       ['DEX', 'CHA'],
-  Cleric:     ['WIS', 'CHA'],
-  Druid:      ['INT', 'WIS'],
-  Fighter:    ['STR', 'CON'],
-  Monk:       ['STR', 'DEX'],
-  Paladin:    ['WIS', 'CHA'],
-  Ranger:     ['STR', 'DEX'],
-  Rogue:      ['DEX', 'INT'],
-  Sorcerer:   ['CON', 'CHA'],
-  Warlock:    ['WIS', 'CHA'],
-  Wizard:     ['INT', 'WIS'],
-};
+// Sourced from shared (server needs the same table for spell save resolution);
+// re-cased to uppercase here since StatName/STAT_NAMES are uppercase throughout this file.
+export const CLASS_SAVING_THROWS: Record<string, [StatName, StatName]> = Object.fromEntries(
+  Object.entries(CLASS_SAVING_THROWS_SHARED).map(
+    ([cls, [a, b]]) => [cls, [a.toUpperCase(), b.toUpperCase()] as [StatName, StatName]]
+  )
+);
 
 // ── Skills ────────────────────────────────────────────────────────────────────
 
