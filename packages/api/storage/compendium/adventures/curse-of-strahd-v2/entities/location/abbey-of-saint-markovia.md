@@ -1,1 +1,0 @@
-West of the two mountains, atop a hill, stands the Abbey of Saint Markovia, around which the Barovians built a walled village named Krezk.

@@ -1,1 +1,0 @@
-The Blue Water Inn (area N2) offers food, wine, and shelter to visitors. A stranger with pointed ears is staying there. He came to Barovia from a distant land, riding into town on a carnival wagon.
