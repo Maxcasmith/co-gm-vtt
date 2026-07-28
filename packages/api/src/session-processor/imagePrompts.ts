@@ -1,4 +1,4 @@
-import type { ChatPayload, Character, EnemyStatBlock, AttackResult, WorldState } from 'shared';
+import type { ChatPayload, Character, EnemyStatBlock, AttackResult, WorldState, NemesisRecord } from 'shared';
 
 const PARSE_MODEL = 'gpt-4o-mini';
 const API_BASE = 'https://api.openai.com/v1';
@@ -27,13 +27,18 @@ const FALLBACK_CONTEXT: LocationContext = {
   mood: 'dangerous and foreboding',
 };
 
-export async function parseLocationContext(messages: ChatPayload[], apiKey: string): Promise<LocationContext> {
+export async function parseLocationContext(messages: ChatPayload[], apiKey: string, locationMd?: string | null): Promise<LocationContext> {
   const transcript = messages
     .slice(-20)
     .map(m => `[${m.senderName}]: ${m.text}`)
     .join('\n');
 
+  const knownLocationBlock = locationMd
+    ? `\nKNOWN LOCATION (authoritative — the party is confirmed to be here):\n${locationMd}\n\nUse this to fill "location", "locationType", "architecture", "atmosphere" — these values MUST come from here when it provides them, not from the transcript. Only use the transcript for "currentSituation", "timeOfDay", "weather", "keyFeatures", "mood", or any field the location text leaves unclear.\n`
+    : '';
+
   const systemPrompt = `You are extracting location context from a D&D session transcript to generate a battle map.
+${knownLocationBlock}
 Return ONLY valid JSON with these exact keys:
 {
   "location": "name or description of the location",
@@ -42,11 +47,11 @@ Return ONLY valid JSON with these exact keys:
   "atmosphere": "general feel of the space",
   "timeOfDay": "dawn/morning/midday/afternoon/dusk/night",
   "weather": "weather conditions (if exterior)",
-  "currentSituation": "what is happening right now in one sentence",
-  "keyFeatures": "notable tactical features — furniture, cover, terrain, exits",
+  "currentSituation": "the physical/environmental state of the scene in one sentence — damage, clutter, disturbed objects, tactical terrain. NEVER mention people, NPCs, monsters, or characters being present",
+  "keyFeatures": "notable tactical features — furniture, cover, terrain, exits. NEVER mention people or creatures",
   "mood": "lighting and emotional tone"
 }
-If a field cannot be determined, make a reasonable inference from context. Never return null values.`;
+If a field cannot be determined, make a reasonable inference from context. Never return null values. This describes an empty scene — no living creatures of any kind should appear in any field.`;
 
   try {
     const res = await fetch(`${API_BASE}/chat/completions`, {
@@ -83,12 +88,17 @@ export async function generateEncounterEnemies(
   characters: Character[],
   apiKey: string,
   model = PARSE_MODEL,
+  availableNemeses: NemesisRecord[] = [],
 ): Promise<EnemyStatBlock[]> {
   const partyLines = characters.length
     ? characters.map(c => `- ${c.name}, ${c.class} (${c.species}), equipped: ${(c.inventory ?? []).map(i => i.name).join(', ') || 'basic gear'}`).join('\n')
     : '- Unknown adventurers (assume level 1–2)';
 
   const transcript = messages.slice(-10).map(m => `[${m.senderName}]: ${m.text}`).join('\n');
+
+  const nemesisBlock = availableNemeses.length
+    ? `\nReturning nemeses available for this encounter (recurring enemies the party has met before):\n${availableNemeses.map(n => `- ${n.name}: exact stat block ${JSON.stringify(n.statBlock)}`).join('\n')}\nIf narratively fitting given the recent transcript, you may include one of these as one of the enemies — reuse its stat block exactly, do not alter the numbers. Do not force it if there's no good reason for them to appear.\n`
+    : '';
 
   const systemPrompt = `You are a D&D 5e DM generating a combat encounter. Return ONLY valid JSON:
 {
@@ -105,6 +115,7 @@ export async function generateEncounterEnemies(
     }
   ]
 }
+${nemesisBlock}
 Rules: 1-3 enemies, MEDIUM difficulty for this party, use official 5e monster stat blocks as reference.`;
 
   try {
@@ -294,7 +305,8 @@ STYLE RULES (MANDATORY):
 - Multiple routes, cover, chokepoints, and line-of-sight blockers
 - Rich visual detail with no empty or unused areas
 - Suitable for Foundry VTT, Roll20, and print play
-- No characters, labels, UI elements, text, borders, perspective distortion, or grid lines
+- ABSOLUTELY NO people, NPCs, monsters, animals, or living figures of any kind anywhere in the image — a completely empty scene, ready for tokens to be placed
+- No labels, UI elements, text, borders, perspective distortion, or grid lines
 
 MAP CONTEXT
 
@@ -321,7 +333,91 @@ Atmosphere: ${ctx.atmosphere}
 Map Size: MEDIUM
 
 Final Requirement:
-Visually express every piece of provided context through architecture, terrain, props, lighting, damage, wear, clutter, and environmental storytelling. Maintain strict top-down orthographic perspective, realistic scale, tactical usability, and premium battle-map quality throughout.`;
+Visually express every piece of provided context through architecture, terrain, props, lighting, damage, wear, clutter, and environmental storytelling. Maintain strict top-down orthographic perspective, realistic scale, tactical usability, and premium battle-map quality throughout. The scene must be completely empty of people, NPCs, monsters, and animals — no living creatures anywhere in the image.`;
+}
+
+export interface NemesisCandidate {
+  name: string;
+  boundTo: string;
+  detail: string;
+}
+
+export async function evaluateNemesisCandidates(
+  transcript: ChatPayload[],
+  roster: EnemyStatBlock[],
+  statusLines: string[],
+  existingNemeses: NemesisRecord[],
+  characterNames: string[],
+  apiKey: string,
+  model: string,
+): Promise<{ candidates: NemesisCandidate[] }> {
+  if (!roster.length || !transcript.length) return { candidates: [] };
+
+  const transcriptText = transcript.map(m => `[${m.senderName}]: ${m.text}`).join('\n');
+  const rosterText = roster.map(e => `${e.name} (CR ${e.cr}, HP ${e.hp}, AC ${e.ac}, attacks: ${e.attacks.map(a => a.name).join(', ') || 'none'})`).join('\n');
+  const statusText = statusLines.join('\n') || 'unknown';
+  const activeNemeses = existingNemeses.filter(n => n.status === 'active');
+  const existingText = activeNemeses.length
+    ? activeNemeses.map(n => `${n.name} (bound to ${n.boundTo}, ${n.deathCount}/3 deaths survived)`).join('\n')
+    : 'none';
+
+  const systemPrompt = `You are analysing a just-finished D&D combat encounter to decide whether it produced a "nemesis" — a recurring enemy who can return later, escalated.
+
+Original enemy roster for this fight:
+${rosterText}
+
+Final status (mechanically accurate — HP/alive-dead is reliable regardless of how the fight was narrated):
+${statusText}
+
+Existing active nemeses already bound to this party (a candidate matching one of these names is a RETURN, not a new creation):
+${existingText}
+
+Party members: ${characterNames.join(', ') || 'unknown'}
+
+Full transcript of this encounter:
+${transcriptText}
+
+Most encounters should produce ZERO candidates. Do NOT propose a candidate just because an enemy survived, fled, or was hit — that describes most enemies in most fights and is not sufficient on its own.
+
+Propose a candidate ONLY if the party's specific actions or the fight's narrative turned this one individual into someone distinct from the rest of the mob. Valid reasons include (not exhaustive):
+- The party used a distinctive tactic on this one specific enemy (charmed it, dominated it, made it turn on its own allies)
+- A uniquely memorable manner of near-death or death with a visible lasting consequence (burned, maimed, scarred) — this enemy can still return later if the world/campaign supports revival, resurrection, or simply wasn't fully finished off; note the visible consequence in "detail" so it can be referenced when they return
+- The enemy was given a name, spoke, or had a personal exchange with a specific PC
+- Disproportionate party attention or effort was spent on this one target specifically
+
+An enemy having been hit, having fled, or merely being "one of the survivors" among several identical enemies is NOT sufficient on its own.
+
+If the enemy doesn't have an established name, invent one that fits the scene.
+
+boundTo should be a specific party member's name if the moment was personal to them, or "party" if it was a group confrontation.
+
+Return ONLY valid JSON:
+{
+  "candidates": [
+    { "name": "string", "boundTo": "string — a party member name or \\"party\\"", "detail": "string — 1-2 sentences: what made them distinct, including any visible lasting consequence" }
+  ]
+}
+Empty array if nothing qualifies — this should be the common case.`;
+
+  try {
+    const res = await fetch(`${API_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        max_tokens: 500,
+        response_format: { type: 'json_object' },
+        messages: [{ role: 'system', content: systemPrompt }],
+      }),
+    });
+    if (!res.ok) throw new Error(res.statusText);
+    const data = await res.json() as { choices: { message: { content: string } }[] };
+    const parsed = JSON.parse(data.choices[0]?.message.content ?? '{}') as { candidates?: NemesisCandidate[] };
+    return { candidates: parsed.candidates ?? [] };
+  } catch (err) {
+    console.error('[imagePrompts] nemesis evaluation failed:', err);
+    return { candidates: [] };
+  }
 }
 
 export function buildWorldMapPrompt(worldMd: string, locationsSummary: string, tags: string[]): string {

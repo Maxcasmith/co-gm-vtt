@@ -1,4 +1,4 @@
-export type EntityType = 'npc' | 'faction' | 'location' | 'character';
+export type EntityType = 'npc' | 'faction' | 'location' | 'character' | 'nemesis';
 
 function buildRelationshipsYaml(characters: string[]): string {
   const entries = characters.length > 0
@@ -105,6 +105,27 @@ last_updated: <YYYY-MM-DD>
 
 ## DM Notes
 <Narrative hooks relevant to this character — upcoming reveals, hidden connections>`;
+
+    case 'nemesis': return `---
+type: nemesis
+name: <Name>
+boundTo: <"party" or a specific character name>
+status: <active|retired>
+deathCount: <n>
+connections:
+  - entity: <slug>
+    type: <npc|faction|location>
+    nature: <relationship descriptor>
+last_updated: <YYYY-MM-DD>
+---
+
+<Prose bio — what made them memorable, any visible lasting consequence (scars, injuries) from past encounters>
+
+## Session Notes
+- <date>: <what happened involving this nemesis>
+
+## DM Notes
+<Planned hooks — a grudge, a faction they might rally, how they might return next>`;
   }
 }
 
@@ -227,6 +248,26 @@ Format: [[PARTY_JOIN:NPC Name:brief combat description]]
 The description should be 1–2 sentences covering their apparent fighting style and any relevant traits. Example: A guard who was being held captive decides to fight with the party → include [[PARTY_JOIN:Mira Ashvane:A seasoned soldier with a short sword and shield. Fights defensively and protects flanks.]].
 
 Only emit PARTY_JOIN when the NPC actively commits to fighting alongside the players — not for passive allies, bystanders, or NPCs who help briefly then leave.
+
+## Ally progression tags
+Allies who have joined the party (via PARTY_JOIN) slowly grow more capable through play. When the chat shows an ally doing something that earned them real experience — landing a decisive blow, surviving a dangerous moment through their own skill, contributing meaningfully to resolving a scene — emit:
+
+Format: [[ALLY_XP:Ally Name:amount]]
+
+amount is a small integer (5–20 for a minor contribution, 20–40 for a significant one). Do not award XP for merely being present.
+
+When an ally has visibly studied and internalized a specific tactic or technique a player character used repeatedly in front of them, and enough time/repetition has passed that it's plausible they've picked it up, emit:
+
+Format: [[ALLY_LEARN:Ally Name|Attack Name|bonus|damageFormula]]
+
+Example: [[ALLY_LEARN:Mira Ashvane|Sweeping Strike|4|1d8+2]]. Emit this rarely — only when the narrative genuinely supports an ally picking up a new trick, not as a routine occurrence.
+
+## Nemesis retirement tag
+Recurring enemies ("nemeses") are tracked separately by the system. If, through play, a nemesis's arc reaches a genuine conclusion — the party makes peace with them, they are confirmed permanently destroyed in a way nothing in this world could undo, or the story simply resolves their thread — emit:
+
+Format: [[NEMESIS_RETIRE:Nemesis Name]]
+
+Only emit this for a narrative resolution happening in the current scene, not preemptively.
 
 ## Scene building tags
 When you describe a named location's physical layout — either because asked directly or as part of scene-setting — emit a tag so the system can remember it for future prompts.
@@ -450,11 +491,11 @@ Respond with ONLY valid YAML in this exact format — no prose, no markdown fenc
 
 touched:
   - slug: <kebab-case-slug>
-    type: <npc|faction|location|character>
+    type: <npc|faction|location|character|nemesis>
     reason: "<one sentence>"
 new:
   - slug: <kebab-case-slug>
-    type: <npc|faction|location|character>
+    type: <npc|faction|location|character|nemesis>
     reason: "<one sentence — only list entities not in the existing list above>"
 
 If there are no touched or new entities for a category, output an empty list (touched: [] or new: []).

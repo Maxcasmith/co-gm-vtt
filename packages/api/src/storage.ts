@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, WorldState, EnemyStatBlock, Dungeon, SessionManifest, Quest } from 'shared';
+import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, WorldState, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord } from 'shared';
 import { Encounter } from './domain/encounter.ts';
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
@@ -252,7 +252,18 @@ export async function writeManifest(slug: string, manifest: SessionManifest): Pr
 }
 
 export function emptyManifest(): SessionManifest {
-  return { currentLocation: null, npcs: [], factions: [], connectedZones: [], updatedAt: new Date().toISOString(), act: 1, worldTimeSecs: 43200 };
+  return { currentLocation: null, npcs: [], factions: [], connectedZones: [], updatedAt: new Date().toISOString(), act: 1, worldTimeSecs: 43200, sessionsPlayed: 0 };
+}
+
+export async function readNemeses(slug: string): Promise<NemesisRecord[]> {
+  try {
+    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'nemeses.json'), 'utf-8');
+    return JSON.parse(raw) as NemesisRecord[];
+  } catch { return []; }
+}
+
+export async function writeNemeses(slug: string, records: NemesisRecord[]): Promise<void> {
+  await writeCampaignFile(slug, 'nemeses.json', JSON.stringify(records, null, 2));
 }
 
 export async function readQuests(slug: string): Promise<Quest[]> {

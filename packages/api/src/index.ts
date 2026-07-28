@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import type { ServerToClientEvents, ClientToServerEvents, Player, CharacterStats, TurnOrderEntry, Character, Weapon, SpellAttackResult, SpellSaveResult, SpellSaveOutcome } from 'shared';
+import type { ServerToClientEvents, ClientToServerEvents, Player, CharacterStats, TurnOrderEntry, Character, Weapon, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, EnemyStatBlock, NemesisRecord } from 'shared';
 import { Weapon as WeaponClass, CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, resolveSpellDamageDice, calcAC } from 'shared';
 import { configRouter } from './routes/config.ts';
 import { campaignsRouter } from './routes/campaigns.ts';
@@ -10,12 +10,12 @@ import { compendiumRouter } from './routes/compendium.ts';
 import { readdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { getCharacter, writeCharacter, readChatLog, appendChatLog, listEntitySlugs, readEntity, writeEntity, getWorldMeta, getConfig, CAMPAIGNS_DIR, saveMap, appendMapIndex, listMaps, listPremadeMaps, saveEncounter, loadEncounter, clearEncounter, readWorldState, writeWorldState, readCampaignFile, listCharacters, loadPartyAllies, savePartyAllies, saveDungeon, loadDungeon, readManifest, writeManifest, emptyManifest, parseEntityLinks, readQuests, writeQuests } from './storage.ts';
+import { getCharacter, writeCharacter, readChatLog, appendChatLog, listEntitySlugs, readEntity, writeEntity, getWorldMeta, getConfig, CAMPAIGNS_DIR, saveMap, appendMapIndex, listMaps, listPremadeMaps, saveEncounter, loadEncounter, clearEncounter, readWorldState, writeWorldState, readCampaignFile, listCharacters, loadPartyAllies, savePartyAllies, saveDungeon, loadDungeon, readManifest, writeManifest, emptyManifest, parseEntityLinks, readQuests, writeQuests, readNemeses, writeNemeses } from './storage.ts';
 import { generateDungeon } from './dungeon/index.ts';
 import { getStoryProvider, getTierApiKey } from './providers/index.ts';
 import { buildRecapPrompt } from './session-processor/prompts.ts';
 import { processSession, getDMResponse, ensureSessionQuests } from './session-processor/index.ts';
-import { parseLocationContext, buildBattleMapPrompt, generateEncounterEnemies, generateCombatFlavour, resolveImprovisedAction, generateWorldState, tickWorldNarrative } from './session-processor/imagePrompts.ts';
+import { parseLocationContext, buildBattleMapPrompt, generateEncounterEnemies, generateCombatFlavour, resolveImprovisedAction, generateWorldState, tickWorldNarrative, evaluateNemesisCandidates } from './session-processor/imagePrompts.ts';
 import { generateBattleMap } from './providers/openai.ts';
 import { mapsRouter } from './routes/maps.ts';
 import { adminRouter } from './routes/admin.ts';
@@ -61,6 +61,22 @@ const dmQueue = new Map<string, Promise<void>>();
 const campaignPlayers = new Map<string, string[]>();
 const playerSocketIds = new Map<string, string>(); // charId → socketId (for private events)
 const enemiesReady   = new Map<string, boolean>();  // true once rollEnemyInitiatives has fired
+const combatStartedAt = new Map<string, number>();  // timestamp when combat_init fired, for nemesis transcript slicing
+
+const NEMESIS_COOLDOWN_SESSIONS = 2;
+const NEMESIS_CAP_PER_TARGET = 3;
+const NEMESIS_MAX_DEATHS = 3;
+const ALLY_XP_PER_LEVEL = 100;
+const CR_STEPS = [0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6, 7, 8];
+
+function toSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+function escalateCr(cr: number): number {
+  const next = CR_STEPS.find(c => c > cr);
+  return next ?? cr + 1;
+}
 
 const HIT_DICE: Record<string, number> = {
   Artificer: 8, Barbarian: 12, Bard: 8, Cleric: 8, Druid: 8,
@@ -350,10 +366,68 @@ async function runEnemyAI(cid: string, actor: Participant): Promise<void> {
   advanceTurn(cid);
 }
 
+async function evaluateNemesisAfterCombat(cid: string): Promise<void> {
+  try {
+    // Captured synchronously, before any await — endCombat() calls encounter.teardown()
+    // right after this function's first await suspends it, which wipes encounter.teams.
+    const encounter = encounters.get(cid);
+    const enemyParticipants = encounter?.enemies.filter(p => p.creature) ?? [];
+    const roster = enemyParticipants.map(p => p.creature!.toStatBlock());
+    if (!roster.length) return;
+    const statusLines = enemyParticipants.map(p =>
+      `${p.name}: ${p.creature!.isDead() ? 'dead' : `${p.creature!.currentHp}/${p.creature!.hp} HP, alive`}`
+    );
+
+    const startedAt = combatStartedAt.get(cid) ?? 0;
+    const fullLog = await readChatLog(cid);
+    const transcript = fullLog.filter(m => m.timestamp >= startedAt);
+    if (!transcript.length) return;
+
+    const config = await getConfig();
+    const { model, provider } = config.tiers[config.tasks.combat];
+    const apiKey = getTierApiKey(config.apiKeys, provider);
+    if (!apiKey) return;
+
+    const [nemeses, characters] = await Promise.all([readNemeses(cid), listCharacters(cid)]);
+
+    const { candidates } = await evaluateNemesisCandidates(transcript, roster, statusLines, nemeses, characters.map(c => c.name), apiKey, model);
+    if (!candidates.length) return;
+
+    // Applied one at a time (not batched) — each does a read-modify-write of the
+    // shared nemeses.json, and concurrent candidates would clobber each other's writes.
+    for (const c of candidates) {
+      const baseline = roster.find(e => e.name.toLowerCase() === c.name.toLowerCase());
+      await applyEffects(cid, [{
+        type: 'nemesis_create',
+        boundTo: c.boundTo,
+        name: c.name,
+        detail: c.detail,
+        ...(baseline ? { statBlock: baseline } : {}),
+      }]);
+    }
+  } catch (err) {
+    console.error('[nemesis] evaluation failed:', err);
+  }
+}
+
+function endCombat(cid: string): void {
+  void evaluateNemesisAfterCombat(cid);
+  const encounter = encounters.get(cid);
+  encounter?.teardown();
+  encounters.delete(cid);
+  combatStartedAt.delete(cid);
+  void clearEncounter(cid);
+}
+
 function endSession(cid: string): void {
   if (!sessionState.get(cid)) return;
   sessionState.set(cid, false);
   io.to(ROOM).emit('session:state', false);
+  void readManifest(cid).then(manifest => {
+    const m = manifest ?? emptyManifest();
+    m.sessionsPlayed = (m.sessionsPlayed ?? 0) + 1;
+    void writeManifest(cid, m);
+  });
   void processSession(cid).then(async result => {
     const names = [...(result.updated ?? []), ...(result.created ?? []), ...(result.cascaded ?? [])];
     const text = result.skipped
@@ -371,10 +445,7 @@ function endCombatDefeated(cid: string): void {
   enemiesReady.delete(cid);
   io.to(ROOM).emit('combat:defeat');
   setTimeout(() => {
-    const encounter = encounters.get(cid);
-    encounter?.teardown();
-    encounters.delete(cid);
-    void clearEncounter(cid);
+    endCombat(cid);
     io.to(ROOM).emit('combat:state', false);
     endSession(cid);
   }, 8000);
@@ -415,9 +486,7 @@ async function applyDamageToCreature(cid: string, targetId: string, damage: numb
 
       setTimeout(() => {
         combatState.set(cid, false);
-        encounter.teardown();
-        encounters.delete(cid);
-        void clearEncounter(cid);
+        endCombat(cid);
         io.to(ROOM).emit('combat:state', false);
 
         const kills = enemyStatBlocks.map(e => e.name).join(', ');
@@ -550,7 +619,11 @@ async function generateAndBroadcastMap(campaignId: string): Promise<void> {
 
     io.to(ROOM).emit('map:generating');
     const messages = await readChatLog(campaignId);
-    const ctx = await parseLocationContext(messages, apiKey);
+    const manifest = await readManifest(campaignId);
+    const locationMd = manifest?.currentLocation
+      ? await readEntity(campaignId, 'location', manifest.currentLocation)
+      : null;
+    const ctx = await parseLocationContext(messages, apiKey, locationMd);
     const prompt = buildBattleMapPrompt(ctx);
 
     console.log('[map] generating battle map for:', ctx.location);
@@ -575,12 +648,22 @@ async function generateAndBroadcastEnemies(campaignId: string): Promise<void> {
     const apiKey = getTierApiKey(config.apiKeys, provider);
     if (!apiKey) console.warn('[encounter] no combat API key, using fallback');
 
-    const [messages, characters] = await Promise.all([
+    const [messages, characters, nemeses, manifest] = await Promise.all([
       readChatLog(campaignId),
       listCharacters(campaignId),
+      readNemeses(campaignId),
+      readManifest(campaignId),
     ]);
 
-    const statBlocks = await generateEncounterEnemies(messages, characters, apiKey, model);
+    const sessionsPlayed = manifest?.sessionsPlayed ?? 0;
+    const characterNames = characters.map(c => c.name);
+    const availableNemeses = nemeses.filter(n =>
+      n.status === 'active' &&
+      n.cooldownUntilSession <= sessionsPlayed &&
+      (n.boundTo === 'party' || characterNames.includes(n.boundTo))
+    );
+
+    const statBlocks = await generateEncounterEnemies(messages, characters, apiKey, model, availableNemeses);
 
     const encounter = encounters.get(campaignId);
     if (!encounter) return;
@@ -743,6 +826,7 @@ async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
     if (effect.type === 'combat_init' && !combatState.get(cid)) {
       combatState.set(cid, true);
       enemiesReady.set(cid, false);
+      combatStartedAt.set(cid, Date.now());
       encounters.set(cid, Encounter.empty(cid));
       io.to(ROOM).emit('combat:state', true);
       void listCharacters(cid).then(chars => rollPlayerInitiatives(cid, chars));
@@ -855,6 +939,82 @@ async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
       manifest.updatedAt = new Date().toISOString();
       await writeManifest(cid, manifest);
       io.to(ROOM).emit('clock:update', { worldTimeSecs: manifest.worldTimeSecs });
+    } else if (effect.type === 'nemesis_create') {
+      const slug = toSlug(effect.name);
+      const manifest = await readManifest(cid) ?? emptyManifest();
+      const records = await readNemeses(cid);
+      const existingIdx = records.findIndex(r => r.id === slug);
+
+      if (existingIdx >= 0) {
+        const record = records[existingIdx]!;
+        if (record.status === 'retired') return;
+        record.deathCount += 1;
+        record.statBlock = {
+          ...record.statBlock,
+          hp: Math.round(record.statBlock.hp * 1.3),
+          ac: record.statBlock.ac + 1,
+          cr: escalateCr(record.statBlock.cr),
+        };
+        record.cooldownUntilSession = manifest.sessionsPlayed + NEMESIS_COOLDOWN_SESSIONS;
+        record.status = record.deathCount >= NEMESIS_MAX_DEATHS ? 'retired' : 'active';
+        records[existingIdx] = record;
+        console.log(`[nemesis] ${effect.name} returns — death #${record.deathCount}${record.status === 'retired' ? ', retired' : ''}`);
+      } else {
+        const activeForTarget = records.filter(r => r.boundTo === effect.boundTo && r.status === 'active').length;
+        if (activeForTarget >= NEMESIS_CAP_PER_TARGET) {
+          console.log(`[nemesis] cap reached for ${effect.boundTo}, skipping ${effect.name}`);
+          return;
+        }
+        const statBlock: EnemyStatBlock = effect.statBlock
+          ? { ...effect.statBlock, id: randomUUID(), name: effect.name }
+          : { id: randomUUID(), name: effect.name, cr: 0.25, hp: 11, ac: 12, speed: 30, stats: { str: 11, dex: 11, con: 11, int: 8, wis: 8, cha: 8 }, attacks: [{ name: 'Attack', bonus: 3, damage: '1d6+1' }] };
+
+        records.push({
+          id: slug,
+          name: effect.name,
+          boundTo: effect.boundTo,
+          status: 'active',
+          deathCount: 0,
+          cooldownUntilSession: manifest.sessionsPlayed + NEMESIS_COOLDOWN_SESSIONS,
+          statBlock,
+          createdAtSession: manifest.sessionsPlayed,
+        });
+
+        const today = new Date().toISOString().slice(0, 10);
+        const stub = `---\ntype: nemesis\nname: ${effect.name}\nboundTo: ${effect.boundTo}\nstatus: active\ndeathCount: 0\nlast_updated: ${today}\n---\n\n${effect.detail}\n\n## Session Notes\n- ${today}: ${effect.detail}`;
+        await writeEntity(cid, 'nemesis', slug, stub);
+        console.log(`[nemesis] created: ${effect.name} (bound to ${effect.boundTo})`);
+      }
+      await writeNemeses(cid, records);
+    } else if (effect.type === 'nemesis_retire') {
+      const records = await readNemeses(cid);
+      const record = records.find(r => r.id === toSlug(effect.name));
+      if (!record) return;
+      record.status = 'retired';
+      await writeNemeses(cid, records);
+      console.log(`[nemesis] retired: ${effect.name}`);
+    } else if (effect.type === 'ally_xp') {
+      const allies = await loadPartyAllies(cid);
+      const idx = allies.findIndex(a => a.name.toLowerCase() === effect.allyName.toLowerCase());
+      if (idx === -1) return;
+      const ally = allies[idx]!;
+      const xp = (ally.xp ?? 0) + effect.amount;
+      const level = ally.level ?? 1;
+      if (xp >= ALLY_XP_PER_LEVEL) {
+        allies[idx] = { ...ally, xp: xp - ALLY_XP_PER_LEVEL, level: level + 1, hp: ally.hp + 5, ac: ally.ac + 1 };
+        console.log(`[ally] ${ally.name} leveled up to ${level + 1}`);
+      } else {
+        allies[idx] = { ...ally, xp };
+      }
+      await savePartyAllies(cid, allies);
+    } else if (effect.type === 'ally_learn') {
+      const allies = await loadPartyAllies(cid);
+      const idx = allies.findIndex(a => a.name.toLowerCase() === effect.allyName.toLowerCase());
+      if (idx === -1) return;
+      const ally = allies[idx]!;
+      allies[idx] = { ...ally, attacks: [...ally.attacks, { name: effect.attackName, bonus: effect.bonus, damage: effect.damageFormula }] };
+      await savePartyAllies(cid, allies);
+      console.log(`[ally] ${ally.name} learned ${effect.attackName}`);
     }
   }));
 }
@@ -968,12 +1128,7 @@ function dispatchDMResponse(cid: string): void {
 
       if (response.includes('[COMBAT END]') && combatState.get(cid)) {
         combatState.set(cid, false);
-        const enc = encounters.get(cid);
-        if (enc) {
-          enc.teardown();
-          encounters.delete(cid);
-        }
-        void clearEncounter(cid);
+        endCombat(cid);
         io.to(ROOM).emit('combat:state', false);
       }
 

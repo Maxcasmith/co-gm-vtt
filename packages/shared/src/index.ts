@@ -65,6 +65,8 @@ export interface EnemyStatBlock {
   speed: number;
   stats: CharacterStats;
   attacks: { name: string; bonus: number; damage: string }[];
+  xp?: number;
+  level?: number;
 }
 
 export interface TurnOrderEntry {
@@ -230,6 +232,18 @@ export interface SessionManifest {
   updatedAt: string;
   act: number;
   worldTimeSecs: number;
+  sessionsPlayed: number;
+}
+
+export interface NemesisRecord {
+  id: string;
+  name: string;
+  boundTo: string; // 'party' or a specific character name
+  status: 'active' | 'retired';
+  deathCount: number;
+  cooldownUntilSession: number;
+  statBlock: EnemyStatBlock;
+  createdAtSession: number;
 }
 
 export interface CompendiumMeta {

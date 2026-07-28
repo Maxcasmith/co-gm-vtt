@@ -13,7 +13,11 @@ export type TagEffect =
   | { type: 'quest_add'; id: string; name: string; description: string }
   | { type: 'quest_update'; id: string; entry: string }
   | { type: 'quest_resolve'; id: string }
-  | { type: 'clock'; secs: number };
+  | { type: 'clock'; secs: number }
+  | { type: 'nemesis_create'; boundTo: string; name: string; detail: string; statBlock?: EnemyStatBlock }
+  | { type: 'nemesis_retire'; name: string }
+  | { type: 'ally_xp'; allyName: string; amount: number }
+  | { type: 'ally_learn'; allyName: string; attackName: string; bonus: number; damageFormula: string };
 
 interface ProcessResult {
   text: string;
@@ -226,6 +230,37 @@ export async function processVdmResponse(
     effects.push({ type: 'combat_init' });
   }
 
+  const NEMESIS_RETIRE_RE = /\[\[NEMESIS_RETIRE:([^\]]+)\]\]/g;
+  for (const match of [...text.matchAll(NEMESIS_RETIRE_RE)]) {
+    const name = match[1]?.trim();
+    if (name) {
+      console.log(`[tag] NEMESIS_RETIRE: ${name}`);
+      effects.push({ type: 'nemesis_retire', name });
+    }
+  }
+
+  const ALLY_XP_RE = /\[\[ALLY_XP:([^:[\]]+):(\d+)\]\]/g;
+  for (const match of [...text.matchAll(ALLY_XP_RE)]) {
+    const allyName = match[1]?.trim();
+    const amount = parseInt(match[2] ?? '', 10);
+    if (allyName && !isNaN(amount) && amount > 0) {
+      console.log(`[tag] ALLY_XP: ${allyName} +${amount}`);
+      effects.push({ type: 'ally_xp', allyName, amount });
+    }
+  }
+
+  const ALLY_LEARN_RE = /\[\[ALLY_LEARN:([^|[\]]+)\|([^|[\]]+)\|([^|[\]]+)\|([^\]]+)\]\]/g;
+  for (const match of [...text.matchAll(ALLY_LEARN_RE)]) {
+    const allyName = match[1]?.trim();
+    const attackName = match[2]?.trim();
+    const bonus = parseInt(match[3] ?? '', 10);
+    const damageFormula = match[4]?.trim();
+    if (allyName && attackName && !isNaN(bonus) && damageFormula) {
+      console.log(`[tag] ALLY_LEARN: ${allyName} learned ${attackName}`);
+      effects.push({ type: 'ally_learn', allyName, attackName, bonus, damageFormula });
+    }
+  }
+
   await Promise.all([
     ...tagMatches.map(async match => {
       const tagType = match[1];
@@ -263,6 +298,6 @@ export async function processVdmResponse(
     }),
   ]);
 
-  const strippedText = text.replace(TAG_RE, '').replace(PARTY_JOIN_RE, '').replace(SCENE_BUILD_RE, '').replace(NPC_BUILD_RE, '').replace(COMBAT_INIT_RE, '').replace(SPEAKING_AS_RE, '').replace(CHECK_RE, '').replace(SAVE_RE, '').replace(DUNGEON_GEN_RE, '').replace(QUEST_ADD_RE, '').replace(QUEST_UPDATE_RE, '').replace(QUEST_RESOLVE_RE, '').replace(CLOCK_RE, '').replace(/\s{2,}/g, ' ').trim();
+  const strippedText = text.replace(TAG_RE, '').replace(PARTY_JOIN_RE, '').replace(SCENE_BUILD_RE, '').replace(NPC_BUILD_RE, '').replace(COMBAT_INIT_RE, '').replace(SPEAKING_AS_RE, '').replace(CHECK_RE, '').replace(SAVE_RE, '').replace(DUNGEON_GEN_RE, '').replace(QUEST_ADD_RE, '').replace(QUEST_UPDATE_RE, '').replace(QUEST_RESOLVE_RE, '').replace(CLOCK_RE, '').replace(NEMESIS_RETIRE_RE, '').replace(ALLY_XP_RE, '').replace(ALLY_LEARN_RE, '').replace(/\s{2,}/g, ' ').trim();
   return { text: strippedText, effects, checkRequests, ...(speakingAs !== undefined ? { speakingAs } : {}) };
 }

@@ -11,7 +11,7 @@ import { getStoryProvider, type ChatMessage } from '../providers/index.ts';
 import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, type EntityType } from './prompts.ts';
 import type { ChatPayload } from 'shared';
 
-const ENTITY_TYPES: EntityType[] = ['npc', 'faction', 'location', 'character'];
+const ENTITY_TYPES: EntityType[] = ['npc', 'faction', 'location', 'character', 'nemesis'];
 
 // ── YAML parsing ─────────────────────────────────────────────────────────────
 // ponytail: hand-rolled parser for the simple list-of-objects shape the AI returns
@@ -355,7 +355,7 @@ export async function processSession(campaignSlug: string): Promise<ProcessResul
   const characters = await getCharacterNames(campaignSlug);
 
   // Build existing entity map for triage
-  const existingEntities: Record<EntityType, string[]> = { npc: [], faction: [], location: [], character: [] };
+  const existingEntities: Record<EntityType, string[]> = { npc: [], faction: [], location: [], character: [], nemesis: [] };
   for (const type of ENTITY_TYPES) {
     existingEntities[type] = await listEntitySlugs(campaignSlug, type);
   }
