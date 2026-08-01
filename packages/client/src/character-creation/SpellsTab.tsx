@@ -62,7 +62,8 @@ export default function SpellsTab() {
 
     fetch(`${API}/api/spells?${params}`)
       .then(r => r.json())
-      .then((data: Spell[]) => setAllSpells(data))
+      // character creation is always level 1 — only cantrips and 1st-level spells are learnable
+      .then((data: Spell[]) => setAllSpells(data.filter(s => s.level <= 1)))
       .catch(() => setAllSpells([]))
       .finally(() => setLoading(false));
   }, [c.characterClass, featGrant?.forClass]);
@@ -163,7 +164,7 @@ export default function SpellsTab() {
             />
             <select className="spells-filter-select" value={filterLevel} onChange={e => setFilterLevel(e.target.value)}>
               <option value="all">All Levels</option>
-              {[0,1,2,3,4,5,6,7,8,9].map(l => (
+              {[0,1].map(l => (
                 <option key={l} value={String(l)}>{LEVEL_LABELS[l]}</option>
               ))}
             </select>

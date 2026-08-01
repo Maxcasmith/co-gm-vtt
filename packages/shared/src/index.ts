@@ -160,12 +160,15 @@ export interface ClientToServerEvents {
   'combat:spell:cast': (payload: { casterId: string; casterName: string; spell: Spell; slotLevel: number; targetIds: string[] }) => void;
 }
 
-export type StoryProvider = 'claude' | 'openai' | 'deepseek';
+export type StoryProvider = 'claude' | 'openai' | 'deepseek' | 'kimi';
 export type ImageModel = 'gpt-image-1' | 'dall-e-3' | 'dall-e-2';
+
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'maximum';
 
 export interface ModelTier {
   provider: StoryProvider;
   model: string;
+  effort?: ReasoningEffort;
 }
 
 export interface ImageConfig {
@@ -185,10 +188,11 @@ export interface ApiKeys {
   openai: string;
   anthropic: string;
   deepseek: string;
+  kimi: string;
 }
 
 export interface AppConfig {
-  tiers: { light: ModelTier; thinking: ModelTier };
+  tiers: { light: ModelTier[]; thinking: ModelTier[] };
   tasks: { story: 'light' | 'thinking'; combat: 'light' | 'thinking' };
   apiKeys: ApiKeys;
   image: ImageConfig;
@@ -252,6 +256,9 @@ export interface CompendiumMeta {
   source: string;
   createdAt: string;
   entityCount: { npc: number; creature: number; faction: number; location: number };
+  status: 'complete' | 'draft';
+  tierKey: 'light' | 'thinking';
+  resumeFromChunk: number;
 }
 
 export interface CharacterStats {

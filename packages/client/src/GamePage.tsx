@@ -14,6 +14,7 @@ import ShortcutsOverlay from './ShortcutsOverlay.tsx';
 import RestModal from './RestModal.tsx';
 import BattleMapBackground from './BattleMapBackground.tsx';
 import CombatDock from './CombatDock.tsx';
+import PartyHud from './PartyHud.tsx';
 import TurnOrderBar from './TurnOrderBar.tsx';
 import VictoryScreen from './VictoryScreen.tsx';
 import DefeatScreen from './DefeatScreen.tsx';
@@ -67,6 +68,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [deadPlayerNames, setDeadPlayerNames] = useState<Set<string>>(new Set());
   const [playerHpState, setPlayerHpState] = useState<{ current: number; max: number } | null>(null);
   const [tokenUrls, setTokenUrls] = useState<Record<string, string>>({});
+  const [portraitUrls, setPortraitUrls] = useState<Record<string, string>>({});
   const [acquisitions, setAcquisitions] = useState<Character['inventory']>([]);
   const [itemNotifications, setItemNotifications] = useState<{ id: string; name: string }[]>([]);
   const [worldMapUrl, setWorldMapUrl] = useState<string | undefined>(undefined);
@@ -139,6 +141,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('players:characters', map => {
       setTokenUrls(Object.fromEntries(
         Object.entries(map).map(([name, charId]) => [name, `${API}/api/campaigns/${character.campaignId}/party/${charId}/token`])
+      ));
+      setPortraitUrls(Object.fromEntries(
+        Object.entries(map).map(([name, charId]) => [name, `${API}/api/campaigns/${character.campaignId}/party/${charId}/portrait`])
       ));
     });
     socket.on('character:inventory:add', items => {
@@ -301,6 +306,31 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   }, [combatActive, encounter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (!dungeon) return;
+    const socket = socketRef.current;
+    const room = dungeon.rooms[0];
+    if (!room) return;
+
+    const defaults: Record<string, { gx: number; gy: number }> = {};
+    connected.forEach((name, i) => {
+      defaults[name] = {
+        gx: Math.min(room.x + Math.floor(room.width / 2) + i, room.x + room.width - 1),
+        gy: room.y + Math.floor(room.height / 2),
+      };
+    });
+
+    setTokenPositions(prev => {
+      const next = { ...prev };
+      Object.entries(defaults).forEach(([id, pos]) => { if (!next[id]) next[id] = pos; });
+      return next;
+    });
+
+    if (socket) {
+      Object.entries(defaults).forEach(([tokenId, pos]) => socket.emit('token:move', { tokenId, ...pos }));
+    }
+  }, [dungeon]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.repeat) return;
       if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) return;
@@ -393,6 +423,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         dungeon={dungeon ?? undefined}
       />
       <TurnOrderBar campaignId={character.campaignId} />
+      {!combatActive && (
+        <PartyHud connected={connected} portraitUrls={portraitUrls} self={character.name} />
+      )}
       <CombatDock character={character} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} />
       <EncounterLoadingOverlay />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} header={<span className="palette-clock">{formatWorldTime(worldTimeSecs)}</span>} />

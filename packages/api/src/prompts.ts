@@ -9,13 +9,13 @@ export function buildConceptsPrompt(tags: string[], type: CampaignType): string 
   if (type === 'one-shot') {
     return `You are a tabletop RPG designer. Generate exactly 3 distinct one-shot adventure concepts inspired by these tags: ${tags.join(', ')}.
 
-Each concept must be self-contained — playable and resolvable in a single 3–4 hour session. Name a specific inciting event (who did what, where, when) and the central dramatic question players must answer. Avoid vague atmosphere — be concrete.
+Each concept must be self-contained — playable and resolvable in a single 3–4 hour session. Name the setting and its central conflict or tension — what's wrong, who's driving it. Avoid vague atmosphere — be concrete about the conflict. Do NOT reveal the inciting event, plot twists, or how the session resolves — that's for players to discover at the table, not a spoiler on a concept card.
 
 ${LORE_INSTRUCTION}
 
 Return ONLY a JSON array — no markdown, no explanation:
 [
-  { "name": "string — punchy title that signals the tone", "description": "string — 2 sentences: the specific inciting event and the central question players must resolve" },
+  { "name": "string — punchy title that signals the tone", "description": "string — 2 sentences: the setting and its central conflict — enough to hook a player, not what happens or how it resolves" },
   { "name": "...", "description": "..." },
   { "name": "...", "description": "..." }
 ]`;
@@ -23,13 +23,13 @@ Return ONLY a JSON array — no markdown, no explanation:
 
   return `You are a world-building expert for tabletop RPGs. Generate exactly 3 distinct sandbox world concepts inspired by these tags: ${tags.join(', ')}.
 
-Each concept must name a specific central conflict or irony — the thing that makes this world interesting to drop players into right now. Avoid vague atmosphere. Be concrete about the tension.
+Each concept is pure world-building: the setting itself — its tone, genre, geography, culture, and atmosphere. What kind of place this is, what it looks and feels like to stand in it.
 
 ${LORE_INSTRUCTION}
 
 Return ONLY a JSON array — no markdown, no explanation:
 [
-  { "name": "string — title that signals the world's tone and genre", "description": "string — 2 sentences: what defines this world and what central conflict or irony makes it compelling to play in" },
+  { "name": "string — title that signals the world's tone and genre", "description": "string — 2 sentences of pure world-building: the setting, its atmosphere, and defining flavour" },
   { "name": "...", "description": "..." },
   { "name": "...", "description": "..." }
 ]`;
@@ -89,13 +89,17 @@ Return ONLY a single valid JSON object — no markdown fences, no explanation:
   "startingTime": "HH:MM — the in-world time when play begins (e.g. '09:00' for morning, '20:30' for evening)"
 }
 
-Requirements: 2–3 factions, 4–6 NPCs. Keep scope tight — one location cluster, one central conflict, one session. Every element should directly serve the scenario objective. Do NOT pad with backstory that has no bearing on the session. initialQuests: 2–4 hooks the DM will surface during play.`;
+Requirements: 4–6 factions, 8–12 NPCs. Keep scope tight — one location cluster, one central conflict, one session. Every element should directly serve the scenario objective. Do NOT pad with backstory that has no bearing on the session. initialQuests: 4–8 hooks the DM will surface during play.
+
+This document is for the DM's eyes only — climax, resolution, and secrets are meant to be discovered at the table, not disclosed to players ahead of play.`;
   }
 
   return `You are a master world-builder for tabletop RPGs. Build a rich, specific sandbox world based on this concept.
 
 Concept: "${conceptName}" — ${conceptDescription}
 Tags: ${tags.join(', ')}
+
+The concept above is flavour only — it names no conflict. Invent the specific central conflict, tension, and stakes now, from scratch, consistent with that flavour.
 
 ${LORE_INSTRUCTION}
 
@@ -143,7 +147,7 @@ Return ONLY a single valid JSON object — no markdown fences, no explanation:
   "startingTime": "HH:MM — the in-world time when play begins (e.g. '09:00' for morning, '20:30' for evening)"
 }
 
-Requirements: at least 3 factions, at least 6 NPCs. Include at least 2 NPCs with no faction affiliation or whose loyalty is genuinely divided. Factions should have conflicting goals that create natural drama without the GM needing to force it. initialQuests: 3–5 opening hooks written as pending story beats the DM will surface in early sessions.
+Requirements: at least 6 factions, at least 12 NPCs. Include at least 2 NPCs with no faction affiliation or whose loyalty is genuinely divided. Factions should have conflicting goals that create natural drama without the GM needing to force it. initialQuests: 6–10 opening hooks written as pending story beats the DM will surface in early sessions.
 
 Do NOT generate a plot or overarching story — the players will create that. Generate world state, not narrative. Every NPC and faction should be pursuable independently.`;
 }

@@ -1,3 +1,5 @@
+import { logError } from '../logger.ts';
+
 const API_BASE = 'https://api.anthropic.com/v1';
 const ANTHROPIC_VERSION = '2023-06-01';
 
@@ -60,7 +62,7 @@ export async function claudeStream(
     },
     body: JSON.stringify({
       model,
-      max_tokens: 8000,
+      max_tokens: 16000,
       stream: true,
       messages: [{ role: 'user', content: prompt }],
     }),
@@ -92,7 +94,7 @@ export async function claudeStream(
           full += evt.delta.text;
           onToken(evt.delta.text);
         }
-      } catch { /* ignore malformed SSE lines */ }
+      } catch (err) { logError('providers/claude:claudeStream', err); }
     }
   }
   return full;

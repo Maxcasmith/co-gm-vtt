@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, WorldState, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord } from 'shared';
 import { Encounter } from './domain/encounter.ts';
+import { logError } from './logger.ts';
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const STORAGE_DIR = path.resolve(__dir, '../storage');
@@ -13,9 +14,9 @@ export const CAMPAIGNS_DIR = path.join(STORAGE_DIR, 'campaigns');
 export const PREMADE_DIR   = path.join(STORAGE_DIR, 'premade');
 
 const DEFAULT_CONFIG: AppConfig = {
-  tiers:    { light: { provider: 'openai', model: 'gpt-4o-mini' }, thinking: { provider: 'claude', model: 'claude-sonnet-4-6' } },
+  tiers:    { light: [{ provider: 'openai', model: 'gpt-4o-mini' }], thinking: [{ provider: 'claude', model: 'claude-sonnet-4-6' }] },
   tasks:    { story: 'thinking', combat: 'light' },
-  apiKeys:  { openai: '', anthropic: '', deepseek: '' },
+  apiKeys:  { openai: '', anthropic: '', deepseek: '', kimi: '' },
   image:    { model: 'gpt-image-1', generateMaps: true, generateWorldMap: false },
   narration: { model: 'none', voice: 'onyx' },
 };
@@ -24,7 +25,8 @@ export async function getConfig(): Promise<AppConfig> {
   try {
     const raw = await readFile(CONFIG_PATH, 'utf-8');
     return { ...DEFAULT_CONFIG, ...JSON.parse(raw) } as AppConfig;
-  } catch {
+  } catch (err) {
+    logError('storage:getConfig', err);
     return DEFAULT_CONFIG;
   }
 }
@@ -44,7 +46,8 @@ export async function getWorldMeta(slug: string): Promise<WorldMeta | null> {
   try {
     const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'world.json'), 'utf-8');
     return JSON.parse(raw) as WorldMeta;
-  } catch {
+  } catch (err) {
+    logError('storage:getWorldMeta', err);
     return null;
   }
 }
@@ -84,9 +87,29 @@ export async function getCharacter(slug: string, charId: string): Promise<Charac
   try {
     const raw = await readFile(path.join(partyDir(slug, charId), 'character.json'), 'utf-8');
     return JSON.parse(raw) as Character;
-  } catch {
+  } catch (err) {
+    logError('storage:getCharacter', err);
     return null;
   }
+}
+
+// Concurrent tag effects / requests can each read-modify-write the same character.json;
+// without serializing, the slower write silently clobbers the faster one's changes.
+const characterLocks = new Map<string, Promise<unknown>>();
+
+export async function updateCharacter(
+  slug: string, charId: string, updater: (char: Character) => Character,
+): Promise<Character | null> {
+  const key = `${slug}/${charId}`;
+  const run = (characterLocks.get(key) ?? Promise.resolve()).then(async () => {
+    const char = await getCharacter(slug, charId);
+    if (!char) return null;
+    const updated = updater(char);
+    await writeCharacter(slug, charId, updated);
+    return updated;
+  });
+  characterLocks.set(key, run.catch(err => logError('storage:updateCharacter:lock', err)));
+  return run;
 }
 
 export async function listCharacters(slug: string): Promise<Character[]> {
@@ -115,7 +138,8 @@ export async function readChatLog(slug: string): Promise<ChatPayload[]> {
   try {
     const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'chat.json'), 'utf-8');
     return JSON.parse(raw) as ChatPayload[];
-  } catch {
+  } catch (err) {
+    logError('storage:readChatLog', err);
     return [];
   }
 }
@@ -142,7 +166,8 @@ export async function listEntitySlugs(slug: string, type: string): Promise<strin
 export async function readEntity(slug: string, type: string, entitySlug: string): Promise<string | null> {
   try {
     return await readFile(path.join(CAMPAIGNS_DIR, slug, 'entities', type, `${entitySlug}.md`), 'utf-8');
-  } catch {
+  } catch (err) {
+    logError('storage:readEntity', err);
     return null;
   }
 }
@@ -168,7 +193,7 @@ export async function saveMap(slug: string, mapId: string, buffer: Buffer): Prom
 export async function appendMapIndex(slug: string, entry: BattleMap): Promise<void> {
   const indexPath = path.join(CAMPAIGNS_DIR, slug, 'maps', 'index.json');
   let index: BattleMap[] = [];
-  try { index = JSON.parse(await readFile(indexPath, 'utf-8')) as BattleMap[]; } catch { /* first map */ }
+  try { index = JSON.parse(await readFile(indexPath, 'utf-8')) as BattleMap[]; } catch (err) { logError('storage:appendMapIndex', err); }
   index.push(entry);
   await writeFile(indexPath, JSON.stringify(index, null, 2), 'utf-8');
 }
@@ -177,7 +202,8 @@ export async function listMaps(slug: string): Promise<BattleMap[]> {
   try {
     const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'maps', 'index.json'), 'utf-8');
     return JSON.parse(raw) as BattleMap[];
-  } catch {
+  } catch (err) {
+    logError('storage:listMaps', err);
     return [];
   }
 }
@@ -190,21 +216,22 @@ export async function loadEncounter(slug: string): Promise<Encounter | null> {
   try {
     const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'encounter.json'), 'utf-8');
     return Encounter.fromJSON(JSON.parse(raw));
-  } catch {
+  } catch (err) {
+    logError('storage:loadEncounter', err);
     return null;
   }
 }
 
 export async function clearEncounter(slug: string): Promise<void> {
   const p = path.join(CAMPAIGNS_DIR, slug, 'encounter.json');
-  try { if (existsSync(p)) await writeFile(p, JSON.stringify({ enemies: [] }), 'utf-8'); } catch { /* ignore */ }
+  try { if (existsSync(p)) await writeFile(p, JSON.stringify({ enemies: [] }), 'utf-8'); } catch (err) { logError('storage:clearEncounter', err); }
 }
 
 export async function readWorldState(slug: string): Promise<WorldState | null> {
   try {
     const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'world-state.json'), 'utf-8');
     return JSON.parse(raw) as WorldState;
-  } catch { return null; }
+  } catch (err) { logError('storage:readWorldState', err); return null; }
 }
 
 export async function writeWorldState(slug: string, state: WorldState): Promise<void> {
@@ -214,14 +241,14 @@ export async function writeWorldState(slug: string, state: WorldState): Promise<
 export async function readCampaignFile(slug: string, filename: string): Promise<string | null> {
   try {
     return await readFile(path.join(CAMPAIGNS_DIR, slug, filename), 'utf-8');
-  } catch { return null; }
+  } catch (err) { logError('storage:readCampaignFile', err); return null; }
 }
 
 export async function loadPartyAllies(slug: string): Promise<EnemyStatBlock[]> {
   try {
     const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'party-allies.json'), 'utf-8');
     return JSON.parse(raw) as EnemyStatBlock[];
-  } catch { return []; }
+  } catch (err) { logError('storage:loadPartyAllies', err); return []; }
 }
 
 export async function savePartyAllies(slug: string, allies: EnemyStatBlock[]): Promise<void> {
@@ -237,14 +264,14 @@ export async function loadDungeon(slug: string): Promise<Dungeon | null> {
   try {
     const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'dungeon.json'), 'utf-8');
     return JSON.parse(raw) as Dungeon;
-  } catch { return null; }
+  } catch (err) { logError('storage:loadDungeon', err); return null; }
 }
 
 export async function readManifest(slug: string): Promise<SessionManifest | null> {
   try {
     const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'manifest.json'), 'utf-8');
     return JSON.parse(raw) as SessionManifest;
-  } catch { return null; }
+  } catch (err) { logError('storage:readManifest', err); return null; }
 }
 
 export async function writeManifest(slug: string, manifest: SessionManifest): Promise<void> {
@@ -259,7 +286,7 @@ export async function readNemeses(slug: string): Promise<NemesisRecord[]> {
   try {
     const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'nemeses.json'), 'utf-8');
     return JSON.parse(raw) as NemesisRecord[];
-  } catch { return []; }
+  } catch (err) { logError('storage:readNemeses', err); return []; }
 }
 
 export async function writeNemeses(slug: string, records: NemesisRecord[]): Promise<void> {
@@ -270,7 +297,7 @@ export async function readQuests(slug: string): Promise<Quest[]> {
   try {
     const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'quests.json'), 'utf-8');
     return JSON.parse(raw) as Quest[];
-  } catch { return []; }
+  } catch (err) { logError('storage:readQuests', err); return []; }
 }
 
 export async function writeQuests(slug: string, quests: Quest[]): Promise<void> {
@@ -297,6 +324,6 @@ export async function archiveChatLog(slug: string): Promise<void> {
     const count = existing.filter(f => f.startsWith(date)).length;
     const archiveName = `${date}-${String(count + 1).padStart(3, '0')}.json`;
     await writeFile(path.join(sessionsDir, archiveName), raw, 'utf-8');
-  } catch { /* no chat log yet */ }
+  } catch (err) { logError('storage:archiveChatLog', err); }
   await writeFile(chatPath, '[]', 'utf-8');
 }

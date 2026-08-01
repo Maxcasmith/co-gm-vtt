@@ -1,3 +1,6 @@
+import type { StoryProviderAdapter } from '../providers/index.ts';
+import { logError } from '../logger.ts';
+
 export interface ManifestRoom {
   name: string;
   size: 'small' | 'medium' | 'large';
@@ -19,24 +22,12 @@ function isGeneric(name: string): boolean {
 export async function fetchManifest(
   name: string,
   dungeonType: string,
-  apiKey: string,
-  model: string,
+  adapter: StoryProviderAdapter,
 ): Promise<DungeonManifest | null> {
   if (isGeneric(name)) return null;
 
-  try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model,
-        max_tokens: 600,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: `You are a dungeon architect. Given a location name and genre, produce 6-10 named rooms that authentically represent that location.
-Return ONLY valid JSON:
+  const prompt = `You are a dungeon architect. Given a location name and genre, produce 6-10 named rooms that authentically represent that location.
+Return ONLY valid JSON, no markdown fences, no explanation:
 {
   "rooms": [
     {
@@ -47,18 +38,18 @@ Return ONLY valid JSON:
     }
   ]
 }
-Use location-authentic names (e.g. for RPD: "Evidence Room", "S.T.A.R.S. Office"). Match creature types to the genre.`,
-          },
-          { role: 'user', content: `Location: ${name}\nGenre: ${dungeonType}` },
-        ],
-      }),
-    });
-    if (!res.ok) throw new Error(res.statusText);
-    const data = await res.json() as { choices: { message: { content: string } }[] };
-    const parsed = JSON.parse(data.choices[0]?.message.content ?? '{}') as Partial<DungeonManifest>;
+Use location-authentic names (e.g. for RPD: "Evidence Room", "S.T.A.R.S. Office"). Match creature types to the genre.
+
+Location: ${name}
+Genre: ${dungeonType}`;
+
+  try {
+    const raw = await adapter.complete(prompt);
+    const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    const parsed = JSON.parse(cleaned) as Partial<DungeonManifest>;
     return parsed.rooms?.length ? { rooms: parsed.rooms } : null;
   } catch (err) {
-    console.error('[dungeon:manifest] failed:', err);
+    logError('dungeon/manifest:fetchManifest', err);
     return null;
   }
 }

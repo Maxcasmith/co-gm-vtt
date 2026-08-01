@@ -435,7 +435,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
         ctx.stroke();
       }
 
-      if (encounter && tokenPositions) {
+      if ((encounter || dungeon) && tokenPositions) {
         const drag = dragRef.current;
         const playerPos = tokenPositions[player];
 
@@ -591,7 +591,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
         });
 
         // Enemy tokens
-        encounter.forEach(enemy => {
+        encounter?.forEach(enemy => {
           const pos = tokenPositions[enemy.id];
           if (!pos) return;
           const isDragged = drag?.id === enemy.id;
@@ -712,17 +712,6 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
         }
     } else {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#e0e0e0';
-      ctx.font = '14px monospace';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'alphabetic';
-      ctx.fillText(`You: ${player}`, 20, 40);
-      ctx.fillStyle = '#888';
-      ctx.fillText('Connected:', 20, 80);
-      connected.forEach((p, i) => {
-        ctx.fillStyle = p === player ? '#7eb8f7' : '#c0c0c0';
-        ctx.fillText(`• ${p}`, 20, 100 + i * 24);
-      });
     }
   }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick, aoeTick]);
 

@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { Spell, SpellCombatMeta } from 'shared';
+import { logError } from '../logger.ts';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -59,7 +60,8 @@ function loadCombatOverrides(): Record<string, SpellCombatMeta> {
   const path = join(__dir, '../../storage/spells/spell-overrides.json');
   try {
     return JSON.parse(readFileSync(path, 'utf-8'));
-  } catch {
+  } catch (err) {
+    logError('routes/spells:loadCombatOverrides', err);
     return {};
   }
 }

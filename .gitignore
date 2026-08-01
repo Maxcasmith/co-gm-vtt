@@ -5,3 +5,4 @@ dist
 packages/api/storage/campaigns/
 packages/api/storage/config.json
 packages/api/storage/compendium/adventures/
+packages/api/storage/logs/

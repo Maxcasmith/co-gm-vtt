@@ -4,6 +4,7 @@ import { rm, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { CAMPAIGNS_DIR, listCampaigns } from '../storage.ts';
+import { logError } from '../logger.ts';
 
 export const adminRouter = Router();
 
@@ -34,6 +35,7 @@ adminRouter.delete('/campaigns/:id', async (req, res) => {
     if (existsSync(campaignDir)) await rm(campaignDir, { recursive: true });
     res.json({ ok: true });
   } catch (err) {
+    logError('routes/admin:deleteCampaign', err);
     res.status(500).json({ ok: false, error: String(err) });
   }
 });
@@ -45,6 +47,7 @@ adminRouter.delete('/campaigns/:id/chat', async (req, res) => {
     if (existsSync(chatPath)) await rm(chatPath);
     res.json({ ok: true });
   } catch (err) {
+    logError('routes/admin:deleteChat', err);
     res.status(500).json({ ok: false, error: String(err) });
   }
 });
@@ -59,6 +62,7 @@ adminRouter.delete('/campaigns/:id/sessions', async (req, res) => {
     }
     res.json({ ok: true });
   } catch (err) {
+    logError('routes/admin:deleteSessions', err);
     res.status(500).json({ ok: false, error: String(err) });
   }
 });

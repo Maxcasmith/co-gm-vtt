@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AppConfig, StoryProvider, ImageModel, NarrationModel } from 'shared';
 import { previewVoice } from './narration.ts';
+import ConfigureModelChainModal from './ConfigureModelChainModal.tsx';
 
 interface Props {
   open: boolean;
   onClose: () => void;
 }
 
-const STORY_PROVIDERS: { id: StoryProvider; label: string; models: { id: string; label: string }[] }[] = [
+export const STORY_PROVIDERS: { id: StoryProvider; label: string; models: { id: string; label: string; supportsEffort?: boolean }[] }[] = [
   {
     id: 'claude',
     label: 'Claude (Anthropic)',
@@ -22,13 +23,13 @@ const STORY_PROVIDERS: { id: StoryProvider; label: string; models: { id: string;
     id: 'openai',
     label: 'OpenAI (GPT)',
     models: [
-      { id: 'gpt-5.5', label: 'GPT-5.5' },
-      { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-      { id: 'gpt-5.4', label: 'GPT-5.4' },
+      { id: 'gpt-5.5', label: 'GPT-5.5', supportsEffort: true },
+      { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', supportsEffort: true },
+      { id: 'gpt-5.4', label: 'GPT-5.4', supportsEffort: true },
       { id: 'gpt-4.1', label: 'GPT-4.1' },
       { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
       { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano' },
-      { id: 'o4-mini', label: 'o4 Mini (Reasoning)' },
+      { id: 'o4-mini', label: 'o4 Mini (Reasoning)', supportsEffort: true },
       { id: 'gpt-4o', label: 'GPT-4o' },
       { id: 'gpt-4o-mini', label: 'GPT-4o Mini' },
     ],
@@ -39,6 +40,13 @@ const STORY_PROVIDERS: { id: StoryProvider; label: string; models: { id: string;
     models: [
       { id: 'deepseek-chat', label: 'DeepSeek Chat' },
       { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner' },
+    ],
+  },
+  {
+    id: 'kimi',
+    label: 'Kimi (Moonshot AI)',
+    models: [
+      { id: 'kimi-k3', label: 'Kimi K3', supportsEffort: true },
     ],
   },
 ];
@@ -70,9 +78,9 @@ const OPENAI_VOICES = [
 ];
 
 const DEFAULT_CONFIG: AppConfig = {
-  tiers: { light: { provider: 'openai', model: 'gpt-4o-mini' }, thinking: { provider: 'claude', model: 'claude-sonnet-4-6' } },
+  tiers: { light: [{ provider: 'openai', model: 'gpt-4o-mini' }], thinking: [{ provider: 'claude', model: 'claude-sonnet-4-6' }] },
   tasks: { story: 'thinking', combat: 'light' },
-  apiKeys: { openai: '', anthropic: '', deepseek: '' },
+  apiKeys: { openai: '', anthropic: '', deepseek: '', kimi: '' },
   image: { model: 'gpt-image-1', generateMaps: true, generateWorldMap: false },
   narration: { model: 'none', voice: 'onyx' },
 };
@@ -82,10 +90,9 @@ const API = `http://${window.location.hostname}:3001`;
 export default function SettingsSidebar({ open, onClose }: Props) {
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
   const [saved, setSaved] = useState<AppConfig>(DEFAULT_CONFIG);
-  const [thinkingStatus, setThinkingStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
-  const [lightStatus, setLightStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [imageStatus, setImageStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [narrationPreviewing, setNarrationPreviewing] = useState(false);
+  const [chainModalTier, setChainModalTier] = useState<'thinking' | 'light' | null>(null);
   const discardRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -119,19 +126,18 @@ export default function SettingsSidebar({ open, onClose }: Props) {
     onClose();
   }
 
-  async function testConnection(type: 'thinking' | 'light' | 'image') {
-    const set = type === 'thinking' ? setThinkingStatus : type === 'light' ? setLightStatus : setImageStatus;
-    set('testing');
+  async function testImageConnection() {
+    setImageStatus('testing');
     try {
       const r = await fetch(`${API}/api/config/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type }),
+        body: JSON.stringify({ type: 'image' }),
       });
       const { ok } = await r.json() as { ok: boolean };
-      set(ok ? 'ok' : 'fail');
+      setImageStatus(ok ? 'ok' : 'fail');
     } catch {
-      set('fail');
+      setImageStatus('fail');
     }
   }
 
@@ -148,8 +154,10 @@ export default function SettingsSidebar({ open, onClose }: Props) {
     setNarrationPreviewing(false);
   }
 
-  const thinkingProvider = STORY_PROVIDERS.find(p => p.id === config.tiers.thinking.provider) ?? STORY_PROVIDERS[0]!;
-  const lightProvider = STORY_PROVIDERS.find(p => p.id === config.tiers.light.provider) ?? STORY_PROVIDERS[0]!;
+  function chainSummary(chain: AppConfig['tiers']['thinking']): string {
+    if (!chain.length) return 'No models configured';
+    return chain.map(n => STORY_PROVIDERS.find(p => p.id === n.provider)?.models.find(m => m.id === n.model)?.label ?? n.model).join(' → ');
+  }
 
   return (
     <>
@@ -192,6 +200,16 @@ export default function SettingsSidebar({ open, onClose }: Props) {
                 placeholder="sk-..."
               />
             </label>
+            <label className="modal-label">
+              Kimi (Moonshot AI)
+              <input
+                className="modal-input"
+                type="password"
+                value={config.apiKeys.kimi}
+                onChange={e => setConfig(c => ({ ...c, apiKeys: { ...c.apiKeys, kimi: e.target.value } }))}
+                placeholder="sk-..."
+              />
+            </label>
           </section>
 
           <div className="settings-divider" />
@@ -199,46 +217,8 @@ export default function SettingsSidebar({ open, onClose }: Props) {
           <section className="settings-section">
             <h3 className="settings-section-title">Thinking</h3>
             <p className="settings-section-note">Used for story generation, DM responses, and world building — tasks that need reasoning and creativity.</p>
-            <label className="modal-label">
-              Provider
-              <select
-                className="modal-select"
-                value={config.tiers.thinking.provider}
-                onChange={e => setConfig(c => ({
-                  ...c,
-                  tiers: {
-                    ...c.tiers,
-                    thinking: {
-                      ...c.tiers.thinking,
-                      provider: e.target.value as StoryProvider,
-                      model: STORY_PROVIDERS.find(p => p.id === e.target.value)?.models[0]?.id ?? '',
-                    },
-                  },
-                }))}
-              >
-                {STORY_PROVIDERS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-              </select>
-            </label>
-            <label className="modal-label">
-              Model
-              <select
-                className="modal-select"
-                value={config.tiers.thinking.model}
-                onChange={e => setConfig(c => ({ ...c, tiers: { ...c.tiers, thinking: { ...c.tiers.thinking, model: e.target.value } } }))}
-              >
-                {thinkingProvider.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-              </select>
-            </label>
-            <div className="settings-test-row">
-              <button className="btn-test" onClick={() => testConnection('thinking')} disabled={thinkingStatus === 'testing'}>
-                {thinkingStatus === 'testing' ? 'Testing…' : 'Test Connection'}
-              </button>
-              {thinkingStatus !== 'idle' && thinkingStatus !== 'testing' && (
-                <span className={`status-badge status-badge--${thinkingStatus}`}>
-                  {thinkingStatus === 'ok' ? '● Connected' : '● Failed'}
-                </span>
-              )}
-            </div>
+            <p className="settings-chain-summary">{chainSummary(config.tiers.thinking)}</p>
+            <button className="btn-secondary" onClick={() => setChainModalTier('thinking')}>Configure Thinking</button>
           </section>
 
           <div className="settings-divider" />
@@ -246,46 +226,8 @@ export default function SettingsSidebar({ open, onClose }: Props) {
           <section className="settings-section">
             <h3 className="settings-section-title">Light</h3>
             <p className="settings-section-note">Used for combat AI, item structuring, and other fast structured tasks. A cheaper model works well here.</p>
-            <label className="modal-label">
-              Provider
-              <select
-                className="modal-select"
-                value={config.tiers.light.provider}
-                onChange={e => setConfig(c => ({
-                  ...c,
-                  tiers: {
-                    ...c.tiers,
-                    light: {
-                      ...c.tiers.light,
-                      provider: e.target.value as StoryProvider,
-                      model: STORY_PROVIDERS.find(p => p.id === e.target.value)?.models[0]?.id ?? '',
-                    },
-                  },
-                }))}
-              >
-                {STORY_PROVIDERS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-              </select>
-            </label>
-            <label className="modal-label">
-              Model
-              <select
-                className="modal-select"
-                value={config.tiers.light.model}
-                onChange={e => setConfig(c => ({ ...c, tiers: { ...c.tiers, light: { ...c.tiers.light, model: e.target.value } } }))}
-              >
-                {lightProvider.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-              </select>
-            </label>
-            <div className="settings-test-row">
-              <button className="btn-test" onClick={() => testConnection('light')} disabled={lightStatus === 'testing'}>
-                {lightStatus === 'testing' ? 'Testing…' : 'Test Connection'}
-              </button>
-              {lightStatus !== 'idle' && lightStatus !== 'testing' && (
-                <span className={`status-badge status-badge--${lightStatus}`}>
-                  {lightStatus === 'ok' ? '● Connected' : '● Failed'}
-                </span>
-              )}
-            </div>
+            <p className="settings-chain-summary">{chainSummary(config.tiers.light)}</p>
+            <button className="btn-secondary" onClick={() => setChainModalTier('light')}>Configure Light</button>
           </section>
 
           <div className="settings-divider" />
@@ -337,7 +279,7 @@ export default function SettingsSidebar({ open, onClose }: Props) {
               </select>
             </label>
             <div className="settings-test-row">
-              <button className="btn-test" onClick={() => testConnection('image')} disabled={imageStatus === 'testing'}>
+              <button className="btn-test" onClick={() => void testImageConnection()} disabled={imageStatus === 'testing'}>
                 {imageStatus === 'testing' ? 'Testing…' : 'Test Connection'}
               </button>
               {imageStatus !== 'idle' && imageStatus !== 'testing' && (
@@ -436,6 +378,17 @@ export default function SettingsSidebar({ open, onClose }: Props) {
           <button className="btn-primary" onClick={handleDiscard}>Discard</button>
         </div>
       </dialog>
+
+      <ConfigureModelChainModal
+        open={chainModalTier !== null}
+        tierLabel={chainModalTier === 'light' ? 'Light' : 'Thinking'}
+        chain={chainModalTier ? config.tiers[chainModalTier] : []}
+        onCancel={() => setChainModalTier(null)}
+        onConfirm={newChain => {
+          if (chainModalTier) setConfig(c => ({ ...c, tiers: { ...c.tiers, [chainModalTier]: newChain } }));
+          setChainModalTier(null);
+        }}
+      />
 
     </>
   );

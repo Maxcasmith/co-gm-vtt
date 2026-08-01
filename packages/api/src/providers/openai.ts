@@ -1,14 +1,30 @@
+import type { ReasoningEffort } from 'shared';
+import { logError } from '../logger.ts';
+
 const API_BASE = 'https://api.openai.com/v1';
 
 export interface ChatMessage { role: 'user' | 'assistant'; content: string }
 
-export async function openaiChat(system: string, messages: ChatMessage[], apiKey: string, model: string): Promise<string> {
+// OpenAI's reasoning models accept low|medium|high — no true "maximum" tier, collapse to high.
+function toOpenaiEffort(effort?: ReasoningEffort): 'low' | 'medium' | 'high' | undefined {
+  switch (effort) {
+    case 'low': return 'low';
+    case 'medium': return 'medium';
+    case 'high': return 'high';
+    case 'maximum': return 'high';
+    default: return undefined;
+  }
+}
+
+export async function openaiChat(system: string, messages: ChatMessage[], apiKey: string, model: string, effort?: ReasoningEffort): Promise<string> {
+  const reasoningEffort = toOpenaiEffort(effort);
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model,
-      max_tokens: 1024,
+      max_completion_tokens: 1024,
+      ...(reasoningEffort && { reasoning_effort: reasoningEffort }),
       messages: [{ role: 'system', content: system }, ...messages],
     }),
   });
@@ -20,13 +36,15 @@ export async function openaiChat(system: string, messages: ChatMessage[], apiKey
   return data.choices[0]?.message.content ?? '';
 }
 
-export async function openaiComplete(prompt: string, apiKey: string, model: string): Promise<string> {
+export async function openaiComplete(prompt: string, apiKey: string, model: string, effort?: ReasoningEffort): Promise<string> {
+  const reasoningEffort = toOpenaiEffort(effort);
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model,
-      max_tokens: 8000,
+      max_completion_tokens: 8000,
+      ...(reasoningEffort && { reasoning_effort: reasoningEffort }),
       messages: [{ role: 'user', content: prompt }],
     }),
   });
@@ -43,13 +61,16 @@ export async function openaiStream(
   apiKey: string,
   model: string,
   onToken: (token: string) => void,
+  effort?: ReasoningEffort,
 ): Promise<string> {
+  const reasoningEffort = toOpenaiEffort(effort);
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model,
-      max_tokens: 8000,
+      max_completion_tokens: 16000,
+      ...(reasoningEffort && { reasoning_effort: reasoningEffort }),
       stream: true,
       messages: [{ role: 'user', content: prompt }],
     }),
@@ -78,7 +99,7 @@ export async function openaiStream(
         const evt = JSON.parse(data) as { choices: { delta?: { content?: string } }[] };
         const token = evt.choices[0]?.delta?.content;
         if (token) { full += token; onToken(token); }
-      } catch { /* ignore malformed SSE lines */ }
+      } catch (err) { logError('providers/openai:openaiStream', err); }
     }
   }
   return full;
@@ -102,7 +123,7 @@ export async function describeImage(base64image: string, apiKey: string): Promis
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model: 'gpt-4o',
-      max_tokens: 300,
+      max_completion_tokens: 300,
       messages: [{
         role: 'user',
         content: [

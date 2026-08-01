@@ -16,6 +16,7 @@ function cacheKey(tags: string[]) { return [...tags].sort().join('|'); }
 export default function CreateCampaignModal({ open, onClose, onCreated }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const streamRef = useRef<HTMLPreElement>(null);
+  const rawStreamRef = useRef<HTMLPreElement>(null);
   // ponytail: session-level concept cache keyed by sorted tag string — persists across open/close
   const conceptsCache = useRef<Map<string, WorldConcept[]>>(new Map());
 
@@ -27,6 +28,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
   const [concepts, setConcepts] = useState<WorldConcept[]>([]);
   const [selectedConcept, setSelectedConcept] = useState<WorldConcept | null>(null);
   const [progressLines, setProgressLines] = useState<string[]>([]);
+  const [rawOutput, setRawOutput] = useState('');
   const [done, setDone] = useState(false);
   const [campaignId, setCampaignId] = useState('');
   const [error, setError] = useState('');
@@ -40,6 +42,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
     setConcepts([]);
     setSelectedConcept(null);
     setProgressLines([]);
+    setRawOutput('');
     setDone(false);
     setCampaignId('');
     setError('');
@@ -115,6 +118,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
     if (!concept) return;
     setStep('generating');
     setProgressLines([]);
+    setRawOutput('');
     setDone(false);
     setError('');
 
@@ -138,10 +142,13 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           try {
-            const evt = JSON.parse(line.slice(6)) as { type: string; id?: string; message?: string };
+            const evt = JSON.parse(line.slice(6)) as { type: string; id?: string; message?: string; text?: string };
             if (evt.type === 'progress') {
               setProgressLines(l => [...l, evt.message ?? '']);
               if (streamRef.current) streamRef.current.scrollTop = streamRef.current.scrollHeight;
+            } else if (evt.type === 'token') {
+              setRawOutput(r => r + (evt.text ?? ''));
+              if (rawStreamRef.current) rawStreamRef.current.scrollTop = rawStreamRef.current.scrollHeight;
             } else if (evt.type === 'complete') {
               setCampaignId(evt.id ?? '');
               setDone(true);
@@ -159,9 +166,17 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
 
   if (!open) return null;
 
+  // Backdrop click only closes the modal on the tags step, before anything has been
+  // generated. Once concepts or a world are being generated or shown, an accidental
+  // click shouldn't discard them — the X button is the only way out from there.
+  const dismissable = step === 'tags';
+
   return (
-    <div className="modal-overlay" onClick={handleClose}>
+    <div className="modal-overlay" onClick={dismissable ? handleClose : undefined}>
       <dialog ref={dialogRef} className="modal campaign-modal" open onClick={e => e.stopPropagation()}>
+        {step !== 'generating' && (
+          <button className="sheet-close campaign-modal-close" onClick={handleClose} aria-label="Close">×</button>
+        )}
 
         {step === 'tags' && (
           <>
@@ -256,6 +271,11 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
             <pre ref={streamRef} className="stream-output">
               {progressLines.join('\n') || 'Generating world…'}
             </pre>
+            {rawOutput && (
+              <pre ref={rawStreamRef} className="stream-output stream-output-raw">
+                {rawOutput}
+              </pre>
+            )}
             {error && <p className="modal-error">{error}</p>}
             {done && (
               <p className="modal-success">

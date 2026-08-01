@@ -632,6 +632,109 @@
 .status-badge--ok { color: #6dbf7e; }
 .status-badge--fail { color: #c0605a; }
 
+.settings-chain-summary {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-family: 'Crimson Pro', Georgia, serif;
+  margin: 4px 0 10px;
+}
+
+/* ── model chain modal ── */
+.chain-modal {
+  max-width: 90vw;
+  width: 640px;
+}
+
+.chain-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0;
+  margin-bottom: 20px;
+}
+
+.chain-node-wrap {
+  display: flex;
+  align-items: center;
+}
+
+.chain-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 180px;
+  padding: 22px 20px;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-raised, var(--surface));
+  transition: border-color 0.25s;
+}
+
+.chain-node--testing { border-color: #d8b84c; }
+.chain-node--ok { border-color: #6dbf7e; }
+.chain-node--fail { border-color: #c0605a; }
+
+.chain-node--empty {
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  border-style: dashed;
+  cursor: pointer;
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  gap: 6px;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.chain-node--empty:hover { border-color: var(--gold); color: var(--gold); }
+
+.chain-node-plus {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.chain-node-remove {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px;
+}
+
+.chain-node-remove:hover { color: #c0605a; }
+
+.chain-node-select {
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.chain-connector {
+  width: 28px;
+  height: 0;
+  border-top: 2px dotted var(--border);
+  flex-shrink: 0;
+}
+
+.chain-test-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.chain-summary {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-family: 'Crimson Pro', Georgia, serif;
+}
+
 .settings-footer {
   padding: 20px 32px;
   border-top: 1px solid var(--border);
@@ -667,6 +770,8 @@
 }
 
 .modal-header { margin-bottom: 0; display: flex; flex-direction: column; align-items: flex-start; }
+
+.campaign-modal-close { position: absolute; top: 16px; right: 16px; }
 
 .modal-hint {
   font-family: 'Crimson Pro', Georgia, serif;
@@ -999,6 +1104,15 @@
   line-height: 1.6;
 }
 
+.stream-output-raw {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.75;
+  min-height: 120px;
+  max-height: 180px;
+}
+
 /* ── character creation page ── */
 .create-page {
   min-height: 100vh;
@@ -1105,6 +1219,12 @@
 }
 
 .create-error { margin: 0 32px; }
+
+.finished-stats-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+.finished-stat { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0; border: 1px solid var(--border); border-radius: 4px; }
+.finished-stat-name { font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 0.1em; color: var(--text-muted); }
+.finished-stat-value { font-size: 18px; color: var(--text); }
+.finished-create-row { display: flex; justify-content: flex-end; padding-top: 8px; }
 
 /* ── tab content ── */
 .tab-content {
@@ -4070,6 +4190,11 @@ button.sheet-save-row {
   color: var(--text-muted);
 }
 
+.admin-draft-badge {
+  font-size: 11px;
+  color: var(--gold);
+}
+
 .admin-empty {
   color: var(--text-muted);
   font-size: 13px;
@@ -4170,6 +4295,54 @@ button.sheet-save-row {
   font-size: 11px;
   font-family: 'Crimson Pro', Georgia, serif;
   color: var(--text);
+}
+
+/* ── Party HUD ────────────────────────────────────────────────────────────── */
+
+.party-hud {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 150;
+  pointer-events: none;
+}
+
+.party-hud-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+}
+
+.party-hud-card--self {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.party-hud-avatar {
+  width: 40px;
+  height: 40px;
+  background: var(--surface);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.party-hud-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.party-hud-name {
+  font-size: 14px;
+  font-family: 'Cinzel', serif;
+  letter-spacing: 0.03em;
+  color: var(--text);
+  white-space: nowrap;
 }
 
 /* ── Combat dock ──────────────────────────────────────────────────────────── */

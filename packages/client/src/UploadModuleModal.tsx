@@ -1,20 +1,31 @@
 import { useRef, useState } from 'react';
+import type { CompendiumMeta } from 'shared';
 
 interface Props {
   open: boolean;
   onClose: () => void;
   onUploaded: () => void;
+  resumeAdventure?: CompendiumMeta | null;
 }
 
 const API = `http://${window.location.hostname}:3001`;
 
-export default function UploadModuleModal({ open, onClose, onUploaded }: Props) {
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+export default function UploadModuleModal({ open, onClose, onUploaded, resumeAdventure }: Props) {
   const streamRef = useRef<HTMLPreElement>(null);
+  const rawStreamRef = useRef<HTMLPreElement>(null);
   const [name, setName] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [tier, setTier] = useState<'light' | 'thinking'>('light');
   const [progress, setProgress] = useState('');
+  const [rawOutput, setRawOutput] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [pausing, setPausing] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [activeSlug, setActiveSlug] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
 
@@ -23,7 +34,11 @@ export default function UploadModuleModal({ open, onClose, onUploaded }: Props) 
     setFile(null);
     setTier('light');
     setProgress('');
+    setRawOutput('');
     setUploading(false);
+    setPausing(false);
+    setPaused(false);
+    setActiveSlug(null);
     setDone(false);
     setError('');
   }
@@ -41,20 +56,33 @@ export default function UploadModuleModal({ open, onClose, onUploaded }: Props) 
     }
   }
 
+  async function handlePause() {
+    if (!activeSlug || pausing) return;
+    setPausing(true);
+    await fetch(`${API}/api/compendium/${activeSlug}/pause`, { method: 'POST' });
+  }
+
   async function handleUpload() {
-    if (!file || !name) return;
+    const resuming = !!resumeAdventure || paused;
+    if (!resuming && (!file || !name)) return;
+    const slug = resumeAdventure?.slug ?? activeSlug ?? slugify(name);
+
+    setActiveSlug(slug);
     setUploading(true);
+    setPausing(false);
+    setPaused(false);
     setProgress('');
+    setRawOutput('');
     setError('');
     setDone(false);
 
-    const markdown = await file.text();
-
-    const res = await fetch(`${API}/api/compendium/upload`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ markdown, name, model: tier }),
-    });
+    const res = resuming
+      ? await fetch(`${API}/api/compendium/${slug}/resume`, { method: 'POST' })
+      : await fetch(`${API}/api/compendium/upload`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ markdown: await file!.text(), name, model: tier }),
+        });
 
     try {
       const reader = res.body!.getReader();
@@ -70,12 +98,20 @@ export default function UploadModuleModal({ open, onClose, onUploaded }: Props) 
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           try {
-            const evt = JSON.parse(line.slice(6)) as { type: string; message?: string; slug?: string };
+            const evt = JSON.parse(line.slice(6)) as { type: string; message?: string; text?: string };
             if (evt.type === 'progress') {
               setProgress(p => p ? `${p}\n${evt.message}` : (evt.message ?? ''));
+              setRawOutput('');
               if (streamRef.current) streamRef.current.scrollTop = streamRef.current.scrollHeight;
+            } else if (evt.type === 'token') {
+              setRawOutput(r => r + (evt.text ?? ''));
+              if (rawStreamRef.current) rawStreamRef.current.scrollTop = rawStreamRef.current.scrollHeight;
             } else if (evt.type === 'complete') {
               setDone(true);
+              onUploaded();
+            } else if (evt.type === 'paused') {
+              setPausing(false);
+              setPaused(true);
               onUploaded();
             } else if (evt.type === 'error') {
               setError(evt.message ?? 'Upload failed');
@@ -93,14 +129,20 @@ export default function UploadModuleModal({ open, onClose, onUploaded }: Props) 
   if (!open) return null;
 
   return (
-    <div className="modal-overlay" onClick={handleClose}>
+    <div className="modal-overlay" onClick={uploading ? undefined : handleClose}>
       <dialog className="modal campaign-modal" open onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 className="modal-title">{done ? 'Module Uploaded' : 'Upload Adventure Module'}</h2>
-          {!done && <p className="modal-hint">Upload a Markdown adventure file to the compendium. Large modules are processed in sections.</p>}
+          <h2 className="modal-title">
+            {done ? 'Module Uploaded' : paused ? 'Extraction Paused' : resumeAdventure ? `Resume Extraction — ${resumeAdventure.name}` : 'Upload Adventure Module'}
+          </h2>
+          {!done && !paused && !resumeAdventure && <p className="modal-hint">Upload a Markdown adventure file to the compendium. Large modules are processed in sections.</p>}
+          {!done && !paused && resumeAdventure && (
+            <p className="modal-hint">Continues from section {resumeAdventure.resumeFromChunk + 1} where it previously stopped.</p>
+          )}
+          {paused && <p className="modal-hint">Progress is saved. Resume now, or save as a draft and come back later.</p>}
         </div>
 
-        {!uploading && !done && (
+        {!uploading && !done && !paused && !resumeAdventure && (
           <>
             <label className="modal-label">
               Adventure Name
@@ -132,10 +174,13 @@ export default function UploadModuleModal({ open, onClose, onUploaded }: Props) 
           </>
         )}
 
-        {(uploading || done) && (
+        {(uploading || done || paused) && (
           <>
             <pre ref={streamRef} className="stream-output">{progress}</pre>
-            {done && <p className="modal-success"><strong>{name}</strong> is ready in the compendium.</p>}
+            {rawOutput && (
+              <pre ref={rawStreamRef} className="stream-output stream-output-raw">{rawOutput}</pre>
+            )}
+            {done && <p className="modal-success"><strong>{resumeAdventure?.name ?? name}</strong> is ready in the compendium.</p>}
           </>
         )}
 
@@ -144,15 +189,24 @@ export default function UploadModuleModal({ open, onClose, onUploaded }: Props) 
         <div className="modal-actions">
           {done || error ? (
             <button className="btn-primary" onClick={handleClose}>Done</button>
+          ) : paused ? (
+            <>
+              <button className="btn-secondary" onClick={() => void handleUpload()}>Resume</button>
+              <button className="btn-primary" onClick={handleClose}>Save as Draft</button>
+            </>
+          ) : uploading ? (
+            <button className="btn-primary" onClick={() => void handlePause()} disabled={pausing}>
+              {pausing ? 'Pausing…' : 'Pause'}
+            </button>
           ) : (
             <>
-              <button className="btn-secondary" onClick={handleClose} disabled={uploading}>Cancel</button>
+              <button className="btn-secondary" onClick={handleClose}>Cancel</button>
               <button
                 className="btn-primary"
                 onClick={() => void handleUpload()}
-                disabled={!file || !name || uploading}
+                disabled={!resumeAdventure && (!file || !name)}
               >
-                {uploading ? 'Extracting…' : 'Upload'}
+                {resumeAdventure ? 'Resume' : 'Upload'}
               </button>
             </>
           )}

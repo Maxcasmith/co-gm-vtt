@@ -5,13 +5,13 @@ import {
   CAMPAIGNS_DIR,
   getConfig, writeCampaignFile, listCampaigns,
   getWorldMeta, writeWorldMeta,
-  writeCharacter, getCharacter, listCharacters, findCharacterByPassword, writeCharacterImage,
+  writeCharacter, updateCharacter, getCharacter, listCharacters, findCharacterByPassword, writeCharacterImage,
   readWorldState, writeWorldState, readCampaignFile, writeEntity,
   listEntitySlugs, readEntity, saveDungeon, writeManifest, readManifest, emptyManifest, writeQuests,
 } from '../storage.ts';
 import { generateGrid } from '../dungeon/generator.ts';
 import { placeEntities } from '../dungeon/placer.ts';
-import { getStoryProvider, getTierApiKey } from '../providers/index.ts';
+import { getStoryProvider, getCombatProvider } from '../providers/index.ts';
 import { copyCompendiumToCampaign } from '../compendium/storage.ts';
 import { buildConceptsPrompt, buildWorldGenPrompt } from '../prompts.ts';
 import { processSession, generateDmBrief } from '../session-processor/index.ts';
@@ -20,8 +20,17 @@ import { generateWorldState, tickWorldNarrative, buildWorldMapPrompt } from '../
 import { generateBattleMap } from '../providers/openai.ts';
 import { writeFile } from 'fs/promises';
 import path from 'path';
+import { jsonrepair } from 'jsonrepair';
+import { logError } from '../logger.ts';
 
 export const campaignsRouter = Router();
+
+// LLMs occasionally tack a stray closing quote onto true/false/null literals
+// (e.g. `"factionAffiliation": null"`) — jsonrepair can't infer intent there, so strip it first.
+function parseLlmJson<T>(raw: string): T {
+  const desanitized = raw.replace(/(:\s*(?:true|false|null))"(?=\s*[,}])/g, '$1');
+  return JSON.parse(jsonrepair(desanitized)) as T;
+}
 
 // ── session processing ────────────────────────────────────────────────────────
 
@@ -30,6 +39,7 @@ campaignsRouter.post('/:slug/session/process', async (req, res) => {
     const result = await processSession(req.params.slug ?? '');
     res.json(result);
   } catch (err) {
+    logError('routes/campaigns:session/process', err);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Processing failed' });
   }
 });
@@ -58,7 +68,8 @@ campaignsRouter.get('/:id', async (req, res) => {
     const raw = await readFile(`${CAMPAIGNS_DIR}/${slug}/meta.json`, 'utf-8');
     const campaign = JSON.parse(raw) as { tags?: string[] };
     res.json({ ...meta, tags: campaign.tags ?? [] });
-  } catch {
+  } catch (err) {
+    logError('routes/campaigns:getById', err);
     res.json(meta);
   }
 });
@@ -72,8 +83,9 @@ campaignsRouter.post('/concepts', async (req, res) => {
   try {
     const raw = await getStoryProvider(config).complete(buildConceptsPrompt(tags, type));
     const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-    res.json(JSON.parse(cleaned) as WorldConcept[]);
+    res.json(parseLlmJson<WorldConcept[]>(cleaned));
   } catch (err) {
+    logError('routes/campaigns:concepts', err);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Concept generation failed' });
   }
 });
@@ -97,14 +109,14 @@ campaignsRouter.post('/generate', async (req, res) => {
     send({ type: 'progress', message: 'Generating world…' });
     await getStoryProvider(config).stream(
       buildWorldGenPrompt(tags, concept.name, concept.description, type),
-      token => { accumulated += token; },
+      token => { accumulated += token; send({ type: 'token', text: token }); },
     );
 
     const start = accumulated.indexOf('{');
     const end   = accumulated.lastIndexOf('}');
     if (start === -1 || end === -1) throw new Error('Model did not return a JSON object');
-    const jsonStr = accumulated.slice(start, end + 1).replace(/,(\s*[}\]])/g, '$1');
-    const world = JSON.parse(jsonStr) as Record<string, unknown> & { world?: { name?: string } };
+    const jsonStr = accumulated.slice(start, end + 1);
+    const world = parseLlmJson<Record<string, unknown> & { world?: { name?: string } }>(jsonStr);
 
     await writeVault(slug, world, tags, concept, msg => send({ type: 'progress', message: msg }));
 
@@ -143,13 +155,14 @@ campaignsRouter.post('/generate', async (req, res) => {
           await writeFile(path.join(CAMPAIGNS_DIR, slug, 'world-map.jpg'), buffer);
           console.log('[world-map] generated for:', slug);
         } catch (err) {
-          console.error('[world-map] generation failed:', err);
+          logError('routes/campaigns:generate:worldMap', err);
         }
       }
     }
 
     send({ type: 'complete', id: slug, name: campaignName });
   } catch (err) {
+    logError('routes/campaigns:generate', err);
     send({ type: 'error', message: err instanceof Error ? err.message : 'Generation failed' });
   } finally {
     res.end();
@@ -204,6 +217,7 @@ campaignsRouter.post('/from-module', async (req, res) => {
 
     send({ type: 'complete', id: slug, name: campaignName });
   } catch (err) {
+    logError('routes/campaigns:from-module', err);
     send({ type: 'error', message: err instanceof Error ? err.message : 'Failed to create campaign' });
   } finally {
     res.end();
@@ -234,16 +248,16 @@ campaignsRouter.post('/:id/party', async (req, res) => {
 campaignsRouter.get('/:id/party/:charId', async (req, res) => {
   const char = await getCharacter(req.params.id ?? '', req.params.charId ?? '');
   if (!char) { res.status(404).json({ error: 'Character not found' }); return; }
-  res.json(char);
+  const maxHp = calcMaxHp(char);
+  res.json({ ...char, maxHp, currentHp: char.currentHp ?? maxHp });
 });
 
 campaignsRouter.patch('/:id/party/:charId', async (req, res) => {
   const { id, charId } = req.params as { id: string; charId: string };
-  const char = await getCharacter(id, charId);
-  if (!char) { res.status(404).json({ error: 'Character not found' }); return; }
   const allowed = ['xp', 'level', 'proficiencyBonus'] as const;
   const patch = Object.fromEntries(allowed.filter(k => k in req.body).map(k => [k, (req.body as Record<string, unknown>)[k]]));
-  await writeCharacter(id, charId, { ...char, ...patch });
+  const updated = await updateCharacter(id, charId, char => ({ ...char, ...patch }));
+  if (!updated) { res.status(404).json({ error: 'Character not found' }); return; }
   res.json({ ok: true });
 });
 
@@ -291,6 +305,7 @@ campaignsRouter.post('/:id/party/portrait', async (req, res) => {
       tokenPath: `party/${charId}/token.png`,
     });
   } catch (err) {
+    logError('routes/campaigns:portrait', err);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Portrait processing failed' });
   }
 });
@@ -436,9 +451,10 @@ campaignsRouter.post('/:id/rest/short', async (req, res) => {
     hpGained = Math.max(0, hpGained);
     const currentHp = Math.min(maxHp, current + hpGained);
 
-    await writeCharacter(id, characterId, { ...char, currentHp, maxHp });
+    await updateCharacter(id, characterId, fresh => ({ ...fresh, currentHp, maxHp }));
     return res.json({ hpGained, currentHp, maxHp });
   } catch (err) {
+    logError('routes/campaigns:rest', err);
     return res.status(500).json({ error: err instanceof Error ? err.message : 'Rest failed' });
   }
 });
@@ -451,22 +467,21 @@ campaignsRouter.post('/:id/rest/long', async (req, res) => {
     if (!char) return res.status(404).json({ error: 'Character not found' });
 
     const maxHp = calcMaxHp(char);
-    await writeCharacter(id, characterId, { ...char, currentHp: maxHp, maxHp });
+    await updateCharacter(id, characterId, fresh => ({ ...fresh, currentHp: maxHp, maxHp }));
 
     // Advance world state
     const HOURS = 8;
     let state = await readWorldState(id);
 
     const config = await getConfig();
-    const { model, provider } = config.tiers[config.tasks.combat];
-    const apiKey = getTierApiKey(config.apiKeys, provider);
+    const adapter = getCombatProvider(config);
 
-    if (!state && apiKey) {
+    if (!state) {
       const [worldMd, factionsMd] = await Promise.all([
         readCampaignFile(id, 'world.md'),
         readCampaignFile(id, 'factions.md'),
       ]);
-      state = await generateWorldState(worldMd ?? '', factionsMd ?? '', apiKey, model);
+      state = await generateWorldState(worldMd ?? '', factionsMd ?? '', adapter);
       if (state) { state.dayNumber = 1; state.totalHoursElapsed = 0; }
     }
 
@@ -496,9 +511,9 @@ campaignsRouter.post('/:id/rest/long', async (req, res) => {
         }
       }
 
-      if (apiKey) {
+      {
         const worldMd = await readCampaignFile(id, 'world.md');
-        worldEvents = await tickWorldNarrative(state, HOURS, worldMd ?? '', newlyCompleted, apiKey, model);
+        worldEvents = await tickWorldNarrative(state, HOURS, worldMd ?? '', newlyCompleted, adapter);
       }
 
       await writeWorldState(id, state);
@@ -506,6 +521,7 @@ campaignsRouter.post('/:id/rest/long', async (req, res) => {
 
     return res.json({ currentHp: maxHp, maxHp, worldEvents: worldEvents ?? undefined });
   } catch (err) {
+    logError('routes/campaigns:longRest', err);
     return res.status(500).json({ error: err instanceof Error ? err.message : 'Long rest failed' });
   }
 });

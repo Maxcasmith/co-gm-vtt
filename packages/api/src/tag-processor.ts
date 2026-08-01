@@ -1,5 +1,7 @@
 import type { Item, Weapon, Consumable, Ammunition, EnemyStatBlock, CheckRequest } from 'shared';
 import { randomUUID } from 'crypto';
+import type { StoryProviderAdapter } from './providers/index.ts';
+import { logError } from './logger.ts';
 
 export type AcquiredItem = Item | Weapon | Consumable | Ammunition;
 
@@ -70,40 +72,25 @@ const TEMPLATES: Record<string, string> = {
 async function structureItems(
   tagType: string,
   itemNames: string[],
-  apiKey: string,
-  model: string,
+  adapter: StoryProviderAdapter,
 ): Promise<AcquiredItem[]> {
   const template = TEMPLATES[tagType];
   if (!template || !itemNames.length) return [];
 
-  const schema = `[\n  ${template}\n]`;
   const itemList = itemNames.map(n => `- ${n.trim()}`).join('\n');
+  const prompt = `You are a D&D 5e item formatter. Convert item names into structured JSON following the schema exactly.
+Return ONLY valid JSON, no markdown fences, no explanation, in the form: { "items": [ ...each item matching the schema... ] }
+Schema for one item:\n${template}
+
+Items to structure:\n${itemList}`;
 
   try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model,
-        max_tokens: 600,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: `You are a D&D 5e item formatter. Convert item names into structured JSON following the schema exactly.
-Return ONLY valid JSON in the form: { "items": [ ...each item matching the schema... ] }
-Schema for one item:\n${template}`,
-          },
-          { role: 'user', content: `Items to structure:\n${itemList}` },
-        ],
-      }),
-    });
-    if (!res.ok) throw new Error(res.statusText);
-    const data = await res.json() as { choices: { message: { content: string } }[] };
-    const parsed = JSON.parse(data.choices[0]?.message.content ?? '{}') as { items?: AcquiredItem[] };
+    const raw = await adapter.complete(prompt);
+    const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    const parsed = JSON.parse(cleaned) as { items?: AcquiredItem[] };
     return parsed.items ?? [];
   } catch (err) {
-    console.error('[tag-processor] item structuring failed:', err);
+    logError('tag-processor:structureItems', err);
     return [];
   }
 }
@@ -111,22 +98,10 @@ Schema for one item:\n${template}`,
 async function generateAllyStatBlock(
   name: string,
   description: string,
-  apiKey: string,
-  model: string,
+  adapter: StoryProviderAdapter,
 ): Promise<EnemyStatBlock | null> {
-  try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model,
-        max_tokens: 400,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: `Generate a D&D 5e stat block for an NPC ally. Keep them weak — CR 0.125 to 0.5 unless described as powerful.
-Return ONLY valid JSON:
+  const prompt = `Generate a D&D 5e stat block for an NPC ally. Keep them weak — CR 0.125 to 0.5 unless described as powerful.
+Return ONLY valid JSON, no markdown fences, no explanation:
 {
   "name": "string",
   "cr": 0.25,
@@ -135,27 +110,26 @@ Return ONLY valid JSON:
   "speed": 30,
   "stats": { "str": 11, "dex": 12, "con": 12, "int": 10, "wis": 10, "cha": 10 },
   "attacks": [{ "name": "string", "bonus": 2, "damage": "1d6" }]
-}`,
-          },
-          { role: 'user', content: `Name: ${name}\nDescription: ${description}` },
-        ],
-      }),
-    });
-    if (!res.ok) throw new Error(res.statusText);
-    const data = await res.json() as { choices: { message: { content: string } }[] };
-    const parsed = JSON.parse(data.choices[0]?.message.content ?? '{}') as Partial<EnemyStatBlock>;
+}
+
+Name: ${name}
+Description: ${description}`;
+
+  try {
+    const raw = await adapter.complete(prompt);
+    const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    const parsed = JSON.parse(cleaned) as Partial<EnemyStatBlock>;
     if (!parsed.hp || !parsed.ac) return null;
     return { ...parsed, id: randomUUID(), name: parsed.name ?? name } as EnemyStatBlock;
   } catch (err) {
-    console.error('[tag-processor] ally stat block generation failed:', err);
+    logError('tag-processor:generateAllyStatBlock', err);
     return null;
   }
 }
 
 export async function processVdmResponse(
   text: string,
-  apiKey: string,
-  model: string,
+  adapter: StoryProviderAdapter,
 ): Promise<ProcessResult> {
   const effects: TagEffect[] = [];
   const tagMatches = [...text.matchAll(TAG_RE)];
@@ -269,7 +243,7 @@ export async function processVdmResponse(
       if (!tagType || !player || !rawItems || !TEMPLATES[tagType]) return;
       const itemNames = rawItems.split(',').map(s => s.trim()).filter(Boolean);
       console.log(`[tag] ${tagType} for ${player}: ${itemNames.join(', ')}`);
-      const items = await structureItems(tagType, itemNames, apiKey, model);
+      const items = await structureItems(tagType, itemNames, adapter);
       if (items.length) effects.push({ type: 'inventory_add', player: player.trim(), items });
       else console.warn(`[tag] ${tagType} structuring returned no items`);
     }),
@@ -278,7 +252,7 @@ export async function processVdmResponse(
       const description = match[2]?.trim();
       if (!name || !description) return;
       console.log(`[tag] PARTY_JOIN: ${name}`);
-      const ally = await generateAllyStatBlock(name, description, apiKey, model);
+      const ally = await generateAllyStatBlock(name, description, adapter);
       if (ally) effects.push({ type: 'party_join', ally });
       else console.warn(`[tag] PARTY_JOIN stat block generation failed for ${name}`);
     }),

@@ -4,6 +4,7 @@ import { CharacterProvider, useCharacter } from './character-creation/CharacterC
 import PlayerInfoTab from './character-creation/PlayerInfoTab.tsx';
 import SpellsTab from './character-creation/SpellsTab.tsx';
 import ShopTab from './character-creation/ShopTab.tsx';
+import FinishedTab from './character-creation/FinishedTab.tsx';
 import { BACKGROUND_SKILLS } from './character-creation/srd.ts';
 import './app.css';
 
@@ -121,21 +122,20 @@ function CreatePageInner({ campaignId, campaignName }: { campaignId: string; cam
         >
           Shop
         </button>
+        <button
+          className={`tab-btn ${c.activeTab === 'finished' ? 'tab-btn--active' : ''}`}
+          onClick={() => c.set('activeTab', 'finished')}
+        >
+          Finished
+        </button>
       </nav>
 
       <div className="create-body">
         {c.activeTab === 'spells' ? <SpellsTab />
           : c.activeTab === 'shop' ? <ShopTab />
+          : c.activeTab === 'finished' ? <FinishedTab onCreate={handleCreate} canCreate={canCreate} saving={saving} error={error} />
           : <PlayerInfoTab campaignId={campaignId} />}
       </div>
-
-      {error && <p className="modal-error create-error">{error}</p>}
-
-      <footer className="create-footer">
-        <button className="btn-primary" onClick={handleCreate} disabled={!canCreate || saving}>
-          {saving ? 'Creating…' : 'Create Character'}
-        </button>
-      </footer>
 
       {/* back confirmation */}
       <dialog ref={backDialogRef} className="modal">

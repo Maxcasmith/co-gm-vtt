@@ -21,7 +21,7 @@ interface CharacterDraft {
   portraitPath: string;
   tokenPath: string;
   expertiseSkills: string[];
-  activeTab: 'info' | 'spells' | 'shop';
+  activeTab: 'info' | 'spells' | 'shop' | 'finished';
   gold: number;
   inventory: InventoryItem[];
   learnedSpells: string[];

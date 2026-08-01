@@ -1,16 +1,31 @@
+import type { ReasoningEffort } from 'shared';
 import { logError } from '../logger.ts';
 
-const API_BASE = 'https://api.deepseek.com/v1';
+const API_BASE = 'https://api.moonshot.ai/v1';
 
 export interface ChatMessage { role: 'user' | 'assistant'; content: string }
 
-export async function deepseekChat(system: string, messages: ChatMessage[], apiKey: string, model: string): Promise<string> {
+// Kimi only accepts low|high|max — collapse the app's 4-level UI onto that.
+function toKimiEffort(effort?: ReasoningEffort): 'low' | 'high' | 'max' {
+  switch (effort) {
+    case 'low': return 'low';
+    case 'medium': return 'high';
+    case 'high': return 'high';
+    case 'maximum': return 'max';
+    default: return 'max';
+  }
+}
+
+export async function kimiChat(system: string, messages: ChatMessage[], apiKey: string, model: string, effort?: ReasoningEffort): Promise<string> {
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model,
-      max_tokens: 1024,
+      // K3's 1M context leaves plenty of room — cap generously so high reasoning
+      // effort never truncates the real answer before it starts.
+      max_tokens: 100000,
+      reasoning_effort: toKimiEffort(effort),
       messages: [{ role: 'system', content: system }, ...messages],
     }),
   });
@@ -22,13 +37,14 @@ export async function deepseekChat(system: string, messages: ChatMessage[], apiK
   return data.choices[0]?.message.content ?? '';
 }
 
-export async function deepseekComplete(prompt: string, apiKey: string, model: string): Promise<string> {
+export async function kimiComplete(prompt: string, apiKey: string, model: string, effort?: ReasoningEffort): Promise<string> {
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model,
-      max_tokens: 8000,
+      max_tokens: 100000,
+      reasoning_effort: toKimiEffort(effort),
       messages: [{ role: 'user', content: prompt }],
     }),
   });
@@ -40,19 +56,20 @@ export async function deepseekComplete(prompt: string, apiKey: string, model: st
   return data.choices[0]?.message.content ?? '';
 }
 
-export async function deepseekStream(
+export async function kimiStream(
   prompt: string,
   apiKey: string,
   model: string,
   onToken: (token: string) => void,
+  effort?: ReasoningEffort,
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model,
-      // DeepSeek caps output at 8192 regardless of what's requested — don't ask for more.
-      max_tokens: 8192,
+      max_tokens: 100000,
+      reasoning_effort: toKimiEffort(effort),
       stream: true,
       messages: [{ role: 'user', content: prompt }],
     }),
@@ -81,13 +98,13 @@ export async function deepseekStream(
         const evt = JSON.parse(data) as { choices: { delta?: { content?: string } }[] };
         const token = evt.choices[0]?.delta?.content;
         if (token) { full += token; onToken(token); }
-      } catch (err) { logError('providers/deepseek:deepseekStream', err); }
+      } catch (err) { logError('providers/kimi:kimiStream', err); }
     }
   }
   return full;
 }
 
-export async function deepseekValidateKey(apiKey: string): Promise<boolean> {
+export async function kimiValidateKey(apiKey: string): Promise<boolean> {
   const res = await fetch(`${API_BASE}/models`, {
     headers: { Authorization: `Bearer ${apiKey}` },
     signal: AbortSignal.timeout(10000),

@@ -1,7 +1,6 @@
 import type { ChatPayload, Character, EnemyStatBlock, AttackResult, WorldState, NemesisRecord } from 'shared';
-
-const PARSE_MODEL = 'gpt-4o-mini';
-const API_BASE = 'https://api.openai.com/v1';
+import type { StoryProviderAdapter } from '../providers/index.ts';
+import { logError } from '../logger.ts';
 
 interface LocationContext {
   location: string;
@@ -27,7 +26,7 @@ const FALLBACK_CONTEXT: LocationContext = {
   mood: 'dangerous and foreboding',
 };
 
-export async function parseLocationContext(messages: ChatPayload[], apiKey: string, locationMd?: string | null): Promise<LocationContext> {
+export async function parseLocationContext(messages: ChatPayload[], adapter: StoryProviderAdapter, locationMd?: string | null): Promise<LocationContext> {
   const transcript = messages
     .slice(-20)
     .map(m => `[${m.senderName}]: ${m.text}`)
@@ -51,28 +50,17 @@ Return ONLY valid JSON with these exact keys:
   "keyFeatures": "notable tactical features — furniture, cover, terrain, exits. NEVER mention people or creatures",
   "mood": "lighting and emotional tone"
 }
-If a field cannot be determined, make a reasonable inference from context. Never return null values. This describes an empty scene — no living creatures of any kind should appear in any field.`;
+If a field cannot be determined, make a reasonable inference from context. Never return null values. This describes an empty scene — no living creatures of any kind should appear in any field.
+
+Return ONLY valid JSON, no markdown fences, no explanation.`;
 
   try {
-    const res = await fetch(`${API_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: PARSE_MODEL,
-        max_tokens: 400,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Session transcript:\n${transcript}` },
-        ],
-      }),
-    });
-    if (!res.ok) throw new Error(res.statusText);
-    const data = await res.json() as { choices: { message: { content: string } }[] };
-    const parsed = JSON.parse(data.choices[0]?.message.content ?? '{}') as Partial<LocationContext>;
+    const raw = await adapter.complete(`${systemPrompt}\n\nSession transcript:\n${transcript}`);
+    const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    const parsed = JSON.parse(cleaned) as Partial<LocationContext>;
     return { ...FALLBACK_CONTEXT, ...parsed };
   } catch (err) {
-    console.error('[imagePrompts] location parse failed, using fallback:', err);
+    logError('session-processor/imagePrompts:parseLocationContext', err);
     return FALLBACK_CONTEXT;
   }
 }
@@ -86,8 +74,7 @@ const FALLBACK_ENEMY: EnemyStatBlock = {
 export async function generateEncounterEnemies(
   messages: ChatPayload[],
   characters: Character[],
-  apiKey: string,
-  model = PARSE_MODEL,
+  adapter: StoryProviderAdapter,
   availableNemeses: NemesisRecord[] = [],
 ): Promise<EnemyStatBlock[]> {
   const partyLines = characters.length
@@ -116,60 +103,42 @@ export async function generateEncounterEnemies(
   ]
 }
 ${nemesisBlock}
-Rules: 1-3 enemies, MEDIUM difficulty for this party, use official 5e monster stat blocks as reference.`;
+Rules: 1-3 enemies, MEDIUM difficulty for this party, use official 5e monster stat blocks as reference.
+
+Return ONLY valid JSON, no markdown fences, no explanation.`;
 
   try {
-    const res = await fetch(`${API_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model,
-        max_tokens: 800,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Party:\n${partyLines}\n\nRecent events:\n${transcript}` },
-        ],
-      }),
-    });
-    if (!res.ok) throw new Error(res.statusText);
-    const data = await res.json() as { choices: { message: { content: string } }[] };
-    const parsed = JSON.parse(data.choices[0]?.message.content ?? '{}') as { enemies?: EnemyStatBlock[] };
+    const raw = await adapter.complete(`${systemPrompt}\n\nParty:\n${partyLines}\n\nRecent events:\n${transcript}`);
+    const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    const parsed = JSON.parse(cleaned) as { enemies?: EnemyStatBlock[] };
     const enemies = parsed.enemies ?? [];
     return enemies.length ? enemies.map((e, i) => ({ ...e, id: e.id || `enemy-${i + 1}` })) : [FALLBACK_ENEMY];
   } catch (err) {
-    console.error('[imagePrompts] enemy gen failed, using fallback:', err);
+    logError('session-processor/imagePrompts:generateEncounterEnemies', err);
     return [FALLBACK_ENEMY];
   }
 }
 
-async function llmJson<T>(messages: { role: string; content: string }[], apiKey: string, model: string): Promise<T | null> {
-  try {
-    const res = await fetch(`${API_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, max_tokens: 400, response_format: { type: 'json_object' }, messages }),
-    });
-    if (!res.ok) throw new Error(res.statusText);
-    const data = await res.json() as { choices: { message: { content: string } }[] };
-    return JSON.parse(data.choices[0]?.message.content ?? 'null') as T;
-  } catch { return null; }
+function flattenMessages(messages: { role: string; content: string }[]): string {
+  return messages.map(m => m.content).join('\n\n');
 }
 
-async function llmText(messages: { role: string; content: string }[], apiKey: string, model: string): Promise<string | null> {
+async function llmJson<T>(messages: { role: string; content: string }[], adapter: StoryProviderAdapter): Promise<T | null> {
   try {
-    const res = await fetch(`${API_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, max_tokens: 120, messages }),
-    });
-    if (!res.ok) throw new Error(res.statusText);
-    const data = await res.json() as { choices: { message: { content: string } }[] };
-    return data.choices[0]?.message.content?.trim() ?? null;
-  } catch { return null; }
+    const raw = await adapter.complete(`${flattenMessages(messages)}\n\nReturn ONLY valid JSON, no markdown fences, no explanation.`);
+    const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    return JSON.parse(cleaned) as T;
+  } catch (err) { logError('session-processor/imagePrompts:llmJson', err); return null; }
 }
 
-export async function generateCombatFlavour(result: AttackResult, apiKey: string, model: string): Promise<string | null> {
+async function llmText(messages: { role: string; content: string }[], adapter: StoryProviderAdapter): Promise<string | null> {
+  try {
+    const raw = await adapter.complete(flattenMessages(messages));
+    return raw.trim() || null;
+  } catch (err) { logError('session-processor/imagePrompts:llmText', err); return null; }
+}
+
+export async function generateCombatFlavour(result: AttackResult, adapter: StoryProviderAdapter): Promise<string | null> {
   const outcome = result.hit
     ? `HIT for ${result.damage} ${result.damageFormula ? `(${result.damageFormula})` : ''} damage.${result.targetDead ? ' Target is slain.' : ` ${result.targetName} has ${result.remainingHp} HP remaining.`}`
     : `MISS — the blow fails to land (rolled ${result.total} vs AC ${result.ac}).`;
@@ -177,13 +146,13 @@ export async function generateCombatFlavour(result: AttackResult, apiKey: string
   return llmText([
     {
       role: 'system',
-      content: 'You are a vivid D&D combat narrator. Write a single punchy sentence (max 40 words) describing the combat action. Be cinematic. Vary your style — sometimes brutal, sometimes graceful. Never mention dice or numbers.',
+      content: 'You are a punchy D&D combat narrator. Write ONE short sentence (max 15 words) describing the action. Style: visceral action verbs and impact sound effects — "looses an arrow, SMACK into the goblin\'s shoulder" — not flowery metaphor. No purple prose: no similes, no "light fading from eyes", no poetic mortality language, no internal feelings. Unless the target is slain, do NOT imply they are dying, fatally wounded, or near death — a hit is a hit, not a death scene. Never mention dice, numbers, or HP.',
     },
     {
       role: 'user',
       content: `${result.attackerName} attacks ${result.targetName} with their ${result.weaponName}. ${outcome}`,
     },
-  ], apiKey, model);
+  ], adapter);
 }
 
 export interface ImprovisedActionResult {
@@ -198,8 +167,7 @@ export interface ImprovisedActionResult {
 
 export async function resolveImprovisedAction(
   context: { playerName: string; playerClass: string; message: string; enemies: EnemyStatBlock[]; recentChat: string },
-  apiKey: string,
-  model: string,
+  adapter: StoryProviderAdapter,
 ): Promise<ImprovisedActionResult | null> {
   const enemyList = context.enemies.map(e => `${e.name} (id: ${e.id}, HP: ${e.hp}, AC: ${e.ac})`).join(', ');
   return llmJson<ImprovisedActionResult>([
@@ -216,10 +184,10 @@ Respond with JSON only:
 If type is "question", only "type" and "answer" are needed. Be fair but decisive on DCs.`,
     },
     { role: 'user', content: `Recent events:\n${context.recentChat}\n\n${context.playerName} (${context.playerClass}) says: "${context.message}"` },
-  ], apiKey, model);
+  ], adapter);
 }
 
-export async function generateWorldState(worldMd: string, factionsMd: string, apiKey: string, model: string): Promise<WorldState | null> {
+export async function generateWorldState(worldMd: string, factionsMd: string, adapter: StoryProviderAdapter): Promise<WorldState | null> {
   return llmJson<WorldState>([
     {
       role: 'system',
@@ -255,7 +223,7 @@ Rules:
 - Return valid JSON only`,
     },
     { role: 'user', content: `World lore:\n${worldMd}\n\nFactions:\n${factionsMd}` },
-  ], apiKey, model);
+  ], adapter);
 }
 
 export async function tickWorldNarrative(
@@ -263,8 +231,7 @@ export async function tickWorldNarrative(
   hoursElapsed: number,
   worldMd: string,
   newlyCompleted: string[],
-  apiKey: string,
-  model: string,
+  adapter: StoryProviderAdapter,
 ): Promise<string | null> {
   const actorSummaries = state.actors
     .filter(a => a.status === 'active')
@@ -287,7 +254,7 @@ export async function tickWorldNarrative(
       role: 'user',
       content: `The players rested for ${hoursElapsed} hours (${(hoursElapsed / 24).toFixed(1)} days passed).\n\nActive actors:\n${actorSummaries}${completedLine}\n\nWorld context (brief): ${worldMd.slice(0, 400)}`,
     },
-  ], apiKey, model);
+  ], adapter);
 }
 
 export function buildBattleMapPrompt(ctx: LocationContext): string {
@@ -348,8 +315,7 @@ export async function evaluateNemesisCandidates(
   statusLines: string[],
   existingNemeses: NemesisRecord[],
   characterNames: string[],
-  apiKey: string,
-  model: string,
+  adapter: StoryProviderAdapter,
 ): Promise<{ candidates: NemesisCandidate[] }> {
   if (!roster.length || !transcript.length) return { candidates: [] };
 
@@ -397,25 +363,17 @@ Return ONLY valid JSON:
     { "name": "string", "boundTo": "string — a party member name or \\"party\\"", "detail": "string — 1-2 sentences: what made them distinct, including any visible lasting consequence" }
   ]
 }
-Empty array if nothing qualifies — this should be the common case.`;
+Empty array if nothing qualifies — this should be the common case.
+
+Return ONLY valid JSON, no markdown fences, no explanation.`;
 
   try {
-    const res = await fetch(`${API_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model,
-        max_tokens: 500,
-        response_format: { type: 'json_object' },
-        messages: [{ role: 'system', content: systemPrompt }],
-      }),
-    });
-    if (!res.ok) throw new Error(res.statusText);
-    const data = await res.json() as { choices: { message: { content: string } }[] };
-    const parsed = JSON.parse(data.choices[0]?.message.content ?? '{}') as { candidates?: NemesisCandidate[] };
+    const raw = await adapter.complete(systemPrompt);
+    const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    const parsed = JSON.parse(cleaned) as { candidates?: NemesisCandidate[] };
     return { candidates: parsed.candidates ?? [] };
   } catch (err) {
-    console.error('[imagePrompts] nemesis evaluation failed:', err);
+    logError('session-processor/imagePrompts:evaluateNemesisCandidates', err);
     return { candidates: [] };
   }
 }

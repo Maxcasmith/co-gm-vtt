@@ -10,9 +10,9 @@ import { compendiumRouter } from './routes/compendium.ts';
 import { readdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { getCharacter, writeCharacter, readChatLog, appendChatLog, listEntitySlugs, readEntity, writeEntity, getWorldMeta, getConfig, CAMPAIGNS_DIR, saveMap, appendMapIndex, listMaps, listPremadeMaps, saveEncounter, loadEncounter, clearEncounter, readWorldState, writeWorldState, readCampaignFile, listCharacters, loadPartyAllies, savePartyAllies, saveDungeon, loadDungeon, readManifest, writeManifest, emptyManifest, parseEntityLinks, readQuests, writeQuests, readNemeses, writeNemeses } from './storage.ts';
+import { getCharacter, updateCharacter, readChatLog, appendChatLog, listEntitySlugs, readEntity, writeEntity, getWorldMeta, getConfig, CAMPAIGNS_DIR, saveMap, appendMapIndex, listMaps, listPremadeMaps, saveEncounter, loadEncounter, clearEncounter, readWorldState, writeWorldState, readCampaignFile, listCharacters, loadPartyAllies, savePartyAllies, saveDungeon, loadDungeon, readManifest, writeManifest, emptyManifest, parseEntityLinks, readQuests, writeQuests, readNemeses, writeNemeses } from './storage.ts';
 import { generateDungeon } from './dungeon/index.ts';
-import { getStoryProvider, getTierApiKey } from './providers/index.ts';
+import { getStoryProvider, getCombatProvider } from './providers/index.ts';
 import { buildRecapPrompt } from './session-processor/prompts.ts';
 import { processSession, getDMResponse, ensureSessionQuests } from './session-processor/index.ts';
 import { parseLocationContext, buildBattleMapPrompt, generateEncounterEnemies, generateCombatFlavour, resolveImprovisedAction, generateWorldState, tickWorldNarrative, evaluateNemesisCandidates } from './session-processor/imagePrompts.ts';
@@ -24,6 +24,7 @@ import { randomUUID } from 'crypto';
 import { Encounter, Team, Participant } from './domain/encounter.ts';
 import { Creature } from './domain/creature.ts';
 import { processVdmResponse, type TagEffect, type AcquiredItem } from './tag-processor.ts';
+import { logError } from './logger.ts';
 
 const app = express();
 app.use(cors());
@@ -47,9 +48,9 @@ const _origLog = console.log;
 console.log = (...args: unknown[]) => {
   _origLog(...args);
   try {
-    const text = args.map(a => { if (typeof a === 'string') return a; try { return JSON.stringify(a); } catch { return String(a); } }).join(' ');
+    const text = args.map(a => { if (typeof a === 'string') return a; try { return JSON.stringify(a); } catch (err) { logError('index:consoleLogOverride:stringify', err); return String(a); } }).join(' ');
     io.to(ROOM).emit('combat:log', { text, timestamp: Date.now() });
-  } catch { /* never let log broadcast crash the server */ }
+  } catch (err) { logError('index:consoleLogOverride', err); }
 };
 
 const connected = new Set<Player>();
@@ -342,15 +343,14 @@ async function runEnemyAI(cid: string, actor: Participant): Promise<void> {
       });
 
       const cfg = await getConfig();
-      const cfgTier = cfg.tiers[cfg.tasks.combat];
-      const cfgApiKey = getTierApiKey(cfg.apiKeys, cfgTier.provider);
-      if (cfgApiKey) {
+      const cfgAdapter = getCombatProvider(cfg);
+      {
         const atkResult = {
           attackerName: actor.name, targetName: targetParticipant.name, targetId,
           weaponName: atk.name, d20: roll, attackBonus: atk.bonus, statBonus: atk.bonus, statName: 'Attack', weaponBonus: 0, total, ac: targetAc,
           hit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
         };
-        const flavour = await generateCombatFlavour(atkResult, cfgApiKey, cfgTier.model);
+        const flavour = await generateCombatFlavour(atkResult, cfgAdapter);
         if (flavour) {
           const msg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
           io.to(ROOM).emit('chat:message', msg);
@@ -384,13 +384,12 @@ async function evaluateNemesisAfterCombat(cid: string): Promise<void> {
     if (!transcript.length) return;
 
     const config = await getConfig();
-    const { model, provider } = config.tiers[config.tasks.combat];
-    const apiKey = getTierApiKey(config.apiKeys, provider);
-    if (!apiKey) return;
+    if (!config.tiers[config.tasks.combat].length) return;
+    const adapter = getCombatProvider(config);
 
     const [nemeses, characters] = await Promise.all([readNemeses(cid), listCharacters(cid)]);
 
-    const { candidates } = await evaluateNemesisCandidates(transcript, roster, statusLines, nemeses, characters.map(c => c.name), apiKey, model);
+    const { candidates } = await evaluateNemesisCandidates(transcript, roster, statusLines, nemeses, characters.map(c => c.name), adapter);
     if (!candidates.length) return;
 
     // Applied one at a time (not batched) — each does a read-modify-write of the
@@ -406,7 +405,7 @@ async function evaluateNemesisAfterCombat(cid: string): Promise<void> {
       }]);
     }
   } catch (err) {
-    console.error('[nemesis] evaluation failed:', err);
+    logError('index:evaluateNemesisAfterCombat', err);
   }
 }
 
@@ -481,7 +480,7 @@ async function applyDamageToCreature(cid: string, targetId: string, damage: numb
       console.log(`[combat] victory! ${totalXp} XP total, ${xpPerPlayer} per player`);
 
       void listCharacters(cid).then(chars => Promise.all(
-        chars.map(char => writeCharacter(cid, char.id, { ...char, xp: (char.xp ?? 0) + xpPerPlayer }))
+        chars.map(char => updateCharacter(cid, char.id, c => ({ ...c, xp: (c.xp ?? 0) + xpPerPlayer })))
       ));
 
       setTimeout(() => {
@@ -596,7 +595,7 @@ function addToTurnOrder(cid: string, entries: Participant[], baseDelay = 0): voi
 
 function queueDMResponse(campaignId: string, fn: () => Promise<void>): void {
   const prev = dmQueue.get(campaignId) ?? Promise.resolve();
-  dmQueue.set(campaignId, prev.then(fn).catch(err => console.error('[dm] queue error:', err)));
+  dmQueue.set(campaignId, prev.then(fn).catch(err => logError('index:queueDMResponse', err)));
 }
 
 async function generateAndBroadcastMap(campaignId: string): Promise<void> {
@@ -623,7 +622,7 @@ async function generateAndBroadcastMap(campaignId: string): Promise<void> {
     const locationMd = manifest?.currentLocation
       ? await readEntity(campaignId, 'location', manifest.currentLocation)
       : null;
-    const ctx = await parseLocationContext(messages, apiKey, locationMd);
+    const ctx = await parseLocationContext(messages, getCombatProvider(config), locationMd);
     const prompt = buildBattleMapPrompt(ctx);
 
     console.log('[map] generating battle map for:', ctx.location);
@@ -636,7 +635,7 @@ async function generateAndBroadcastMap(campaignId: string): Promise<void> {
     io.to(ROOM).emit('map:generated', mapId);
     console.log('[map] battle map ready:', mapId);
   } catch (err) {
-    console.error('[map] generation failed:', err);
+    logError('index:generateAndBroadcastMap', err);
   }
 }
 
@@ -644,9 +643,8 @@ async function generateAndBroadcastEnemies(campaignId: string): Promise<void> {
   try {
     io.to(ROOM).emit('encounter:generating');
     const config = await getConfig();
-    const { model, provider } = config.tiers[config.tasks.combat];
-    const apiKey = getTierApiKey(config.apiKeys, provider);
-    if (!apiKey) console.warn('[encounter] no combat API key, using fallback');
+    const adapter = getCombatProvider(config);
+    if (!config.tiers[config.tasks.combat].length) console.warn('[encounter] no combat models configured, using fallback');
 
     const [messages, characters, nemeses, manifest] = await Promise.all([
       readChatLog(campaignId),
@@ -663,7 +661,7 @@ async function generateAndBroadcastEnemies(campaignId: string): Promise<void> {
       (n.boundTo === 'party' || characterNames.includes(n.boundTo))
     );
 
-    const statBlocks = await generateEncounterEnemies(messages, characters, apiKey, model, availableNemeses);
+    const statBlocks = await generateEncounterEnemies(messages, characters, adapter, availableNemeses);
 
     const encounter = encounters.get(campaignId);
     if (!encounter) return;
@@ -696,7 +694,7 @@ async function generateAndBroadcastEnemies(campaignId: string): Promise<void> {
 
     if (combatState.get(campaignId)) rollEnemyInitiatives(campaignId);
   } catch (err) {
-    console.error('[encounter] generation failed:', err);
+    logError('index:generateAndBroadcastEnemies', err);
   }
 }
 
@@ -708,7 +706,7 @@ async function buildEntitySummaries(campaignId: string): Promise<string> {
     try {
       const content = await readFile(path.join(CAMPAIGNS_DIR, campaignId, filename), 'utf-8');
       lines.push(`### ${filename}\n${content.slice(0, 1000)}`);
-    } catch { /* skip */ }
+    } catch (err) { logError('index:buildEntitySummaries', err); }
   }
 
   // Characters — always load (the active party)
@@ -758,7 +756,7 @@ async function runRecap(campaignId: string): Promise<{ text: string; isFirstSess
         const raw = await readFile(path.join(sessionsDir, last), 'utf-8');
         const msgs = JSON.parse(raw) as Array<{ senderName: string; text: string }>;
         lastSessionText = msgs.map(m => `[${m.senderName}]: ${m.text}`).join('\n');
-      } catch { /* leave null */ }
+      } catch (err) { logError('index:runRecap', err); }
     }
   }
 
@@ -836,8 +834,7 @@ async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
       const chars = await listCharacters(cid);
       const char = chars.find(c => c.name === effect.player);
       if (!char) return;
-      const updated = { ...char, inventory: [...(char.inventory ?? []), ...effect.items] };
-      await writeCharacter(cid, char.id, updated);
+      await updateCharacter(cid, char.id, c => ({ ...c, inventory: [...(c.inventory ?? []), ...effect.items] }));
       const sid = playerSocketIds.get(char.id);
       if (sid) io.to(sid).emit('character:inventory:add', effect.items);
     } else if (effect.type === 'scene_build') {
@@ -877,11 +874,9 @@ async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
       }
     } else if (effect.type === 'dungeon_gen') {
       const config = await getConfig();
-      const { model, provider } = config.tiers[config.tasks.combat];
-      const apiKey = getTierApiKey(config.apiKeys, provider);
-      if (!apiKey) { console.warn('[dungeon] no API key — skipping dungeon generation'); return; }
+      if (!config.tiers[config.tasks.combat].length) { console.warn('[dungeon] no models configured — skipping dungeon generation'); return; }
       console.log(`[dungeon] generating: ${effect.name}`);
-      const dungeon = await generateDungeon(effect.name, effect.dungeonType, apiKey, model);
+      const dungeon = await generateDungeon(effect.name, effect.dungeonType, getCombatProvider(config));
       await saveDungeon(cid, dungeon);
       io.to(ROOM).emit('dungeon:loaded', dungeon);
       console.log(`[dungeon] generated and broadcast: ${dungeon.name} (${dungeon.rooms.length} rooms, ${dungeon.entities.length} entities)`);
@@ -1134,10 +1129,8 @@ function dispatchDMResponse(cid: string): void {
 
       const rawResponse = response.replace(/\[COMBAT END\]/g, '').trim();
       const config = await getConfig();
-      const { model: tagsModel, provider: tagsProvider } = config.tiers[config.tasks.combat];
-      const tagsApiKey = getTierApiKey(config.apiKeys, tagsProvider);
-      const { text: cleanResponse, effects, speakingAs, checkRequests } = tagsApiKey
-        ? await processVdmResponse(rawResponse, tagsApiKey, tagsModel)
+      const { text: cleanResponse, effects, speakingAs, checkRequests } = config.tiers[config.tasks.combat].length
+        ? await processVdmResponse(rawResponse, getCombatProvider(config))
         : { text: rawResponse, effects: [], speakingAs: undefined, checkRequests: [] };
 
       await applyEffects(cid, effects);
@@ -1146,7 +1139,7 @@ function dispatchDMResponse(cid: string): void {
       await appendChatLog(cid, { text: cleanResponse, senderName, timestamp: Date.now() });
       io.to(ROOM).emit('session:recap', { text: cleanResponse, senderName, checkRequests });
     } catch (err) {
-      console.error('[dm] response error:', err);
+      logError('index:dmResponse', err);
       io.to(ROOM).emit('chat:message', { text: `[DM error: ${(err as Error).message}]`, senderName: 'System', timestamp: Date.now() });
     } finally {
       io.to(ROOM).emit('dm:thinking', false);
@@ -1227,7 +1220,7 @@ io.on('connection', (socket) => {
           await appendChatLog(cid, { text, senderName: 'Virtual DM', timestamp: Date.now() });
           io.to(ROOM).emit('session:recap', { text, senderName: 'Virtual DM' });
         } catch (err) {
-          console.error('[dm] recap error:', err);
+          logError('index:sessionStartRecap', err);
           io.to(ROOM).emit('session:recap', { text: 'The story begins...', senderName: 'Virtual DM' });
         } finally {
           io.to(ROOM).emit('dm:thinking', false);
@@ -1297,9 +1290,8 @@ io.on('connection', (socket) => {
             void (async () => {
               try {
                 const config = await getConfig();
-                const { model, provider } = config.tiers[config.tasks.combat];
-                const apiKey = getTierApiKey(config.apiKeys, provider);
-                if (!apiKey) return;
+                if (!config.tiers[config.tasks.combat].length) return;
+                const adapter = getCombatProvider(config);
                 const recent = (await readChatLog(campaignId)).slice(-10).map(m => `[${m.senderName}]: ${m.text}`).join('\n');
                 const char = await listCharacters(campaignId).then(cs => cs.find(c => c.name === senderName));
                 const enemies = encounter!.enemies
@@ -1312,7 +1304,7 @@ io.on('connection', (socket) => {
                   message: text,
                   enemies,
                   recentChat: recent,
-                }, apiKey, model);
+                }, adapter);
                 if (!result) return;
 
                 const dmMsg = { text: result.answer, senderName: 'Virtual DM', timestamp: Date.now() };
@@ -1364,14 +1356,14 @@ io.on('connection', (socket) => {
                     remainingHp: encounter!.findCreature(result.targetId)?.currentHp,
                     targetDead: encounter!.findCreature(result.targetId)?.isDead() ?? false,
                   };
-                  const flavour = await generateCombatFlavour(atkResult, apiKey, model);
+                  const flavour = await generateCombatFlavour(atkResult, adapter);
                   if (flavour) {
                     const flavourMsg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
                     await appendChatLog(campaignId, flavourMsg);
                     io.to(ROOM).emit('chat:message', flavourMsg);
                   }
                 }
-              } catch (err) { console.error('[improvised]', err); }
+              } catch (err) { logError('index:improvisedAction', err); }
             })();
             return;
           }
@@ -1483,14 +1475,13 @@ io.on('connection', (socket) => {
         void (async () => {
           try {
             const config = await getConfig();
-            const { model, apiKey } = config.tiers[config.tasks.combat];
-            if (!apiKey) return;
-            const flavour = await generateCombatFlavour(atkResult, apiKey, model);
+            if (!config.tiers[config.tasks.combat].length) return;
+            const flavour = await generateCombatFlavour(atkResult, getCombatProvider(config));
             if (!flavour) return;
             const msg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
             await appendChatLog(cid, msg);
             io.to(ROOM).emit('chat:message', msg);
-          } catch (err) { console.error('[flavour]', err); }
+          } catch (err) { logError('index:combatFlavour', err); }
         })();
       })();
     });

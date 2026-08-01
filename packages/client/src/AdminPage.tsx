@@ -23,6 +23,7 @@ export default function AdminPage() {
   const [uploadOpen, setUploadOpen]             = useState(false);
   const [createCampaignOpen, setCreateCampaignOpen] = useState(false);
   const [selectedAdventure, setSelectedAdventure]   = useState<CompendiumMeta | null>(null);
+  const [resumeAdventure, setResumeAdventure]       = useState<CompendiumMeta | null>(null);
 
   function fetchCampaigns() {
     fetch(`${API}/api/admin/campaigns`, { headers: adminHeaders(password) })
@@ -179,6 +180,7 @@ export default function AdminPage() {
             <tr key={adv.slug}>
               <td className="admin-campaign-name">
                 {adv.name}
+                {adv.status === 'draft' && <span className="admin-draft-badge">draft — paused at section {adv.resumeFromChunk + 1}</span>}
                 <span className="admin-campaign-id">{adv.slug}</span>
                 <span className="admin-module-counts">
                   {[
@@ -189,7 +191,11 @@ export default function AdminPage() {
                 </span>
               </td>
               <td>
-                <button className="btn-secondary" onClick={() => setSelectedAdventure(adv)}>Create</button>
+                {adv.status === 'draft' ? (
+                  <button className="btn-secondary" onClick={() => { setResumeAdventure(adv); setUploadOpen(true); }}>Resume</button>
+                ) : (
+                  <button className="btn-secondary" onClick={() => setSelectedAdventure(adv)}>Create</button>
+                )}
               </td>
               <td>
                 <button className="btn-danger" onClick={() => void deleteAdventure(adv.slug, adv.name)}>Delete</button>
@@ -204,8 +210,9 @@ export default function AdminPage() {
     <SettingsSidebar open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     <UploadModuleModal
       open={uploadOpen}
-      onClose={() => setUploadOpen(false)}
+      onClose={() => { setUploadOpen(false); setResumeAdventure(null); }}
       onUploaded={fetchAdventures}
+      resumeAdventure={resumeAdventure}
     />
     <CreateFromModuleModal
       open={selectedAdventure !== null}

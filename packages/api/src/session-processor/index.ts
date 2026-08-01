@@ -10,6 +10,7 @@ import { getConfig } from '../storage.ts';
 import { getStoryProvider, type ChatMessage } from '../providers/index.ts';
 import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, type EntityType } from './prompts.ts';
 import type { ChatPayload } from 'shared';
+import { logError } from '../logger.ts';
 
 const ENTITY_TYPES: EntityType[] = ['npc', 'faction', 'location', 'character', 'nemesis'];
 
@@ -114,7 +115,8 @@ async function resolveEntity(
 async function readWorldFile(campaignSlug: string, filename: string): Promise<string | null> {
   try {
     return await readFile(path.join(CAMPAIGNS_DIR, campaignSlug, filename), 'utf-8');
-  } catch {
+  } catch (err) {
+    logError('session-processor/index:readWorldFile', err);
     return null;
   }
 }
@@ -279,7 +281,7 @@ export async function ensureSessionQuests(campaignSlug: string): Promise<void> {
       console.log(`[session-quests] added ${newQuests.length} undiscovered quest(s): ${newQuests.map(q => q.id).join(', ')}`);
     }
   } catch (err) {
-    console.error('[session-quests] generation failed:', err);
+    logError('session-processor/index:ensureSessionQuests', err);
   }
 }
 
@@ -423,7 +425,7 @@ export async function processSession(campaignSlug: string): Promise<ProcessResul
       }
     }
   } catch (err) {
-    console.error('[act] advancement check failed:', err);
+    logError('session-processor/index:actAdvancement', err);
   }
 
   return { updated, created, cascaded };
