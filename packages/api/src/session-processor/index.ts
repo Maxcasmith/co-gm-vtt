@@ -121,8 +121,10 @@ async function readWorldFile(campaignSlug: string, filename: string): Promise<st
   }
 }
 
-async function buildEntitySummaries(campaignSlug: string): Promise<string> {
+async function buildEntitySummaries(campaignSlug: string, dungeonState = ''): Promise<string> {
   const lines: string[] = [];
+
+  if (dungeonState) lines.push(`### Current dungeon state\n${dungeonState}`);
 
   // World bible — generated campaigns use world.md/factions.md; modules use dm-brief.md
   for (const filename of ['world.md', 'factions.md', 'dm-brief.md']) {
@@ -290,14 +292,14 @@ export async function ensureSessionQuests(campaignSlug: string): Promise<void> {
 const DM_SENDER = 'Virtual DM';
 const HISTORY_LIMIT = 20;
 
-export async function getDMResponse(campaignSlug: string): Promise<string> {
+export async function getDMResponse(campaignSlug: string, dungeonState = ''): Promise<string> {
   const [config, meta, log] = await Promise.all([
     getConfig(),
     getWorldMeta(campaignSlug),
     readChatLog(campaignSlug),
   ]);
 
-  const entitySummaries = await buildEntitySummaries(campaignSlug);
+  const entitySummaries = await buildEntitySummaries(campaignSlug, dungeonState);
   const characters = await getCharacterNames(campaignSlug);
   const characterSummaries = characters.map(n => `- ${n}`).join('\n');
 
@@ -332,6 +334,7 @@ export async function getDMResponse(campaignSlug: string): Promise<string> {
     worldType,
     entitySummaries,
     characterSummaries,
+    !!dungeonState,
   );
 
   const provider = getStoryProvider(config);

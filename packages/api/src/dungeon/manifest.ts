@@ -1,55 +1,97 @@
+import type { EnemyStatBlock } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { logError } from '../logger.ts';
+
+export interface ManifestHazard {
+  name: string;
+  hideDC: number;
+}
 
 export interface ManifestRoom {
   name: string;
   size: 'small' | 'medium' | 'large';
-  creatures?: string[];
-  loot?: string[];
+  role?: 'entrance' | 'exit';
+  creatures?: EnemyStatBlock[];
+  traps?: ManifestHazard[];
+  loot?: ManifestHazard[];
+  key?: string; // single-char id for the organic grid prompt — assigned here, never left to the LLM
 }
 
 export interface DungeonManifest {
   rooms: ManifestRoom[];
 }
 
-// Single generic words get no LLM call — the generator handles them without narrative context
+// Single generic words get no LLM call — falls back to a hand-authored generic layout
 const GENERIC_RE = /^(dungeon|cave|crypt|tomb|cavern|ruins|tunnel|maze|lair|cellar|basement)$/i;
 
 function isGeneric(name: string): boolean {
   return GENERIC_RE.test(name.trim());
 }
 
+const GENERIC_ROOMS: ManifestRoom[] = [
+  { name: 'Entrance', size: 'medium', role: 'entrance' },
+  { name: 'Guard Room', size: 'small', creatures: [{ id: 'guard-1', name: 'Guard', cr: 0.25, hp: 11, ac: 12, speed: 30, stats: { str: 13, dex: 12, con: 12, int: 10, wis: 10, cha: 10 }, attacks: [{ name: 'Spear', bonus: 3, damage: '1d6+1' }] }] },
+  { name: 'Storage Room', size: 'small', loot: [{ name: 'Supplies', hideDC: 8 }] },
+  { name: 'Junction', size: 'small' },
+  { name: 'Vault', size: 'medium', traps: [{ name: 'Trapped Chest', hideDC: 15 }], loot: [{ name: 'Treasure Chest', hideDC: 12 }] },
+  { name: 'Inner Chamber', size: 'large', creatures: [{ id: 'boss-1', name: 'Boss', cr: 1, hp: 27, ac: 14, speed: 30, stats: { str: 15, dex: 13, con: 14, int: 10, wis: 11, cha: 12 }, attacks: [{ name: 'Greatsword', bonus: 5, damage: '2d6+3' }] }], role: 'exit' },
+];
+
+// A-Z, deterministic — up to 26 rooms, well past the largest room range we ask for (20).
+function assignKeys(rooms: ManifestRoom[]): ManifestRoom[] {
+  return rooms.map((room, i) => ({ ...room, key: String.fromCharCode(65 + (i % 26)) }));
+}
+
 export async function fetchManifest(
   name: string,
   dungeonType: string,
   adapter: StoryProviderAdapter,
-): Promise<DungeonManifest | null> {
-  if (isGeneric(name)) return null;
+  storyContext = '',
+  roomRange: [number, number] = [6, 10],
+  onToken: (t: string) => void = () => {},
+): Promise<DungeonManifest> {
+  if (isGeneric(name)) return { rooms: assignKeys(GENERIC_ROOMS) };
 
-  const prompt = `You are a dungeon architect. Given a location name and genre, produce 6-10 named rooms that authentically represent that location.
+  const contextBlock = storyContext
+    ? `\nRecent story context (what's actually happening — use this to decide what belongs in each room, not just the genre label):\n${storyContext}\n`
+    : '';
+
+  const [minRooms, maxRooms] = roomRange;
+  const prompt = `You are a dungeon architect. Given a location name and genre, produce ${minRooms}-${maxRooms} named rooms that authentically represent that location.
 Return ONLY valid JSON, no markdown fences, no explanation:
 {
   "rooms": [
     {
       "name": "string — room name specific to this location",
       "size": "small|medium|large",
-      "creatures": ["creature type that would inhabit this room — omit if empty"],
-      "loot": ["item or treasure found here — omit if empty"]
+      "role": "entrance|exit — omit for a normal room. Mark exactly as many entrance/exit rooms as make sense for this location (usually one of each, sometimes more).",
+      "creatures": [{
+        "id": "string, unique per creature",
+        "name": "string",
+        "cr": 0.25,
+        "hp": 11,
+        "ac": 12,
+        "speed": 30,
+        "stats": { "str": 11, "dex": 12, "con": 12, "int": 10, "wis": 10, "cha": 10 },
+        "attacks": [{ "name": "string", "bonus": 3, "damage": "1d6+1" }]
+      }],
+      "traps": [{ "name": "string — trap description", "hideDC": 14 }],
+      "loot": [{ "name": "string — item or treasure", "hideDC": 8 }]
     }
   ]
 }
-Use location-authentic names (e.g. for RPD: "Evidence Room", "S.T.A.R.S. Office"). Match creature types to the genre.
-
+Omit "creatures"/"traps"/"loot" for rooms that don't have any — not every room needs them. Use location-authentic room names (e.g. for RPD: "Evidence Room", "S.T.A.R.S. Office"). Match creature types and stat blocks (use official 5e monster stat blocks as reference) to the genre. hideDC ranges 1-22 (higher = harder to spot); scale it to how well-concealed the trap/item narratively is. If the story context implies a non-hostile purpose (e.g. sneaking in to gather information), it's fine for rooms to have no creatures at all — don't force combat that doesn't fit.
+${contextBlock}
 Location: ${name}
 Genre: ${dungeonType}`;
 
   try {
-    const raw = await adapter.complete(prompt);
+    const raw = await adapter.stream(prompt, onToken);
     const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
     const parsed = JSON.parse(cleaned) as Partial<DungeonManifest>;
-    return parsed.rooms?.length ? { rooms: parsed.rooms } : null;
+    return { rooms: assignKeys(parsed.rooms?.length ? parsed.rooms : GENERIC_ROOMS) };
   } catch (err) {
     logError('dungeon/manifest:fetchManifest', err);
-    return null;
+    return { rooms: assignKeys(GENERIC_ROOMS) };
   }
 }

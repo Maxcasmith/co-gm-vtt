@@ -23,14 +23,18 @@ export interface DungeonRoom {
   y: number;
   width: number;
   height: number;
+  role?: 'entrance' | 'exit';
 }
 
 export interface DungeonEntity {
   id: string;
-  type: 'creature' | 'loot';
+  type: 'creature' | 'loot' | 'trap';
   x: number;
   y: number;
   name: string;
+  discovered: boolean;
+  hideDC?: number;
+  statBlock?: EnemyStatBlock;
 }
 
 export interface Dungeon {
@@ -41,6 +45,26 @@ export interface Dungeon {
   cells: number[][];
   rooms: DungeonRoom[];
   entities: DungeonEntity[];
+  positions?: Record<string, { gx: number; gy: number }>;
+  arena?: boolean;
+}
+
+// Bresenham line-of-sight — a wall cell (anything but floor, `1`) anywhere between viewer and
+// target blocks the target. The wall cell itself stays visible: you can see the wall you're
+// looking at, not through it.
+export function hasLineOfSight(cells: number[][], x0: number, y0: number, x1: number, y1: number): boolean {
+  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  let x = x0, y = y0;
+  while (x !== x1 || y !== y1) {
+    const e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; x += sx; }
+    if (e2 < dx) { err += dx; y += sy; }
+    if (x === x1 && y === y1) break;
+    if (cells[y]?.[x] !== 1) return false;
+  }
+  return true;
 }
 
 export interface ChatPayload {
@@ -119,8 +143,6 @@ export interface ServerToClientEvents {
   'session:recap': (payload: { text: string; senderName: string; checkRequests?: CheckRequest[] }) => void;
   'dm:thinking': (active: boolean) => void;
   'combat:state': (active: boolean) => void;
-  'map:generating': () => void;
-  'map:generated': (mapId: string) => void;
   'encounter:generating': () => void;
   'encounter:ready': (enemies: EnemyStatBlock[]) => void;
   'token:moved': (pos: TokenPosition) => void;
@@ -140,7 +162,9 @@ export interface ServerToClientEvents {
   'combat:log': (data: { text: string; timestamp: number }) => void;
   'players:characters': (map: Record<string, string>) => void;
   'character:inventory:add': (items: unknown[]) => void;
+  'dungeon:generating': () => void;
   'dungeon:loaded': (dungeon: Dungeon) => void;
+  'dungeon:cleared': () => void;
   'quest:update': (data: { quests: Quest[]; act: number }) => void;
   'clock:update': (data: { worldTimeSecs: number }) => void;
 }
@@ -391,6 +415,7 @@ export interface Character {
   species: string;
   background: string;
   class: string;
+  backstory?: string;
   stats: CharacterStats;
   skillProficiencies: string[];
   password: string;

@@ -29,12 +29,10 @@ export interface SheetOpenedPayload {
 // ponytail: empty payload — payload shape reserved for future use (e.g. close reason)
 export type SheetClosedPayload       = Record<string, never>;
 export type RestOpenPayload          = Record<string, never>;
-export type MapGeneratingPayload     = Record<string, never>;
 export type EncounterGeneratingPayload = Record<string, never>;
 export interface EncounterReadyPayload { enemies: EnemyStatBlock[] }
 
 export interface CombatStatePayload { active: boolean }
-export interface MapGeneratedPayload { mapId: string; campaignId: string }
 export type TargetingStartPayload =
   | { kind: 'weapon'; weapon: Weapon; actionType: 'action' | 'bonusAction' | 'reaction' }
   | { kind: 'spell'; spell: Spell; casterId: string; actionType: 'action' | 'bonusAction' | 'reaction' };
@@ -145,8 +143,6 @@ export interface VTTEventMap {
   'vtt:roll:result':            RollResultPayload;
   'vtt:rest:open':              RestOpenPayload;
   'vtt:combat:state':           CombatStatePayload;
-  'vtt:map:generating':         MapGeneratingPayload;
-  'vtt:map:generated':          MapGeneratedPayload;
   'vtt:encounter:generating':   EncounterGeneratingPayload;
   'vtt:encounter:ready':        EncounterReadyPayload;
   'vtt:token:move':             TokenPosition;

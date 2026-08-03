@@ -21,10 +21,11 @@ interface CharacterDraft {
   portraitPath: string;
   tokenPath: string;
   expertiseSkills: string[];
-  activeTab: 'info' | 'spells' | 'shop' | 'finished';
+  activeTab: 'info' | 'backstory' | 'spells' | 'shop' | 'finished';
   gold: number;
   inventory: InventoryItem[];
   learnedSpells: string[];
+  backstory: string;
 }
 
 interface CharacterContextValue extends CharacterDraft {
@@ -53,6 +54,7 @@ const BLANK: Omit<CharacterDraft, 'id'> = {
   gold: 200,
   inventory: [],
   learnedSpells: [],
+  backstory: '',
 };
 
 const STAT_IDX: Record<StatName, number> = { STR: 0, DEX: 1, CON: 2, INT: 3, WIS: 4, CHA: 5 };

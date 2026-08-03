@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { WorldMeta } from 'shared';
 import { CharacterProvider, useCharacter } from './character-creation/CharacterContext.tsx';
 import PlayerInfoTab from './character-creation/PlayerInfoTab.tsx';
+import BackstoryTab from './character-creation/BackstoryTab.tsx';
 import SpellsTab from './character-creation/SpellsTab.tsx';
 import ShopTab from './character-creation/ShopTab.tsx';
 import FinishedTab from './character-creation/FinishedTab.tsx';
@@ -23,7 +24,7 @@ function genId(): string {
 
 // ── inner page (needs context) ────────────────────────────────────────────────
 
-function CreatePageInner({ campaignId, campaignName }: { campaignId: string; campaignName: string }) {
+function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId: string; campaignName: string; isCampaign: boolean }) {
   const c = useCharacter();
   const backDialogRef = useRef<HTMLDialogElement>(null);
   const successDialogRef = useRef<HTMLDialogElement>(null);
@@ -55,6 +56,7 @@ function CreatePageInner({ campaignId, campaignName }: { campaignId: string; cam
           species: c.species,
           background: c.background,
           class: c.characterClass,
+          backstory: c.backstory,
           stats: c.toStats(),
           skillProficiencies: [
             ...(BACKGROUND_SKILLS[c.background] ?? []),
@@ -110,6 +112,14 @@ function CreatePageInner({ campaignId, campaignName }: { campaignId: string; cam
         >
           Player Info
         </button>
+        {isCampaign && (
+          <button
+            className={`tab-btn ${c.activeTab === 'backstory' ? 'tab-btn--active' : ''}`}
+            onClick={() => c.set('activeTab', 'backstory')}
+          >
+            Backstory
+          </button>
+        )}
         <button
           className={`tab-btn ${c.activeTab === 'spells' ? 'tab-btn--active' : ''}`}
           onClick={() => c.set('activeTab', 'spells')}
@@ -131,7 +141,8 @@ function CreatePageInner({ campaignId, campaignName }: { campaignId: string; cam
       </nav>
 
       <div className="create-body">
-        {c.activeTab === 'spells' ? <SpellsTab />
+        {c.activeTab === 'backstory' && isCampaign ? <BackstoryTab campaignId={campaignId} />
+          : c.activeTab === 'spells' ? <SpellsTab />
           : c.activeTab === 'shop' ? <ShopTab />
           : c.activeTab === 'finished' ? <FinishedTab onCreate={handleCreate} canCreate={canCreate} saving={saving} error={error} />
           : <PlayerInfoTab campaignId={campaignId} />}
@@ -184,7 +195,7 @@ export default function PlayerCreatePage({ campaignId }: Props) {
 
   return (
     <CharacterProvider id={charId}>
-      <CreatePageInner campaignId={campaignId} campaignName={meta.name} />
+      <CreatePageInner campaignId={campaignId} campaignName={meta.name} isCampaign={meta.type === 'campaign'} />
     </CharacterProvider>
   );
 }

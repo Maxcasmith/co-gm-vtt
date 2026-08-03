@@ -393,6 +393,28 @@
   color: var(--text-muted);
 }
 
+.modal-textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  padding: 9px 12px;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.2s;
+  width: 100%;
+  resize: vertical;
+}
+
+.modal-textarea:focus {
+  border-color: var(--gold);
+}
+
+.modal-textarea::placeholder {
+  color: var(--text-muted);
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -1224,7 +1246,7 @@
 .finished-stat { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0; border: 1px solid var(--border); border-radius: 4px; }
 .finished-stat-name { font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 0.1em; color: var(--text-muted); }
 .finished-stat-value { font-size: 18px; color: var(--text); }
-.finished-create-row { display: flex; justify-content: flex-end; padding-top: 8px; }
+.finished-create-row { display: flex; justify-content: flex-end; gap: 10px; padding-top: 8px; }
 
 /* ── tab content ── */
 .tab-content {
@@ -1935,6 +1957,27 @@
   color: var(--muted);
   margin: 0;
   padding: 12px 0;
+}
+
+.lore-score {
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.lore-score--good { color: #4caf6e; border-color: #4caf6e44; background: #4caf6e11; }
+.lore-score--mixed { color: #d4a017; border-color: #d4a01744; background: #d4a01711; }
+.lore-score--poor { color: #c0524a; border-color: #c0524a44; background: #c0524a11; }
+
+.lore-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
 }
 
 /* Learned spells chips */
@@ -3778,47 +3821,12 @@ button.sheet-save-row {
   background: #0e0c10;
 }
 
-.battle-map-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-  transform-origin: 0 0;
-}
 .world-map-img {
   width: 100%;
   height: 100%;
   object-fit: contain;
   display: block;
   transform-origin: 0 0;
-}
-
-.battle-map-generating {
-  position: absolute;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(14, 12, 16, 0.85);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 8px 14px;
-  font-family: 'Cinzel', serif;
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  color: var(--text-muted);
-  z-index: 1;
-}
-
-@keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
-.battle-map-generating-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--gold);
-  animation: pulse 1.4s ease-in-out infinite;
 }
 
 /* ── Shop tab ──────────────────────────────────────────────────────────────── */
@@ -4335,6 +4343,32 @@ button.sheet-save-row {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.party-hud-hp {
+  width: 40px;
+  height: 5px;
+  border: none;
+  border-radius: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  overflow: hidden;
+  background: #2a2a2a;
+}
+
+.party-hud-hp::-webkit-progress-bar {
+  background: #2a2a2a;
+  border-radius: 0;
+}
+
+.party-hud-hp::-webkit-progress-value {
+  background: #a83232;
+  border-radius: 0;
+}
+
+.party-hud-hp::-moz-progress-bar {
+  background: #a83232;
+  border-radius: 0;
 }
 
 .party-hud-name {

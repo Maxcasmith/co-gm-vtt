@@ -2,69 +2,6 @@ import type { ChatPayload, Character, EnemyStatBlock, AttackResult, WorldState, 
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { logError } from '../logger.ts';
 
-interface LocationContext {
-  location: string;
-  locationType: string;
-  architecture: string;
-  atmosphere: string;
-  timeOfDay: string;
-  weather: string;
-  currentSituation: string;
-  keyFeatures: string;
-  mood: string;
-}
-
-const FALLBACK_CONTEXT: LocationContext = {
-  location: 'Unknown location',
-  locationType: 'interior',
-  architecture: 'medieval fantasy',
-  atmosphere: 'tense and atmospheric',
-  timeOfDay: 'night',
-  weather: 'clear',
-  currentSituation: 'An encounter is beginning',
-  keyFeatures: 'tables, barrels, doorways providing cover',
-  mood: 'dangerous and foreboding',
-};
-
-export async function parseLocationContext(messages: ChatPayload[], adapter: StoryProviderAdapter, locationMd?: string | null): Promise<LocationContext> {
-  const transcript = messages
-    .slice(-20)
-    .map(m => `[${m.senderName}]: ${m.text}`)
-    .join('\n');
-
-  const knownLocationBlock = locationMd
-    ? `\nKNOWN LOCATION (authoritative — the party is confirmed to be here):\n${locationMd}\n\nUse this to fill "location", "locationType", "architecture", "atmosphere" — these values MUST come from here when it provides them, not from the transcript. Only use the transcript for "currentSituation", "timeOfDay", "weather", "keyFeatures", "mood", or any field the location text leaves unclear.\n`
-    : '';
-
-  const systemPrompt = `You are extracting location context from a D&D session transcript to generate a battle map.
-${knownLocationBlock}
-Return ONLY valid JSON with these exact keys:
-{
-  "location": "name or description of the location",
-  "locationType": "interior/exterior/dungeon/wilderness/urban/etc",
-  "architecture": "architectural style and materials",
-  "atmosphere": "general feel of the space",
-  "timeOfDay": "dawn/morning/midday/afternoon/dusk/night",
-  "weather": "weather conditions (if exterior)",
-  "currentSituation": "the physical/environmental state of the scene in one sentence — damage, clutter, disturbed objects, tactical terrain. NEVER mention people, NPCs, monsters, or characters being present",
-  "keyFeatures": "notable tactical features — furniture, cover, terrain, exits. NEVER mention people or creatures",
-  "mood": "lighting and emotional tone"
-}
-If a field cannot be determined, make a reasonable inference from context. Never return null values. This describes an empty scene — no living creatures of any kind should appear in any field.
-
-Return ONLY valid JSON, no markdown fences, no explanation.`;
-
-  try {
-    const raw = await adapter.complete(`${systemPrompt}\n\nSession transcript:\n${transcript}`);
-    const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
-    const parsed = JSON.parse(cleaned) as Partial<LocationContext>;
-    return { ...FALLBACK_CONTEXT, ...parsed };
-  } catch (err) {
-    logError('session-processor/imagePrompts:parseLocationContext', err);
-    return FALLBACK_CONTEXT;
-  }
-}
-
 const FALLBACK_ENEMY: EnemyStatBlock = {
   id: 'fallback-1', name: 'Brigand', cr: 0.125, hp: 11, ac: 12, speed: 30,
   stats: { str: 11, dex: 12, con: 12, int: 10, wis: 10, cha: 10 },
@@ -255,52 +192,6 @@ export async function tickWorldNarrative(
       content: `The players rested for ${hoursElapsed} hours (${(hoursElapsed / 24).toFixed(1)} days passed).\n\nActive actors:\n${actorSummaries}${completedLine}\n\nWorld context (brief): ${worldMd.slice(0, 400)}`,
     },
   ], adapter);
-}
-
-export function buildBattleMapPrompt(ctx: LocationContext): string {
-  return `Create a PREMIUM AAA VTT BATTLE MAP.
-
-STYLE RULES (MANDATORY):
-- Perfect orthographic top-down view (90° overhead)
-- Tactical battle map, not concept art
-- Professional Patreon-quality cartography
-- Highly detailed textures and environmental storytelling
-- Realistic architecture and terrain
-- Atmospheric lighting that preserves readability
-- Dense but believable clutter and props
-- Clear focal points and tactical combat spaces
-- Multiple routes, cover, chokepoints, and line-of-sight blockers
-- Rich visual detail with no empty or unused areas
-- Suitable for Foundry VTT, Roll20, and print play
-- ABSOLUTELY NO people, NPCs, monsters, animals, or living figures of any kind anywhere in the image — a completely empty scene, ready for tokens to be placed
-- No labels, UI elements, text, borders, perspective distortion, or grid lines
-
-MAP CONTEXT
-
-Genre: Dark fantasy tabletop RPG
-
-Location: ${ctx.location}
-
-Purpose: ${ctx.locationType} encounter space
-
-Current Situation: ${ctx.currentSituation}
-
-Mood & Atmosphere: ${ctx.mood}
-
-Time: ${ctx.timeOfDay}
-
-Weather: ${ctx.weather}
-
-Architecture / Environment Style: ${ctx.architecture}
-
-Key Encounter Elements: ${ctx.keyFeatures}
-
-Atmosphere: ${ctx.atmosphere}
-
-Map Size: MEDIUM
-
-Final Requirement:
-Visually express every piece of provided context through architecture, terrain, props, lighting, damage, wear, clutter, and environmental storytelling. Maintain strict top-down orthographic perspective, realistic scale, tactical usability, and premium battle-map quality throughout. The scene must be completely empty of people, NPCs, monsters, and animals — no living creatures anywhere in the image.`;
 }
 
 export interface NemesisCandidate {

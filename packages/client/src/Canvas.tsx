@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Player, EnemyStatBlock, Spell, Dungeon } from 'shared';
-import { parseRangeFeet } from 'shared';
+import { parseRangeFeet, hasLineOfSight } from 'shared';
 import { dispatch, on } from './events.ts';
 import type { TargetingStartPayload } from './events.ts';
 import './app.css';
@@ -10,6 +10,37 @@ const TOKEN_R = 24;
 const DUNGEON_ENTITY_R = 10;
 const FLOAT_DUR  = 950;   // ms for floating text
 const FLASH_DUR  = 220;   // ms for token flash
+const SIGHT_RADIUS = 20;  // square (Chebyshev) fog-of-war radius, in cells — mirrors PLAYER_SIGHT_RADIUS server-side
+const DUNGEON_BG = '#0e0c14';
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2.0;
+
+// Wall-aware reachable cells within `maxSteps` (8-directional, uniform cost) — exploration movement
+// cap + highlight. Returns "gx,gy" keys, including the start cell.
+function bfsReachable(cells: number[][], startX: number, startY: number, maxSteps: number): Set<string> {
+  const key = (x: number, y: number) => `${x},${y}`;
+  const height = cells.length;
+  const width = cells[0]?.length ?? 0;
+  const visited = new Set<string>([key(startX, startY)]);
+  const queue: { x: number; y: number; steps: number }[] = [{ x: startX, y: startY, steps: 0 }];
+  for (let i = 0; i < queue.length; i++) {
+    const { x, y, steps } = queue[i]!;
+    if (steps >= maxSteps) continue;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || ny >= height || nx >= width) continue;
+        if (cells[ny]?.[nx] !== 1) continue;
+        const k = key(nx, ny);
+        if (visited.has(k)) continue;
+        visited.add(k);
+        queue.push({ x: nx, y: ny, steps: steps + 1 });
+      }
+    }
+  }
+  return visited;
+}
 
 // ── AoE geometry (grid cells, 1 cell = 5ft) ─────────────────────────────────────
 // Simplified templates: cone/line use a straight-triangle/rectangle approximation
@@ -98,6 +129,8 @@ interface Props {
   downPlayerNames?: Set<string>;
   deadPlayerNames?: Set<string>;
   dungeon?: Dungeon;
+  speed?: number;
+  sessionActive?: boolean;
 }
 
 function drawToken(
@@ -138,10 +171,27 @@ function drawToken(
   ctx.fillText(name.length > 10 ? name.slice(0, 9) + '…' : name, x, y + tokenR + 12 * (tokenR / TOKEN_R));
 }
 
-export default function Canvas({ player, characterId, connected, showBattleMap, encounter, tokenUrls, tokenPositions, movementRemaining = 0, deadCreatureIds, downPlayerNames, deadPlayerNames, dungeon }: Props) {
+export default function Canvas({ player, characterId, connected, showBattleMap, encounter, tokenUrls, tokenPositions, movementRemaining = 0, deadCreatureIds, downPlayerNames, deadPlayerNames, dungeon, speed = 30, sessionActive = true }: Props) {
   const ref            = useRef<HTMLCanvasElement>(null);
   const tokenImgCache  = useRef<Record<string, HTMLImageElement>>({});
   const [tokenCacheVer, setTokenCacheVer] = useState(0);
+
+  // Fog-of-war: cells visible to my own token — square radius + wall-blocked line-of-sight.
+  // Recomputed only when the dungeon or my own position changes, not per animation frame.
+  const myPos = tokenPositions?.[player];
+  const visibleCells = useMemo(() => {
+    if (!dungeon || !myPos) return null;
+    const set = new Set<string>();
+    for (let dy = -SIGHT_RADIUS; dy <= SIGHT_RADIUS; dy++) {
+      for (let dx = -SIGHT_RADIUS; dx <= SIGHT_RADIUS; dx++) {
+        const tx = myPos.gx + dx, ty = myPos.gy + dy;
+        if (tx < 0 || ty < 0 || tx >= dungeon.width || ty >= dungeon.height) continue;
+        if (hasLineOfSight(dungeon.cells, myPos.gx, myPos.gy, tx, ty)) set.add(`${tx},${ty}`);
+      }
+    }
+    return set;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dungeon, myPos?.gx, myPos?.gy]);
 
   // Refs to give window-level handlers (empty deps) access to latest prop values
   const playerRef           = useRef(player);
@@ -154,6 +204,24 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
   useEffect(() => { movementRef.current = movementRemaining; },   [movementRemaining]);
   useEffect(() => { dungeonRef.current = dungeon; },              [dungeon]);
   useEffect(() => { showBattleMapRef.current = showBattleMap; },  [showBattleMap]);
+
+  // Camera: on entering a dungeon, snap to max zoom centred on my own token.
+  // Re-fires only when the dungeon changes, so it never fights manual pan/zoom.
+  const centeredDungeonIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const myPos = tokenPositions?.[player];
+    const canvas = ref.current;
+    if (!dungeon || !myPos || !canvas) return;
+    if (centeredDungeonIdRef.current === dungeon.id) return;
+    centeredDungeonIdRef.current = dungeon.id;
+    const cellSz = CELL * MAX_ZOOM;
+    dungeonZoomRef.current = MAX_ZOOM;
+    dungeonPanRef.current = {
+      x: canvas.offsetWidth / 2 - (myPos.gx * cellSz + cellSz / 2),
+      y: canvas.offsetHeight / 2 - (myPos.gy * cellSz + cellSz / 2),
+    };
+    setDragTick(t => t + 1);
+  }, [dungeon, tokenPositions, player]);
 
   // Pan + zoom state for dungeon navigation
   const dungeonPanRef  = useRef({ x: 0, y: 0 });
@@ -202,6 +270,8 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
   // Drag state — refs keep closures fresh inside window listeners
   const dragRef     = useRef<{ id: string; x: number; y: number } | null>(null);
   const dragOffset  = useRef({ x: 0, y: 0 });
+  // Wall-aware reachable set for the current exploration-mode drag ("gx,gy" keys); null outside exploration mode
+  const reachableRef = useRef<Set<string> | null>(null);
   const [dragTick, setDragTick] = useState(0);
   const [sizeTick, setSizeTick] = useState(0);
 
@@ -304,6 +374,19 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
       // Movement accounting for the player's own token
       if (drag.id === playerRef.current) {
         const oldPos = tokenPositionsRef.current?.[drag.id];
+
+        // Exploration mode: wall-aware reachable set computed at drag-start is the only source of truth —
+        // commit if the drop cell is in it, otherwise snap back. No turn/movementRemaining gating here.
+        if (reachableRef.current) {
+          const dest = reachableRef.current.has(`${gx},${gy}`) ? { gx, gy } : oldPos;
+          reachableRef.current = null;
+          if (dest) dispatch('vtt:token:move', { tokenId: drag.id, gx: dest.gx, gy: dest.gy });
+          dragRef.current = null;
+          if (ref.current) ref.current.style.cursor = 'default';
+          setDragTick(t => t + 1);
+          return;
+        }
+
         if (oldPos && movementRef.current === 0) {
           // No movement left — snap back to last stationary position
           dispatch('vtt:token:move', { tokenId: drag.id, gx: oldPos.gx, gy: oldPos.gy });
@@ -338,7 +421,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
       e.preventDefault();
       const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
       const oldZoom = dungeonZoomRef.current;
-      const newZoom = Math.max(0.5, Math.min(2.0, oldZoom * factor));
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, oldZoom * factor));
       const rect = ref.current?.getBoundingClientRect();
       if (!rect) return;
       const mx = e.clientX - rect.left;
@@ -387,7 +470,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
 
       if (dungeon) {
         // Dungeon grid: wall background, then floor cells, then entity markers
-        ctx.fillStyle = '#0e0c14';
+        ctx.fillStyle = DUNGEON_BG;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         ctx.fillStyle = '#2d2b42';
@@ -410,9 +493,23 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           }
         }
 
+        // Entrance/exit room overlays — per-cell, not a blanket rect: irregular room shapes mean
+        // a room's bounding box can include wall cells that aren't actually part of the room.
+        for (const room of dungeon.rooms) {
+          if (!room.role) continue;
+          ctx.fillStyle = room.role === 'entrance' ? 'rgba(60,200,90,0.18)' : 'rgba(220,170,30,0.18)';
+          for (let row = room.y; row < room.y + room.height; row++) {
+            for (let col = room.x; col < room.x + room.width; col++) {
+              if (dungeon.cells[row]?.[col] === 1) ctx.fillRect(col * cellSz + panX, row * cellSz + panY, cellSz, cellSz);
+            }
+          }
+        }
+
         // Entity markers
         const entityR = DUNGEON_ENTITY_R * dungeonZoomRef.current;
         for (const entity of dungeon.entities) {
+          // Combat token (drawn below) replaces the marker for any creature in the active encounter
+          if (entity.type === 'creature' && encounter) continue;
           const ex = entity.x * cellSz + cellSz / 2 + panX;
           const ey = entity.y * cellSz + cellSz / 2 + panY;
           ctx.beginPath();
@@ -464,6 +561,16 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
               if (!onEdge) continue;
               ctx.strokeRect(tx * cellSz + panX + 0.5, ty * cellSz + panY + 0.5, cellSz - 1, cellSz - 1);
             }
+          }
+        }
+
+        // Exploration movement highlight — wall-aware reachable cells, own eyes only
+        if (drag?.id === player && reachableRef.current) {
+          ctx.fillStyle = 'rgba(255, 200, 50, 0.13)';
+          for (const key of reachableRef.current) {
+            const [kx, ky] = key.split(',').map(Number) as [number, number];
+            if (playerPos && kx === playerPos.gx && ky === playerPos.gy) continue;
+            ctx.fillRect(kx * cellSz + panX, ky * cellSz + panY, cellSz, cellSz);
           }
         }
 
@@ -710,10 +817,23 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           ctx.fillText(eff.text, 0, 0);
           ctx.restore();
         }
+
+        // Fog-of-war: black over anything outside my own sight radius OR behind a wall from my
+        // own position — computed from my own token only, never synced, so nobody else's sight
+        // lines are visible to me or mine to them
+        if (dungeon && visibleCells) {
+          ctx.fillStyle = DUNGEON_BG;
+          for (let row = 0; row < dungeon.height; row++) {
+            for (let col = 0; col < dungeon.width; col++) {
+              if (visibleCells.has(`${col},${row}`)) continue;
+              ctx.fillRect(col * cellSz + panX, row * cellSz + panY, cellSz, cellSz);
+            }
+          }
+        }
     } else {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
-  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick, aoeTick]);
+  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick, aoeTick, visibleCells]);
 
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!showBattleMap) return;
@@ -727,7 +847,14 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
       return;
     }
 
-    if (!encounter || !tokenPositions) return;
+    // No moves, attacks, or targeting while the session is paused/ended — panning above still works
+    if (!sessionActive) return;
+
+    // Exploration mode: dungeon loaded, no active encounter — free click-hold movement,
+    // no turn-gating, no targeting (those are combat-only concerns)
+    const exploring = !!dungeon && !encounter;
+    if (!exploring && (!encounter || !tokenPositions)) return;
+    if (!tokenPositions) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const rawMx = e.clientX - rect.left;
     const rawMy = e.clientY - rect.top;
@@ -737,58 +864,60 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     const mx = rawMx - panX;
     const my = rawMy - panY;
 
-    // Block all interaction when it's not this player's turn
-    if (!isMyTurnRef.current) return;
+    if (!exploring) {
+      // Block all interaction when it's not this player's turn
+      if (!isMyTurnRef.current) return;
 
-    // Targeting mode: resolve attack/cast or cancel
-    if (targetingRef.current) {
-      const targetingNow = targetingRef.current;
-      const playerPos = tokenPositions[player];
+      // Targeting mode: resolve attack/cast or cancel
+      if (targetingRef.current) {
+        const targetingNow = targetingRef.current;
+        const playerPos = tokenPositions[player];
 
-      if (targetingNow.kind === 'spell' && targetingNow.spell.combat?.area && playerPos) {
-        const area = targetingNow.spell.combat.area;
-        const origin = resolveAoeOrigin(area, playerPos, aoeMouseRef.current, parseRangeFeet(targetingNow.spell.range));
-        const targetIds: string[] = [];
-        for (const enemy of encounter) {
-          const epos = tokenPositions[enemy.id];
-          if (epos && inArea(area, origin.originGx, origin.originGy, origin.dirGx, origin.dirGy, epos.gx + 0.5, epos.gy + 0.5)) targetIds.push(enemy.id);
+        if (targetingNow.kind === 'spell' && targetingNow.spell.combat?.area && playerPos) {
+          const area = targetingNow.spell.combat.area;
+          const origin = resolveAoeOrigin(area, playerPos, aoeMouseRef.current, parseRangeFeet(targetingNow.spell.range));
+          const targetIds: string[] = [];
+          for (const enemy of encounter!) {
+            const epos = tokenPositions[enemy.id];
+            if (epos && inArea(area, origin.originGx, origin.originGy, origin.dirGx, origin.dirGy, epos.gx + 0.5, epos.gy + 0.5)) targetIds.push(enemy.id);
+          }
+          for (const name of connected) {
+            const ppos = tokenPositions[name];
+            if (ppos && inArea(area, origin.originGx, origin.originGy, origin.dirGx, origin.dirGy, ppos.gx + 0.5, ppos.gy + 0.5)) targetIds.push(name);
+          }
+          dispatch('vtt:combat:spell:cast', { casterName: player, casterId: targetingNow.casterId, spell: targetingNow.spell, slotLevel: targetingNow.spell.level, targetIds });
+          e.preventDefault();
+          return;
         }
-        for (const name of connected) {
-          const ppos = tokenPositions[name];
-          if (ppos && inArea(area, origin.originGx, origin.originGy, origin.dirGx, origin.dirGy, ppos.gx + 0.5, ppos.gy + 0.5)) targetIds.push(name);
+
+        if (playerPos) {
+          const range = targetingNow.kind === 'weapon' ? targetingNow.weapon.range : parseRangeFeet(targetingNow.spell.range);
+          const extendedRange = targetingNow.kind === 'weapon' ? targetingNow.weapon.extendedRange : undefined;
+          const maxRangeCells = extendedRange ? Math.floor(extendedRange / 5) : Math.floor(range / 5);
+          for (const enemy of encounter!) {
+            const epos = tokenPositions[enemy.id];
+            if (!epos) continue;
+            if (Math.max(Math.abs(epos.gx - playerPos.gx), Math.abs(epos.gy - playerPos.gy)) > maxRangeCells) continue;
+            const ex = epos.gx * hdCellSz + hdCellSz / 2;
+            const ey = epos.gy * hdCellSz + hdCellSz / 2;
+            if (Math.hypot(mx - ex, my - ey) <= TOKEN_R) {
+              if (targetingNow.kind === 'weapon') {
+                dispatch('vtt:combat:attack', { attackerName: player, attackerId: characterId, targetId: enemy.id, targetName: enemy.name, weapon: targetingNow.weapon });
+              } else if (targetingNow.spell.combat?.resolution === 'attack') {
+                dispatch('vtt:combat:spell:attack', { casterName: player, casterId: targetingNow.casterId, targetId: enemy.id, targetName: enemy.name, spell: targetingNow.spell, slotLevel: targetingNow.spell.level });
+              } else {
+                dispatch('vtt:combat:spell:cast', { casterName: player, casterId: targetingNow.casterId, spell: targetingNow.spell, slotLevel: targetingNow.spell.level, targetIds: [enemy.id] });
+              }
+              e.preventDefault();
+              return;
+            }
+          }
         }
-        dispatch('vtt:combat:spell:cast', { casterName: player, casterId: targetingNow.casterId, spell: targetingNow.spell, slotLevel: targetingNow.spell.level, targetIds });
+        // Clicked empty — cancel targeting
+        dispatch('vtt:targeting:cancel', {});
         e.preventDefault();
         return;
       }
-
-      if (playerPos) {
-        const range = targetingNow.kind === 'weapon' ? targetingNow.weapon.range : parseRangeFeet(targetingNow.spell.range);
-        const extendedRange = targetingNow.kind === 'weapon' ? targetingNow.weapon.extendedRange : undefined;
-        const maxRangeCells = extendedRange ? Math.floor(extendedRange / 5) : Math.floor(range / 5);
-        for (const enemy of encounter) {
-          const epos = tokenPositions[enemy.id];
-          if (!epos) continue;
-          if (Math.max(Math.abs(epos.gx - playerPos.gx), Math.abs(epos.gy - playerPos.gy)) > maxRangeCells) continue;
-          const ex = epos.gx * hdCellSz + hdCellSz / 2;
-          const ey = epos.gy * hdCellSz + hdCellSz / 2;
-          if (Math.hypot(mx - ex, my - ey) <= TOKEN_R) {
-            if (targetingNow.kind === 'weapon') {
-              dispatch('vtt:combat:attack', { attackerName: player, attackerId: characterId, targetId: enemy.id, targetName: enemy.name, weapon: targetingNow.weapon });
-            } else if (targetingNow.spell.combat?.resolution === 'attack') {
-              dispatch('vtt:combat:spell:attack', { casterName: player, casterId: targetingNow.casterId, targetId: enemy.id, targetName: enemy.name, spell: targetingNow.spell, slotLevel: targetingNow.spell.level });
-            } else {
-              dispatch('vtt:combat:spell:cast', { casterName: player, casterId: targetingNow.casterId, spell: targetingNow.spell, slotLevel: targetingNow.spell.level, targetIds: [enemy.id] });
-            }
-            e.preventDefault();
-            return;
-          }
-        }
-      }
-      // Clicked empty — cancel targeting
-      dispatch('vtt:targeting:cancel', {});
-      e.preventDefault();
-      return;
     }
 
     // Drag mode: own token only
@@ -797,6 +926,9 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
     const cx = pos.gx * hdCellSz + hdCellSz / 2;
     const cy = pos.gy * hdCellSz + hdCellSz / 2;
     if (Math.hypot(mx - cx, my - cy) <= TOKEN_R) {
+      reachableRef.current = exploring && dungeon
+        ? bfsReachable(dungeon.cells, pos.gx, pos.gy, Math.max(1, Math.floor(speed / 5)))
+        : null;
       // Store drag position in screen space (includes pan so drag line renders correctly)
       dragRef.current = { id: player, x: cx + panX, y: cy + panY };
       dragOffset.current = { x: rawMx - (cx + panX), y: rawMy - (cy + panY) };

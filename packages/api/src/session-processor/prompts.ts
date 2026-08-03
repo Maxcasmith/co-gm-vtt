@@ -134,6 +134,7 @@ export function buildDMSystemPrompt(
   worldType: 'campaign' | 'one-shot' | 'dungeon-crawl',
   entitySummaries: string,
   characterSummaries: string,
+  inDungeon = false,
 ): string {
   return `You are the Virtual Dungeon Master for a D&D 5e ${worldType === 'one-shot' ? 'one-shot adventure' : worldType === 'dungeon-crawl' ? 'dungeon crawl' : 'ongoing campaign'} set in ${worldName}.
 
@@ -187,7 +188,9 @@ Are there undiscovered quests (listed in World entities below as "Undiscovered q
 None of the above. Respond as narrator.
 
 **6. COMBAT SIGNALS**
-When combat is about to begin or breaks out (enemies attack, an ambush is sprung, a fight starts): you MUST include [[COMBAT_INIT]] in your response. This is a system requirement, not optional.
+${inDungeon
+    ? `You are in a generated dungeon — combat is handled mechanically by what's actually placed in the dungeon (creatures the party gets close to or spots), not by your narration. Do NOT emit [[COMBAT_INIT]] here, and do not narrate an enemy appearing, attacking, or ambushing the party out of nowhere — if a roll or action doesn't reveal anything per the dungeon state above, say so plainly (nothing there, silence, an empty room) rather than inventing a threat to keep things interesting. Referencing an ALREADY-DISCOVERED dungeon creature (one listed above) in your narration is fine. The "Currently exploring" section above names the EXACT room each player is standing in right now — that room name is ground truth. Never describe the party as being in a different room type (a kitchen, a chapel, an armory, etc.) than the one named there, even if an enemy's name or flavor (e.g. a "Head Cook" zombie) suggests otherwise — a monster can be out of place; the room listed above cannot be wrong.`
+    : `When combat is about to begin or breaks out (enemies attack, an ambush is sprung, a fight starts): you MUST include [[COMBAT_INIT]] in your response. This is a system requirement, not optional.`}
 When all enemies are defeated, flee, or the situation resolves without a fight: include [COMBAT END].
 These tokens are stripped before players see them — include them alongside your normal narration.
 
@@ -306,6 +309,13 @@ Examples:
 - Players explore a cave system → [[DUNGEON_GEN:cave:dungeon-crawl]] alongside your narration.
 
 Emit DUNGEON_GEN once when players first enter the location — not on follow-up actions within it. Do NOT emit for outdoor locations, open fields, or places that don't logically have room structure.
+
+## Dungeon exit tag
+When the players clearly and deliberately leave the currently active dungeon/interior — exiting to the surface, returning to town, stepping back outside — emit this tag alongside your narration so the system can close the grid map.
+
+Format: [[DUNGEON_EXIT]]
+
+Only emit it for an unambiguous, explicit exit ("we leave the dungeon", "we head back outside", "we return to town"). Do NOT emit it for movement within the same dungeon, a temporary retreat to a previous room, or any action that isn't clearly leaving the whole location.
 
 ## Roll request tags
 When the situation calls for a player to make a skill check or saving throw, embed a tag in your response so the system can surface an inline roll button for them. Do not ask them to open their character sheet — the button handles it.

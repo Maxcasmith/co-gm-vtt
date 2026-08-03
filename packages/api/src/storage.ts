@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, readdir } from 'fs/promises';
+import { readFile, writeFile, mkdir, readdir, rm } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -265,6 +265,10 @@ export async function loadDungeon(slug: string): Promise<Dungeon | null> {
     const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'dungeon.json'), 'utf-8');
     return JSON.parse(raw) as Dungeon;
   } catch (err) { logError('storage:loadDungeon', err); return null; }
+}
+
+export async function clearDungeon(slug: string): Promise<void> {
+  await rm(path.join(CAMPAIGNS_DIR, slug, 'dungeon.json'), { force: true });
 }
 
 export async function readManifest(slug: string): Promise<SessionManifest | null> {

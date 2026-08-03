@@ -5,6 +5,90 @@ type CampaignType = 'campaign' | 'one-shot' | 'dungeon-crawl';
 // without assuming every campaign is based on one.
 const LORE_INSTRUCTION = `Where tags reference a named IP, setting, or genre (a game, film, book, historical era, etc.), draw from its established lore, proper nouns, named locations, and specific flavour — use the real names and details, not generic substitutes. For original or custom worlds, apply the same level of specificity using invented names and concrete details.`;
 
+export function buildBackstoryCheckPrompt(
+  worldLore: string,
+  concept: { name: string; species: string; background: string; characterClass: string; backstory: string },
+): string {
+  return `You are a tabletop RPG lore consistency judge. Score how well a player's character concept fits the established world below.
+
+WORLD LORE:
+${worldLore || '(no world lore has been established yet — score based on internal consistency and genre fit only)'}
+
+CHARACTER CONCEPT:
+Name: ${concept.name || '(unnamed)'}
+Species: ${concept.species || '(unspecified)'}
+Background: ${concept.background || '(unspecified)'}
+Class: ${concept.characterClass || '(unspecified)'}
+Backstory: ${concept.backstory || '(none written yet)'}
+
+Judge fit on: does the backstory reference or contradict specific facts, factions, regions, history, or tone established in the lore; does the species/background/class combination make sense given the world's cultures and current conflicts; is the backstory's scale and stakes appropriate for a starting character (not already the world's savior or a named lore figure).
+
+Return ONLY a single valid JSON object — no markdown fences, no explanation:
+
+{
+  "score": number (0-100, integer, how well the concept fits the world),
+  "verdict": "string — one sentence summary of the fit",
+  "issues": ["string — a specific contradiction or mismatch with the lore, if any"],
+  "suggestions": ["string — a specific, concrete change to the backstory that would raise the score, referencing actual lore names/places/factions where possible"]
+}
+
+If the concept already fits well, return an empty issues array and 1-2 suggestions for small flavour improvements rather than forcing problems that aren't there.`;
+}
+
+export function buildBackstoryGeneratePrompt(
+  worldLore: string,
+  concept: { name: string; species: string; background: string; characterClass: string },
+): string {
+  return `You are a tabletop RPG writer. Write a character backstory grounded in the world below.
+
+WORLD LORE:
+${worldLore || '(no world lore has been established yet — invent grounded, genre-appropriate details)'}
+
+CHARACTER CONCEPT:
+Name: ${concept.name || '(unnamed — invent a fitting name)'}
+Species: ${concept.species || '(unspecified — pick one that fits the world)'}
+Background: ${concept.background || '(unspecified — pick one that fits the world)'}
+Class: ${concept.characterClass || '(unspecified — pick one that fits the world)'}
+
+Reference specific named places, factions, NPCs, or events from the world lore above where it makes sense — ground the character in this world, not a generic fantasy setting. Explain how their species/background/class combination came to be, and give them a personal stake in something already happening in the world (a grudge, a debt, a missing person, a faction tie). Keep them a starting adventurer, not a legend — no world-saving deeds, no famous names.
+
+Write exactly 3 paragraphs of prose. No headers, no bullet points, no markdown, no preamble — return only the backstory text itself.`;
+}
+
+export function buildBackstoryExtractPrompt(
+  worldLore: string,
+  character: { name: string; species: string; background: string; class: string; backstory?: string },
+): string {
+  return `You are a tabletop RPG world-builder. A new player character has just joined the campaign. Read their backstory and extract concrete world content from it, so the character feels like they already belong in this world rather than being bolted on.
+
+WORLD LORE (current):
+${worldLore || '(no world lore established yet)'}
+
+NEW PARTY MEMBER:
+Name: ${character.name}
+Species: ${character.species}
+Background: ${character.background}
+Class: ${character.class}
+Backstory: ${character.backstory || '(none provided)'}
+
+Only extract what the backstory actually introduces — do not invent unrelated content. If it names a person (family, companion, rival, mentor, even an animal), that's an NPC. If it names a place the character is from, passed through, or is headed toward, that's a location. If it implies something the party will need to act on (a missing person, a promise, a search, a debt, an unresolved thread), that's a quest, written from the party's perspective as a hook to pursue. If the backstory is empty or too thin to extract anything, return empty arrays — do not fabricate content to fill them.
+
+Return ONLY a single valid JSON object — no markdown fences, no explanation:
+
+{
+  "worldEntry": "string — 2-4 sentences, in-world journal/historical voice, recording this character's arrival and tying it to the lore above where it fits. Appended to the world document verbatim.",
+  "npcs": [
+    { "name": "string", "role": "string — their relation to the character, e.g. 'niece', 'hunting hound', 'estranged mentor'", "race": "string", "occupation": "string", "personality": "string — 2-3 specific traits", "motivation": "string", "secret": "string, or empty if none", "factionAffiliation": "string or null" }
+  ],
+  "locations": [
+    { "name": "string", "description": "string — grounded, specific, consistent with the world lore's tone and geography" }
+  ],
+  "quests": [
+    { "id": "kebab-slug", "name": "string — short, player-facing", "description": "string — 1-2 sentences, what the party knows or is being asked to do" }
+  ]
+}`;
+}
+
 export function buildConceptsPrompt(tags: string[], type: CampaignType): string {
   if (type === 'one-shot') {
     return `You are a tabletop RPG designer. Generate exactly 3 distinct one-shot adventure concepts inspired by these tags: ${tags.join(', ')}.
@@ -150,4 +234,18 @@ Return ONLY a single valid JSON object — no markdown fences, no explanation:
 Requirements: at least 6 factions, at least 12 NPCs. Include at least 2 NPCs with no faction affiliation or whose loyalty is genuinely divided. Factions should have conflicting goals that create natural drama without the GM needing to force it. initialQuests: 6–10 opening hooks written as pending story beats the DM will surface in early sessions.
 
 Do NOT generate a plot or overarching story — the players will create that. Generate world state, not narrative. Every NPC and faction should be pursuable independently.`;
+}
+
+// Dungeon crawl: no world, no factions, no NPC roster — the dungeon itself is the content.
+// Just a title (not the raw tag list) and enough premise for the DM to open the scene.
+export function buildDungeonCrawlPremisePrompt(tags: string[]): string {
+  return `You are a tabletop RPG designer. Based on these tags: ${tags.join(', ')} — name this dungeon crawl and write the premise for why a party of adventurers is about to enter it.
+
+${LORE_INSTRUCTION}
+
+Return ONLY a single valid JSON object — no markdown fences, no explanation:
+{
+  "title": "string — a short, evocative title for this adventure. Not just the tags restated.",
+  "premise": "string — a single paragraph (3-5 sentences) covering who sent them or why they're going, what they're after or expect to find, and the tone/atmosphere the tags imply. Do not describe the dungeon's layout or contents — that's generated separately. Do not invent named NPCs, factions, or a wider world — this is scene-setting for the trip in, nothing more."
+}`;
 }

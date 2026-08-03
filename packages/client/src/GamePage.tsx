@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import type { Character, Player, EnemyStatBlock, TokenPosition, Dungeon, Quest } from 'shared';
+import { HIT_DICE } from './character-creation/srd.ts';
 import Canvas from './Canvas.tsx';
 import EncounterLoadingOverlay from './EncounterLoadingOverlay.tsx';
 import CommandPalette from './CommandPalette.tsx';
@@ -67,12 +68,14 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [downPlayerNames, setDownPlayerNames] = useState<Set<string>>(new Set());
   const [deadPlayerNames, setDeadPlayerNames] = useState<Set<string>>(new Set());
   const [playerHpState, setPlayerHpState] = useState<{ current: number; max: number } | null>(null);
+  const [partyHp, setPartyHp] = useState<Record<string, { current: number; max: number }>>({});
   const [tokenUrls, setTokenUrls] = useState<Record<string, string>>({});
   const [portraitUrls, setPortraitUrls] = useState<Record<string, string>>({});
   const [acquisitions, setAcquisitions] = useState<Character['inventory']>([]);
   const [itemNotifications, setItemNotifications] = useState<{ id: string; name: string }[]>([]);
   const [worldMapUrl, setWorldMapUrl] = useState<string | undefined>(undefined);
   const [dungeon, setDungeon] = useState<Dungeon | null>(null);
+  const [dungeonGenerating, setDungeonGenerating] = useState(false);
   const [questLogOpen, setQuestLogOpen] = useState(false);
   const [quests, setQuests] = useState<Quest[]>([]);
   const [act, setAct] = useState(1);
@@ -121,6 +124,13 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const derivedMax = (HIT_DICE[character.class] ?? 8) + Math.floor((character.stats.con - 10) / 2);
+    const max = character.maxHp ?? derivedMax;
+    const current = character.currentHp ?? max;
+    setPartyHp(prev => ({ ...prev, [character.name]: { current, max } }));
+  }, [character.id, character.maxHp, character.currentHp]);
 
   useEffect(() => {
     const url = `${API}/api/campaigns/${character.campaignId}/world-map`;
@@ -186,7 +196,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('combat:state', active => {
       setCombatActive(active);
       dispatch('vtt:combat:state', { active });
-      if (!active) { setEncounter(null); setTokenPositions({}); }
+      if (!active) setEncounter(null);
     });
     socket.on('combat:turn', data => dispatch('vtt:combat:turn', data));
     socket.on('combat:initiative', entry => dispatch('vtt:combat:initiative', { entry }));
@@ -197,6 +207,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('combat:player:damage', data => {
       dispatch('vtt:combat:player:damage', data);
       if (data.characterId === character.id) setPlayerHpState({ current: data.currentHp, max: data.maxHp });
+      setPartyHp(prev => ({ ...prev, [data.characterName]: { current: data.currentHp, max: data.maxHp } }));
       if (data.currentHp <= 0) setDownPlayerNames(prev => new Set([...prev, data.characterName]));
       else setDownPlayerNames(prev => { const s = new Set(prev); s.delete(data.characterName); return s; });
     });
@@ -207,7 +218,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       setDeadPlayerNames(prev => new Set([...prev, data.characterName]));
       setDownPlayerNames(prev => { const s = new Set(prev); s.delete(data.characterName); return s; });
     });
-    const unsubRest = on('vtt:rest:result', ({ currentHp, maxHp }) => setPlayerHpState({ current: currentHp, max: maxHp }));
+    const unsubRest = on('vtt:rest:result', ({ currentHp, maxHp }) => {
+      setPlayerHpState({ current: currentHp, max: maxHp });
+      setPartyHp(prev => ({ ...prev, [character.name]: { current: currentHp, max: maxHp } }));
+    });
     socket.on('creature:update', data => {
       dispatch('vtt:creature:update', data);
       if (data.effects.includes('Dead')) setDeadCreatureIds(prev => new Set([...prev, data.id]));
@@ -225,15 +239,15 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('token:moved', (pos: TokenPosition) => {
       setTokenPositions(prev => ({ ...prev, [pos.tokenId]: { gx: pos.gx, gy: pos.gy } }));
     });
-    socket.on('map:generating', () => dispatch('vtt:map:generating', {}));
-    socket.on('map:generated', mapId => dispatch('vtt:map:generated', { mapId, campaignId: character.campaignId }));
     socket.on('encounter:generating', () => dispatch('vtt:encounter:generating', {}));
     socket.on('encounter:ready', enemies => { setEncounter(enemies); dispatch('vtt:encounter:ready', { enemies }); });
     socket.on('session:recap', ({ text, senderName, checkRequests }) => {
       dispatch('vtt:chat:message-received', { text, senderName, timestamp: Date.now(), variant: 'recap', checkRequests });
     });
     socket.on('combat:log', data => dispatch('vtt:combat:log', { kind: 'text', ...data }));
-    socket.on('dungeon:loaded', dungeon => { setDungeon(dungeon); dispatch('vtt:dungeon:loaded', dungeon); });
+    socket.on('dungeon:generating', () => setDungeonGenerating(true));
+    socket.on('dungeon:loaded', dungeon => { setDungeonGenerating(false); setDungeon(dungeon); dispatch('vtt:dungeon:loaded', dungeon); });
+    socket.on('dungeon:cleared', () => setDungeon(null));
     socket.on('quest:update', ({ quests: q, act: a }) => { setQuests(q); setAct(a); });
     socket.on('clock:update', ({ worldTimeSecs: t }) => { setWorldTimeSecs(t); });
 
@@ -281,42 +295,39 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   useEffect(() => on('vtt:movement:gained', ({ ft }) => setMovementRemaining(prev => prev + ft)), []);
 
   useEffect(() => {
-    if (!combatActive || !encounter) return;
-    const socket = socketRef.current;
-    const CELL = 64;
-    const cols = Math.floor(window.innerWidth / CELL);
-
-    // Compute default positions before touching state so we can emit them immediately
-    const defaults: Record<string, { gx: number; gy: number }> = {};
-    connected.forEach((name, i)  => { defaults[name]      = { gx: 2,        gy: 3 + i * 2 }; });
-    encounter.forEach((enemy, i) => { defaults[enemy.id]  = { gx: cols - 3, gy: 3 + i * 2 }; });
-
-    setTokenPositions(prev => {
-      const next = { ...prev };
-      Object.entries(defaults).forEach(([id, pos]) => { if (!next[id]) next[id] = pos; });
-      return next;
-    });
-
-    // Send every default that isn't already tracked on the server
-    if (socket) {
-      Object.entries(defaults).forEach(([tokenId, { gx, gy }]) => {
-        socket.emit('token:move', { tokenId, gx, gy });
-      });
-    }
-  }, [combatActive, encounter]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
     if (!dungeon) return;
     const socket = socketRef.current;
-    const room = dungeon.rooms[0];
+    const room = dungeon.rooms.find(r => r.role === 'entrance') ?? dungeon.rooms[0];
     if (!room) return;
+
+    // Spread players across the entrance room without stacking any two on the same cell —
+    // a raw +i offset collapses onto the room's edge once the party outgrows a small room.
+    const cx = room.x + Math.floor(room.width / 2);
+    const cy = room.y + Math.floor(room.height / 2);
+    const used = new Set<string>();
+    const key = (x: number, y: number) => `${x},${y}`;
+    const inRoom = (x: number, y: number) => x >= room.x && x < room.x + room.width && y >= room.y && y < room.y + room.height;
+    const findFree = (targetX: number, targetY: number): { gx: number; gy: number } => {
+      if (inRoom(targetX, targetY) && !used.has(key(targetX, targetY))) return { gx: targetX, gy: targetY };
+      const maxRadius = Math.max(room.width, room.height);
+      for (let r = 1; r <= maxRadius; r++) {
+        for (let dx = -r; dx <= r; dx++) {
+          for (let dy = -r; dy <= r; dy++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+            const x = targetX + dx, y = targetY + dy;
+            if (x < room.x || x >= room.x + room.width || y < room.y || y >= room.y + room.height) continue;
+            if (!used.has(key(x, y))) return { gx: x, gy: y };
+          }
+        }
+      }
+      return { gx: targetX, gy: targetY }; // room genuinely full — overlap is the least-bad fallback
+    };
 
     const defaults: Record<string, { gx: number; gy: number }> = {};
     connected.forEach((name, i) => {
-      defaults[name] = {
-        gx: Math.min(room.x + Math.floor(room.width / 2) + i, room.x + room.width - 1),
-        gy: room.y + Math.floor(room.height / 2),
-      };
+      const pos = findFree(cx + i, cy);
+      used.add(key(pos.gx, pos.gy));
+      defaults[name] = pos;
     });
 
     setTokenPositions(prev => {
@@ -421,11 +432,11 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         downPlayerNames={downPlayerNames}
         deadPlayerNames={deadPlayerNames}
         dungeon={dungeon ?? undefined}
+        speed={character.speed}
+        sessionActive={sessionActive}
       />
       <TurnOrderBar campaignId={character.campaignId} />
-      {!combatActive && (
-        <PartyHud connected={connected} portraitUrls={portraitUrls} self={character.name} />
-      )}
+      <PartyHud connected={connected} portraitUrls={portraitUrls} self={character.name} hp={partyHp} />
       <CombatDock character={character} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} />
       <EncounterLoadingOverlay />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} header={<span className="palette-clock">{formatWorldTime(worldTimeSecs)}</span>} />
@@ -439,8 +450,13 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       {defeated && <DefeatScreen onDismiss={() => setDefeated(false)} />}
       <ShortcutsOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <RestModal character={character} />
-      <BattleMapBackground campaignId={character.campaignId} worldMapUrl={worldMapUrl} />
+      <BattleMapBackground worldMapUrl={worldMapUrl} />
       <div className="item-notifications">
+        {dungeonGenerating && (
+          <div className="item-notification">
+            <span className="item-notification-label">Generating dungeon…</span>
+          </div>
+        )}
         {itemNotifications.map(n => (
           <div key={n.id} className="item-notification">
             <span className="item-notification-label">Item received</span>

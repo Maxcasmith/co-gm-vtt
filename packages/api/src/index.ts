@@ -2,7 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import type { ServerToClientEvents, ClientToServerEvents, Player, CharacterStats, TurnOrderEntry, Character, Weapon, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, EnemyStatBlock, NemesisRecord } from 'shared';
+import type { ServerToClientEvents, ClientToServerEvents, Player, CharacterStats, TurnOrderEntry, Character, Weapon, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, EnemyStatBlock, NemesisRecord, Dungeon, DungeonEntity } from 'shared';
+import { hasLineOfSight } from 'shared';
 import { Weapon as WeaponClass, CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, resolveSpellDamageDice, calcAC } from 'shared';
 import { configRouter } from './routes/config.ts';
 import { campaignsRouter } from './routes/campaigns.ts';
@@ -10,13 +11,12 @@ import { compendiumRouter } from './routes/compendium.ts';
 import { readdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { getCharacter, updateCharacter, readChatLog, appendChatLog, listEntitySlugs, readEntity, writeEntity, getWorldMeta, getConfig, CAMPAIGNS_DIR, saveMap, appendMapIndex, listMaps, listPremadeMaps, saveEncounter, loadEncounter, clearEncounter, readWorldState, writeWorldState, readCampaignFile, listCharacters, loadPartyAllies, savePartyAllies, saveDungeon, loadDungeon, readManifest, writeManifest, emptyManifest, parseEntityLinks, readQuests, writeQuests, readNemeses, writeNemeses } from './storage.ts';
-import { generateDungeon } from './dungeon/index.ts';
+import { getCharacter, updateCharacter, readChatLog, appendChatLog, listEntitySlugs, readEntity, writeEntity, getWorldMeta, getConfig, CAMPAIGNS_DIR, saveEncounter, loadEncounter, clearEncounter, readWorldState, writeWorldState, readCampaignFile, listCharacters, loadPartyAllies, savePartyAllies, saveDungeon, loadDungeon, clearDungeon, readManifest, writeManifest, emptyManifest, parseEntityLinks, readQuests, writeQuests, readNemeses, writeNemeses } from './storage.ts';
+import { generateDungeon, generateEncounterDungeon, describeDungeonState, toClientDungeon } from './dungeon/index.ts';
 import { getStoryProvider, getCombatProvider } from './providers/index.ts';
 import { buildRecapPrompt } from './session-processor/prompts.ts';
 import { processSession, getDMResponse, ensureSessionQuests } from './session-processor/index.ts';
-import { parseLocationContext, buildBattleMapPrompt, generateEncounterEnemies, generateCombatFlavour, resolveImprovisedAction, generateWorldState, tickWorldNarrative, evaluateNemesisCandidates } from './session-processor/imagePrompts.ts';
-import { generateBattleMap } from './providers/openai.ts';
+import { generateEncounterEnemies, generateCombatFlavour, resolveImprovisedAction, generateWorldState, tickWorldNarrative, evaluateNemesisCandidates } from './session-processor/imagePrompts.ts';
 import { mapsRouter } from './routes/maps.ts';
 import { adminRouter } from './routes/admin.ts';
 import { spellsRouter } from './routes/spells.ts';
@@ -24,7 +24,7 @@ import { randomUUID } from 'crypto';
 import { Encounter, Team, Participant } from './domain/encounter.ts';
 import { Creature } from './domain/creature.ts';
 import { processVdmResponse, type TagEffect, type AcquiredItem } from './tag-processor.ts';
-import { logError } from './logger.ts';
+import { logError, logDebug } from './logger.ts';
 
 const app = express();
 app.use(cors());
@@ -63,6 +63,11 @@ const campaignPlayers = new Map<string, string[]>();
 const playerSocketIds = new Map<string, string>(); // charId → socketId (for private events)
 const enemiesReady   = new Map<string, boolean>();  // true once rollEnemyInitiatives has fired
 const combatStartedAt = new Map<string, number>();  // timestamp when combat_init fired, for nemesis transcript slicing
+const dungeons = new Map<string, Dungeon>(); // in-memory mirror of saveDungeon/loadDungeon, mutated on reveal
+const microDungeons = new Set<string>(); // cids whose current dungeon is an ephemeral combat arena — discarded on victory instead of continued
+
+const PLAYER_SIGHT_RADIUS = 20; // square (Chebyshev) radius, in cells
+const ENEMY_AGGRO_RADIUS  = 12;
 
 const NEMESIS_COOLDOWN_SESSIONS = 2;
 const NEMESIS_CAP_PER_TARGET = 3;
@@ -422,6 +427,11 @@ function endSession(cid: string): void {
   if (!sessionState.get(cid)) return;
   sessionState.set(cid, false);
   io.to(ROOM).emit('session:state', false);
+  const dungeon = dungeons.get(cid);
+  if (dungeon) {
+    dungeon.positions = tokenPositions.get(cid) ?? {};
+    void saveDungeon(cid, dungeon);
+  }
   void readManifest(cid).then(manifest => {
     const m = manifest ?? emptyManifest();
     m.sessionsPlayed = (m.sessionsPlayed ?? 0) + 1;
@@ -446,6 +456,7 @@ function endCombatDefeated(cid: string): void {
   setTimeout(() => {
     endCombat(cid);
     io.to(ROOM).emit('combat:state', false);
+    microDungeons.delete(cid);
     endSession(cid);
   }, 8000);
 }
@@ -464,10 +475,12 @@ async function applyDamageToCreature(cid: string, targetId: string, damage: numb
     maxHp: creature.hp,
     effects: creature.effects,
   });
+  void saveEncounter(cid, encounter);
 
   if (creature.isDead()) {
     console.log(`[combat] ${creature.name} is dead`);
     encounter.removeFromTurnOrder(targetId);
+    void saveEncounter(cid, encounter);
 
     if (encounter.allEnemiesDead()) {
       const enemyStatBlocks = encounter.enemies
@@ -483,10 +496,50 @@ async function applyDamageToCreature(cid: string, targetId: string, damage: numb
         chars.map(char => updateCharacter(cid, char.id, c => ({ ...c, xp: (c.xp ?? 0) + xpPerPlayer })))
       ));
 
+      // combatState flips false right away so a player still moving on their last turn can't
+      // trigger checkDungeonProximity/joinReinforcements against this encounter mid-teardown —
+      // but the client-facing combat:state emit (which VictoryScreen clears itself on) stays on
+      // the narrative delay below, so the victory screen still gets its full display window.
+      combatState.set(cid, false);
+
+      // Captured so the delayed cleanup below can check it's still tearing down THIS fight — if
+      // the party found another encounter within the delay window, encounters.get(cid) is by then
+      // a brand new Encounter for that fight, and blindly tearing it down (endCombat deletes
+      // whatever's currently in the map) would silently kill the next fight mid-combat.
+      const wonEncounter = encounter;
+
       setTimeout(() => {
-        combatState.set(cid, false);
-        endCombat(cid);
-        io.to(ROOM).emit('combat:state', false);
+        const superseded = encounters.get(cid) !== wonEncounter;
+        if (!superseded) {
+          endCombat(cid);
+          io.to(ROOM).emit('combat:state', false);
+
+          if (microDungeons.has(cid)) {
+            // Combat-arena dungeon served its purpose — discard it and return to the world map
+            microDungeons.delete(cid);
+            dungeons.delete(cid);
+            void clearDungeon(cid);
+            io.to(ROOM).emit('dungeon:cleared');
+          } else {
+            const dungeon = dungeons.get(cid);
+            if (dungeon) {
+              const killedIds = new Set(enemyStatBlocks.map(e => e.id));
+              dungeon.entities = dungeon.entities.filter(e => !(e.type === 'creature' && killedIds.has(e.id)));
+              void saveDungeon(cid, dungeon);
+              io.to(ROOM).emit('dungeon:loaded', toClientDungeon(dungeon));
+            }
+          }
+        } else {
+          // A new encounter already replaced this one — still strip the dead entities from the
+          // dungeon (that part doesn't touch live combat state) so they don't linger forever.
+          const dungeon = dungeons.get(cid);
+          if (dungeon && !microDungeons.has(cid)) {
+            const killedIds = new Set(enemyStatBlocks.map(e => e.id));
+            dungeon.entities = dungeon.entities.filter(e => !(e.type === 'creature' && killedIds.has(e.id)));
+            void saveDungeon(cid, dungeon);
+            io.to(ROOM).emit('dungeon:loaded', toClientDungeon(dungeon));
+          }
+        }
 
         const kills = enemyStatBlocks.map(e => e.name).join(', ');
         const summary = `[Combat over — party victorious. Defeated: ${kills}. ${xpPerPlayer} XP awarded per player. Describe the immediate aftermath and give the party something to act on.]`;
@@ -507,6 +560,7 @@ function advanceTurn(cid: string) {
   const after = encounter.currentActor?.name ?? '?';
   console.log(`[turn] advanceTurn: ${before} → ${after} (order=[${encounter.turnOrder.map(p => p.name).join(',')}])`);
   emitTurn(cid);
+  void saveEncounter(cid, encounter);
 }
 
 async function rollPlayerInitiatives(cid: string, chars: Character[]): Promise<void> {
@@ -589,6 +643,7 @@ function addToTurnOrder(cid: string, entries: Participant[], baseDelay = 0): voi
         encounter.beginCombat();
         emitTurn(cid);
       }
+      void saveEncounter(cid, encounter);
     }, baseDelay + i * 500);
   });
 }
@@ -596,47 +651,6 @@ function addToTurnOrder(cid: string, entries: Participant[], baseDelay = 0): voi
 function queueDMResponse(campaignId: string, fn: () => Promise<void>): void {
   const prev = dmQueue.get(campaignId) ?? Promise.resolve();
   dmQueue.set(campaignId, prev.then(fn).catch(err => logError('index:queueDMResponse', err)));
-}
-
-async function generateAndBroadcastMap(campaignId: string): Promise<void> {
-  try {
-    const config = await getConfig();
-
-    if (!config.image.generateMaps) {
-      const premade = await listPremadeMaps();
-      if (premade.length) {
-        const pick = premade[Math.floor(Math.random() * premade.length)]!;
-        io.to(ROOM).emit('map:generated', pick);
-        console.log('[map] generation disabled — using premade:', pick);
-      }
-      return;
-    }
-
-    const { model } = config.image;
-    const apiKey = config.apiKeys.openai;
-    if (!apiKey) { console.warn('[map] no image API key configured, skipping map generation'); return; }
-
-    io.to(ROOM).emit('map:generating');
-    const messages = await readChatLog(campaignId);
-    const manifest = await readManifest(campaignId);
-    const locationMd = manifest?.currentLocation
-      ? await readEntity(campaignId, 'location', manifest.currentLocation)
-      : null;
-    const ctx = await parseLocationContext(messages, getCombatProvider(config), locationMd);
-    const prompt = buildBattleMapPrompt(ctx);
-
-    console.log('[map] generating battle map for:', ctx.location);
-    const buffer = await generateBattleMap(prompt, apiKey, model);
-
-    const mapId = randomUUID();
-    await saveMap(campaignId, mapId, buffer);
-    await appendMapIndex(campaignId, { id: mapId, createdAt: new Date().toISOString(), locationName: ctx.location });
-
-    io.to(ROOM).emit('map:generated', mapId);
-    console.log('[map] battle map ready:', mapId);
-  } catch (err) {
-    logError('index:generateAndBroadcastMap', err);
-  }
 }
 
 async function generateAndBroadcastEnemies(campaignId: string): Promise<void> {
@@ -692,10 +706,188 @@ async function generateAndBroadcastEnemies(campaignId: string): Promise<void> {
     io.to(ROOM).emit('encounter:ready', uniqueStatBlocks);
     console.log('[encounter] ready:', statBlocks.map(e => `${e.name} (CR ${e.cr})`).join(', '));
 
+    // World-map combat (no dungeon already loaded — the only case that reaches this function at
+    // all now that combat_init is hard-blocked while a real dungeon exists): spawn a bare
+    // combat-arena dungeon instead of an AI backdrop image — same rendering/fog/movement path as
+    // any other dungeon, discarded on victory.
+    if (!dungeons.has(campaignId)) {
+      const dungeon = generateEncounterDungeon(uniqueStatBlocks);
+      dungeon.arena = true;
+      dungeons.set(campaignId, dungeon);
+      microDungeons.add(campaignId);
+      await saveDungeon(campaignId, dungeon);
+      io.to(ROOM).emit('dungeon:loaded', toClientDungeon(dungeon));
+
+      const positions = tokenPositions.get(campaignId) ?? {};
+      for (const entity of dungeon.entities) {
+        positions[entity.id] = { gx: entity.x, gy: entity.y };
+        io.to(ROOM).emit('token:moved', { tokenId: entity.id, gx: entity.x, gy: entity.y });
+      }
+      tokenPositions.set(campaignId, positions);
+    }
+
     if (combatState.get(campaignId)) rollEnemyInitiatives(campaignId);
   } catch (err) {
     logError('index:generateAndBroadcastEnemies', err);
   }
+}
+
+// Starts combat straight from dungeon-placed creatures (their stat blocks were already generated
+// at dungeon-gen time) — same shape as combat_init/generateAndBroadcastEnemies, minus the LLM calls
+// and map regeneration, since the dungeon map stays as-is.
+async function startDungeonCombat(cid: string, triggerEntities: DungeonEntity[]): Promise<void> {
+  if (combatState.get(cid)) return;
+  combatState.set(cid, true);
+  enemiesReady.set(cid, false);
+  combatStartedAt.set(cid, Date.now());
+  encounters.set(cid, Encounter.empty(cid));
+  io.to(ROOM).emit('combat:state', true);
+
+  void listCharacters(cid).then(chars => rollPlayerInitiatives(cid, chars));
+
+  const encounter = encounters.get(cid)!;
+  const enemyTeam = new Team('enemies', 'Enemies');
+  encounter.addTeam(enemyTeam);
+
+  // id = the originating DungeonEntity's id, not a fresh one — keeps the combat participant and the
+  // dungeon entity as the same row, so a post-combat victory can trace kills back to remove them.
+  const triggered = triggerEntities.filter((e): e is DungeonEntity & { statBlock: EnemyStatBlock } => !!e.statBlock);
+  const uniqueStatBlocks = triggered.map(e => ({ ...e.statBlock, id: e.id }));
+
+  for (const sb of uniqueStatBlocks) {
+    const creature = Creature.from(sb);
+    enemyTeam.addParticipant(new Participant({
+      id: creature.id,
+      name: creature.name,
+      initiative: 0,
+      isPlayer: false,
+      teamId: 'enemies',
+      creature,
+    }));
+  }
+
+  encounter.expectedParticipantCount += uniqueStatBlocks.length;
+  await saveEncounter(cid, encounter);
+  io.to(ROOM).emit('encounter:ready', uniqueStatBlocks);
+  console.log('[dungeon] combat triggered:', uniqueStatBlocks.map(e => `${e.name} (CR ${e.cr})`).join(', '));
+
+  const positions = tokenPositions.get(cid) ?? {};
+  for (const e of triggered) {
+    positions[e.id] = { gx: e.x, gy: e.y };
+    io.to(ROOM).emit('token:moved', { tokenId: e.id, gx: e.x, gy: e.y });
+  }
+  tokenPositions.set(cid, positions);
+
+  rollEnemyInitiatives(cid);
+}
+
+// Runs on every player token move while a dungeon is loaded: reveals creatures within sight, and
+// either starts combat (not already fighting) or pulls newly-aggro'd creatures into the running
+// fight (already fighting) when one comes within its own aggro radius.
+async function checkDungeonProximity(cid: string, gx: number, gy: number): Promise<void> {
+  const dungeon = dungeons.get(cid);
+  if (!dungeon) return;
+  const inCombat = combatState.get(cid);
+  const encounter = inCombat ? encounters.get(cid) : undefined;
+
+  let changed = false;
+  const aggro: DungeonEntity[] = [];
+
+  for (const entity of dungeon.entities) {
+    if (entity.type !== 'creature') continue;
+    if (encounter?.findParticipant(entity.id)) continue; // already in this fight
+    const dist = Math.max(Math.abs(gx - entity.x), Math.abs(gy - entity.y));
+    const seen = dist <= PLAYER_SIGHT_RADIUS && hasLineOfSight(dungeon.cells, gx, gy, entity.x, entity.y);
+    if (!entity.discovered && seen) { entity.discovered = true; changed = true; }
+    if (dist <= ENEMY_AGGRO_RADIUS && seen) aggro.push(entity);
+  }
+
+  if (changed) {
+    void saveDungeon(cid, dungeon);
+    io.to(ROOM).emit('dungeon:loaded', toClientDungeon(dungeon));
+  }
+  if (!aggro.length) return;
+  if (inCombat) joinReinforcements(cid, aggro);
+  else await startDungeonCombat(cid, aggro);
+}
+
+// Mid-fight version of startDungeonCombat: splices newly-aggro'd creatures into the running
+// encounter — rolls initiative, doesn't touch whose turn it currently is (addToTurnOrder re-anchors
+// the current actor), and re-broadcasts the full enemy list so their tokens render.
+function joinReinforcements(cid: string, triggerEntities: DungeonEntity[]): void {
+  const encounter = encounters.get(cid);
+  if (!encounter) { logDebug('joinReinforcements BLOCKED — no live encounter'); return; }
+
+  let enemyTeam = encounter.teams.find(t => t.name === 'Enemies');
+  if (!enemyTeam) {
+    enemyTeam = new Team('enemies', 'Enemies');
+    encounter.addTeam(enemyTeam);
+  }
+
+  const joined = triggerEntities.filter((e): e is DungeonEntity & { statBlock: EnemyStatBlock } => !!e.statBlock);
+  const entries = joined.map(e => {
+    const creature = Creature.from({ ...e.statBlock, id: e.id });
+    const p = new Participant({
+      id: creature.id,
+      name: creature.name,
+      initiative: new D20Roll().roll() + statMod(creature.stats.dex),
+      isPlayer: false,
+      teamId: 'enemies',
+      creature,
+    });
+    enemyTeam!.addParticipant(p);
+    return p;
+  });
+
+  encounter.expectedParticipantCount += entries.length;
+  addToTurnOrder(cid, entries);
+
+  io.to(ROOM).emit('encounter:ready', encounter.enemies.filter(p => p.creature).map(p => p.creature!.toStatBlock()));
+
+  const positions = tokenPositions.get(cid) ?? {};
+  for (const e of joined) {
+    positions[e.id] = { gx: e.x, gy: e.y };
+    io.to(ROOM).emit('token:moved', { tokenId: e.id, gx: e.x, gy: e.y });
+  }
+  tokenPositions.set(cid, positions);
+
+  for (const name of joined.map(e => e.name)) {
+    const joinMsg = { text: `${name} joins the fight!`, senderName: 'Combat', timestamp: Date.now() };
+    io.to(ROOM).emit('chat:message', joinMsg);
+    void appendChatLog(cid, joinMsg);
+  }
+}
+
+// Perception/Investigation checks compare against hideDC for undiscovered loot/traps within sight
+// Returns a grounded note for the DM's next response: what this roll found (or that it found
+// nothing conclusive), so the narration matches the map instead of improvising blind. Returns
+// null when there's nothing dungeon-related to say at all (no dungeon, or nothing nearby).
+async function checkDungeonHiddenReveal(cid: string, characterName: string, total: number): Promise<string | null> {
+  const dungeon = dungeons.get(cid);
+  const pos = tokenPositions.get(cid)?.[characterName];
+  if (!dungeon || !pos) return null;
+
+  let changed = false;
+  const found: string[] = [];
+  let nearbyUncleared = false;
+  for (const entity of dungeon.entities) {
+    if (entity.type === 'creature' || entity.discovered || entity.hideDC === undefined) continue;
+    if (Math.max(Math.abs(pos.gx - entity.x), Math.abs(pos.gy - entity.y)) > PLAYER_SIGHT_RADIUS) continue;
+    if (!hasLineOfSight(dungeon.cells, pos.gx, pos.gy, entity.x, entity.y)) continue;
+    if (total < entity.hideDC) { nearbyUncleared = true; continue; }
+    entity.discovered = true;
+    changed = true;
+    found.push(entity.name);
+    console.log(`[dungeon] ${characterName} notices ${entity.name}`);
+  }
+
+  if (changed) {
+    void saveDungeon(cid, dungeon);
+    io.to(ROOM).emit('dungeon:loaded', toClientDungeon(dungeon));
+    return `${characterName}'s check finds: ${found.join(', ')}.`;
+  }
+  if (nearbyUncleared) return `${characterName}'s check finds nothing conclusive — whatever's here stays hidden for now.`;
+  return null;
 }
 
 async function buildEntitySummaries(campaignId: string): Promise<string> {
@@ -822,13 +1014,23 @@ function fmtMod(n: number) { return n >= 0 ? `+${n}` : `${n}`; }
 async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
   await Promise.all(consolidateEffects(effects).map(async effect => {
     if (effect.type === 'combat_init' && !combatState.get(cid)) {
+      // Hard guard, not just a prompt instruction: while a real dungeon is loaded, combat must
+      // only ever start through the dungeon's own aggro system (checkDungeonProximity /
+      // startDungeonCombat), which spawns creatures already placed in dungeon.entities. The DM
+      // is told not to emit COMBAT_INIT here, but that's advisory — a model can still slip and
+      // emit it (e.g. right after a combat-flavoured victory narration), and if unguarded this
+      // routes into the world-map path (generateAndBroadcastEnemies, a fresh LLM call unrelated
+      // to any dungeon entity) — a second, parallel combat system running alongside the real one.
+      if (dungeons.has(cid)) {
+        logDebug(`combat_init ignored — real dungeon already loaded for ${cid}, DM should not have emitted this tag`);
+        return;
+      }
       combatState.set(cid, true);
       enemiesReady.set(cid, false);
       combatStartedAt.set(cid, Date.now());
       encounters.set(cid, Encounter.empty(cid));
       io.to(ROOM).emit('combat:state', true);
       void listCharacters(cid).then(chars => rollPlayerInitiatives(cid, chars));
-      void generateAndBroadcastMap(cid);
       void generateAndBroadcastEnemies(cid);
     } else if (effect.type === 'inventory_add') {
       const chars = await listCharacters(cid);
@@ -876,10 +1078,21 @@ async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
       const config = await getConfig();
       if (!config.tiers[config.tasks.combat].length) { console.warn('[dungeon] no models configured — skipping dungeon generation'); return; }
       console.log(`[dungeon] generating: ${effect.name}`);
-      const dungeon = await generateDungeon(effect.name, effect.dungeonType, getCombatProvider(config));
+      io.to(ROOM).emit('dungeon:generating');
+      const recentChat = await readChatLog(cid);
+      const storyContext = recentChat.slice(-10).map(m => `[${m.senderName}]: ${m.text}`).join('\n');
+      const dungeon = await generateDungeon(effect.name, effect.dungeonType, getCombatProvider(config), storyContext);
+      dungeons.set(cid, dungeon);
       await saveDungeon(cid, dungeon);
-      io.to(ROOM).emit('dungeon:loaded', dungeon);
+      io.to(ROOM).emit('dungeon:loaded', toClientDungeon(dungeon));
       console.log(`[dungeon] generated and broadcast: ${dungeon.name} (${dungeon.rooms.length} rooms, ${dungeon.entities.length} entities)`);
+    } else if (effect.type === 'dungeon_exit') {
+      if (combatState.get(cid) || !dungeons.has(cid)) return; // don't rip the map out from under an active fight, or if there's nothing loaded
+      dungeons.delete(cid);
+      microDungeons.delete(cid);
+      await clearDungeon(cid);
+      io.to(ROOM).emit('dungeon:cleared');
+      console.log('[dungeon] party left — cleared');
     } else if (effect.type === 'party_join') {
       const currentAllies = await loadPartyAllies(cid);
       const alreadyPresent = currentAllies.some(a => a.name === effect.ally.name);
@@ -1118,7 +1331,12 @@ function dispatchDMResponse(cid: string): void {
   io.to(ROOM).emit('dm:thinking', true);
   queueDMResponse(cid, async () => {
     try {
-      const response = await getDMResponse(cid);
+      const dungeon = dungeons.get(cid);
+      const playerPositions = Object.fromEntries(
+        Object.entries(tokenPositions.get(cid) ?? {}).filter(([name]) => connected.has(name))
+      );
+      const dungeonState = dungeon ? describeDungeonState(dungeon, playerPositions) : '';
+      const response = await getDMResponse(cid, dungeonState);
       if (!response) return;
 
       if (response.includes('[COMBAT END]') && combatState.get(cid)) {
@@ -1170,41 +1388,52 @@ io.on('connection', (socket) => {
       io.to(ROOM).emit('players:characters', map);
     });
 
-    if (combatState.get(campaignId)) {
-      void listMaps(campaignId).then(maps => {
-        const latest = maps[maps.length - 1];
-        if (latest) socket.emit('map:generated', latest.id);
-      });
+    // Restores dungeon + combat state for a reconnecting player. Prefers in-memory state (may
+    // have reveals/moves not yet flushed to disk) but falls back to disk — needed because a
+    // server restart (e.g. resuming a session a week later) wipes combatState/encounters/dungeons,
+    // even though everything relevant was persisted via saveEncounter/saveDungeon as it happened.
+    void (async () => {
+      let dungeon = dungeons.get(campaignId);
+      if (!dungeon) {
+        const loaded = await loadDungeon(campaignId);
+        if (loaded) { dungeons.set(campaignId, loaded); dungeon = loaded; }
+      }
+      if (dungeon) {
+        if (dungeon.arena) microDungeons.add(campaignId);
+        socket.emit('dungeon:loaded', toClientDungeon(dungeon));
+        if (!tokenPositions.has(campaignId) && dungeon.positions) tokenPositions.set(campaignId, dungeon.positions);
+        Object.entries(tokenPositions.get(campaignId) ?? {}).forEach(([tokenId, pos]) => socket.emit('token:moved', { tokenId, ...pos }));
+      }
 
-      const encounter = encounters.get(campaignId);
-      if (encounter && encounter.enemies.length > 0) {
+      let encounter = encounters.get(campaignId);
+      let active = combatState.get(campaignId) ?? false;
+      if (!active) {
+        const saved = encounter ?? await loadEncounter(campaignId);
+        if (saved && saved.enemies.length > 0 && !saved.allEnemiesDead()) {
+          encounters.set(campaignId, saved);
+          encounter = saved;
+          combatState.set(campaignId, true);
+          enemiesReady.set(campaignId, true);
+          active = true;
+          socket.emit('combat:state', true); // corrects the optimistic `false` sent above
+        }
+      }
+
+      if (active && encounter) {
         socket.emit('encounter:ready', encounter.enemies
           .filter(p => p.creature)
           .map(p => p.creature!.toStatBlock()));
-      } else {
-        void loadEncounter(campaignId).then(saved => {
-          if (saved && saved.enemies.length > 0) {
-            socket.emit('encounter:ready', saved.enemies
-              .filter(p => p.creature)
-              .map(p => p.creature!.toStatBlock()));
-          }
-        });
+
+        const positions = tokenPositions.get(campaignId) ?? {};
+        Object.entries(positions).forEach(([tokenId, pos]) => socket.emit('token:moved', { tokenId, ...pos }));
+
+        if (encounter.turnOrder.length) {
+          socket.emit('combat:turn:order', encounter.turnOrder.map(p => p.toTurnOrderEntry()));
+          const actor = encounter.currentActor;
+          if (actor) socket.emit('combat:turn', { actorName: actor.name });
+        }
       }
-
-      const positions = tokenPositions.get(campaignId) ?? {};
-      Object.entries(positions).forEach(([tokenId, pos]) => socket.emit('token:moved', { tokenId, ...pos }));
-
-      if (encounter?.turnOrder.length) {
-        socket.emit('combat:turn:order', encounter.turnOrder.map(p => p.toTurnOrderEntry()));
-        const actor = encounter.currentActor;
-        if (actor) socket.emit('combat:turn', { actorName: actor.name });
-      }
-    }
-
-    // Send current dungeon state to reconnecting player
-    void loadDungeon(campaignId).then(dungeon => {
-      if (dungeon) socket.emit('dungeon:loaded', dungeon);
-    });
+    })();
 
     socket.on('session:start', ({ campaignId: cid }) => {
       sessionState.set(cid, true);
@@ -1248,6 +1477,10 @@ io.on('connection', (socket) => {
         const checkResult = { characterName: char.name, rollType: 'check' as const, stat: stat.toUpperCase(), d20: roll, modifier, total, description: `${char.name} rolls ${label}: ${total}` };
         await appendChatLog(campaignId, { text: checkResult.description, senderName: 'System', timestamp: Date.now() });
         io.to(ROOM).emit('roll:result', checkResult);
+        if (skill && /^(perception|investigation)$/i.test(skill)) {
+          const note = await checkDungeonHiddenReveal(campaignId, char.name, total);
+          if (note) await appendChatLog(campaignId, { text: note, senderName: 'System', timestamp: Date.now() });
+        }
         dispatchDMResponse(campaignId);
       })();
     });
@@ -1378,6 +1611,8 @@ io.on('connection', (socket) => {
       positions[tokenId] = { gx, gy };
       tokenPositions.set(campaignId, positions);
       socket.to(ROOM).emit('token:moved', { tokenId, gx, gy });
+
+      if (connected.has(tokenId)) void checkDungeonProximity(campaignId, gx, gy);
     });
 
     socket.on('combat:initiative:roll', (entry: TurnOrderEntry) => {
@@ -1407,6 +1642,7 @@ io.on('connection', (socket) => {
         encounter.beginCombat();
         emitTurn(cid);
       }
+      void saveEncounter(cid, encounter);
     });
 
     socket.on('combat:attack', ({ attackerId, attackerName, targetId, weapon }: { attackerId: string; attackerName: string; targetId: string; weapon: Weapon }) => {

@@ -1,24 +1,24 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import type { WorldConcept, Character } from 'shared';
+import type { WorldConcept, Character, Quest } from 'shared';
 import {
   CAMPAIGNS_DIR,
   getConfig, writeCampaignFile, listCampaigns,
   getWorldMeta, writeWorldMeta,
   writeCharacter, updateCharacter, getCharacter, listCharacters, findCharacterByPassword, writeCharacterImage,
   readWorldState, writeWorldState, readCampaignFile, writeEntity,
-  listEntitySlugs, readEntity, saveDungeon, writeManifest, readManifest, emptyManifest, writeQuests,
+  listEntitySlugs, readEntity, saveDungeon, writeManifest, readManifest, emptyManifest, readQuests, writeQuests,
 } from '../storage.ts';
-import { generateGrid } from '../dungeon/generator.ts';
-import { placeEntities } from '../dungeon/placer.ts';
+import { generateDungeon } from '../dungeon/index.ts';
 import { getStoryProvider, getCombatProvider } from '../providers/index.ts';
 import { copyCompendiumToCampaign } from '../compendium/storage.ts';
-import { buildConceptsPrompt, buildWorldGenPrompt } from '../prompts.ts';
+import { buildConceptsPrompt, buildWorldGenPrompt, buildDungeonCrawlPremisePrompt, buildBackstoryCheckPrompt, buildBackstoryGeneratePrompt, buildBackstoryExtractPrompt } from '../prompts.ts';
 import { processSession, generateDmBrief } from '../session-processor/index.ts';
 import { processPortrait } from '../utils/image.ts';
 import { generateWorldState, tickWorldNarrative, buildWorldMapPrompt } from '../session-processor/imagePrompts.ts';
 import { generateBattleMap } from '../providers/openai.ts';
 import { writeFile } from 'fs/promises';
+import { existsSync } from 'fs';
 import path from 'path';
 import { jsonrepair } from 'jsonrepair';
 import { logError } from '../logger.ts';
@@ -30,6 +30,22 @@ export const campaignsRouter = Router();
 function parseLlmJson<T>(raw: string): T {
   const desanitized = raw.replace(/(:\s*(?:true|false|null))"(?=\s*[,}])/g, '$1');
   return JSON.parse(jsonrepair(desanitized)) as T;
+}
+
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+// Regenerating with the same name/tags previously overwrote the prior campaign in place — bump a
+// numeric suffix until the directory is free instead of silently clobbering it.
+function uniqueSlug(base: string): string {
+  let slug = base;
+  let n = 2;
+  while (existsSync(path.join(CAMPAIGNS_DIR, slug))) {
+    slug = `${base}-${n}`;
+    n++;
+  }
+  return slug;
 }
 
 // ── session processing ────────────────────────────────────────────────────────
@@ -101,11 +117,49 @@ campaignsRouter.post('/generate', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
-  const slug = (name || concept.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const slug = uniqueSlug(slugify(name || concept.name));
 
   try {
-    let accumulated = '';
     const config = await getConfig();
+
+    // Dungeon crawl: no world, no factions, no NPC roster — just a short premise and the dungeon
+    // itself, generated straight from the tags rather than funnelled through a world concept.
+    if (type === 'dungeon-crawl') {
+      send({ type: 'progress', message: 'Writing premise…' });
+      const raw = await getStoryProvider(config).stream(
+        buildDungeonCrawlPremisePrompt(tags),
+        token => send({ type: 'token', text: token }),
+      );
+      let title = concept.name, premise = concept.description;
+      try {
+        const parsed = parseLlmJson<{ title?: string; premise?: string }>(raw);
+        if (parsed.title) title = parsed.title;
+        if (parsed.premise) premise = parsed.premise;
+      } catch (err) { logError('routes/campaigns:generate:dungeonCrawlPremise', err); }
+      await writeCampaignFile(slug, 'world.md', `# ${title}\n\n${premise.trim()}`);
+
+      const campaignName = title;
+      await writeWorldMeta(slug, {
+        id: randomUUID(),
+        name: campaignName,
+        campaignDir: slug,
+        type,
+        concept: { name: concept.name, description: concept.description },
+      });
+
+      send({ type: 'progress', message: 'Generating dungeon…' });
+      const dungeon = await generateDungeon(
+        title, 'dungeon-crawl', getCombatProvider(config), tags.join(', '),
+        { width: 100, height: 100, roomRange: [14, 20] },
+        token => send({ type: 'token', text: token }),
+      );
+      await saveDungeon(slug, dungeon);
+
+      send({ type: 'complete', id: slug, name: campaignName });
+      return;
+    }
+
+    let accumulated = '';
     send({ type: 'progress', message: 'Generating world…' });
     await getStoryProvider(config).stream(
       buildWorldGenPrompt(tags, concept.name, concept.description, type),
@@ -129,12 +183,6 @@ campaignsRouter.post('/generate', async (req, res) => {
       type,
       concept: { name: concept.name, description: concept.description },
     });
-
-    if (type === 'dungeon-crawl') {
-      const { cells, rooms } = generateGrid(null);
-      const entities = placeEntities(rooms, null);
-      await saveDungeon(slug, { id: randomUUID(), name: concept.name, width: 50, height: 50, cells, rooms, entities });
-    }
 
     if (type === 'campaign' && config.image.generateWorldMap) {
       const apiKey = config.apiKeys.openai;
@@ -184,7 +232,7 @@ campaignsRouter.post('/from-module', async (req, res) => {
 
   function send(data: object) { res.write(`data: ${JSON.stringify(data)}\n\n`); }
 
-  const slug = campaignName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const slug = uniqueSlug(slugify(campaignName));
   try {
     send({ type: 'progress', message: 'Copying module entities…' });
     await copyCompendiumToCampaign(adventureSlug, slug, campaignName);
@@ -243,6 +291,116 @@ campaignsRouter.post('/:id/party', async (req, res) => {
   const character: Character = { ...data, id: charId, campaignId: slug, createdAt: new Date().toISOString() };
   await writeCharacter(slug, charId, character);
   res.json({ id: charId });
+  void syncCharacterToWorldLore(slug, character);
+});
+
+// Fire-and-forget: deconstructs a finalised character's backstory into world content — NPCs,
+// locations, quest hooks — the same way module import seeds a campaign, so the character feels
+// woven into the world rather than bolted on. Runs after the response is already sent; a slow or
+// failed LLM call must never block character creation.
+async function syncCharacterToWorldLore(slug: string, character: Character): Promise<void> {
+  try {
+    const meta = await getWorldMeta(slug);
+    if (meta?.type !== 'campaign') return;
+    const config = await getConfig();
+    const worldMd = await readCampaignFile(slug, 'world.md') ?? '';
+    const raw = await getStoryProvider(config).complete(buildBackstoryExtractPrompt(worldMd, character));
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    const extracted = parseLlmJson<{
+      worldEntry: string;
+      npcs: Array<{ name: string; role?: string; race?: string; occupation?: string; personality?: string; motivation?: string; secret?: string; factionAffiliation?: string | null }>;
+      locations: Array<{ name: string; description?: string }>;
+      quests: Array<{ id: string; name: string; description: string }>;
+    }>(cleaned);
+
+    const toEntitySlug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+    if (extracted.worldEntry) {
+      const heading = '## Party Arrivals';
+      const bullet = `- ${extracted.worldEntry.trim().replace(/\n+/g, ' ')}`;
+      const updated = worldMd.includes(heading)
+        ? `${worldMd.trimEnd()}\n${bullet}\n`
+        : `${worldMd.trimEnd()}\n\n${heading}\n${bullet}\n`;
+      await writeCampaignFile(slug, 'world.md', updated);
+    }
+
+    const [existingNpcSlugs, existingLocationSlugs, existingQuests] = await Promise.all([
+      listEntitySlugs(slug, 'npc'),
+      listEntitySlugs(slug, 'location'),
+      readQuests(slug),
+    ]);
+
+    // Skip anything that collides with an existing slug — a same-named NPC/location is almost
+    // certainly the established one, and this pass must never clobber hand-authored lore.
+    const npcWrites = (extracted.npcs ?? [])
+      .filter(n => n.name && !existingNpcSlugs.includes(toEntitySlug(n.name)))
+      .map(n => {
+        const content = `# ${n.name}\n\n**Role:** ${n.role ?? ''} | **Race:** ${n.race ?? ''} | **Occupation:** ${n.occupation ?? ''}\n\n**Personality:** ${n.personality ?? ''}\n**Motivation:** ${n.motivation ?? ''}\n**Secret:** ${n.secret ?? ''}\n**Faction:** ${n.factionAffiliation ?? 'Independent'}\n\n## Observed\n- Connected to ${character.name} (${character.class})\n`;
+        return writeEntity(slug, 'npc', toEntitySlug(n.name), content);
+      });
+
+    const locationWrites = (extracted.locations ?? [])
+      .filter(l => l.name && !existingLocationSlugs.includes(toEntitySlug(l.name)))
+      .map(l => {
+        const content = `# ${l.name}\n\n${l.description ?? ''}\n\n## Scene Notes\n`;
+        return writeEntity(slug, 'location', toEntitySlug(l.name), content);
+      });
+
+    const existingQuestIds = new Set(existingQuests.map(q => q.id));
+    const today = new Date().toISOString().slice(0, 10);
+    const newQuests: Quest[] = (extracted.quests ?? [])
+      .filter(q => q.id && !existingQuestIds.has(q.id))
+      .map(q => ({ id: q.id, name: q.name, description: q.description, status: 'undiscovered', log: [], addedAt: today }));
+
+    await Promise.all([
+      ...npcWrites,
+      ...locationWrites,
+      ...(newQuests.length ? [writeQuests(slug, [...existingQuests, ...newQuests])] : []),
+    ]);
+
+    console.log(`[lore-sync] ${character.name}: +${npcWrites.length} npcs, +${locationWrites.length} locations, +${newQuests.length} quests`);
+  } catch (err) {
+    logError('routes/campaigns:syncCharacterToWorldLore', err);
+  }
+}
+
+campaignsRouter.post('/:id/party/backstory-check', async (req, res) => {
+  const slug = req.params.id ?? '';
+  const { name, species, background, characterClass, backstory } = req.body as
+    { name: string; species: string; background: string; characterClass: string; backstory: string };
+  const meta = await getWorldMeta(slug);
+  if (meta?.type !== 'campaign') { res.status(403).json({ error: 'Backstory tools are only available for campaign-type worlds' }); return; }
+  const config = await getConfig();
+  try {
+    const worldMd = await readCampaignFile(slug, 'world.md') ?? '';
+    const raw = await getStoryProvider(config).complete(
+      buildBackstoryCheckPrompt(worldMd, { name, species, background, characterClass, backstory }),
+    );
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    res.json(parseLlmJson<{ score: number; verdict: string; issues: string[]; suggestions: string[] }>(cleaned));
+  } catch (err) {
+    logError('routes/campaigns:backstory-check', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Backstory check failed' });
+  }
+});
+
+campaignsRouter.post('/:id/party/backstory-generate', async (req, res) => {
+  const slug = req.params.id ?? '';
+  const { name, species, background, characterClass } = req.body as
+    { name: string; species: string; background: string; characterClass: string };
+  const meta = await getWorldMeta(slug);
+  if (meta?.type !== 'campaign') { res.status(403).json({ error: 'Backstory tools are only available for campaign-type worlds' }); return; }
+  const config = await getConfig();
+  try {
+    const worldMd = await readCampaignFile(slug, 'world.md') ?? '';
+    const backstory = await getStoryProvider(config).complete(
+      buildBackstoryGeneratePrompt(worldMd, { name, species, background, characterClass }),
+    );
+    res.json({ backstory: backstory.trim() });
+  } catch (err) {
+    logError('routes/campaigns:backstory-generate', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Backstory generation failed' });
+  }
 });
 
 campaignsRouter.get('/:id/party/:charId', async (req, res) => {

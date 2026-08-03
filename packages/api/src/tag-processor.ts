@@ -12,6 +12,7 @@ export type TagEffect =
   | { type: 'scene_build'; locationName: string; detail: string }
   | { type: 'npc_build'; npcName: string; detail: string }
   | { type: 'dungeon_gen'; name: string; dungeonType: string }
+  | { type: 'dungeon_exit' }
   | { type: 'quest_add'; id: string; name: string; description: string }
   | { type: 'quest_update'; id: string; entry: string }
   | { type: 'quest_resolve'; id: string }
@@ -204,6 +205,12 @@ export async function processVdmResponse(
     effects.push({ type: 'combat_init' });
   }
 
+  const DUNGEON_EXIT_RE = /\[\[DUNGEON_EXIT\]\]/g;
+  if (text.includes('[[DUNGEON_EXIT]]')) {
+    console.log('[tag] DUNGEON_EXIT detected');
+    effects.push({ type: 'dungeon_exit' });
+  }
+
   const NEMESIS_RETIRE_RE = /\[\[NEMESIS_RETIRE:([^\]]+)\]\]/g;
   for (const match of [...text.matchAll(NEMESIS_RETIRE_RE)]) {
     const name = match[1]?.trim();
@@ -272,6 +279,6 @@ export async function processVdmResponse(
     }),
   ]);
 
-  const strippedText = text.replace(TAG_RE, '').replace(PARTY_JOIN_RE, '').replace(SCENE_BUILD_RE, '').replace(NPC_BUILD_RE, '').replace(COMBAT_INIT_RE, '').replace(SPEAKING_AS_RE, '').replace(CHECK_RE, '').replace(SAVE_RE, '').replace(DUNGEON_GEN_RE, '').replace(QUEST_ADD_RE, '').replace(QUEST_UPDATE_RE, '').replace(QUEST_RESOLVE_RE, '').replace(CLOCK_RE, '').replace(NEMESIS_RETIRE_RE, '').replace(ALLY_XP_RE, '').replace(ALLY_LEARN_RE, '').replace(/\s{2,}/g, ' ').trim();
+  const strippedText = text.replace(TAG_RE, '').replace(PARTY_JOIN_RE, '').replace(SCENE_BUILD_RE, '').replace(NPC_BUILD_RE, '').replace(COMBAT_INIT_RE, '').replace(DUNGEON_EXIT_RE, '').replace(SPEAKING_AS_RE, '').replace(CHECK_RE, '').replace(SAVE_RE, '').replace(DUNGEON_GEN_RE, '').replace(QUEST_ADD_RE, '').replace(QUEST_UPDATE_RE, '').replace(QUEST_RESOLVE_RE, '').replace(CLOCK_RE, '').replace(NEMESIS_RETIRE_RE, '').replace(ALLY_XP_RE, '').replace(ALLY_LEARN_RE, '').replace(/\s{2,}/g, ' ').trim();
   return { text: strippedText, effects, checkRequests, ...(speakingAs !== undefined ? { speakingAs } : {}) };
 }
