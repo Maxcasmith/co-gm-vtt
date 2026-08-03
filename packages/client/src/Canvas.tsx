@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Player, EnemyStatBlock, Spell, Dungeon } from 'shared';
-import { parseRangeFeet, hasLineOfSight } from 'shared';
+import type { Player, EnemyStatBlock, Spell, Dungeon, Character } from 'shared';
+import { parseRangeFeet, hasLineOfSight, statMod, CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY } from 'shared';
 import { dispatch, on } from './events.ts';
 import type { TargetingStartPayload } from './events.ts';
+import { paletteFor, drawRoomProps } from './dungeonThemes.ts';
 import './app.css';
 
 const CELL = 64;
@@ -116,9 +117,36 @@ function resolveAoeOrigin(
 interface FloatEffect { id: number; gx: number; gy: number; text: string; isHit: boolean; startTime: number }
 interface FlashEffect { tokenKey: string; startTime: number }
 
+// Mirrors the server's attack-roll math (packages/api/src/index.ts combat:attack / combat:spell:attack)
+// so the hover readout matches the actual roll odds, including extended-range disadvantage.
+function attackBonusFor(character: Character, targeting: TargetingStartPayload): number | null {
+  const charProf = character.proficiencyBonus ?? 2;
+  if (targeting.kind === 'weapon') {
+    const weapon = targeting.weapon;
+    const strMod = statMod(character.stats.str);
+    const dexMod = statMod(character.stats.dex);
+    const isMelee = weapon.range <= 5;
+    const useDex = !isMelee || (weapon.isFinesse && dexMod > strMod);
+    const statBonus = useDex ? dexMod : strMod;
+    const classWeaponProfs = CLASS_WEAPON_PROFS[character.class] ?? [];
+    const isProficient = weapon.properties?.some(p => classWeaponProfs.includes(p as 'simple' | 'martial'));
+    const weaponBonus = (weapon.attackBonus ?? 0) + (isProficient ? charProf : 0);
+    return statBonus + weaponBonus;
+  }
+  if (targeting.spell.combat?.resolution !== 'attack') return null;
+  const spellAbility = CLASS_SPELLCASTING_ABILITY[character.class] ?? 'int';
+  return statMod(character.stats[spellAbility]) + charProf;
+}
+
+function hitChancePercent(attackBonus: number, ac: number, withDisadvantage: boolean): number {
+  const single = Math.max(0, Math.min(1, (21 - (ac - attackBonus)) / 20));
+  return Math.round((withDisadvantage ? single * single : single) * 100);
+}
+
 interface Props {
   player: Player;
   characterId: string;
+  character?: Character;
   connected: Player[];
   showBattleMap?: boolean;
   encounter?: EnemyStatBlock[] | null;
@@ -171,7 +199,7 @@ function drawToken(
   ctx.fillText(name.length > 10 ? name.slice(0, 9) + '…' : name, x, y + tokenR + 12 * (tokenR / TOKEN_R));
 }
 
-export default function Canvas({ player, characterId, connected, showBattleMap, encounter, tokenUrls, tokenPositions, movementRemaining = 0, deadCreatureIds, downPlayerNames, deadPlayerNames, dungeon, speed = 30, sessionActive = true }: Props) {
+export default function Canvas({ player, characterId, character, connected, showBattleMap, encounter, tokenUrls, tokenPositions, movementRemaining = 0, deadCreatureIds, downPlayerNames, deadPlayerNames, dungeon, speed = 30, sessionActive = true }: Props) {
   const ref            = useRef<HTMLCanvasElement>(null);
   const tokenImgCache  = useRef<Record<string, HTMLImageElement>>({});
   const [tokenCacheVer, setTokenCacheVer] = useState(0);
@@ -281,6 +309,8 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
   // Live cursor grid position while AoE targeting (point-placement + cone/line rotation)
   const aoeMouseRef = useRef<{ gx: number; gy: number } | null>(null);
   const [aoeTick, setAoeTick] = useState(0);
+  // Hit-chance readout while hovering an enemy token during single-target attack targeting
+  const [hoverHitChance, setHoverHitChance] = useState<{ percent: number; x: number; y: number } | null>(null);
 
   // Turn state — true when no combat active (free movement) or when it's this player's turn
   const isMyTurnRef = useRef(true);
@@ -320,22 +350,26 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
       targetingRef.current = null;
       aoeMouseRef.current = null;
       setTargeting(null);
+      setHoverHitChance(null);
       if (ref.current) ref.current.style.cursor = 'default';
     });
     const u3 = on('vtt:combat:attack', () => {
       targetingRef.current = null;
       aoeMouseRef.current = null;
       setTargeting(null);
+      setHoverHitChance(null);
     });
     const u4 = on('vtt:combat:spell:attack', () => {
       targetingRef.current = null;
       aoeMouseRef.current = null;
       setTargeting(null);
+      setHoverHitChance(null);
     });
     const u5 = on('vtt:combat:spell:cast', () => {
       targetingRef.current = null;
       aoeMouseRef.current = null;
       setTargeting(null);
+      setHoverHitChance(null);
     });
     return () => { u1(); u2(); u3(); u4(); u5(); };
   }, []);
@@ -473,11 +507,23 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
         ctx.fillStyle = DUNGEON_BG;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        ctx.fillStyle = '#2d2b42';
+        // Base floor (covers corridors + any cell not owned by a themed room), then per-room
+        // theme color painted over its own floor cells — irregular room shapes mean the bounding
+        // box can include cells that aren't actually walkable, so this stays cell-checked.
+        ctx.fillStyle = paletteFor(undefined).floor;
         for (let row = 0; row < dungeon.height; row++) {
           for (let col = 0; col < dungeon.width; col++) {
             if (dungeon.cells[row]?.[col] === 1) {
               ctx.fillRect(col * cellSz + panX, row * cellSz + panY, cellSz, cellSz);
+            }
+          }
+        }
+        for (const room of dungeon.rooms) {
+          if (!room.theme || room.theme === 'stone') continue;
+          ctx.fillStyle = paletteFor(room.theme).floor;
+          for (let row = room.y; row < room.y + room.height; row++) {
+            for (let col = room.x; col < room.x + room.width; col++) {
+              if (dungeon.cells[row]?.[col] === 1) ctx.fillRect(col * cellSz + panX, row * cellSz + panY, cellSz, cellSz);
             }
           }
         }
@@ -503,6 +549,12 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
               if (dungeon.cells[row]?.[col] === 1) ctx.fillRect(col * cellSz + panX, row * cellSz + panY, cellSz, cellSz);
             }
           }
+        }
+
+        // Themed room decoration (tombstones, benches, crates...) — purely visual, drawn on top
+        // of the floor, no collision, positions stable per room via a room-id-seeded RNG.
+        for (const room of dungeon.rooms) {
+          drawRoomProps(ctx, room, dungeon.cells, cellSz, panX, panY);
         }
 
         // Entity markers
@@ -830,10 +882,26 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
             }
           }
         }
+
+        // Hit-chance readout — follows the cursor while hovering a target during attack targeting
+        if (hoverHitChance) {
+          const hcRect = canvas.getBoundingClientRect();
+          const hcX = hoverHitChance.x - hcRect.left + 14;
+          const hcY = hoverHitChance.y - hcRect.top - 14;
+          ctx.save();
+          ctx.font = 'bold 15px monospace';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.shadowColor = 'rgba(0,0,0,0.9)';
+          ctx.shadowBlur = 4;
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText(`${hoverHitChance.percent}%`, hcX, hcY);
+          ctx.restore();
+        }
     } else {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
-  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick, aoeTick, visibleCells]);
+  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick, aoeTick, visibleCells, hoverHitChance]);
 
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!showBattleMap) return;
@@ -973,6 +1041,7 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
         aoeMouseRef.current = { gx: mx / mmCellSz, gy: my / mmCellSz };
         setAoeTick(t => t + 1);
         e.currentTarget.style.cursor = 'crosshair';
+        if (hoverHitChance) setHoverHitChance(null);
         return;
       }
 
@@ -987,15 +1056,26 @@ export default function Canvas({ player, characterId, connected, showBattleMap, 
           const ey = epos.gy * mmCellSz + mmCellSz / 2;
           if (Math.hypot(mx - ex, my - ey) <= TOKEN_R) {
             e.currentTarget.style.cursor = 'crosshair';
+            if (character) {
+              const attackBonus = attackBonusFor(character, targetingNow);
+              if (attackBonus != null) {
+                const withDisadvantage = !!extendedRange &&
+                  Math.max(Math.abs(epos.gx - playerPos.gx), Math.abs(epos.gy - playerPos.gy)) > Math.floor(range / 5);
+                const percent = hitChancePercent(attackBonus, enemy.ac, withDisadvantage);
+                setHoverHitChance({ percent, x: e.clientX, y: e.clientY });
+              } else if (hoverHitChance) setHoverHitChance(null);
+            }
             return;
           }
         }
       }
       e.currentTarget.style.cursor = 'default';
+      if (hoverHitChance) setHoverHitChance(null);
       return;
     }
 
     // Normal: grab cursor over own token
+    if (hoverHitChance) setHoverHitChance(null);
     if (!showBattleMap || !tokenPositions) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const panX = dungeonPanRef.current.x;

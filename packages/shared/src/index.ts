@@ -16,6 +16,9 @@ export interface CheckRequest {
   type: 'check' | 'save';
 }
 
+export const DUNGEON_THEMES = ['stone', 'church', 'graveyard', 'prison', 'kitchen', 'library', 'armory', 'throne', 'cave', 'laboratory'] as const;
+export type DungeonTheme = typeof DUNGEON_THEMES[number];
+
 export interface DungeonRoom {
   id: string;
   name: string;
@@ -24,6 +27,7 @@ export interface DungeonRoom {
   width: number;
   height: number;
   role?: 'entrance' | 'exit';
+  theme?: DungeonTheme;
 }
 
 export interface DungeonEntity {
@@ -625,7 +629,7 @@ export const CLASS_ARMOR_TRAINING: Record<string, ArmorTraining[]> = {
   Wizard:     [],
 };
 
-function statMod(score: number) { return Math.floor((score - 10) / 2); }
+export function statMod(score: number) { return Math.floor((score - 10) / 2); }
 
 /** Compute a character's AC from their inventory armor, applying D&D 5e dex-mod rules per armor type. */
 export function calcAC(character: Character): number {

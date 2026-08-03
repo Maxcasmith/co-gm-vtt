@@ -306,7 +306,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     const cy = room.y + Math.floor(room.height / 2);
     const used = new Set<string>();
     const key = (x: number, y: number) => `${x},${y}`;
-    const inRoom = (x: number, y: number) => x >= room.x && x < room.x + room.width && y >= room.y && y < room.y + room.height;
+    // Organic-grid rooms are irregular shapes, not solid rects — a bounding-box cell can be a wall
+    // (e.g. the geometric center of an L-shaped room). Must check the actual floor, not just the box.
+    const isFloor = (x: number, y: number) => dungeon.cells[y]?.[x] === 1;
+    const inRoom = (x: number, y: number) => x >= room.x && x < room.x + room.width && y >= room.y && y < room.y + room.height && isFloor(x, y);
     const findFree = (targetX: number, targetY: number): { gx: number; gy: number } => {
       if (inRoom(targetX, targetY) && !used.has(key(targetX, targetY))) return { gx: targetX, gy: targetY };
       const maxRadius = Math.max(room.width, room.height);
@@ -316,6 +319,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
             if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
             const x = targetX + dx, y = targetY + dy;
             if (x < room.x || x >= room.x + room.width || y < room.y || y >= room.y + room.height) continue;
+            if (!isFloor(x, y)) continue;
             if (!used.has(key(x, y))) return { gx: x, gy: y };
           }
         }
@@ -323,8 +327,13 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       return { gx: targetX, gy: targetY }; // room genuinely full — overlap is the least-bad fallback
     };
 
+    // dungeon.positions is the server's saved-position snapshot, bundled directly on this same
+    // payload — never default-place (or emit a move for) a player who already has one, otherwise
+    // every reconnect/refresh silently stomps their real position with a fresh entrance spawn.
+    const saved = dungeon.positions ?? {};
     const defaults: Record<string, { gx: number; gy: number }> = {};
     connected.forEach((name, i) => {
+      if (saved[name]) return;
       const pos = findFree(cx + i, cy);
       used.add(key(pos.gx, pos.gy));
       defaults[name] = pos;
@@ -332,6 +341,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
 
     setTokenPositions(prev => {
       const next = { ...prev };
+      Object.entries(saved).forEach(([id, pos]) => { next[id] = pos; });
       Object.entries(defaults).forEach(([id, pos]) => { if (!next[id]) next[id] = pos; });
       return next;
     });
@@ -422,6 +432,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       <Canvas
         player={character.name}
         characterId={character.id}
+        character={character}
         connected={connected}
         showBattleMap={combatActive || dungeon != null}
         encounter={combatActive ? encounter : null}

@@ -8,7 +8,7 @@ export type AcquiredItem = Item | Weapon | Consumable | Ammunition;
 export type TagEffect =
   | { type: 'inventory_add'; player: string; items: AcquiredItem[] }
   | { type: 'party_join'; ally: EnemyStatBlock }
-  | { type: 'combat_init' }
+  | { type: 'combat_init'; combatants: string[] }
   | { type: 'scene_build'; locationName: string; detail: string }
   | { type: 'npc_build'; npcName: string; detail: string }
   | { type: 'dungeon_gen'; name: string; dungeonType: string }
@@ -199,10 +199,12 @@ export async function processVdmResponse(
     if (!isNaN(secs) && secs > 0) effects.push({ type: 'clock', secs });
   }
 
-  const COMBAT_INIT_RE = /\[\[COMBAT_INIT\]\]/g;
-  if (text.includes('[[COMBAT_INIT]]')) {
-    console.log('[tag] COMBAT_INIT detected');
-    effects.push({ type: 'combat_init' });
+  const COMBAT_INIT_RE = /\[\[COMBAT_INIT(?::([^\]]*))?\]\]/g;
+  const combatInitMatch = COMBAT_INIT_RE.exec(text);
+  if (combatInitMatch) {
+    const combatants = (combatInitMatch[1] ?? '').split(',').map(s => s.trim()).filter(Boolean);
+    console.log('[tag] COMBAT_INIT detected', combatants);
+    effects.push({ type: 'combat_init', combatants });
   }
 
   const DUNGEON_EXIT_RE = /\[\[DUNGEON_EXIT\]\]/g;

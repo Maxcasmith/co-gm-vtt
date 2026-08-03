@@ -66,6 +66,15 @@ const combatStartedAt = new Map<string, number>();  // timestamp when combat_ini
 const dungeons = new Map<string, Dungeon>(); // in-memory mirror of saveDungeon/loadDungeon, mutated on reveal
 const microDungeons = new Set<string>(); // cids whose current dungeon is an ephemeral combat arena — discarded on victory instead of continued
 
+// Every dungeon:loaded broadcast must carry live positions, not just what was last saved to disk —
+// the client's entrance-spawn effect treats any player missing from `positions` as never-placed and
+// re-defaults (and re-broadcasts) their position, so a stale/absent snapshot here silently teleports
+// already-positioned players back to the entrance on the next reveal or reconnect.
+function withLivePositions(cid: string, dungeon: Dungeon): Dungeon {
+  const positions = tokenPositions.get(cid);
+  return positions ? { ...dungeon, positions } : dungeon;
+}
+
 const PLAYER_SIGHT_RADIUS = 20; // square (Chebyshev) radius, in cells
 const ENEMY_AGGRO_RADIUS  = 12;
 
@@ -526,7 +535,7 @@ async function applyDamageToCreature(cid: string, targetId: string, damage: numb
               const killedIds = new Set(enemyStatBlocks.map(e => e.id));
               dungeon.entities = dungeon.entities.filter(e => !(e.type === 'creature' && killedIds.has(e.id)));
               void saveDungeon(cid, dungeon);
-              io.to(ROOM).emit('dungeon:loaded', toClientDungeon(dungeon));
+              io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
             }
           }
         } else {
@@ -537,7 +546,7 @@ async function applyDamageToCreature(cid: string, targetId: string, damage: numb
             const killedIds = new Set(enemyStatBlocks.map(e => e.id));
             dungeon.entities = dungeon.entities.filter(e => !(e.type === 'creature' && killedIds.has(e.id)));
             void saveDungeon(cid, dungeon);
-            io.to(ROOM).emit('dungeon:loaded', toClientDungeon(dungeon));
+            io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
           }
         }
 
@@ -653,7 +662,7 @@ function queueDMResponse(campaignId: string, fn: () => Promise<void>): void {
   dmQueue.set(campaignId, prev.then(fn).catch(err => logError('index:queueDMResponse', err)));
 }
 
-async function generateAndBroadcastEnemies(campaignId: string): Promise<void> {
+async function generateAndBroadcastEnemies(campaignId: string, combatants: string[] = []): Promise<void> {
   try {
     io.to(ROOM).emit('encounter:generating');
     const config = await getConfig();
@@ -675,7 +684,7 @@ async function generateAndBroadcastEnemies(campaignId: string): Promise<void> {
       (n.boundTo === 'party' || characterNames.includes(n.boundTo))
     );
 
-    const statBlocks = await generateEncounterEnemies(messages, characters, adapter, availableNemeses);
+    const statBlocks = await generateEncounterEnemies(messages, characters, adapter, availableNemeses, combatants);
 
     const encounter = encounters.get(campaignId);
     if (!encounter) return;
@@ -716,7 +725,7 @@ async function generateAndBroadcastEnemies(campaignId: string): Promise<void> {
       dungeons.set(campaignId, dungeon);
       microDungeons.add(campaignId);
       await saveDungeon(campaignId, dungeon);
-      io.to(ROOM).emit('dungeon:loaded', toClientDungeon(dungeon));
+      io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(campaignId, dungeon)));
 
       const positions = tokenPositions.get(campaignId) ?? {};
       for (const entity of dungeon.entities) {
@@ -804,7 +813,7 @@ async function checkDungeonProximity(cid: string, gx: number, gy: number): Promi
 
   if (changed) {
     void saveDungeon(cid, dungeon);
-    io.to(ROOM).emit('dungeon:loaded', toClientDungeon(dungeon));
+    io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
   }
   if (!aggro.length) return;
   if (inCombat) joinReinforcements(cid, aggro);
@@ -883,7 +892,7 @@ async function checkDungeonHiddenReveal(cid: string, characterName: string, tota
 
   if (changed) {
     void saveDungeon(cid, dungeon);
-    io.to(ROOM).emit('dungeon:loaded', toClientDungeon(dungeon));
+    io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
     return `${characterName}'s check finds: ${found.join(', ')}.`;
   }
   if (nearbyUncleared) return `${characterName}'s check finds nothing conclusive — whatever's here stays hidden for now.`;
@@ -1031,7 +1040,7 @@ async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
       encounters.set(cid, Encounter.empty(cid));
       io.to(ROOM).emit('combat:state', true);
       void listCharacters(cid).then(chars => rollPlayerInitiatives(cid, chars));
-      void generateAndBroadcastEnemies(cid);
+      void generateAndBroadcastEnemies(cid, effect.combatants);
     } else if (effect.type === 'inventory_add') {
       const chars = await listCharacters(cid);
       const char = chars.find(c => c.name === effect.player);
@@ -1084,7 +1093,7 @@ async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
       const dungeon = await generateDungeon(effect.name, effect.dungeonType, getCombatProvider(config), storyContext);
       dungeons.set(cid, dungeon);
       await saveDungeon(cid, dungeon);
-      io.to(ROOM).emit('dungeon:loaded', toClientDungeon(dungeon));
+      io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
       console.log(`[dungeon] generated and broadcast: ${dungeon.name} (${dungeon.rooms.length} rooms, ${dungeon.entities.length} entities)`);
     } else if (effect.type === 'dungeon_exit') {
       if (combatState.get(cid) || !dungeons.has(cid)) return; // don't rip the map out from under an active fight, or if there's nothing loaded
@@ -1300,10 +1309,12 @@ function consolidateEffects(effects: TagEffect[]): TagEffect[] {
   const sceneByLocation = new Map<string, string[]>();
   const npcByName = new Map<string, string[]>();
   let hasCombatInit = false;
+  const combatInitCombatants: string[] = [];
 
   for (const effect of effects) {
     if (effect.type === 'combat_init') {
       hasCombatInit = true;
+      combatInitCombatants.push(...effect.combatants);
     } else if (effect.type === 'inventory_add') {
       const existing = inventoryByPlayer.get(effect.player) ?? [];
       inventoryByPlayer.set(effect.player, [...existing, ...effect.items]);
@@ -1318,7 +1329,7 @@ function consolidateEffects(effects: TagEffect[]): TagEffect[] {
     }
   }
 
-  if (hasCombatInit) result.unshift({ type: 'combat_init' });
+  if (hasCombatInit) result.unshift({ type: 'combat_init', combatants: [...new Set(combatInitCombatants)] });
   for (const [player, items] of inventoryByPlayer) result.push({ type: 'inventory_add', player, items });
   for (const [locationName, details] of sceneByLocation) result.push({ type: 'scene_build', locationName, detail: details.join('\n- ') });
   for (const [npcName, details] of npcByName) result.push({ type: 'npc_build', npcName, detail: details.join('\n- ') });
@@ -1400,8 +1411,8 @@ io.on('connection', (socket) => {
       }
       if (dungeon) {
         if (dungeon.arena) microDungeons.add(campaignId);
-        socket.emit('dungeon:loaded', toClientDungeon(dungeon));
         if (!tokenPositions.has(campaignId) && dungeon.positions) tokenPositions.set(campaignId, dungeon.positions);
+        socket.emit('dungeon:loaded', toClientDungeon(withLivePositions(campaignId, dungeon)));
         Object.entries(tokenPositions.get(campaignId) ?? {}).forEach(([tokenId, pos]) => socket.emit('token:moved', { tokenId, ...pos }));
       }
 

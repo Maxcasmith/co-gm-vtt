@@ -227,11 +227,12 @@ export async function generateOrganicGrid(
           width: box.maxX - box.minX + 1,
           height: box.maxY - box.minY + 1,
           ...(manifestRoom.role ? { role: manifestRoom.role } : {}),
+          ...(manifestRoom.theme ? { theme: manifestRoom.theme } : {}),
         });
       } else {
         console.warn(`[dungeon] organic grid never drew room "${manifestRoom.name}" — patching one in`);
         const patched = patchMissingRoom(cells, width, height, manifestRoom.size);
-        if (patched) rooms.push({ id: randomUUID(), name: manifestRoom.name, ...patched, ...(manifestRoom.role ? { role: manifestRoom.role } : {}) });
+        if (patched) rooms.push({ id: randomUUID(), name: manifestRoom.name, ...patched, ...(manifestRoom.role ? { role: manifestRoom.role } : {}), ...(manifestRoom.theme ? { theme: manifestRoom.theme } : {}) });
       }
     }
 

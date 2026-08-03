@@ -1,3 +1,4 @@
+import { calcAC } from 'shared';
 import type { ChatPayload, Character, EnemyStatBlock, AttackResult, WorldState, NemesisRecord } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { logError } from '../logger.ts';
@@ -13,15 +14,20 @@ export async function generateEncounterEnemies(
   characters: Character[],
   adapter: StoryProviderAdapter,
   availableNemeses: NemesisRecord[] = [],
+  combatants: string[] = [],
 ): Promise<EnemyStatBlock[]> {
   const partyLines = characters.length
-    ? characters.map(c => `- ${c.name}, ${c.class} (${c.species}), equipped: ${(c.inventory ?? []).map(i => i.name).join(', ') || 'basic gear'}`).join('\n')
+    ? characters.map(c => `- ${c.name}, level ${c.level ?? 1} ${c.class} (${c.species}), AC ${calcAC(c)}, HP ${c.currentHp ?? c.maxHp ?? '?'}/${c.maxHp ?? '?'}, equipped: ${(c.inventory ?? []).map(i => i.name).join(', ') || 'basic gear'}`).join('\n')
     : '- Unknown adventurers (assume level 1–2)';
 
   const transcript = messages.slice(-10).map(m => `[${m.senderName}]: ${m.text}`).join('\n');
 
   const nemesisBlock = availableNemeses.length
     ? `\nReturning nemeses available for this encounter (recurring enemies the party has met before):\n${availableNemeses.map(n => `- ${n.name}: exact stat block ${JSON.stringify(n.statBlock)}`).join('\n')}\nIf narratively fitting given the recent transcript, you may include one of these as one of the enemies — reuse its stat block exactly, do not alter the numbers. Do not force it if there's no good reason for them to appear.\n`
+    : '';
+
+  const combatantBlock = combatants.length
+    ? `\nThe narrative DM has already established these exact combatants in the scene: ${combatants.join(', ')}.\nGenerate one stat block per entry listed, matching what it describes (species, role, apparent equipment) — do not invent additional or different creatures, and do not drop any entry.\nException: if an entry is a named creature that matches one of the returning nemeses listed below, use that exact stat block instead of generating a new one — do not alter its numbers to fit the party.\n`
     : '';
 
   const systemPrompt = `You are a D&D 5e DM generating a combat encounter. Return ONLY valid JSON:
@@ -39,8 +45,8 @@ export async function generateEncounterEnemies(
     }
   ]
 }
-${nemesisBlock}
-Rules: 1-3 enemies, MEDIUM difficulty for this party, use official 5e monster stat blocks as reference.
+${nemesisBlock}${combatantBlock}
+Rules: 1-3 enemies, MEDIUM difficulty scaled to the party's ACTUAL current state below — real level, AC, and current HP, not an assumed standard 4-person party. A party of one gets a correspondingly lighter encounter than a party of four; a party already down HP from a prior fight gets a lighter encounter than a party at full HP. Use official 5e monster stat blocks as reference for the base numbers, then adjust to fit the party size and state given.${combatants.length ? '' : ' Base the enemies on whoever/whatever is described as hostile in the recent transcript below — do not introduce a creature type unconnected to what has already been narrated.'}
 
 Return ONLY valid JSON, no markdown fences, no explanation.`;
 
