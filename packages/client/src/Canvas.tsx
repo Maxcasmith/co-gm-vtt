@@ -3,7 +3,7 @@ import type { Player, EnemyStatBlock, Spell, Dungeon, Character } from 'shared';
 import { parseRangeFeet, hasLineOfSight, statMod, CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY } from 'shared';
 import { dispatch, on } from './events.ts';
 import type { TargetingStartPayload } from './events.ts';
-import { paletteFor, drawRoomProps } from './dungeonThemes.ts';
+import { paletteFor } from './dungeonThemes.ts';
 import './app.css';
 
 const CELL = 64;
@@ -682,12 +682,6 @@ export default function Canvas({ player, characterId, character, connected, show
               if (dungeon.cells[row]?.[col] === 1) ctx.fillRect(col * cellSz + panX, row * cellSz + panY, cellSz, cellSz);
             }
           }
-        }
-
-        // Themed room decoration (tombstones, benches, crates...) — purely visual, drawn on top
-        // of the floor, no collision, positions stable per room via a room-id-seeded RNG.
-        for (const room of dungeon.rooms) {
-          drawRoomProps(ctx, room, dungeon.cells, cellSz, panX, panY);
         }
 
         // Entity markers

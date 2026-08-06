@@ -7,8 +7,8 @@ import {
   readQuests, writeQuests, readCampaignFile,
 } from '../storage.ts';
 import { getConfig } from '../storage.ts';
-import { getStoryProvider, type ChatMessage } from '../providers/index.ts';
-import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, type EntityType } from './prompts.ts';
+import { getFeatureProvider, type ChatMessage } from '../providers/index.ts';
+import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDungeonExplorationPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, type EntityType } from './prompts.ts';
 import type { ChatPayload } from 'shared';
 import { logError } from '../logger.ts';
 
@@ -218,7 +218,7 @@ export async function generateDmBrief(
   factionSlugs: string[],
 ): Promise<DmBriefResult> {
   const config = await getConfig();
-  const provider = getStoryProvider(config);
+  const provider = getFeatureProvider(config, 'dmBrief');
   const prompt = buildDmBriefPrompt(moduleName, locationSlugs, npcSlugs, factionSlugs);
   const raw = await provider.complete(prompt);
   console.log('[dm-brief] raw response:\n', raw);
@@ -256,7 +256,7 @@ export async function ensureSessionQuests(campaignSlug: string): Promise<void> {
     const resolvedNames = quests.filter(q => q.status === 'resolved').map(q => q.name);
 
     const config = await getConfig();
-    const provider = getStoryProvider(config);
+    const provider = getFeatureProvider(config, 'questGeneration');
     const prompt = buildSessionQuestsPrompt({
       campaignName: meta?.name ?? campaignSlug,
       currentAct,
@@ -292,22 +292,11 @@ export async function ensureSessionQuests(campaignSlug: string): Promise<void> {
 const DM_SENDER = 'Virtual DM';
 const HISTORY_LIMIT = 20;
 
-export async function getDMResponse(campaignSlug: string, dungeonState = ''): Promise<string> {
-  const [config, meta, log] = await Promise.all([
-    getConfig(),
-    getWorldMeta(campaignSlug),
-    readChatLog(campaignSlug),
-  ]);
-
-  const entitySummaries = await buildEntitySummaries(campaignSlug, dungeonState);
-  const characters = await getCharacterNames(campaignSlug);
-  const characterSummaries = characters.map(n => `- ${n}`).join('\n');
-
-  // Build alternating user/assistant turns from the recent chat log
-  // Player messages → user role; DM messages → assistant role; System (rolls) → user role labelled as roll
-  const recent = log.slice(-HISTORY_LIMIT);
+// Build alternating user/assistant turns from the recent chat log
+// Player messages → user role; DM messages → assistant role; System (rolls) → user role labelled as roll
+function buildChatMessages(log: ChatPayload[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
-  for (const msg of recent) {
+  for (const msg of log.slice(-HISTORY_LIMIT)) {
     const isRoll = msg.senderName === 'System';
     const role = msg.senderName === DM_SENDER ? 'assistant' : 'user';
     const content = isRoll
@@ -326,6 +315,21 @@ export async function getDMResponse(campaignSlug: string, dungeonState = ''): Pr
   while (messages.length > 0 && messages[messages.length - 1]?.role === 'assistant') {
     messages.pop();
   }
+  return messages;
+}
+
+export async function getDMResponse(campaignSlug: string, dungeonState = ''): Promise<string> {
+  const [config, meta, log] = await Promise.all([
+    getConfig(),
+    getWorldMeta(campaignSlug),
+    readChatLog(campaignSlug),
+  ]);
+
+  const entitySummaries = await buildEntitySummaries(campaignSlug, dungeonState);
+  const characters = await getCharacterNames(campaignSlug);
+  const characterSummaries = characters.map(n => `- ${n}`).join('\n');
+
+  const messages = buildChatMessages(log);
   if (messages.length === 0) return '';
 
   const worldType = (meta?.type === 'module' ? 'campaign' : meta?.type) ?? 'campaign';
@@ -337,7 +341,37 @@ export async function getDMResponse(campaignSlug: string, dungeonState = ''): Pr
     !!dungeonState,
   );
 
-  const provider = getStoryProvider(config);
+  const provider = getFeatureProvider(config, 'dmChatResponse');
+  return provider.chat(system, messages);
+}
+
+// Dungeon loaded, combat inactive. Same shape as getDMResponse, but the DM gets the full floor plan
+// (describeDungeonGroundTruth) so it can answer spatial questions accurately — the prompt's
+// reveal-discipline rules are what keep undiscovered entities out of the narration.
+export async function getDungeonExplorationResponse(campaignSlug: string, groundTruth: string): Promise<string> {
+  const [config, meta, log] = await Promise.all([
+    getConfig(),
+    getWorldMeta(campaignSlug),
+    readChatLog(campaignSlug),
+  ]);
+
+  const entitySummaries = await buildEntitySummaries(campaignSlug);
+  const characters = await getCharacterNames(campaignSlug);
+  const characterSummaries = characters.map(n => `- ${n}`).join('\n');
+
+  const messages = buildChatMessages(log);
+  if (messages.length === 0) return '';
+
+  const worldType = (meta?.type === 'module' ? 'campaign' : meta?.type) ?? 'campaign';
+  const system = buildDungeonExplorationPrompt(
+    meta?.name ?? 'Unknown World',
+    worldType,
+    entitySummaries,
+    characterSummaries,
+    groundTruth,
+  );
+
+  const provider = getFeatureProvider(config, 'dmChatResponse');
   return provider.chat(system, messages);
 }
 
@@ -355,7 +389,7 @@ export async function processSession(campaignSlug: string): Promise<ProcessResul
   if (log.length === 0) return { skipped: true, updated: [], created: [], cascaded: [] };
 
   const config = await getConfig();
-  const provider = getStoryProvider(config);
+  const provider = getFeatureProvider(config, 'sessionTriage');
   const today = new Date().toISOString().slice(0, 10);
   const characters = await getCharacterNames(campaignSlug);
 

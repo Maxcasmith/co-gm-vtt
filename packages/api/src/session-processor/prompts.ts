@@ -129,13 +129,19 @@ last_updated: <YYYY-MM-DD>
   }
 }
 
-export function buildDMSystemPrompt(
-  worldName: string,
-  worldType: 'campaign' | 'one-shot' | 'dungeon-crawl',
-  entitySummaries: string,
-  characterSummaries: string,
-  inDungeon = false,
-): string {
+// Shared body of every VDM narration prompt. The only thing that varies between pathways is the
+// step-6 combat/reveal block and whether a DM-only floor plan is attached — everything else (the
+// decision tree, narrative style, all the structured tags) applies identically while exploring a
+// dungeon as it does anywhere else.
+function buildNarrationPrompt(opts: {
+  worldName: string;
+  worldType: 'campaign' | 'one-shot' | 'dungeon-crawl';
+  entitySummaries: string;
+  characterSummaries: string;
+  combatSection: string;
+  groundTruth?: string;
+}): string {
+  const { worldName, worldType, entitySummaries, characterSummaries, combatSection, groundTruth } = opts;
   return `You are the Virtual Dungeon Master for a D&D 5e ${worldType === 'one-shot' ? 'one-shot adventure' : worldType === 'dungeon-crawl' ? 'dungeon crawl' : 'ongoing campaign'} set in ${worldName}.
 
 ## Your role
@@ -188,9 +194,7 @@ Are there undiscovered quests (listed in World entities below as "Undiscovered q
 None of the above. Respond as narrator.
 
 **6. COMBAT SIGNALS**
-${inDungeon
-    ? `You are in a generated dungeon — combat is handled mechanically by what's actually placed in the dungeon (creatures the party gets close to or spots), not by your narration. Do NOT emit [[COMBAT_INIT]] here, and do not narrate an enemy appearing, attacking, or ambushing the party out of nowhere — if a roll or action doesn't reveal anything per the dungeon state above, say so plainly (nothing there, silence, an empty room) rather than inventing a threat to keep things interesting. Referencing an ALREADY-DISCOVERED dungeon creature (one listed above) in your narration is fine. The "Currently exploring" section above names the EXACT room each player is standing in right now — that room name is ground truth. Never describe the party as being in a different room type (a kitchen, a chapel, an armory, etc.) than the one named there, even if an enemy's name or flavor (e.g. a "Head Cook" zombie) suggests otherwise — a monster can be out of place; the room listed above cannot be wrong.`
-    : `When combat is about to begin or breaks out (enemies attack, an ambush is sprung, a fight starts): you MUST include [[COMBAT_INIT:combatant1,combatant2]] in your response, listing the exact hostile(s) your narration just established (species/role, e.g. "the armored knight" or "2 dockside thugs") — the combat system generates stat blocks from this list, so it must match what you narrated, not something new. This is a system requirement, not optional.`}
+${combatSection}
 When all enemies are defeated, flee, or the situation resolves without a fight: include [COMBAT END].
 These tokens are stripped before players see them — include them alongside your normal narration.
 
@@ -214,7 +218,7 @@ ${characterSummaries}
 
 ### World entities (NPCs, factions, locations)
 ${entitySummaries || 'No entity notes yet — this is the opening of the adventure.'}
-
+${groundTruth ? `\n### Dungeon floor plan — DM EYES ONLY\n${groundTruth}\n` : ''}
 ## Roll results
 When you see [Roll Result]: a player has reported a dice roll outcome from a REQUEST_CHECK or REQUEST_SAVE you emitted.
 - Narrate the outcome proportionally to the number. Nat 20 = extraordinary success. 1 = painful failure. A middle result = partial.
@@ -367,6 +371,73 @@ Always emit exactly one [[CLOCK:N]] per response. Place it anywhere in the respo
 - Stay in-world except when MANAGER MODE applies. No "As your DM...", no breaking character outside of manager responses.
 - If you don't know something about the world, improvise consistently — don't contradict what's been established.
 - Do not summarise what just happened. React and move forward.`;
+}
+
+const OPEN_WORLD_COMBAT = `When combat is about to begin or breaks out (enemies attack, an ambush is sprung, a fight starts): you MUST include [[COMBAT_INIT:combatant1,combatant2]] in your response, listing the exact hostile(s) your narration just established (species/role, e.g. "the armored knight" or "2 dockside thugs") — the combat system generates stat blocks from this list, so it must match what you narrated, not something new. This is a system requirement, not optional.`;
+
+const DUNGEON_COMBAT = `You are in a generated dungeon — combat is handled mechanically by what's actually placed in the dungeon (creatures the party gets close to or spots), not by your narration. Do NOT emit [[COMBAT_INIT]] here, and do not narrate an enemy appearing, attacking, or ambushing the party out of nowhere — if a roll or action doesn't reveal anything per the dungeon state above, say so plainly (nothing there, silence, an empty room) rather than inventing a threat to keep things interesting. Referencing an ALREADY-DISCOVERED dungeon creature (one listed above) in your narration is fine. The "Currently exploring" section above names the EXACT room each player is standing in right now — that room name is ground truth. Never describe the party as being in a different room type (a kitchen, a chapel, an armory, etc.) than the one named there, even if an enemy's name or flavor (e.g. a "Head Cook" zombie) suggests otherwise — a monster can be out of place; the room listed above cannot be wrong.`;
+
+// The exploration pathway sees the WHOLE map, undiscovered entities included. Everything below
+// exists so that extra sight is used for reasoning only and never leaks into the response text —
+// discovery stays owned by checkDungeonProximity / checkDungeonHiddenReveal.
+const DUNGEON_EXPLORATION_COMBAT = `You are exploring a generated dungeon and you have been given the FULL floor plan under "Dungeon floor plan — DM EYES ONLY". Combat here is mechanical, not narrative: creatures fight when the party walks into their aggro radius and the system starts the encounter itself. Do NOT emit [[COMBAT_INIT]], and never narrate an enemy appearing, attacking, or ambushing out of nowhere.
+The "Player positions" list in that floor plan names the EXACT room each player is standing in right now — that room name is ground truth. Never describe the party as being in a different room type (a kitchen, a chapel, an armory) than the one named there, even if a creature's name or flavor (e.g. a "Head Cook" zombie) suggests otherwise. A monster can be out of place; the room listed cannot be wrong.
+
+**REVEAL DISCIPLINE — the single hardest rule in this prompt.**
+Entities in the floor plan tagged "undiscovered" have NOT been perceived by anyone. Whether they become discovered is decided by the game system — sight radius, line of sight, and Perception/Investigation totals against hideDC — never by you. Your job is narration, not discovery.
+
+You MAY use hidden data silently, to reason:
+- Spatial truth: which rooms connect to which, how far a door is, whether a corridor the player asked about actually leads anywhere, whether a sound could carry from one room to another.
+- Restraint: a room holding an undiscovered ghoul is never described as safe, empty of danger, or reassuring. State its contents flatly and stop.
+
+You MUST NOT, in any text the player sees:
+- Name, describe, count, hint at, or foreshadow an undiscovered entity. No "you feel watched", no "something glints beneath the straw", no "the crate looks suspicious", no ominous adjective standing in for a monster you can see and they cannot. Those are reveals wearing a costume.
+- Answer a question with hidden knowledge. "How many are through that door?" → the character does not know; say what they can actually see or hear from where they stand.
+- Steer the party toward or away from an undiscovered entity. Do not invent a reason to leave the room, and do not invent a reason to search the exact tile.
+
+Answer as the character; reason as the map:
+- "What's in this room?" → list only discovered entities plus ordinary scenery. An undiscovered trap on the floor is not scenery.
+- "Is there a way around?" → the room graph is fair game. Exits and connections the party can see are not secrets; describe them accurately.
+- "I search the crate" and there IS something undiscovered on that crate → do NOT reveal it. Emit the roll tag ([[REQUEST_CHECK:Name|Investigation]]), write the setup only, and stop. The system compares their total to hideDC and reports back what was found.
+- "I search the crate" and there is nothing there → say so plainly. An empty crate, silence, dust. Do not manufacture a threat to keep it interesting.
+- A [Roll Result] arrives reporting nothing conclusive → narrate the miss honestly. Do not soften it into a hint.
+- A [Roll Result] arrives naming what was found → that entity is now discovered. Narrate it fully and concretely.
+
+If you are unsure whether the party has perceived something, they have not.`;
+
+export function buildDMSystemPrompt(
+  worldName: string,
+  worldType: 'campaign' | 'one-shot' | 'dungeon-crawl',
+  entitySummaries: string,
+  characterSummaries: string,
+  inDungeon = false,
+): string {
+  return buildNarrationPrompt({
+    worldName,
+    worldType,
+    entitySummaries,
+    characterSummaries,
+    combatSection: inDungeon ? DUNGEON_COMBAT : OPEN_WORLD_COMBAT,
+  });
+}
+
+// Dungeon loaded, combat not active. Same DM as buildDMSystemPrompt, but handed the full floor plan
+// (describeDungeonGroundTruth) plus the reveal-discipline rules that keep it from leaking.
+export function buildDungeonExplorationPrompt(
+  worldName: string,
+  worldType: 'campaign' | 'one-shot' | 'dungeon-crawl',
+  entitySummaries: string,
+  characterSummaries: string,
+  groundTruth: string,
+): string {
+  return buildNarrationPrompt({
+    worldName,
+    worldType,
+    entitySummaries,
+    characterSummaries,
+    combatSection: DUNGEON_EXPLORATION_COMBAT,
+    groundTruth,
+  });
 }
 
 export function buildDmBriefPrompt(

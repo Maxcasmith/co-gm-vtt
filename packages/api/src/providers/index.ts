@@ -1,4 +1,4 @@
-import type { AppConfig, StoryProvider, ModelTier, ApiKeys } from 'shared';
+import type { AppConfig, StoryProvider, ModelTier, ApiKeys, AiFeature, AiWorkflow } from 'shared';
 import { claudeComplete, claudeStream, claudeValidateKey, claudeChat } from './claude.ts';
 import { openaiComplete, openaiStream, openaiValidateKey, openaiValidateImageKey, openaiChat } from './openai.ts';
 import { deepseekComplete, deepseekStream, deepseekValidateKey, deepseekChat } from './deepseek.ts';
@@ -26,30 +26,30 @@ export function getTierApiKey(apiKeys: AppConfig['apiKeys'], provider: StoryProv
 }
 
 export function buildAdapter(tier: ModelTier, apiKey: string): StoryProviderAdapter {
-  const { provider, model, effort } = tier;
+  const { provider, model, effort, timeoutSeconds } = tier;
   const adapters: Record<StoryProvider, StoryProviderAdapter> = {
     claude: {
-      complete: p => claudeComplete(p, apiKey, model),
-      stream: (p, cb) => claudeStream(p, apiKey, model, cb),
-      chat: (sys, msgs) => claudeChat(sys, msgs, apiKey, model),
+      complete: p => claudeComplete(p, apiKey, model, timeoutSeconds),
+      stream: (p, cb) => claudeStream(p, apiKey, model, cb, timeoutSeconds),
+      chat: (sys, msgs) => claudeChat(sys, msgs, apiKey, model, timeoutSeconds),
       validateKey: () => claudeValidateKey(apiKey),
     },
     openai: {
-      complete: p => openaiComplete(p, apiKey, model, effort),
-      stream: (p, cb) => openaiStream(p, apiKey, model, cb, effort),
-      chat: (sys, msgs) => openaiChat(sys, msgs, apiKey, model, effort),
+      complete: p => openaiComplete(p, apiKey, model, effort, timeoutSeconds),
+      stream: (p, cb) => openaiStream(p, apiKey, model, cb, effort, timeoutSeconds),
+      chat: (sys, msgs) => openaiChat(sys, msgs, apiKey, model, effort, timeoutSeconds),
       validateKey: () => openaiValidateKey(apiKey),
     },
     deepseek: {
-      complete: p => deepseekComplete(p, apiKey, model),
-      stream: (p, cb) => deepseekStream(p, apiKey, model, cb),
-      chat: (sys, msgs) => deepseekChat(sys, msgs, apiKey, model),
+      complete: p => deepseekComplete(p, apiKey, model, timeoutSeconds),
+      stream: (p, cb) => deepseekStream(p, apiKey, model, cb, timeoutSeconds),
+      chat: (sys, msgs) => deepseekChat(sys, msgs, apiKey, model, timeoutSeconds),
       validateKey: () => deepseekValidateKey(apiKey),
     },
     kimi: {
-      complete: p => kimiComplete(p, apiKey, model, effort),
-      stream: (p, cb) => kimiStream(p, apiKey, model, cb, effort),
-      chat: (sys, msgs) => kimiChat(sys, msgs, apiKey, model, effort),
+      complete: p => kimiComplete(p, apiKey, model, effort, timeoutSeconds),
+      stream: (p, cb) => kimiStream(p, apiKey, model, cb, effort, timeoutSeconds),
+      chat: (sys, msgs) => kimiChat(sys, msgs, apiKey, model, effort, timeoutSeconds),
       validateKey: () => kimiValidateKey(apiKey),
     },
   };
@@ -108,12 +108,19 @@ export function buildChainAdapter(chain: ModelTier[], apiKeys: ApiKeys): StoryPr
   };
 }
 
-export function getStoryProvider(config: AppConfig): StoryProviderAdapter {
-  return buildChainAdapter(config.tiers[config.tasks.story], config.apiKeys);
+export function getWorkflowForFeature(config: AppConfig, feature: AiFeature): AiWorkflow | undefined {
+  return config.workflows.find(w => w.enabled && w.features.includes(feature));
 }
 
-export function getCombatProvider(config: AppConfig): StoryProviderAdapter {
-  return buildChainAdapter(config.tiers[config.tasks.combat], config.apiKeys);
+export function hasFeatureProvider(config: AppConfig, feature: AiFeature): boolean {
+  const workflow = getWorkflowForFeature(config, feature);
+  return !!workflow && workflow.models.length > 0;
+}
+
+export function getFeatureProvider(config: AppConfig, feature: AiFeature): StoryProviderAdapter {
+  const workflow = getWorkflowForFeature(config, feature);
+  if (!workflow) throw new Error(`No enabled workflow configured for "${feature}"`);
+  return buildChainAdapter(workflow.models, config.apiKeys);
 }
 
 export function getImageProvider(config: AppConfig) {

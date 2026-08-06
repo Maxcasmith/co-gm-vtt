@@ -3,8 +3,24 @@ import type { Request, Response } from 'express';
 import { rm, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { CAMPAIGNS_DIR, listCampaigns } from '../storage.ts';
+import { CAMPAIGNS_DIR, getWorldMeta, listCampaigns } from '../storage.ts';
+import { saveCampaignAsAdventure, SAVED_ADVENTURES_DIR } from '../adventures/storage.ts';
 import { logError } from '../logger.ts';
+
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+// Same collision-avoidance pattern as routes/campaigns.ts's uniqueSlug, scoped to the saved-adventures dir.
+function uniqueAdventureSlug(base: string): string {
+  let slug = base;
+  let n = 2;
+  while (existsSync(path.join(SAVED_ADVENTURES_DIR, slug))) {
+    slug = `${base}-${n}`;
+    n++;
+  }
+  return slug;
+}
 
 export const adminRouter = Router();
 
@@ -48,6 +64,22 @@ adminRouter.delete('/campaigns/:id/chat', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     logError('routes/admin:deleteChat', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+adminRouter.post('/campaigns/:id/save-adventure', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const campaignSlug = req.params['id']!;
+  const { name } = req.body as { name?: string };
+  try {
+    const meta = await getWorldMeta(campaignSlug);
+    const adventureName = name || meta?.name || campaignSlug;
+    const adventureSlug = uniqueAdventureSlug(slugify(adventureName));
+    await saveCampaignAsAdventure(campaignSlug, adventureSlug, adventureName);
+    res.json({ ok: true, slug: adventureSlug });
+  } catch (err) {
+    logError('routes/admin:saveAdventure', err);
     res.status(500).json({ ok: false, error: String(err) });
   }
 });

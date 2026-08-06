@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { AppConfig, ModelTier } from 'shared';
 import { getConfig, saveConfig } from '../storage.ts';
-import { getStoryProvider, getImageProvider, getCombatProvider, buildAdapter, getTierApiKey } from '../providers/index.ts';
+import { getImageProvider, buildAdapter, getTierApiKey } from '../providers/index.ts';
 import { logError } from '../logger.ts';
 
 export const configRouter = Router();
@@ -18,12 +18,9 @@ configRouter.put('/', async (req, res) => {
 });
 
 configRouter.post('/test', async (req, res) => {
-  const { type } = req.body as { type: 'thinking' | 'light' | 'image' };
   const config = await getConfig();
   try {
-    const ok = type === 'image'    ? await getImageProvider(config).validateKey()
-             : type === 'light'    ? await getCombatProvider(config).validateKey()
-             :                       await getStoryProvider(config).validateKey();
+    const ok = await getImageProvider(config).validateKey();
     res.json({ ok, message: ok ? 'Connection successful' : 'Invalid API key' });
   } catch (err) {
     logError('routes/config:test', err);

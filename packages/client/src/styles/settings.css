@@ -21,7 +21,9 @@
   transition: transform 0.3s ease;
 }
 
-.settings-sidebar--open { transform: translateX(0); }
+.settings-sidebar--open {
+  transform: translateX(0);
+}
 
 .settings-sidebar-header {
   padding: 32px 32px 24px;
@@ -29,7 +31,7 @@
 }
 
 .settings-title {
-  font-family: 'Cinzel', serif;
+  font-family: "Cinzel", serif;
   font-size: 18px;
   font-weight: 400;
   letter-spacing: 0.1em;
@@ -53,7 +55,7 @@
 }
 
 .settings-section-title {
-  font-family: 'Cinzel', serif;
+  font-family: "Cinzel", serif;
   font-size: 12px;
   font-weight: 400;
   letter-spacing: 0.12em;
@@ -81,9 +83,25 @@
   gap: 12px;
   margin-bottom: 16px;
 }
-.settings-toggle-text { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
-.settings-toggle-label { font-size: 13px; color: var(--text); }
-.settings-toggle-desc  { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+
+.settings-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-toggle-label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.settings-toggle-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
 
 .settings-toggle {
   flex-shrink: 0;
@@ -98,7 +116,11 @@
   transition: background 0.2s;
   margin-top: 2px;
 }
-.settings-toggle--on { background: var(--gold); }
+
+.settings-toggle--on {
+  background: var(--gold);
+}
+
 .settings-toggle-thumb {
   position: absolute;
   top: 3px;
@@ -109,7 +131,10 @@
   background: #fff;
   transition: transform 0.2s;
 }
-.settings-toggle--on .settings-toggle-thumb { transform: translateX(18px); }
+
+.settings-toggle--on .settings-toggle-thumb {
+  transform: translateX(18px);
+}
 
 .settings-test-row {
   display: flex;
@@ -123,28 +148,42 @@
   border-radius: 3px;
   color: var(--text-muted);
   padding: 7px 16px;
-  font-family: 'Cinzel', serif;
+  font-family: "Cinzel", serif;
   font-size: 10px;
   letter-spacing: 0.1em;
   cursor: pointer;
-  transition: border-color 0.2s, color 0.2s;
+  transition:
+    border-color 0.2s,
+    color 0.2s;
 }
 
-.btn-test:hover:not(:disabled) { border-color: var(--gold); color: var(--gold); }
-.btn-test:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-test:hover:not(:disabled) {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.btn-test:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 .status-badge {
-  font-family: 'Crimson Pro', Georgia, serif;
+  font-family: "Crimson Pro", Georgia, serif;
   font-size: 13px;
 }
 
-.status-badge--ok { color: #6dbf7e; }
-.status-badge--fail { color: #c0605a; }
+.status-badge--ok {
+  color: #6dbf7e;
+}
+
+.status-badge--fail {
+  color: #c0605a;
+}
 
 .settings-chain-summary {
   font-size: 13px;
   color: var(--text-muted);
-  font-family: 'Crimson Pro', Georgia, serif;
+  font-family: "Crimson Pro", Georgia, serif;
   margin: 4px 0 10px;
 }
 
@@ -180,9 +219,17 @@
   transition: border-color 0.25s;
 }
 
-.chain-node--testing { border-color: #d8b84c; }
-.chain-node--ok { border-color: #6dbf7e; }
-.chain-node--fail { border-color: #c0605a; }
+.chain-node--testing {
+  border-color: #d8b84c;
+}
+
+.chain-node--ok {
+  border-color: #6dbf7e;
+}
+
+.chain-node--fail {
+  border-color: #c0605a;
+}
 
 .chain-node--empty {
   align-items: center;
@@ -190,14 +237,19 @@
   color: var(--text-muted);
   border-style: dashed;
   cursor: pointer;
-  font-family: 'Cinzel', serif;
+  font-family: "Cinzel", serif;
   font-size: 11px;
   letter-spacing: 0.08em;
   gap: 6px;
-  transition: border-color 0.2s, color 0.2s;
+  transition:
+    border-color 0.2s,
+    color 0.2s;
 }
 
-.chain-node--empty:hover { border-color: var(--gold); color: var(--gold); }
+.chain-node--empty:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+}
 
 .chain-node-plus {
   font-size: 22px;
@@ -217,11 +269,20 @@
   padding: 2px;
 }
 
-.chain-node-remove:hover { color: #c0605a; }
+.chain-node-remove:hover {
+  color: #c0605a;
+}
 
 .chain-node-select {
   font-size: 12px;
   padding: 6px 8px;
+}
+
+.chain-node-timeout {
+  font-size: 12px;
+  padding: 6px 8px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .chain-connector {
@@ -241,7 +302,127 @@
 .chain-summary {
   font-size: 13px;
   color: var(--text-muted);
-  font-family: 'Crimson Pro', Georgia, serif;
+  font-family: "Crimson Pro", Georgia, serif;
+}
+
+/* ── AI workflows super modal ── */
+.super-modal {
+  position: fixed;
+  inset: 24px;
+  width: auto;
+  height: auto;
+  max-width: none;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.super-modal-body {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.super-modal .modal-actions {
+  flex-shrink: 0;
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.workflow-select-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.workflow-select {
+  flex: 1;
+}
+
+.workflow-name-input {
+  flex: 1;
+}
+
+.workflow-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.workflow-status-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: "Cinzel", serif;
+  letter-spacing: 0.08em;
+}
+
+.workflow-pip {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.workflow-pip--active {
+  background: #6dbf7e;
+}
+
+.workflow-pip--disabled {
+  background: var(--text-muted);
+}
+
+.btn-delete-workflow:hover {
+  border-color: #c0605a;
+  color: #c0605a;
+}
+
+.feature-groups-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+  margin: 20px 0;
+}
+
+.feature-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.feature-group-title {
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  color: var(--gold);
+  margin: 0 0 2px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.feature-checkbox {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.feature-checkbox--claimed {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.feature-checkbox-owner {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .settings-footer {
@@ -254,8 +435,15 @@
 
 /* ── campaign modal ── */
 @keyframes modal-in {
-  from { opacity: 0; transform: translateY(10px) scale(0.98); }
-  to   { opacity: 1; transform: translateY(0)    scale(1);    }
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .modal-overlay {
@@ -287,12 +475,21 @@
   animation: modal-in 0.25s ease;
 }
 
-.modal-header { margin-bottom: 0; display: flex; flex-direction: column; align-items: flex-start; }
+.modal-header {
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
 
-.campaign-modal-close { position: absolute; top: 16px; right: 16px; }
+.campaign-modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
 
 .modal-hint {
-  font-family: 'Crimson Pro', Georgia, serif;
+  font-family: "Crimson Pro", Georgia, serif;
   font-size: 14px;
   color: var(--text-muted);
   margin-top: 6px;
@@ -300,14 +497,14 @@
 }
 
 .modal-body-text {
-  font-family: 'Crimson Pro', Georgia, serif;
+  font-family: "Crimson Pro", Georgia, serif;
   font-size: 15px;
   color: var(--text-muted);
   margin-bottom: 24px;
 }
 
 .modal-error {
-  font-family: 'Crimson Pro', Georgia, serif;
+  font-family: "Crimson Pro", Georgia, serif;
   font-size: 13px;
   color: #e5807a;
   background: rgba(139, 32, 32, 0.12);
@@ -318,7 +515,7 @@
 }
 
 .modal-success {
-  font-family: 'Crimson Pro', Georgia, serif;
+  font-family: "Crimson Pro", Georgia, serif;
   font-size: 13px;
   color: #85d99a;
   background: rgba(109, 191, 126, 0.1);
@@ -332,7 +529,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-family: 'Cinzel', serif;
+  font-family: "Cinzel", serif;
   font-size: 10px;
   letter-spacing: 0.08em;
   color: var(--gold);
@@ -347,12 +544,26 @@
   background: var(--gold);
   animation: world-gen-pulse 1.2s ease-in-out infinite;
 }
-.world-gen-progress-dot:nth-child(2) { animation-delay: 0.2s; }
-.world-gen-progress-dot:nth-child(3) { animation-delay: 0.4s; }
+
+.world-gen-progress-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.world-gen-progress-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
 
 @keyframes world-gen-pulse {
-  0%, 100% { opacity: 0.2; transform: scale(0.8); }
-  50%       { opacity: 1;   transform: scale(1.2); }
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: scale(0.8);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
 }
 
 .modal-success code {
@@ -361,4 +572,3 @@
   padding: 1px 5px;
   border-radius: 2px;
 }
-

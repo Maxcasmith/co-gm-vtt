@@ -7,11 +7,12 @@ import {
   getWorldMeta, writeWorldMeta,
   writeCharacter, updateCharacter, getCharacter, listCharacters, findCharacterByPassword, writeCharacterImage,
   readWorldState, writeWorldState, readCampaignFile, writeEntity,
-  listEntitySlugs, readEntity, saveDungeon, writeManifest, readManifest, emptyManifest, readQuests, writeQuests,
+  listEntitySlugs, readEntity, saveDungeon, saveDungeonAscii, writeManifest, readManifest, emptyManifest, readQuests, writeQuests,
 } from '../storage.ts';
 import { generateDungeon } from '../dungeon/index.ts';
-import { getStoryProvider, getCombatProvider } from '../providers/index.ts';
+import { getFeatureProvider } from '../providers/index.ts';
 import { copyCompendiumToCampaign } from '../compendium/storage.ts';
+import { copyAdventureToCampaign } from '../adventures/storage.ts';
 import { buildConceptsPrompt, buildWorldGenPrompt, buildDungeonCrawlPremisePrompt, buildBackstoryCheckPrompt, buildBackstoryGeneratePrompt, buildBackstoryExtractPrompt } from '../prompts.ts';
 import { processSession, generateDmBrief } from '../session-processor/index.ts';
 import { processPortrait } from '../utils/image.ts';
@@ -97,7 +98,7 @@ campaignsRouter.post('/concepts', async (req, res) => {
   if (!tags?.length) { res.status(400).json({ error: 'tags required' }); return; }
   const config = await getConfig();
   try {
-    const raw = await getStoryProvider(config).complete(buildConceptsPrompt(tags, type));
+    const raw = await getFeatureProvider(config, 'campaignConcepts').complete(buildConceptsPrompt(tags, type));
     const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     res.json(parseLlmJson<WorldConcept[]>(cleaned));
   } catch (err) {
@@ -124,7 +125,7 @@ campaignsRouter.post('/generate', async (req, res) => {
     // itself, generated straight from the tags rather than funnelled through a world concept.
     if (type === 'dungeon-crawl') {
       send({ type: 'progress', message: 'Writing premise…' });
-      const raw = await getStoryProvider(config).stream(
+      const raw = await getFeatureProvider(config, 'dungeonPremise').stream(
         buildDungeonCrawlPremisePrompt(tags),
         token => send({ type: 'token', text: token }),
       );
@@ -151,11 +152,12 @@ campaignsRouter.post('/generate', async (req, res) => {
 
       send({ type: 'progress', message: 'Generating dungeon…' });
       const dungeon = await generateDungeon(
-        title, 'dungeon-crawl', getCombatProvider(config), tags.join(', '),
+        title, 'dungeon-crawl', getFeatureProvider(config, 'dungeonGeneration'), tags.join(', '),
         { width: 100, height: 100, roomRange: [14, 20] },
         token => send({ type: 'token', text: token }),
       );
       await saveDungeon(slug, dungeon);
+      await saveDungeonAscii(slug, dungeon);
 
       send({ type: 'complete', id: slug, name: campaignName });
       return;
@@ -165,7 +167,7 @@ campaignsRouter.post('/generate', async (req, res) => {
 
     let accumulated = '';
     send({ type: 'progress', message: 'Generating world…' });
-    await getStoryProvider(config).stream(
+    await getFeatureProvider(config, 'worldGeneration').stream(
       buildWorldGenPrompt(tags, concept.name, concept.description, type),
       token => { accumulated += token; send({ type: 'token', text: token }); },
     );
@@ -276,6 +278,27 @@ campaignsRouter.post('/from-module', async (req, res) => {
   }
 });
 
+// ── create from saved adventure ───────────────────────────────────────────────
+// No LLM calls: the template already carries a starting location, undiscovered quests, and a
+// reset dungeon — spinning up a copy is a plain filesystem clone, so no SSE progress is needed.
+
+campaignsRouter.post('/from-adventure', async (req, res) => {
+  const { adventureSlug, campaignName } = req.body as { adventureSlug?: string; campaignName?: string };
+  if (!adventureSlug || !campaignName) {
+    res.status(400).json({ error: 'adventureSlug and campaignName are required' });
+    return;
+  }
+
+  const slug = uniqueSlug(slugify(campaignName));
+  try {
+    await copyAdventureToCampaign(adventureSlug, slug, campaignName);
+    res.json({ id: slug, name: campaignName });
+  } catch (err) {
+    logError('routes/campaigns:from-adventure', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to create campaign' });
+  }
+});
+
 // ── character endpoints ───────────────────────────────────────────────────────
 
 campaignsRouter.get('/:id/party', async (req, res) => {
@@ -308,7 +331,7 @@ async function syncCharacterToWorldLore(slug: string, character: Character): Pro
     if (meta?.type !== 'campaign') return;
     const config = await getConfig();
     const worldMd = await readCampaignFile(slug, 'world.md') ?? '';
-    const raw = await getStoryProvider(config).complete(buildBackstoryExtractPrompt(worldMd, character));
+    const raw = await getFeatureProvider(config, 'worldLoreSync').complete(buildBackstoryExtractPrompt(worldMd, character));
     const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     const extracted = parseLlmJson<{
       worldEntry: string;
@@ -377,7 +400,7 @@ campaignsRouter.post('/:id/party/backstory-check', async (req, res) => {
   const config = await getConfig();
   try {
     const worldMd = await readCampaignFile(slug, 'world.md') ?? '';
-    const raw = await getStoryProvider(config).complete(
+    const raw = await getFeatureProvider(config, 'backstoryCheck').complete(
       buildBackstoryCheckPrompt(worldMd, { name, species, background, characterClass, backstory }),
     );
     const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
@@ -397,7 +420,7 @@ campaignsRouter.post('/:id/party/backstory-generate', async (req, res) => {
   const config = await getConfig();
   try {
     const worldMd = await readCampaignFile(slug, 'world.md') ?? '';
-    const backstory = await getStoryProvider(config).complete(
+    const backstory = await getFeatureProvider(config, 'backstoryGeneration').complete(
       buildBackstoryGeneratePrompt(worldMd, { name, species, background, characterClass }),
     );
     res.json({ backstory: backstory.trim() });
@@ -636,7 +659,7 @@ campaignsRouter.post('/:id/rest/long', async (req, res) => {
     let state = await readWorldState(id);
 
     const config = await getConfig();
-    const adapter = getCombatProvider(config);
+    const adapter = getFeatureProvider(config, 'worldStateAdvance');
 
     if (!state) {
       const [worldMd, factionsMd] = await Promise.all([

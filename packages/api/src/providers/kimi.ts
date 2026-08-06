@@ -16,7 +16,7 @@ function toKimiEffort(effort?: ReasoningEffort): 'low' | 'high' | 'max' {
   }
 }
 
-export async function kimiChat(system: string, messages: ChatMessage[], apiKey: string, model: string, effort?: ReasoningEffort): Promise<string> {
+export async function kimiChat(system: string, messages: ChatMessage[], apiKey: string, model: string, effort?: ReasoningEffort, timeoutSeconds?: number): Promise<string> {
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -28,6 +28,7 @@ export async function kimiChat(system: string, messages: ChatMessage[], apiKey: 
       reasoning_effort: toKimiEffort(effort),
       messages: [{ role: 'system', content: system }, ...messages],
     }),
+    ...(timeoutSeconds ? { signal: AbortSignal.timeout(timeoutSeconds * 1000) } : {}),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
@@ -37,7 +38,7 @@ export async function kimiChat(system: string, messages: ChatMessage[], apiKey: 
   return data.choices[0]?.message.content ?? '';
 }
 
-export async function kimiComplete(prompt: string, apiKey: string, model: string, effort?: ReasoningEffort): Promise<string> {
+export async function kimiComplete(prompt: string, apiKey: string, model: string, effort?: ReasoningEffort, timeoutSeconds?: number): Promise<string> {
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -47,6 +48,7 @@ export async function kimiComplete(prompt: string, apiKey: string, model: string
       reasoning_effort: toKimiEffort(effort),
       messages: [{ role: 'user', content: prompt }],
     }),
+    ...(timeoutSeconds ? { signal: AbortSignal.timeout(timeoutSeconds * 1000) } : {}),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
@@ -62,6 +64,7 @@ export async function kimiStream(
   model: string,
   onToken: (token: string) => void,
   effort?: ReasoningEffort,
+  timeoutSeconds?: number,
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
@@ -73,6 +76,7 @@ export async function kimiStream(
       stream: true,
       messages: [{ role: 'user', content: prompt }],
     }),
+    ...(timeoutSeconds ? { signal: AbortSignal.timeout(timeoutSeconds * 1000) } : {}),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
@@ -95,9 +99,12 @@ export async function kimiStream(
       const data = line.slice(6);
       if (data === '[DONE]') continue;
       try {
-        const evt = JSON.parse(data) as { choices: { delta?: { content?: string } }[] };
-        const token = evt.choices[0]?.delta?.content;
-        if (token) { full += token; onToken(token); }
+        const evt = JSON.parse(data) as { choices: { delta?: { content?: string; reasoning_content?: string } }[] };
+        const delta = evt.choices[0]?.delta;
+        // K3 streams thinking under reasoning_content before the real answer starts — surface it
+        // to onToken (visible progress) but never fold it into `full` (parsed downstream).
+        if (delta?.reasoning_content) onToken(delta.reasoning_content);
+        if (delta?.content) { full += delta.content; onToken(delta.content); }
       } catch (err) { logError('providers/kimi:kimiStream', err); }
     }
   }

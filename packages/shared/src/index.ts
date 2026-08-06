@@ -39,6 +39,8 @@ export interface DungeonRoom {
   height: number;
   role?: "entrance" | "exit";
   theme?: DungeonTheme;
+  isHallway?: boolean;
+  connectsTo?: string[];
 }
 
 export interface DungeonEntity {
@@ -363,6 +365,22 @@ export interface ModelTier {
   provider: StoryProvider;
   model: string;
   effort?: ReasoningEffort;
+  timeoutSeconds?: number; // undefined/empty = no timeout
+}
+
+export type AiFeature =
+  | "campaignConcepts" | "dungeonPremise" | "backstoryGeneration" | "backstoryCheck" | "worldLoreSync"
+  | "nemesisGeneration" | "dmBrief" | "questGeneration" | "dmChatResponse" | "sessionTriage" | "sessionRecap" | "tagEffectProcessing"
+  | "worldGeneration" | "dungeonGeneration" | "worldStateAdvance"
+  | "combatNarration" | "encounterGeneration" | "improvisedResolution"
+  | "compendium";
+
+export interface AiWorkflow {
+  id: string;
+  name: string;
+  enabled: boolean;
+  models: ModelTier[];
+  features: AiFeature[];
 }
 
 export interface ImageConfig {
@@ -386,8 +404,7 @@ export interface ApiKeys {
 }
 
 export interface AppConfig {
-  tiers: { light: ModelTier[]; thinking: ModelTier[] };
-  tasks: { story: "light" | "thinking"; combat: "light" | "thinking" };
+  workflows: AiWorkflow[];
   apiKeys: ApiKeys;
   image: ImageConfig;
   narration: NarrationConfig;
@@ -444,6 +461,20 @@ export interface NemesisRecord {
   createdAtSession: number;
 }
 
+export interface SavedAdventureMeta {
+  slug: string;
+  name: string;
+  sourceType: WorldMeta["type"];
+  savedAt: string;
+  hasDungeon: boolean;
+  entityCount: {
+    npc: number;
+    creature: number;
+    faction: number;
+    location: number;
+  };
+}
+
 export interface CompendiumMeta {
   slug: string;
   name: string;
@@ -456,7 +487,6 @@ export interface CompendiumMeta {
     location: number;
   };
   status: "complete" | "draft";
-  tierKey: "light" | "thinking";
   resumeFromChunk: number;
 }
 

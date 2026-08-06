@@ -16,7 +16,7 @@ function toOpenaiEffort(effort?: ReasoningEffort): 'low' | 'medium' | 'high' | u
   }
 }
 
-export async function openaiChat(system: string, messages: ChatMessage[], apiKey: string, model: string, effort?: ReasoningEffort): Promise<string> {
+export async function openaiChat(system: string, messages: ChatMessage[], apiKey: string, model: string, effort?: ReasoningEffort, timeoutSeconds?: number): Promise<string> {
   const reasoningEffort = toOpenaiEffort(effort);
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
@@ -27,6 +27,7 @@ export async function openaiChat(system: string, messages: ChatMessage[], apiKey
       ...(reasoningEffort && { reasoning_effort: reasoningEffort }),
       messages: [{ role: 'system', content: system }, ...messages],
     }),
+    ...(timeoutSeconds ? { signal: AbortSignal.timeout(timeoutSeconds * 1000) } : {}),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
@@ -36,7 +37,7 @@ export async function openaiChat(system: string, messages: ChatMessage[], apiKey
   return data.choices[0]?.message.content ?? '';
 }
 
-export async function openaiComplete(prompt: string, apiKey: string, model: string, effort?: ReasoningEffort): Promise<string> {
+export async function openaiComplete(prompt: string, apiKey: string, model: string, effort?: ReasoningEffort, timeoutSeconds?: number): Promise<string> {
   const reasoningEffort = toOpenaiEffort(effort);
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
@@ -47,6 +48,7 @@ export async function openaiComplete(prompt: string, apiKey: string, model: stri
       ...(reasoningEffort && { reasoning_effort: reasoningEffort }),
       messages: [{ role: 'user', content: prompt }],
     }),
+    ...(timeoutSeconds ? { signal: AbortSignal.timeout(timeoutSeconds * 1000) } : {}),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
@@ -62,6 +64,7 @@ export async function openaiStream(
   model: string,
   onToken: (token: string) => void,
   effort?: ReasoningEffort,
+  timeoutSeconds?: number,
 ): Promise<string> {
   const reasoningEffort = toOpenaiEffort(effort);
   const res = await fetch(`${API_BASE}/chat/completions`, {
@@ -74,6 +77,7 @@ export async function openaiStream(
       stream: true,
       messages: [{ role: 'user', content: prompt }],
     }),
+    ...(timeoutSeconds ? { signal: AbortSignal.timeout(timeoutSeconds * 1000) } : {}),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };

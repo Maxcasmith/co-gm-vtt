@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import type { Campaign, CompendiumMeta } from 'shared';
+import type { Campaign, CompendiumMeta, SavedAdventureMeta } from 'shared';
 import SettingsSidebar from './SettingsSidebar.tsx';
 import UploadModuleModal from './UploadModuleModal.tsx';
 import CreateFromModuleModal from './CreateFromModuleModal.tsx';
+import CreateFromAdventureModal from './CreateFromAdventureModal.tsx';
+import SaveAdventureModal from './SaveAdventureModal.tsx';
 import CreateCampaignModal from './CreateCampaignModal.tsx';
 import './app.css';
 
@@ -18,12 +20,15 @@ export default function AdminPage() {
   const [error, setError]           = useState('');
   const [campaigns, setCampaigns]   = useState<Campaign[]>([]);
   const [adventures, setAdventures] = useState<CompendiumMeta[]>([]);
+  const [savedAdventures, setSavedAdventures] = useState<SavedAdventureMeta[]>([]);
   const [feedback, setFeedback]     = useState<Record<string, string>>({});
   const [settingsOpen, setSettingsOpen]         = useState(false);
   const [uploadOpen, setUploadOpen]             = useState(false);
   const [createCampaignOpen, setCreateCampaignOpen] = useState(false);
   const [selectedAdventure, setSelectedAdventure]   = useState<CompendiumMeta | null>(null);
   const [resumeAdventure, setResumeAdventure]       = useState<CompendiumMeta | null>(null);
+  const [selectedSavedAdventure, setSelectedSavedAdventure] = useState<SavedAdventureMeta | null>(null);
+  const [saveAdventureCampaign, setSaveAdventureCampaign]   = useState<Campaign | null>(null);
 
   function fetchCampaigns() {
     fetch(`${API}/api/admin/campaigns`, { headers: adminHeaders(password) })
@@ -39,6 +44,13 @@ export default function AdminPage() {
       .catch(() => setAdventures([]));
   }
 
+  function fetchSavedAdventures() {
+    fetch(`${API}/api/adventures`)
+      .then(r => r.json())
+      .then((data: SavedAdventureMeta[]) => setSavedAdventures(data))
+      .catch(() => setSavedAdventures([]));
+  }
+
   async function handleAuth() {
     const r = await fetch(`${API}/api/admin/auth`, {
       method: 'POST',
@@ -49,6 +61,7 @@ export default function AdminPage() {
       const list = await fetch(`${API}/api/admin/campaigns`, { headers: adminHeaders(password) });
       setCampaigns(await list.json() as Campaign[]);
       fetchAdventures();
+      fetchSavedAdventures();
       setAuthed(true);
     } else {
       setError('Invalid password');
@@ -84,6 +97,13 @@ export default function AdminPage() {
     const r = await fetch(`${API}/api/compendium/${slug}`, { method: 'DELETE' });
     if (r.ok) setAdventures(a => a.filter(x => x.slug !== slug));
     else setFeedback(f => ({ ...f, [`module:${slug}`]: 'Failed' }));
+  }
+
+  async function deleteSavedAdventure(slug: string, name: string) {
+    if (!window.confirm(`Permanently delete the saved adventure "${name}"? This cannot be undone.`)) return;
+    const r = await fetch(`${API}/api/adventures/${slug}`, { method: 'DELETE' });
+    if (r.ok) setSavedAdventures(a => a.filter(x => x.slug !== slug));
+    else setFeedback(f => ({ ...f, [`adventure:${slug}`]: 'Failed' }));
   }
 
   async function erase(campaignId: string, type: 'chat' | 'sessions') {
@@ -151,12 +171,13 @@ export default function AdminPage() {
               <th>Campaign</th>
               <th>Chat History</th>
               <th>Session Notes</th>
+              <th>Save as Adventure</th>
               <th>Delete</th>
             </tr>
           </thead>
           <tbody>
             {campaigns.length === 0 && (
-              <tr><td colSpan={4} className="admin-empty">No campaigns yet.</td></tr>
+              <tr><td colSpan={5} className="admin-empty">No campaigns yet.</td></tr>
             )}
             {campaigns.map(c => (
               <tr key={c.id}>
@@ -168,6 +189,9 @@ export default function AdminPage() {
                 <td>
                   <button className="btn-danger" onClick={() => erase(c.id, 'sessions')}>Erase</button>
                   {feedback[`${c.id}:sessions`] && <span className="admin-feedback">{feedback[`${c.id}:sessions`]}</span>}
+                </td>
+                <td>
+                  <button className="btn-secondary" onClick={() => setSaveAdventureCampaign(c)}>Save</button>
                 </td>
                 <td>
                   <button className="btn-danger" onClick={() => void deleteCampaign(c.id, c.name)}>Delete</button>
@@ -225,6 +249,48 @@ export default function AdminPage() {
           </tbody>
         </table>
       </div>
+      <div className="admin-modules-header">
+        <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">💾</span>Saved Adventures</h2>
+      </div>
+      <div className="admin-table-card">
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th>Adventure</th>
+              <th>Create Campaign</th>
+              <th>Delete</th>
+            </tr>
+          </thead>
+          <tbody>
+            {savedAdventures.length === 0 && (
+              <tr><td colSpan={3} className="admin-empty">No saved adventures yet — save a campaign above to reuse it without regenerating.</td></tr>
+            )}
+            {savedAdventures.map(adv => (
+              <tr key={adv.slug}>
+                <td className="admin-campaign-name">
+                  {adv.name}
+                  <span className="admin-campaign-id">{adv.slug}</span>
+                  <span className="admin-module-counts">
+                    {[
+                      adv.entityCount.npc > 0 && `${adv.entityCount.npc} NPCs`,
+                      adv.entityCount.creature > 0 && `${adv.entityCount.creature} creatures`,
+                      adv.entityCount.location > 0 && `${adv.entityCount.location} locations`,
+                      adv.hasDungeon && 'dungeon',
+                    ].filter(Boolean).join(' · ')}
+                  </span>
+                </td>
+                <td>
+                  <button className="btn-secondary" onClick={() => setSelectedSavedAdventure(adv)}>Create</button>
+                </td>
+                <td>
+                  <button className="btn-danger" onClick={() => void deleteSavedAdventure(adv.slug, adv.name)}>Delete</button>
+                  {feedback[`adventure:${adv.slug}`] && <span className="admin-feedback">{feedback[`adventure:${adv.slug}`]}</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <SettingsSidebar open={settingsOpen} onClose={() => setSettingsOpen(false)} />
@@ -243,6 +309,19 @@ export default function AdminPage() {
     <CreateCampaignModal
       open={createCampaignOpen}
       onClose={() => setCreateCampaignOpen(false)}
+      onCreated={fetchCampaigns}
+    />
+    <SaveAdventureModal
+      open={saveAdventureCampaign !== null}
+      campaign={saveAdventureCampaign}
+      password={password}
+      onClose={() => setSaveAdventureCampaign(null)}
+      onSaved={fetchSavedAdventures}
+    />
+    <CreateFromAdventureModal
+      open={selectedSavedAdventure !== null}
+      adventure={selectedSavedAdventure}
+      onClose={() => setSelectedSavedAdventure(null)}
       onCreated={fetchCampaigns}
     />
     </>

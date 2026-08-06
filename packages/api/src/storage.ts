@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, WorldState, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord } from 'shared';
 import { Encounter } from './domain/encounter.ts';
+import { renderDungeonAscii } from './dungeon/index.ts';
 import { logError } from './logger.ts';
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
@@ -13,18 +14,46 @@ const CONFIG_PATH = path.join(STORAGE_DIR, 'config.json');
 export const CAMPAIGNS_DIR = path.join(STORAGE_DIR, 'campaigns');
 export const PREMADE_DIR   = path.join(STORAGE_DIR, 'premade');
 
+const NARRATIVE_FEATURES: AppConfig['workflows'][number]['features'] = [
+  'campaignConcepts', 'dungeonPremise', 'backstoryGeneration', 'backstoryCheck', 'worldLoreSync',
+  'nemesisGeneration', 'dmBrief', 'questGeneration', 'dmChatResponse', 'sessionTriage', 'sessionRecap', 'tagEffectProcessing',
+];
+const WORLD_AND_COMBAT_FEATURES: AppConfig['workflows'][number]['features'] = [
+  'worldGeneration', 'dungeonGeneration', 'worldStateAdvance',
+  'combatNarration', 'encounterGeneration', 'improvisedResolution',
+  'compendium',
+];
+
 const DEFAULT_CONFIG: AppConfig = {
-  tiers:    { light: [{ provider: 'openai', model: 'gpt-4o-mini' }], thinking: [{ provider: 'claude', model: 'claude-sonnet-4-6' }] },
-  tasks:    { story: 'thinking', combat: 'light' },
+  workflows: [
+    { id: 'default-story', name: 'Story & DM', enabled: true, models: [{ provider: 'claude', model: 'claude-sonnet-4-6' }], features: NARRATIVE_FEATURES },
+    { id: 'default-combat', name: 'Combat & World', enabled: true, models: [{ provider: 'openai', model: 'gpt-4o-mini' }], features: WORLD_AND_COMBAT_FEATURES },
+  ],
   apiKeys:  { openai: '', anthropic: '', deepseek: '', kimi: '' },
   image:    { model: 'gpt-image-1', generateMaps: true, generateWorldMap: false },
   narration: { model: 'none', voice: 'onyx' },
 };
 
+// Legacy config.json (pre-workflows) used `tiers`/`tasks` instead of `workflows`.
+// Converts the old two-chain shape into the two equivalent default workflows above.
+function migrateLegacyConfig(raw: Record<string, unknown>): AppConfig {
+  const tiers = raw.tiers as { light: AppConfig['workflows'][number]['models']; thinking: AppConfig['workflows'][number]['models'] };
+  return {
+    ...DEFAULT_CONFIG,
+    ...raw,
+    workflows: [
+      { id: 'default-story', name: 'Story & DM', enabled: true, models: tiers.thinking, features: NARRATIVE_FEATURES },
+      { id: 'default-combat', name: 'Combat & World', enabled: true, models: tiers.light, features: WORLD_AND_COMBAT_FEATURES },
+    ],
+  } as AppConfig;
+}
+
 export async function getConfig(): Promise<AppConfig> {
   try {
     const raw = await readFile(CONFIG_PATH, 'utf-8');
-    return { ...DEFAULT_CONFIG, ...JSON.parse(raw) } as AppConfig;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if ('tiers' in parsed && !('workflows' in parsed)) return migrateLegacyConfig(parsed);
+    return { ...DEFAULT_CONFIG, ...parsed } as AppConfig;
   } catch (err) {
     logError('storage:getConfig', err);
     return DEFAULT_CONFIG;
@@ -258,6 +287,12 @@ export async function savePartyAllies(slug: string, allies: EnemyStatBlock[]): P
 
 export async function saveDungeon(slug: string, dungeon: Dungeon): Promise<void> {
   await writeCampaignFile(slug, 'dungeon.json', JSON.stringify(dungeon, null, 2));
+}
+
+// Written once per generation (not on every entity-discover save) — a snapshot of the freshly
+// generated layout to compare across regenerations while debugging the generator.
+export async function saveDungeonAscii(slug: string, dungeon: Dungeon): Promise<void> {
+  await writeCampaignFile(slug, 'dungeon.ascii.txt', renderDungeonAscii(dungeon));
 }
 
 export async function loadDungeon(slug: string): Promise<Dungeon | null> {

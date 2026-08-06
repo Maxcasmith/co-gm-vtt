@@ -52,9 +52,8 @@ async function streamPipeline(
 }
 
 compendiumRouter.post('/upload', async (req, res) => {
-  const { markdown, model, name } = req.body as {
+  const { markdown, name } = req.body as {
     markdown?: string;
-    model?: 'light' | 'thinking';
     name?: string;
   };
 
@@ -63,11 +62,10 @@ compendiumRouter.post('/upload', async (req, res) => {
     return;
   }
 
-  const tierKey: 'light' | 'thinking' = model === 'thinking' ? 'thinking' : 'light';
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
   sseHeaders(res);
-  await streamPipeline(res, (onProgress, onToken) => runPipeline(slug, name, name, markdown, tierKey, onProgress, onToken));
+  await streamPipeline(res, (onProgress, onToken) => runPipeline(slug, name, name, markdown, onProgress, onToken));
 });
 
 compendiumRouter.post('/:slug/resume', async (req, res) => {
@@ -85,7 +83,7 @@ compendiumRouter.post('/:slug/resume', async (req, res) => {
 
   sseHeaders(res);
   await streamPipeline(res, (onProgress, onToken) =>
-    runPipeline(slug, meta.name, meta.source, raw, meta.tierKey, onProgress, onToken, meta.resumeFromChunk));
+    runPipeline(slug, meta.name, meta.source, raw, onProgress, onToken, meta.resumeFromChunk));
 });
 
 compendiumRouter.post('/:slug/pause', (req, res) => {

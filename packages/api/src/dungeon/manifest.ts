@@ -17,10 +17,15 @@ export interface ManifestRoom {
   loot?: ManifestHazard[];
   key?: string; // single-char id for the organic grid prompt — assigned here, never left to the LLM
   theme?: DungeonTheme; // for procedural floor/wall/prop rendering — clamped to DUNGEON_THEMES on parse
+  isHallway?: boolean; // building layouts only — a passage/circulation room, not a destination
+  connectsTo?: string[]; // building layouts only — names of other rooms in this manifest it directly opens onto
 }
+
+export type StructureType = 'building' | 'organic';
 
 export interface DungeonManifest {
   rooms: ManifestRoom[];
+  structureType: StructureType;
 }
 
 // Single generic words get no LLM call — falls back to a hand-authored generic layout
@@ -56,22 +61,26 @@ export async function fetchManifest(
   roomRange: [number, number] = [6, 10],
   onToken: (t: string) => void = () => {},
 ): Promise<DungeonManifest> {
-  if (isGeneric(name)) return { rooms: assignKeys(GENERIC_ROOMS) };
+  if (isGeneric(name)) return { rooms: assignKeys(GENERIC_ROOMS), structureType: 'organic' };
 
   const contextBlock = storyContext
     ? `\nRecent story context (what's actually happening — use this to decide what belongs in each room, not just the genre label):\n${storyContext}\n`
     : '';
 
   const [minRooms, maxRooms] = roomRange;
-  const prompt = `You are a dungeon architect. Given a location name and genre, produce ${minRooms}-${maxRooms} named rooms that authentically represent that location.
+  const prompt = `You are a location architect. First decide whether "${name}" is a BUILDING (a man-made structure with an intentional floor plan — house, school, church, office, ship, station, mansion, prison, police precinct, etc.) or ORGANIC (a natural or crudely-dug space with no designed floor plan — cave, natural crypt, tomb carved into rock, sewer, ruins). This decision changes how you produce rooms below.
+
 Return ONLY valid JSON, no markdown fences, no explanation:
 {
+  "structureType": "building|organic",
   "rooms": [
     {
-      "name": "string — room name specific to this location",
+      "name": "string",
       "size": "small|medium|large",
       "role": "entrance|exit — omit for a normal room. Mark exactly as many entrance/exit rooms as make sense for this location (usually one of each, sometimes more).",
-      "theme": "one of: ${DUNGEON_THEMES.join('|')} — pick whichever best fits this room's actual purpose. Keep themes consistent with one coherent setting across the whole dungeon — don't mix incompatible eras or genres (e.g. a laboratory next to a throne room in a medieval crypt).",
+      "isHallway": "boolean — BUILDING ONLY. true if this room's job is passage/circulation (a corridor, hallway, stairwell) rather than being a destination in itself.",
+      "connectsTo": "string[] — BUILDING ONLY, REQUIRED for every room. Names of the other rooms in THIS list that this room directly opens onto (a door or opening exists there). Every room must be reachable from the entrance room through this graph — no isolated rooms.",
+      "theme": "one of: ${DUNGEON_THEMES.join('|')} — pick whichever best fits this room's actual purpose. Keep themes consistent with one coherent setting across the whole location.",
       "creatures": [{
         "id": "string, unique per creature",
         "name": "string",
@@ -88,7 +97,12 @@ Return ONLY valid JSON, no markdown fences, no explanation:
     }
   ]
 }
-Omit "creatures"/"traps"/"loot" for rooms that don't have any — not every room needs them. Use location-authentic room names (e.g. for RPD: "Evidence Room", "S.T.A.R.S. Office"). Match creature types and stat blocks (use official 5e monster stat blocks as reference) to the genre. hideDC ranges 1-22 (higher = harder to spot); scale it to how well-concealed the trap/item narratively is. If the story context implies a non-hostile purpose (e.g. sneaking in to gather information), it's fine for rooms to have no creatures at all — don't force combat that doesn't fit.
+
+IF BUILDING: produce the ${minRooms}-${maxRooms} REAL rooms a location of this exact type would actually have — plain functional names only, never evocative or archaic diction (write "Chapel", never "Weeping Narthex"; write "Storage Closet", never "Sacristy of Moth-Eaten Vestments"). Reuse a letter/number suffix for repeated room types the way a real building would (e.g. "Classroom A".."Classroom E", "Boys Locker Room" / "Girls Locker Room"). Include hallway(s) as their own room(s) in the list whenever the building has more than a couple rooms — do not fold circulation space silently into other rooms. Every room needs "connectsTo".
+
+IF ORGANIC: produce ${minRooms}-${maxRooms} rooms with location-authentic, atmospheric names fitting a natural/dug space (e.g. for a crypt: "Ossuary", "Collapsed Passage"). Omit "isHallway" and "connectsTo" entirely for organic rooms — layout is handled separately.
+
+Omit "creatures"/"traps"/"loot" for rooms that don't have any — not every room needs them. Match creature types and stat blocks (use official 5e monster stat blocks as reference) to the genre. hideDC ranges 1-22 (higher = harder to spot); scale it to how well-concealed the trap/item narratively is. If the story context implies a non-hostile purpose (e.g. sneaking in to gather information), it's fine for rooms to have no creatures at all — don't force combat that doesn't fit.
 ${contextBlock}
 Location: ${name}
 Genre: ${dungeonType}`;
@@ -97,15 +111,16 @@ Genre: ${dungeonType}`;
     const raw = await adapter.stream(prompt, onToken);
     const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
     const parsed = JSON.parse(cleaned) as Partial<DungeonManifest>;
+    const structureType: StructureType = parsed.structureType === 'building' ? 'building' : 'organic';
     const rooms: ManifestRoom[] = (parsed.rooms?.length ? parsed.rooms : GENERIC_ROOMS).map(r => {
       const { theme, creatures, ...rest } = r;
       const themed = DUNGEON_THEMES.includes(theme as DungeonTheme) ? { ...rest, theme: theme as DungeonTheme } : rest;
       if (!creatures?.length) return themed;
       return { ...themed, creatures: creatures.map(c => ({ ...c, creatureType: normalizeCreatureType(c.creatureType) })) };
     });
-    return { rooms: assignKeys(rooms) };
+    return { rooms: assignKeys(rooms), structureType };
   } catch (err) {
     logError('dungeon/manifest:fetchManifest', err);
-    return { rooms: assignKeys(GENERIC_ROOMS) };
+    return { rooms: assignKeys(GENERIC_ROOMS), structureType: 'organic' };
   }
 }

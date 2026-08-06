@@ -19,7 +19,6 @@ export default function UploadModuleModal({ open, onClose, onUploaded, resumeAdv
   const rawStreamRef = useRef<HTMLPreElement>(null);
   const [name, setName] = useState('');
   const [file, setFile] = useState<File | null>(null);
-  const [tier, setTier] = useState<'light' | 'thinking'>('light');
   const [progress, setProgress] = useState('');
   const [rawOutput, setRawOutput] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -32,7 +31,6 @@ export default function UploadModuleModal({ open, onClose, onUploaded, resumeAdv
   function reset() {
     setName('');
     setFile(null);
-    setTier('light');
     setProgress('');
     setRawOutput('');
     setUploading(false);
@@ -81,7 +79,7 @@ export default function UploadModuleModal({ open, onClose, onUploaded, resumeAdv
       : await fetch(`${API}/api/compendium/upload`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ markdown: await file!.text(), name, model: tier }),
+          body: JSON.stringify({ markdown: await file!.text(), name }),
         });
 
     try {
@@ -163,13 +161,6 @@ export default function UploadModuleModal({ open, onClose, onUploaded, resumeAdv
                 accept=".md"
                 onChange={handleFileChange}
               />
-            </label>
-            <label className="modal-label">
-              Extraction Quality
-              <select className="modal-select" value={tier} onChange={e => setTier(e.target.value as 'light' | 'thinking')}>
-                <option value="light">Fast (light tier)</option>
-                <option value="thinking">Thorough (thinking tier)</option>
-              </select>
             </label>
           </>
         )}

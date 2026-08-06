@@ -1,6 +1,6 @@
 import { jsonrepair } from 'jsonrepair';
 import { getConfig } from '../storage.ts';
-import { buildChainAdapter, retry, type StoryProviderAdapter } from '../providers/index.ts';
+import { getFeatureProvider, retry, type StoryProviderAdapter } from '../providers/index.ts';
 import { buildExtractionPrompt } from './prompts.ts';
 import {
   saveCompendiumEntity, saveCompendiumRaw, saveCompendiumMeta,
@@ -71,15 +71,12 @@ export async function runPipeline(
   name: string,
   source: string,
   markdown: string,
-  tierKey: 'light' | 'thinking',
   onProgress: (msg: string) => void,
   onToken: (token: string) => void = () => {},
   startChunk = 0,
 ): Promise<void> {
   const config = await getConfig();
-  const chain = config.tiers[tierKey];
-  if (!chain.length) throw new Error(`No models configured for ${tierKey}`);
-  const adapter = buildChainAdapter(chain, config.apiKeys);
+  const adapter = getFeatureProvider(config, 'compendium');
 
   const existingMeta = await loadCompendiumMeta(slug);
   const createdAt = existingMeta?.createdAt ?? new Date().toISOString();
@@ -99,7 +96,7 @@ export async function runPipeline(
       const entityCount = await countCompendiumEntities(slug);
       await saveCompendiumMeta(slug, {
         slug, name, source, createdAt, entityCount,
-        status: 'draft', tierKey, resumeFromChunk: i,
+        status: 'draft', resumeFromChunk: i,
       });
       onProgress(`Paused by user at section ${i + 1}/${chunks.length}`);
       throw new ExtractionPausedError('Paused by user');
@@ -118,7 +115,7 @@ export async function runPipeline(
       const entityCount = await countCompendiumEntities(slug);
       await saveCompendiumMeta(slug, {
         slug, name, source, createdAt, entityCount,
-        status: 'draft', tierKey, resumeFromChunk: i,
+        status: 'draft', resumeFromChunk: i,
       });
       logError('compendium/parser:runPipeline:paused', err);
       onProgress(`Paused at section ${i + 1}/${chunks.length} — ${(err as Error).message}`);
@@ -140,7 +137,7 @@ export async function runPipeline(
   const entityCount = await countCompendiumEntities(slug);
   await saveCompendiumMeta(slug, {
     slug, name, source, createdAt, entityCount,
-    status: 'complete', tierKey, resumeFromChunk: chunks.length,
+    status: 'complete', resumeFromChunk: chunks.length,
   });
 
   onProgress(

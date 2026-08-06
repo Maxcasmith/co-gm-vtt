@@ -1,0 +1,13 @@
+{
+  "slug": "the-hollow-chancel",
+  "name": "The Hollow Chancel",
+  "sourceType": "dungeon-crawl",
+  "savedAt": "2026-08-06T15:45:53.459Z",
+  "hasDungeon": true,
+  "entityCount": {
+    "npc": 0,
+    "creature": 0,
+    "faction": 0,
+    "location": 0
+  }
+}

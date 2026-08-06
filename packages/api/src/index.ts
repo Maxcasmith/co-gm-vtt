@@ -8,14 +8,15 @@ import { Weapon as WeaponClass, CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY, 
 import { configRouter } from './routes/config.ts';
 import { campaignsRouter } from './routes/campaigns.ts';
 import { compendiumRouter } from './routes/compendium.ts';
+import { adventuresRouter } from './routes/adventures.ts';
 import { readdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { getCharacter, updateCharacter, readChatLog, appendChatLog, listEntitySlugs, readEntity, writeEntity, getWorldMeta, getConfig, CAMPAIGNS_DIR, saveEncounter, loadEncounter, clearEncounter, readWorldState, writeWorldState, readCampaignFile, listCharacters, loadPartyAllies, savePartyAllies, saveDungeon, loadDungeon, clearDungeon, readManifest, writeManifest, emptyManifest, parseEntityLinks, readQuests, writeQuests, readNemeses, writeNemeses } from './storage.ts';
-import { generateDungeon, generateEncounterDungeon, describeDungeonState, toClientDungeon } from './dungeon/index.ts';
-import { getStoryProvider, getCombatProvider } from './providers/index.ts';
+import { getCharacter, updateCharacter, readChatLog, appendChatLog, listEntitySlugs, readEntity, writeEntity, getWorldMeta, getConfig, CAMPAIGNS_DIR, saveEncounter, loadEncounter, clearEncounter, readWorldState, writeWorldState, readCampaignFile, listCharacters, loadPartyAllies, savePartyAllies, saveDungeon, saveDungeonAscii, loadDungeon, clearDungeon, readManifest, writeManifest, emptyManifest, parseEntityLinks, readQuests, writeQuests, readNemeses, writeNemeses } from './storage.ts';
+import { generateDungeon, generateEncounterDungeon, describeDungeonState, describeDungeonGroundTruth, toClientDungeon } from './dungeon/index.ts';
+import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
 import { buildRecapPrompt } from './session-processor/prompts.ts';
-import { processSession, getDMResponse, ensureSessionQuests } from './session-processor/index.ts';
+import { processSession, getDMResponse, getDungeonExplorationResponse, ensureSessionQuests } from './session-processor/index.ts';
 import { generateEncounterEnemies, generateCombatFlavour, generateSpellSaveFlavour, resolveImprovisedAction, generateWorldState, tickWorldNarrative, evaluateNemesisCandidates } from './session-processor/imagePrompts.ts';
 import { mapsRouter } from './routes/maps.ts';
 import { adminRouter } from './routes/admin.ts';
@@ -34,6 +35,8 @@ app.use('/api/campaigns', campaignsRouter);
 app.use('/api/campaigns', mapsRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/compendium', compendiumRouter);
+app.use('/api/adventures', adventuresRouter);
+
 app.use('/api/spells', spellsRouter);
 
 const httpServer = createServer(app);
@@ -386,7 +389,7 @@ async function runEnemyAI(cid: string, actor: Participant): Promise<void> {
       });
 
       const cfg = await getConfig();
-      const cfgAdapter = getCombatProvider(cfg);
+      const cfgAdapter = getFeatureProvider(cfg, 'combatNarration');
       {
         const atkResult = {
           attackerName: actor.name, targetName: targetParticipant.name, targetId,
@@ -427,8 +430,8 @@ async function evaluateNemesisAfterCombat(cid: string): Promise<void> {
     if (!transcript.length) return;
 
     const config = await getConfig();
-    if (!config.tiers[config.tasks.combat].length) return;
-    const adapter = getCombatProvider(config);
+    if (!hasFeatureProvider(config, 'nemesisGeneration')) return;
+    const adapter = getFeatureProvider(config, 'nemesisGeneration');
 
     const [nemeses, characters] = await Promise.all([readNemeses(cid), listCharacters(cid)]);
 
@@ -696,8 +699,8 @@ async function generateAndBroadcastEnemies(campaignId: string, combatants: strin
   try {
     io.to(ROOM).emit('encounter:generating');
     const config = await getConfig();
-    const adapter = getCombatProvider(config);
-    if (!config.tiers[config.tasks.combat].length) console.warn('[encounter] no combat models configured, using fallback');
+    if (!hasFeatureProvider(config, 'encounterGeneration')) console.warn('[encounter] no combat models configured, using fallback');
+    const adapter = getFeatureProvider(config, 'encounterGeneration');
 
     const [messages, characters, nemeses, manifest] = await Promise.all([
       readChatLog(campaignId),
@@ -994,7 +997,7 @@ async function runRecap(campaignId: string): Promise<{ text: string; isFirstSess
   const entitySummaries = await buildEntitySummaries(campaignId);
   const meta = await getWorldMeta(campaignId);
   const config = await getConfig();
-  const provider = getStoryProvider(config);
+  const provider = getFeatureProvider(config, 'sessionRecap');
   const text = await provider.complete(buildRecapPrompt(lastSessionText, entitySummaries, meta?.name ?? 'Unknown World', isFirstSession));
   return { text, isFirstSession };
 }
@@ -1115,14 +1118,15 @@ async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
       }
     } else if (effect.type === 'dungeon_gen') {
       const config = await getConfig();
-      if (!config.tiers[config.tasks.combat].length) { console.warn('[dungeon] no models configured — skipping dungeon generation'); return; }
+      if (!hasFeatureProvider(config, 'dungeonGeneration')) { console.warn('[dungeon] no models configured — skipping dungeon generation'); return; }
       console.log(`[dungeon] generating: ${effect.name}`);
       io.to(ROOM).emit('dungeon:generating');
       const recentChat = await readChatLog(cid);
       const storyContext = recentChat.slice(-10).map(m => `[${m.senderName}]: ${m.text}`).join('\n');
-      const dungeon = await generateDungeon(effect.name, effect.dungeonType, getCombatProvider(config), storyContext);
+      const dungeon = await generateDungeon(effect.name, effect.dungeonType, getFeatureProvider(config, 'dungeonGeneration'), storyContext);
       dungeons.set(cid, dungeon);
       await saveDungeon(cid, dungeon);
+      await saveDungeonAscii(cid, dungeon);
       io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
       console.log(`[dungeon] generated and broadcast: ${dungeon.name} (${dungeon.rooms.length} rooms, ${dungeon.entities.length} entities)`);
     } else if (effect.type === 'dungeon_exit') {
@@ -1376,8 +1380,11 @@ function dispatchDMResponse(cid: string): void {
       const playerPositions = Object.fromEntries(
         Object.entries(tokenPositions.get(cid) ?? {}).filter(([name]) => connected.has(name))
       );
-      const dungeonState = dungeon ? describeDungeonState(dungeon, playerPositions) : '';
-      const response = await getDMResponse(cid, dungeonState);
+      // Dungeon loaded, combat not active → dedicated exploration pathway with the full floor plan.
+      // Otherwise (no dungeon, or combat narration between turns) → the general narrator, same as always.
+      const response = dungeon && !combatState.get(cid)
+        ? await getDungeonExplorationResponse(cid, describeDungeonGroundTruth(dungeon, playerPositions))
+        : await getDMResponse(cid, dungeon ? describeDungeonState(dungeon, playerPositions) : '');
       if (!response) return;
 
       if (response.includes('[COMBAT END]') && combatState.get(cid)) {
@@ -1388,8 +1395,8 @@ function dispatchDMResponse(cid: string): void {
 
       const rawResponse = response.replace(/\[COMBAT END\]/g, '').trim();
       const config = await getConfig();
-      const { text: cleanResponse, effects, speakingAs, checkRequests } = config.tiers[config.tasks.combat].length
-        ? await processVdmResponse(rawResponse, getCombatProvider(config))
+      const { text: cleanResponse, effects, speakingAs, checkRequests } = hasFeatureProvider(config, 'tagEffectProcessing')
+        ? await processVdmResponse(rawResponse, getFeatureProvider(config, 'tagEffectProcessing'))
         : { text: rawResponse, effects: [], speakingAs: undefined, checkRequests: [] };
 
       await applyEffects(cid, effects);
@@ -1564,8 +1571,7 @@ io.on('connection', (socket) => {
             void (async () => {
               try {
                 const config = await getConfig();
-                if (!config.tiers[config.tasks.combat].length) return;
-                const adapter = getCombatProvider(config);
+                if (!hasFeatureProvider(config, 'improvisedResolution')) return;
                 const recent = (await readChatLog(campaignId)).slice(-10).map(m => `[${m.senderName}]: ${m.text}`).join('\n');
                 const char = await listCharacters(campaignId).then(cs => cs.find(c => c.name === senderName));
                 const enemies = encounter!.enemies
@@ -1578,7 +1584,7 @@ io.on('connection', (socket) => {
                   message: text,
                   enemies,
                   recentChat: recent,
-                }, adapter);
+                }, getFeatureProvider(config, 'improvisedResolution'));
                 if (!result) return;
 
                 const dmMsg = { text: result.answer, senderName: 'Virtual DM', timestamp: Date.now() };
@@ -1630,11 +1636,13 @@ io.on('connection', (socket) => {
                     remainingHp: encounter!.findCreature(result.targetId)?.currentHp,
                     targetDead: encounter!.findCreature(result.targetId)?.isDead() ?? false,
                   };
-                  const flavour = await generateCombatFlavour(atkResult, adapter);
-                  if (flavour) {
-                    const flavourMsg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
-                    await appendChatLog(campaignId, flavourMsg);
-                    io.to(ROOM).emit('chat:message', flavourMsg);
+                  if (hasFeatureProvider(config, 'combatNarration')) {
+                    const flavour = await generateCombatFlavour(atkResult, getFeatureProvider(config, 'combatNarration'));
+                    if (flavour) {
+                      const flavourMsg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
+                      await appendChatLog(campaignId, flavourMsg);
+                      io.to(ROOM).emit('chat:message', flavourMsg);
+                    }
                   }
                 }
               } catch (err) { logError('index:improvisedAction', err); }
@@ -1798,8 +1806,8 @@ io.on('connection', (socket) => {
         void (async () => {
           try {
             const config = await getConfig();
-            if (!config.tiers[config.tasks.combat].length) return;
-            const flavour = await generateCombatFlavour(atkResult, getCombatProvider(config));
+            if (!hasFeatureProvider(config, 'combatNarration')) return;
+            const flavour = await generateCombatFlavour(atkResult, getFeatureProvider(config, 'combatNarration'));
             if (!flavour) return;
             const msg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
             await appendChatLog(cid, msg);
@@ -1865,8 +1873,8 @@ io.on('connection', (socket) => {
         void (async () => {
           try {
             const config = await getConfig();
-            if (!config.tiers[config.tasks.combat].length) return;
-            const flavour = await generateCombatFlavour(atkResult, getCombatProvider(config));
+            if (!hasFeatureProvider(config, 'combatNarration')) return;
+            const flavour = await generateCombatFlavour(atkResult, getFeatureProvider(config, 'combatNarration'));
             if (!flavour) return;
             const msg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
             await appendChatLog(cid, msg);
@@ -2011,8 +2019,8 @@ io.on('connection', (socket) => {
           void (async () => {
             try {
               const config = await getConfig();
-              if (!config.tiers[config.tasks.combat].length) return;
-              const flavour = await generateSpellSaveFlavour(result, getCombatProvider(config));
+              if (!hasFeatureProvider(config, 'combatNarration')) return;
+              const flavour = await generateSpellSaveFlavour(result, getFeatureProvider(config, 'combatNarration'));
               if (!flavour) return;
               const msg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
               await appendChatLog(cid, msg);

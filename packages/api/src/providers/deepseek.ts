@@ -4,7 +4,7 @@ const API_BASE = 'https://api.deepseek.com/v1';
 
 export interface ChatMessage { role: 'user' | 'assistant'; content: string }
 
-export async function deepseekChat(system: string, messages: ChatMessage[], apiKey: string, model: string): Promise<string> {
+export async function deepseekChat(system: string, messages: ChatMessage[], apiKey: string, model: string, timeoutSeconds?: number): Promise<string> {
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -13,6 +13,7 @@ export async function deepseekChat(system: string, messages: ChatMessage[], apiK
       max_tokens: 1024,
       messages: [{ role: 'system', content: system }, ...messages],
     }),
+    ...(timeoutSeconds ? { signal: AbortSignal.timeout(timeoutSeconds * 1000) } : {}),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
@@ -22,7 +23,7 @@ export async function deepseekChat(system: string, messages: ChatMessage[], apiK
   return data.choices[0]?.message.content ?? '';
 }
 
-export async function deepseekComplete(prompt: string, apiKey: string, model: string): Promise<string> {
+export async function deepseekComplete(prompt: string, apiKey: string, model: string, timeoutSeconds?: number): Promise<string> {
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -31,6 +32,7 @@ export async function deepseekComplete(prompt: string, apiKey: string, model: st
       max_tokens: 8000,
       messages: [{ role: 'user', content: prompt }],
     }),
+    ...(timeoutSeconds ? { signal: AbortSignal.timeout(timeoutSeconds * 1000) } : {}),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
@@ -45,6 +47,7 @@ export async function deepseekStream(
   apiKey: string,
   model: string,
   onToken: (token: string) => void,
+  timeoutSeconds?: number,
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
@@ -56,6 +59,7 @@ export async function deepseekStream(
       stream: true,
       messages: [{ role: 'user', content: prompt }],
     }),
+    ...(timeoutSeconds ? { signal: AbortSignal.timeout(timeoutSeconds * 1000) } : {}),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
@@ -78,9 +82,12 @@ export async function deepseekStream(
       const data = line.slice(6);
       if (data === '[DONE]') continue;
       try {
-        const evt = JSON.parse(data) as { choices: { delta?: { content?: string } }[] };
-        const token = evt.choices[0]?.delta?.content;
-        if (token) { full += token; onToken(token); }
+        const evt = JSON.parse(data) as { choices: { delta?: { content?: string; reasoning_content?: string } }[] };
+        const delta = evt.choices[0]?.delta;
+        // R1-style models stream thinking under reasoning_content before the real answer starts —
+        // surface it to onToken (visible progress) but never fold it into `full` (parsed downstream).
+        if (delta?.reasoning_content) onToken(delta.reasoning_content);
+        if (delta?.content) { full += delta.content; onToken(delta.content); }
       } catch (err) { logError('providers/deepseek:deepseekStream', err); }
     }
   }

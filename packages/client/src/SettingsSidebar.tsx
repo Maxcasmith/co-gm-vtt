@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AppConfig, StoryProvider, ImageModel, NarrationModel } from 'shared';
 import { previewVoice } from './narration.ts';
-import ConfigureModelChainModal from './ConfigureModelChainModal.tsx';
+import ConfigureAiWorkflowsModal from './ConfigureAiWorkflowsModal.tsx';
 
 interface Props {
   open: boolean;
@@ -80,8 +80,7 @@ const OPENAI_VOICES = [
 ];
 
 const DEFAULT_CONFIG: AppConfig = {
-  tiers: { light: [{ provider: 'openai', model: 'gpt-4o-mini' }], thinking: [{ provider: 'claude', model: 'claude-sonnet-4-6' }] },
-  tasks: { story: 'thinking', combat: 'light' },
+  workflows: [],
   apiKeys: { openai: '', anthropic: '', deepseek: '', kimi: '' },
   image: { model: 'gpt-image-1', generateMaps: true, generateWorldMap: false },
   narration: { model: 'none', voice: 'onyx' },
@@ -94,7 +93,7 @@ export default function SettingsSidebar({ open, onClose }: Props) {
   const [saved, setSaved] = useState<AppConfig>(DEFAULT_CONFIG);
   const [imageStatus, setImageStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [narrationPreviewing, setNarrationPreviewing] = useState(false);
-  const [chainModalTier, setChainModalTier] = useState<'thinking' | 'light' | null>(null);
+  const [workflowsModalOpen, setWorkflowsModalOpen] = useState(false);
   const discardRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -156,11 +155,6 @@ export default function SettingsSidebar({ open, onClose }: Props) {
     setNarrationPreviewing(false);
   }
 
-  function chainSummary(chain: AppConfig['tiers']['thinking']): string {
-    if (!chain.length) return 'No models configured';
-    return chain.map(n => STORY_PROVIDERS.find(p => p.id === n.provider)?.models.find(m => m.id === n.model)?.label ?? n.model).join(' → ');
-  }
-
   return (
     <>
       {open && <div className="sidebar-backdrop" onClick={handleCancel} />}
@@ -217,19 +211,9 @@ export default function SettingsSidebar({ open, onClose }: Props) {
           <div className="settings-divider" />
 
           <section className="settings-section">
-            <h3 className="settings-section-title">Thinking</h3>
-            <p className="settings-section-note">Used for story generation, DM responses, and world building — tasks that need reasoning and creativity.</p>
-            <p className="settings-chain-summary">{chainSummary(config.tiers.thinking)}</p>
-            <button className="btn-secondary" onClick={() => setChainModalTier('thinking')}>Configure Thinking</button>
-          </section>
-
-          <div className="settings-divider" />
-
-          <section className="settings-section">
-            <h3 className="settings-section-title">Light</h3>
-            <p className="settings-section-note">Used for combat AI, item structuring, and other fast structured tasks. A cheaper model works well here.</p>
-            <p className="settings-chain-summary">{chainSummary(config.tiers.light)}</p>
-            <button className="btn-secondary" onClick={() => setChainModalTier('light')}>Configure Light</button>
+            <h3 className="settings-section-title">AI Workflows</h3>
+            <p className="settings-section-note">Configure named workflows, each with its own model chain, and assign which AI features each one handles.</p>
+            <button className="btn-secondary" onClick={() => setWorkflowsModalOpen(true)}>Configure AI Workflows</button>
           </section>
 
           <div className="settings-divider" />
@@ -295,40 +279,6 @@ export default function SettingsSidebar({ open, onClose }: Props) {
           <div className="settings-divider" />
 
           <section className="settings-section">
-            <h3 className="settings-section-title">Story Generation</h3>
-            <label className="modal-label">
-              Model tier
-              <select
-                className="modal-select"
-                value={config.tasks.story}
-                onChange={e => setConfig(c => ({ ...c, tasks: { ...c.tasks, story: e.target.value as 'light' | 'thinking' } }))}
-              >
-                <option value="thinking">Thinking</option>
-                <option value="light">Light</option>
-              </select>
-            </label>
-          </section>
-
-          <div className="settings-divider" />
-
-          <section className="settings-section">
-            <h3 className="settings-section-title">Combat AI</h3>
-            <label className="modal-label">
-              Model tier
-              <select
-                className="modal-select"
-                value={config.tasks.combat}
-                onChange={e => setConfig(c => ({ ...c, tasks: { ...c.tasks, combat: e.target.value as 'light' | 'thinking' } }))}
-              >
-                <option value="light">Light</option>
-                <option value="thinking">Thinking</option>
-              </select>
-            </label>
-          </section>
-
-          <div className="settings-divider" />
-
-          <section className="settings-section">
             <h3 className="settings-section-title">Narration</h3>
             <label className="modal-label">
               Voice Provider
@@ -381,14 +331,13 @@ export default function SettingsSidebar({ open, onClose }: Props) {
         </div>
       </dialog>
 
-      <ConfigureModelChainModal
-        open={chainModalTier !== null}
-        tierLabel={chainModalTier === 'light' ? 'Light' : 'Thinking'}
-        chain={chainModalTier ? config.tiers[chainModalTier] : []}
-        onCancel={() => setChainModalTier(null)}
-        onConfirm={newChain => {
-          if (chainModalTier) setConfig(c => ({ ...c, tiers: { ...c.tiers, [chainModalTier]: newChain } }));
-          setChainModalTier(null);
+      <ConfigureAiWorkflowsModal
+        open={workflowsModalOpen}
+        workflows={config.workflows}
+        onCancel={() => setWorkflowsModalOpen(false)}
+        onSave={newWorkflows => {
+          setConfig(c => ({ ...c, workflows: newWorkflows }));
+          setWorkflowsModalOpen(false);
         }}
       />
 

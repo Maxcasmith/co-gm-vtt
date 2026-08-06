@@ -5,7 +5,7 @@ const ANTHROPIC_VERSION = '2023-06-01';
 
 export interface ChatMessage { role: 'user' | 'assistant'; content: string }
 
-export async function claudeChat(system: string, messages: ChatMessage[], apiKey: string, model: string): Promise<string> {
+export async function claudeChat(system: string, messages: ChatMessage[], apiKey: string, model: string, timeoutSeconds?: number): Promise<string> {
   const res = await fetch(`${API_BASE}/messages`, {
     method: 'POST',
     headers: {
@@ -14,7 +14,7 @@ export async function claudeChat(system: string, messages: ChatMessage[], apiKey
       'anthropic-version': ANTHROPIC_VERSION,
     },
     body: JSON.stringify({ model, max_tokens: 1024, system, messages }),
-    signal: AbortSignal.timeout(60000),
+    ...(timeoutSeconds ? { signal: AbortSignal.timeout(timeoutSeconds * 1000) } : {}),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
@@ -24,7 +24,7 @@ export async function claudeChat(system: string, messages: ChatMessage[], apiKey
   return data.content[0]?.text ?? '';
 }
 
-export async function claudeComplete(prompt: string, apiKey: string, model: string): Promise<string> {
+export async function claudeComplete(prompt: string, apiKey: string, model: string, timeoutSeconds?: number): Promise<string> {
   const res = await fetch(`${API_BASE}/messages`, {
     method: 'POST',
     headers: {
@@ -37,7 +37,7 @@ export async function claudeComplete(prompt: string, apiKey: string, model: stri
       max_tokens: 8000,
       messages: [{ role: 'user', content: prompt }],
     }),
-    signal: AbortSignal.timeout(120000),
+    ...(timeoutSeconds ? { signal: AbortSignal.timeout(timeoutSeconds * 1000) } : {}),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
@@ -52,6 +52,7 @@ export async function claudeStream(
   apiKey: string,
   model: string,
   onToken: (token: string) => void,
+  timeoutSeconds?: number,
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/messages`, {
     method: 'POST',
@@ -66,7 +67,7 @@ export async function claudeStream(
       stream: true,
       messages: [{ role: 'user', content: prompt }],
     }),
-    signal: AbortSignal.timeout(180000),
+    ...(timeoutSeconds ? { signal: AbortSignal.timeout(timeoutSeconds * 1000) } : {}),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };

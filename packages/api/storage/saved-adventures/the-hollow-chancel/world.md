@@ -1,0 +1,3 @@
+# The Hollow Chancel
+
+The bells of the old hilltop church have been ringing at night, though the bell tower collapsed years ago and the parish below has buried no one in months. The party has been hired to descend through the chapel's sealed crypt stairs and find the source, after every villager who went down alone came back changed — pale, quiet, and unable to recall the Lord's Prayer. Rumor says the catacombs beneath the nave predate the church itself, older tunnels the founders built over rather than filled in, and that something long entombed has learned to answer the bell. They go down at dusk with lanterns, silver, and a writ of absolution, knowing the congregation will not hold the doors for them after dark.
