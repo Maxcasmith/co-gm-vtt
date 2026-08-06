@@ -23,7 +23,7 @@ function schoolManifest(): DungeonManifest {
     // dangling reference — must be dropped without crashing
     { name: 'Rooftop', size: 'small', connectsTo: ['Nonexistent Room'] },
   ];
-  return { rooms, structureType: 'building' };
+  return { rooms, structureType: 'building', theme: 'medieval', goals: [] };
 }
 
 function overlaps(a: { x: number; y: number; width: number; height: number }, b: typeof a): boolean {
@@ -32,7 +32,7 @@ function overlaps(a: { x: number; y: number; width: number; height: number }, b:
 
 function reachableFrom(cells: number[][], sx: number, sy: number, width: number, height: number): Set<string> {
   const seen = new Set<string>();
-  const stack = [[sx, sy]];
+  const stack: [number, number][] = [[sx, sy]];
   while (stack.length) {
     const [x, y] = stack.pop()!;
     const key = `${x},${y}`;

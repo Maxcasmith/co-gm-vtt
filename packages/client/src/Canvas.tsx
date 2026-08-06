@@ -3,7 +3,7 @@ import type { Player, EnemyStatBlock, Spell, Dungeon, Character } from 'shared';
 import { parseRangeFeet, hasLineOfSight, statMod, CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY } from 'shared';
 import { dispatch, on } from './events.ts';
 import type { TargetingStartPayload } from './events.ts';
-import { paletteFor } from './dungeonThemes.ts';
+import { texturesFor, getImage, FLOOR_FALLBACK_COLOR } from './dungeonThemes.ts';
 import './app.css';
 
 const CELL = 64;
@@ -303,6 +303,10 @@ export default function Canvas({ player, characterId, character, connected, show
   const ref            = useRef<HTMLCanvasElement>(null);
   const tokenImgCache  = useRef<Record<string, HTMLImageElement>>({});
   const [tokenCacheVer, setTokenCacheVer] = useState(0);
+
+  // Per-cell floor texture variant, picked once and cached so it doesn't re-randomize (flicker)
+  // every animation frame. Cleared when a different dungeon loads.
+  const floorVariantRef = useRef<{ dungeonId: string | null; picks: Map<string, number> }>({ dungeonId: null, picks: new Map() });
 
   // Fog-of-war: cells visible to my own token — square radius + wall-blocked line-of-sight.
   // Recomputed only when the dungeon or my own position changes, not per animation frame.
@@ -640,10 +644,11 @@ export default function Canvas({ player, characterId, character, connected, show
         ctx.fillStyle = DUNGEON_BG;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Base floor (covers corridors + any cell not owned by a themed room), then per-room
-        // theme color painted over its own floor cells — irregular room shapes mean the bounding
-        // box can include cells that aren't actually walkable, so this stays cell-checked.
-        ctx.fillStyle = paletteFor(undefined).floor;
+        // Base floor fallback (covers corridors + any cell not owned by a room, and shows through
+        // until a room's texture finishes decoding), then per-room floor tiles drawn over their
+        // own cells — irregular room shapes mean the bounding box can include cells that aren't
+        // actually walkable, so this stays cell-checked.
+        ctx.fillStyle = FLOOR_FALLBACK_COLOR;
         for (let row = 0; row < dungeon.height; row++) {
           for (let col = 0; col < dungeon.width; col++) {
             if (dungeon.cells[row]?.[col] === 1) {
@@ -651,12 +656,26 @@ export default function Canvas({ player, characterId, character, connected, show
             }
           }
         }
+        if (floorVariantRef.current.dungeonId !== dungeon.id) {
+          floorVariantRef.current = { dungeonId: dungeon.id, picks: new Map() };
+        }
+        const variantPicks = floorVariantRef.current.picks;
         for (const room of dungeon.rooms) {
-          if (!room.theme || room.theme === 'stone') continue;
-          ctx.fillStyle = paletteFor(room.theme).floor;
+          const variants = texturesFor(dungeon.theme, room.material, dungeon.structureType);
+          if (!variants.length) continue;
           for (let row = room.y; row < room.y + room.height; row++) {
             for (let col = room.x; col < room.x + room.width; col++) {
-              if (dungeon.cells[row]?.[col] === 1) ctx.fillRect(col * cellSz + panX, row * cellSz + panY, cellSz, cellSz);
+              if (dungeon.cells[row]?.[col] !== 1) continue;
+              const key = `${row},${col}`;
+              let variantIdx = variantPicks.get(key);
+              if (variantIdx === undefined || variantIdx >= variants.length) {
+                variantIdx = Math.floor(Math.random() * variants.length);
+                variantPicks.set(key, variantIdx);
+              }
+              const img = getImage(variants[variantIdx]!);
+              if (img.complete) {
+                ctx.drawImage(img, col * cellSz + panX, row * cellSz + panY, cellSz, cellSz);
+              }
             }
           }
         }
@@ -1125,7 +1144,7 @@ export default function Canvas({ player, characterId, character, connected, show
             const ppos = tokenPositions[name];
             if (ppos && inArea(area, origin.originGx, origin.originGy, origin.dirGx, origin.dirGy, ppos.gx + 0.5, ppos.gy + 0.5, origin.isSelf)) targetIds.push(name);
           }
-          dispatch('vtt:combat:spell:cast', { casterName: player, casterId: targetingNow.casterId, spell: targetingNow.spell, slotLevel: targetingNow.spell.level, targetIds });
+          dispatch('vtt:combat:spell:cast', { casterName: player, casterId: targetingNow.casterId, spell: targetingNow.spell, slotLevel: targetingNow.slotLevel ?? targetingNow.spell.level, targetIds });
           e.preventDefault();
           return;
         }
@@ -1144,9 +1163,9 @@ export default function Canvas({ player, characterId, character, connected, show
               if (targetingNow.kind === 'weapon') {
                 dispatch('vtt:combat:attack', { attackerName: player, attackerId: characterId, targetId: enemy.id, targetName: enemy.name, weapon: targetingNow.weapon, ...(targetingNow.bonusSpell ? { bonusSpell: targetingNow.bonusSpell } : {}) });
               } else if (targetingNow.spell.combat?.resolution === 'attack') {
-                dispatch('vtt:combat:spell:attack', { casterName: player, casterId: targetingNow.casterId, targetId: enemy.id, targetName: enemy.name, spell: targetingNow.spell, slotLevel: targetingNow.spell.level });
+                dispatch('vtt:combat:spell:attack', { casterName: player, casterId: targetingNow.casterId, targetId: enemy.id, targetName: enemy.name, spell: targetingNow.spell, slotLevel: targetingNow.slotLevel ?? targetingNow.spell.level });
               } else {
-                dispatch('vtt:combat:spell:cast', { casterName: player, casterId: targetingNow.casterId, spell: targetingNow.spell, slotLevel: targetingNow.spell.level, targetIds: [enemy.id] });
+                dispatch('vtt:combat:spell:cast', { casterName: player, casterId: targetingNow.casterId, spell: targetingNow.spell, slotLevel: targetingNow.slotLevel ?? targetingNow.spell.level, targetIds: [enemy.id] });
               }
               e.preventDefault();
               return;

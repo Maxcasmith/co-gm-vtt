@@ -3,7 +3,7 @@ import type { Character, Weapon } from 'shared';
 import { actionCostFromCastingTime, isWeapon } from 'shared';
 import { dispatch, on } from './events.ts';
 import type { TargetingStartPayload } from './events.ts';
-import emptyFrameIcon from './assets/Icon-Frame-Blue.jpg';
+import emptyFrameIcon from './assets/icons/Icon-Frame-Blue.jpg';
 import './app.css';
 
 interface Props {

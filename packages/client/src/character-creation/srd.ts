@@ -1,12 +1,12 @@
 import { CLASS_SAVING_THROWS as CLASS_SAVING_THROWS_SHARED } from 'shared';
-import swordIcon from '../assets/Icon-Sword-Common.jpg';
-import shieldIcon from '../assets/Icon-Frame-shield.jpg';
-import bowIcon from '../assets/Icon-Frame-bow.jpg';
-import leatherArmorIcon from '../assets/Icon-Frame-armor-leather.jpg';
-import handaxeIcon from '../assets/Icon-Frame-handaxe.jpg';
-import potionIcon from '../assets/Icon-Frame-potion-of-healing.jpg';
-import arrowIcon from '../assets/Icon-Frame-arrow.jpg';
-import whipIcon from '../assets/Icon-Frame-whip.jpg';
+import swordIcon from '../assets/icons/Icon-Sword-Common.jpg';
+import shieldIcon from '../assets/icons/Icon-Frame-shield.jpg';
+import bowIcon from '../assets/icons/Icon-Frame-bow.jpg';
+import leatherArmorIcon from '../assets/icons/Icon-Frame-armor-leather.jpg';
+import handaxeIcon from '../assets/icons/Icon-Frame-handaxe.jpg';
+import potionIcon from '../assets/icons/Icon-Frame-potion-of-healing.jpg';
+import arrowIcon from '../assets/icons/Icon-Frame-arrow.jpg';
+import whipIcon from '../assets/icons/Icon-Frame-whip.jpg';
 
 export const SPECIES = [
   'Aasimar', 'Dragonborn', 'Dwarf', 'Elf', 'Gnome', 'Goliath',

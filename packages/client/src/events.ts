@@ -35,7 +35,7 @@ export interface EncounterReadyPayload { enemies: EnemyStatBlock[] }
 export interface CombatStatePayload { active: boolean }
 export type TargetingStartPayload =
   | { kind: 'weapon'; weapon: Weapon; actionType: 'action' | 'bonusAction' | 'reaction'; bonusSpell?: Spell }
-  | { kind: 'spell'; spell: Spell; casterId: string; actionType: 'action' | 'bonusAction' | 'reaction' };
+  | { kind: 'spell'; spell: Spell; casterId: string; actionType: 'action' | 'bonusAction' | 'reaction'; slotLevel?: number };
 export type TargetingCancelPayload = Record<string, never>;
 export interface CombatAttackPayload { attackerName: string; attackerId: string; targetId: string; targetName: string; weapon: Weapon; bonusSpell?: Spell }
 export interface CombatAttackResultPayload extends AttackResult {}
@@ -46,7 +46,8 @@ export interface CombatSpellSaveResultPayload extends SpellSaveResult {}
 export interface CreatureUpdatePayload { id: string; currentHp: number; maxHp: number; effects: string[] }
 export interface CombatVictoryPayload extends CombatVictory {}
 export interface PlayerDamagePayload { characterId: string; characterName: string; damage: number; currentHp: number; maxHp: number }
-export interface RestResultPayload { currentHp: number; maxHp: number; hpGained?: number; worldEvents?: string }
+export interface PlayerSlotsPayload { characterId: string; currentSpellSlots1: number; maxSpellSlots1: number }
+export interface RestResultPayload { currentHp: number; maxHp: number; hpGained?: number; currentSpellSlots1?: number; maxSpellSlots1?: number; worldEvents?: string }
 export interface DeathSavePayload { characterName: string; roll: number; isNatural20: boolean; isNatural1: boolean; success: boolean; successes: number; failures: number; stable: boolean; dead: boolean }
 export type CombatDefeatPayload = Record<string, never>;
 export interface PlayerDeadPayload { characterId: string; characterName: string }
@@ -164,6 +165,7 @@ export interface VTTEventMap {
   'vtt:creature:update':        CreatureUpdatePayload;
   'vtt:combat:victory':         CombatVictoryPayload;
   'vtt:combat:player:damage':   PlayerDamagePayload;
+  'vtt:combat:player:slots':    PlayerSlotsPayload;
   'vtt:rest:result':            RestResultPayload;
   'vtt:combat:death:save':      DeathSavePayload;
   'vtt:combat:defeat':          CombatDefeatPayload;

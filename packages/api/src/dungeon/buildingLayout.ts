@@ -238,7 +238,7 @@ export function generateBuildingLayout(manifest: DungeonManifest, opts?: { width
       width: rect.w,
       height: rect.h,
       ...(manifestRoom.role ? { role: manifestRoom.role } : {}),
-      ...(manifestRoom.theme ? { theme: manifestRoom.theme } : {}),
+      ...(manifestRoom.material ? { material: manifestRoom.material } : {}),
       ...(manifestRoom.isHallway ? { isHallway: true } : {}),
       ...(connections.length ? { connectsTo: connections } : {}),
     });

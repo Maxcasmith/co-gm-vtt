@@ -40,20 +40,6 @@ function findFreeCell(room: DungeonRoom, targetX: number, targetY: number, occup
   return null;
 }
 
-const FALLBACK_GUARD: EnemyStatBlock = {
-  id: 'fallback-guard', name: 'Guard', cr: 0.25, hp: 11, ac: 12, speed: 30,
-  stats: { str: 13, dex: 12, con: 12, int: 10, wis: 10, cha: 10 },
-  attacks: [{ name: 'Spear', bonus: 3, damage: '1d6+1' }],
-  creatureType: 'Humanoid',
-};
-
-const FALLBACK_BOSS: EnemyStatBlock = {
-  id: 'fallback-boss', name: 'Boss', cr: 1, hp: 27, ac: 14, speed: 30,
-  stats: { str: 15, dex: 13, con: 14, int: 10, wis: 11, cha: 12 },
-  attacks: [{ name: 'Greatsword', bonus: 5, damage: '2d6+3' }],
-  creatureType: 'Humanoid',
-};
-
 export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, cells: number[][]): DungeonEntity[] {
   if (rooms.length === 0) return [];
 
@@ -61,9 +47,9 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
   const manifestRooms = manifest.rooms;
   const occupied = new Set<string>();
 
-  // Largest room = boss; smallest third = loot caches; rest = patrols (only used when the manifest itself is silent on a room)
+  // Smallest third = loot caches. Everything else is empty unless the manifest itself put
+  // something there — no invented filler creature/boss for a room the manifest left alone.
   const byArea = [...rooms].sort((a, b) => area(b) - area(a));
-  const bossRoom = byArea[0]!;
   const lootRooms = new Set(byArea.slice(Math.floor(byArea.length * 0.65)).map(r => r.id));
 
   const startRoom = rooms.find(r => r.role === 'entrance') ?? rooms[0]!;
@@ -81,13 +67,12 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
 
     const isLoot = lootRooms.has(room.id);
     const creatureHint = hints?.creatures?.[0];
-    const fallbackCreature = room.id === bossRoom.id ? FALLBACK_BOSS : FALLBACK_GUARD;
 
-    if (creatureHint || !isLoot) {
+    if (creatureHint) {
       const cell = findFreeCell(room, cx, cy, occupied, cells);
       if (cell) {
         occupied.add(key(cell.x, cell.y));
-        const statBlock = { ...(creatureHint ?? fallbackCreature), id: randomUUID() };
+        const statBlock = { ...creatureHint, id: randomUUID() };
         entities.push({ id: statBlock.id, type: 'creature', x: cell.x, y: cell.y, name: statBlock.name, discovered: false, statBlock });
       }
     }

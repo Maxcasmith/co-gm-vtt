@@ -14,6 +14,8 @@ interface RestResult {
   hpGained?: number;
   currentHp: number;
   maxHp: number;
+  currentSpellSlots1?: number;
+  maxSpellSlots1?: number;
   worldEvents?: string;
 }
 
@@ -60,7 +62,11 @@ export default function RestModal({ character }: Props) {
       });
       const data = await r.json() as RestResult;
       setResult(data);
-      dispatch('vtt:rest:result', { currentHp: data.currentHp, maxHp: data.maxHp, hpGained: data.hpGained, worldEvents: data.worldEvents });
+      dispatch('vtt:rest:result', {
+        currentHp: data.currentHp, maxHp: data.maxHp, hpGained: data.hpGained,
+        currentSpellSlots1: data.currentSpellSlots1, maxSpellSlots1: data.maxSpellSlots1,
+        worldEvents: data.worldEvents,
+      });
     } catch {
       setOpen(false);
     } finally {
@@ -93,6 +99,11 @@ export default function RestModal({ character }: Props) {
           )}
           {restType === 'long' && (
             <p className="rest-result-gained">Fully restored</p>
+          )}
+          {(result.maxSpellSlots1 ?? 0) > 0 && (
+            <p className="rest-result-gained">
+              Spell slots: {result.currentSpellSlots1} / {result.maxSpellSlots1}
+            </p>
           )}
           {result.worldEvents && (
             <div className="rest-world-events">

@@ -16,19 +16,13 @@ export interface CheckRequest {
   type: "check" | "save";
 }
 
-export const DUNGEON_THEMES = [
-  "stone",
-  "church",
-  "graveyard",
-  "prison",
-  "kitchen",
-  "library",
-  "armory",
-  "throne",
-  "cave",
-  "laboratory",
-] as const;
-export type DungeonTheme = (typeof DUNGEON_THEMES)[number];
+export const DUNGEON_MATERIALS = ["grass", "wood", "stone"] as const;
+export type DungeonMaterial = (typeof DUNGEON_MATERIALS)[number];
+
+export const DUNGEON_STYLE_PACKS = ["high_fantasy", "medieval", "dark"] as const;
+export type DungeonStylePack = (typeof DUNGEON_STYLE_PACKS)[number];
+
+export type DungeonStructureType = "building" | "organic";
 
 export interface DungeonRoom {
   id: string;
@@ -38,7 +32,7 @@ export interface DungeonRoom {
   width: number;
   height: number;
   role?: "entrance" | "exit";
-  theme?: DungeonTheme;
+  material?: DungeonMaterial;
   isHallway?: boolean;
   connectsTo?: string[];
 }
@@ -64,6 +58,9 @@ export interface Dungeon {
   entities: DungeonEntity[];
   positions?: Record<string, { gx: number; gy: number }>;
   arena?: boolean;
+  goals?: string[];
+  theme?: DungeonStylePack;
+  structureType?: DungeonStructureType;
 }
 
 // Bresenham line-of-sight — a wall cell (anything but floor, `1`) anywhere between viewer and
@@ -166,6 +163,7 @@ export interface EnemyStatBlock {
   xp?: number;
   level?: number;
   creatureType?: CreatureType;
+  isBoss?: boolean;
 }
 
 export interface TurnOrderEntry {
@@ -249,6 +247,11 @@ export interface ServerToClientEvents {
     damage: number;
     currentHp: number;
     maxHp: number;
+  }) => void;
+  "combat:player:slots": (data: {
+    characterId: string;
+    currentSpellSlots1: number;
+    maxSpellSlots1: number;
   }) => void;
   "consumable:heal:result": (data: {
     characterId: string;
@@ -696,6 +699,8 @@ export interface Character {
   proficiencyBonus?: number;
   maxHp?: number;
   currentHp?: number;
+  maxSpellSlots1?: number;
+  currentSpellSlots1?: number;
   spells?: string[]; // learned spell names
   equipment?: {
     head?: string;
@@ -789,6 +794,14 @@ export interface Spell {
   combat?: SpellCombatMeta; // GM/engine-only metadata; not for player-facing display
 }
 
+// Level-1 max spell slots: Warlock's Pact Magic starts with 1, every other spellcasting
+// class with the Spellcasting feat starts with 2. No slots beyond level 1 tracked yet —
+// no class has spells-known growth past level 1 in this app either (see CLASS_SPELL_ALLOWANCE).
+export function spellSlotsForClass(className: string): number {
+  if (className === "Warlock") return 1;
+  return className in CLASS_SPELLCASTING_ABILITY ? 2 : 0;
+}
+
 export const CLASS_SPELLCASTING_ABILITY: Record<string, AbilityKey> = {
   Artificer: "int",
   Bard: "cha",
@@ -841,19 +854,20 @@ export function parseRangeFeet(range: string): number {
 }
 
 /**
- * Resolves a Scaling to the dice formula to roll for a caster's level.
- * No spell-slot upcast support yet (no slot-tracking system exists) — spell-slot
- * mode always returns base; cantrip mode picks the highest tier the caster qualifies for.
+ * Resolves a Scaling to the dice formula to roll. Cantrip mode picks the highest tier
+ * the caster's character level qualifies for; spell-slot mode picks the highest tier
+ * the slot it was cast at qualifies for (i.e. upcasting).
  */
 export function resolveSpellDamageDice(
   scaling: Scaling | undefined,
   casterLevel: number,
+  slotLevel: number,
 ): string | undefined {
   if (!scaling) return undefined;
-  if (scaling.mode !== "cantrip") return scaling.base;
+  const level = scaling.mode === "cantrip" ? casterLevel : slotLevel;
   let value = scaling.base;
   for (const tier of scaling.tiers) {
-    if (casterLevel >= tier.atLevel) value = tier.value;
+    if (level >= tier.atLevel) value = tier.value;
   }
   return value;
 }

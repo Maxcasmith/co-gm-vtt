@@ -4,7 +4,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import type { ServerToClientEvents, ClientToServerEvents, Player, CharacterStats, TurnOrderEntry, Character, Weapon, Spell, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, EnemyStatBlock, NemesisRecord, Dungeon, DungeonEntity, EffectSpec, CreatureType } from 'shared';
 import { hasLineOfSight, resolveForcedMovement } from 'shared';
-import { Weapon as WeaponClass, CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, resolveSpellDamageDice, parseRangeFeet, effectApplies, calcAC, isWeapon, isArmor, isAmmunition } from 'shared';
+import { Weapon as WeaponClass, CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, resolveSpellDamageDice, spellSlotsForClass, parseRangeFeet, effectApplies, calcAC, isWeapon, isArmor, isAmmunition } from 'shared';
 import { configRouter } from './routes/config.ts';
 import { campaignsRouter } from './routes/campaigns.ts';
 import { compendiumRouter } from './routes/compendium.ts';
@@ -13,7 +13,7 @@ import { readdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { getCharacter, updateCharacter, readChatLog, appendChatLog, listEntitySlugs, readEntity, writeEntity, getWorldMeta, getConfig, CAMPAIGNS_DIR, saveEncounter, loadEncounter, clearEncounter, readWorldState, writeWorldState, readCampaignFile, listCharacters, loadPartyAllies, savePartyAllies, saveDungeon, saveDungeonAscii, loadDungeon, clearDungeon, readManifest, writeManifest, emptyManifest, parseEntityLinks, readQuests, writeQuests, readNemeses, writeNemeses } from './storage.ts';
-import { generateDungeon, generateEncounterDungeon, describeDungeonState, describeDungeonGroundTruth, toClientDungeon } from './dungeon/index.ts';
+import { generateDungeon, generateEncounterDungeon, describeDungeonState, describeDungeonGroundTruth, toClientDungeon, buildDungeonQuests } from './dungeon/index.ts';
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
 import { buildRecapPrompt } from './session-processor/prompts.ts';
 import { processSession, getDMResponse, getDungeonExplorationResponse, ensureSessionQuests } from './session-processor/index.ts';
@@ -70,7 +70,7 @@ const dungeons = new Map<string, Dungeon>(); // in-memory mirror of saveDungeon/
 // cid → casterId → self-buff spell (e.g. Divine Smite) queued to trigger on that caster's next
 // weapon hit. Effects are stored unresolved (not pre-rolled) so appliesIf (e.g. vs Fiend/Undead)
 // can be evaluated against whichever creature actually gets hit.
-const pendingWeaponBonuses = new Map<string, Record<string, { spellName: string; effects: EffectSpec[]; casterLevel: number }>>();
+const pendingWeaponBonuses = new Map<string, Record<string, { spellName: string; effects: EffectSpec[]; casterLevel: number; slotLevel: number }>>();
 const microDungeons = new Set<string>(); // cids whose current dungeon is an ephemeral combat arena — discarded on victory instead of continued
 
 // Every dungeon:loaded broadcast must carry live positions, not just what was last saved to disk —
@@ -131,6 +131,7 @@ function rollApplicableDamage(
   effects: EffectSpec[] | undefined,
   targetType: CreatureType,
   casterLevel: number,
+  slotLevel: number,
 ): { total: number; formula: string; damageType: string | undefined } | undefined {
   const applicable = (effects ?? []).filter(e => e.type === 'damage' && effectApplies(e, targetType));
   if (!applicable.length) return undefined;
@@ -138,13 +139,25 @@ function rollApplicableDamage(
   const formulas: string[] = [];
   let damageType: string | undefined;
   for (const e of applicable) {
-    const dice = resolveSpellDamageDice(e.scaling, casterLevel) ?? e.scaling?.base;
+    const dice = resolveSpellDamageDice(e.scaling, casterLevel, slotLevel) ?? e.scaling?.base;
     if (!dice) continue;
     total += rollDice(dice);
     formulas.push(dice);
     damageType ??= e.damageType;
   }
   return formulas.length ? { total, formula: formulas.join(' + '), damageType } : undefined;
+}
+
+// Only level-1 slots are tracked today (no spells-known growth past level 1 exists yet
+// either — see spellSlotsForClass). Cantrips (slotLevel 0) and any untracked tier are free.
+async function trySpendSpellSlot(cid: string, charId: string, char: Character, slotLevel: number): Promise<boolean> {
+  if (slotLevel !== 1) return true;
+  const current = char.currentSpellSlots1 ?? spellSlotsForClass(char.class);
+  if (current <= 0) return false;
+  const next = current - 1;
+  await updateCharacter(cid, charId, c => ({ ...c, currentSpellSlots1: next }));
+  io.to(ROOM).emit('combat:player:slots', { characterId: charId, currentSpellSlots1: next, maxSpellSlots1: char.maxSpellSlots1 ?? spellSlotsForClass(char.class) });
+  return true;
 }
 
 function emitTurn(cid: string) {
@@ -503,6 +516,18 @@ function endCombatDefeated(cid: string): void {
   }, 8000);
 }
 
+// Resolves a quest by id if it exists and isn't already resolved — shared by every mechanical
+// auto-resolve hook (boss death, dungeon exit) so none of them have to remember to emit quest:update.
+async function resolveQuest(cid: string, questId: string): Promise<void> {
+  const quests = await readQuests(cid);
+  const quest = quests.find(q => q.id === questId);
+  if (!quest || quest.status === 'resolved') return;
+  quest.status = 'resolved';
+  await writeQuests(cid, quests);
+  const manifest = await readManifest(cid);
+  io.to(ROOM).emit('quest:update', { quests, act: manifest?.act ?? 1 });
+}
+
 async function applyDamageToCreature(cid: string, targetId: string, damage: number): Promise<void> {
   const encounter = encounters.get(cid);
   if (!encounter) return;
@@ -523,6 +548,13 @@ async function applyDamageToCreature(cid: string, targetId: string, damage: numb
     console.log(`[combat] ${creature.name} is dead`);
     encounter.removeFromTurnOrder(targetId);
     void saveEncounter(cid, encounter);
+
+    // Creature.from() doesn't carry isBoss (combat participants only need combat-relevant fields),
+    // so check the dungeon entity itself rather than the live creature/encounter — it's the
+    // one place the flag survives the manifest -> entity -> Creature hop unmodified.
+    if (dungeons.get(cid)?.entities.find(e => e.id === targetId)?.statBlock?.isBoss) {
+      void resolveQuest(cid, `boss-${targetId}`);
+    }
 
     if (encounter.allEnemiesDead()) {
       const enemyStatBlocks = encounter.enemies
@@ -1129,8 +1161,14 @@ async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
       await saveDungeonAscii(cid, dungeon);
       io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
       console.log(`[dungeon] generated and broadcast: ${dungeon.name} (${dungeon.rooms.length} rooms, ${dungeon.entities.length} entities)`);
+
+      const quests = buildDungeonQuests(dungeon, await readQuests(cid));
+      await writeQuests(cid, quests);
+      const questManifest = await readManifest(cid);
+      io.to(ROOM).emit('quest:update', { quests, act: questManifest?.act ?? 1 });
     } else if (effect.type === 'dungeon_exit') {
       if (combatState.get(cid) || !dungeons.has(cid)) return; // don't rip the map out from under an active fight, or if there's nothing loaded
+      await resolveQuest(cid, 'exit-dungeon');
       dungeons.delete(cid);
       microDungeons.delete(cid);
       await clearDungeon(cid);
@@ -1757,7 +1795,9 @@ io.on('connection', (socket) => {
           // client sends both action + bonus action together for one-shot Instantaneous smites),
           // or queued earlier by a separate cast (Divine Favor/Zephyr Strike-style duration buffs).
           if (bonusSpell) {
-            const rolled = rollApplicableDamage(bonusSpell.combat?.onHit, creature.creatureType, char.level ?? 1);
+            // ponytail: bundled smite doesn't carry a slotLevel (no upcast picker on this
+            // path) or consume a tracked slot yet — falls back to the spell's own level.
+            const rolled = rollApplicableDamage(bonusSpell.combat?.onHit, creature.creatureType, char.level ?? 1, bonusSpell.level);
             if (rolled) {
               bonus = { spellName: bonusSpell.name, damageType: rolled.damageType, total: rolled.total };
               damage += rolled.total;
@@ -1767,7 +1807,7 @@ io.on('connection', (socket) => {
             const pending = bonuses?.[attackerId];
             if (pending) {
               delete bonuses![attackerId];
-              const rolled = rollApplicableDamage(pending.effects, creature.creatureType, pending.casterLevel);
+              const rolled = rollApplicableDamage(pending.effects, creature.creatureType, pending.casterLevel, pending.slotLevel);
               if (rolled) {
                 bonus = { spellName: pending.spellName, damageType: rolled.damageType, total: rolled.total };
                 damage += rolled.total;
@@ -1819,7 +1859,7 @@ io.on('connection', (socket) => {
 
     // Single-target spell attack (e.g. Fire Bolt) — mirrors combat:attack but uses the
     // caster's spellcasting modifier for the attack roll and adds no stat mod to damage.
-    socket.on('combat:spell:attack', ({ casterId, casterName, targetId, spell }) => {
+    socket.on('combat:spell:attack', ({ casterId, casterName, targetId, spell, slotLevel }) => {
       void (async () => {
         const cid = campaignId;
         if (!combatState.get(cid)) return;
@@ -1830,6 +1870,12 @@ io.on('connection', (socket) => {
         const creature = encounter.findCreature(targetId);
         if (!char || !creature || creature.isDead()) return;
 
+        if (!(await trySpendSpellSlot(cid, casterId, char, slotLevel))) {
+          const sid = playerSocketIds.get(casterId);
+          if (sid) io.to(sid).emit('combat:attack:blocked', { reason: 'No spell slots left' });
+          return;
+        }
+
         const spellAbility = CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int';
         const abilityMod = statMod(char.stats[spellAbility]);
         const charProf = char.proficiencyBonus ?? 2;
@@ -1839,7 +1885,7 @@ io.on('connection', (socket) => {
         const total = roll + attackBonus;
         const hit = total >= creature.ac;
 
-        const rolledDamage = rollApplicableDamage(spell.combat?.onHit, creature.creatureType, char.level ?? 1);
+        const rolledDamage = rollApplicableDamage(spell.combat?.onHit, creature.creatureType, char.level ?? 1, slotLevel);
 
         let damage: number | undefined;
         let damageRoll: number | undefined;
@@ -1886,7 +1932,7 @@ io.on('connection', (socket) => {
 
     // Save-based spell (single-target or AoE) — computes the DC once, then rolls each
     // affected target's save mechanically and applies damage/conditions behind the curtain.
-    socket.on('combat:spell:cast', ({ casterId, casterName, spell, targetIds }) => {
+    socket.on('combat:spell:cast', ({ casterId, casterName, spell, slotLevel, targetIds }) => {
       void (async () => {
         const cid = campaignId;
         if (!combatState.get(cid)) return;
@@ -1895,6 +1941,12 @@ io.on('connection', (socket) => {
 
         const char = await getCharacter(cid, casterId);
         if (!char) return;
+
+        if (!(await trySpendSpellSlot(cid, casterId, char, slotLevel))) {
+          const sid = playerSocketIds.get(casterId);
+          if (sid) io.to(sid).emit('combat:attack:blocked', { reason: 'No spell slots left' });
+          return;
+        }
 
         const combat = spell.combat;
 
@@ -1906,7 +1958,7 @@ io.on('connection', (socket) => {
           const damageEffects = combat?.onHit?.filter(e => e.type === 'damage') ?? [];
           if (damageEffects.length) {
             const bonuses = pendingWeaponBonuses.get(cid) ?? {};
-            bonuses[casterId] = { spellName: spell.name, effects: damageEffects, casterLevel: char.level ?? 1 };
+            bonuses[casterId] = { spellName: spell.name, effects: damageEffects, casterLevel: char.level ?? 1, slotLevel };
             pendingWeaponBonuses.set(cid, bonuses);
           }
           return;
@@ -1950,7 +2002,7 @@ io.on('connection', (socket) => {
           const forcedMove = (combat?.onHit ?? []).find(e => (e.type === 'push' || e.type === 'pull') && effectApplies(e, targetType));
 
           let damage: number | undefined;
-          const rolledDamage = rollApplicableDamage(combat?.onHit, targetType, char.level ?? 1);
+          const rolledDamage = rollApplicableDamage(combat?.onHit, targetType, char.level ?? 1, slotLevel);
           if (rolledDamage && (!saved || halfOnSave)) {
             damage = saved ? Math.floor(rolledDamage.total / 2) : rolledDamage.total;
             if (participant.isPlayer && targetChar) {

@@ -673,6 +673,20 @@
   cursor: not-allowed;
 }
 
+.sheet-spell-slots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.sheet-spell-slot {
+  width: 9px;
+  height: 9px;
+  border: 1px solid #60a5fa;
+  border-radius: 2px;
+  background: transparent;
+}
+.sheet-spell-slot--filled { background: #60a5fa; }
+
 /* ── skill picker ── */
 .skill-picker {
   border: 1px solid var(--border);

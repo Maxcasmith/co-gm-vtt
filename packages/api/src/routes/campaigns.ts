@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
 import type { WorldConcept, Character, Quest } from 'shared';
+import { spellSlotsForClass } from 'shared';
 import {
   CAMPAIGNS_DIR,
   getConfig, writeCampaignFile, listCampaigns,
@@ -9,7 +10,7 @@ import {
   readWorldState, writeWorldState, readCampaignFile, writeEntity,
   listEntitySlugs, readEntity, saveDungeon, saveDungeonAscii, writeManifest, readManifest, emptyManifest, readQuests, writeQuests,
 } from '../storage.ts';
-import { generateDungeon } from '../dungeon/index.ts';
+import { generateDungeon, buildDungeonQuests } from '../dungeon/index.ts';
 import { getFeatureProvider } from '../providers/index.ts';
 import { copyCompendiumToCampaign } from '../compendium/storage.ts';
 import { copyAdventureToCampaign } from '../adventures/storage.ts';
@@ -158,6 +159,7 @@ campaignsRouter.post('/generate', async (req, res) => {
       );
       await saveDungeon(slug, dungeon);
       await saveDungeonAscii(slug, dungeon);
+      await writeQuests(slug, buildDungeonQuests(dungeon, await readQuests(slug)));
 
       send({ type: 'complete', id: slug, name: campaignName });
       return;
@@ -434,7 +436,12 @@ campaignsRouter.get('/:id/party/:charId', async (req, res) => {
   const char = await getCharacter(req.params.id ?? '', req.params.charId ?? '');
   if (!char) { res.status(404).json({ error: 'Character not found' }); return; }
   const maxHp = calcMaxHp(char);
-  res.json({ ...char, maxHp, currentHp: char.currentHp ?? maxHp });
+  const maxSpellSlots1 = spellSlotsForClass(char.class);
+  res.json({
+    ...char,
+    maxHp, currentHp: char.currentHp ?? maxHp,
+    maxSpellSlots1, currentSpellSlots1: char.currentSpellSlots1 ?? maxSpellSlots1,
+  });
 });
 
 campaignsRouter.patch('/:id/party/:charId', async (req, res) => {
@@ -636,8 +643,12 @@ campaignsRouter.post('/:id/rest/short', async (req, res) => {
     hpGained = Math.max(0, hpGained);
     const currentHp = Math.min(maxHp, current + hpGained);
 
-    await updateCharacter(id, characterId, fresh => ({ ...fresh, currentHp, maxHp }));
-    return res.json({ hpGained, currentHp, maxHp });
+    // Pact Magic uniquely recovers on a short rest; other casters' slots don't.
+    const maxSpellSlots1 = spellSlotsForClass(char.class);
+    const currentSpellSlots1 = char.class === 'Warlock' ? maxSpellSlots1 : (char.currentSpellSlots1 ?? maxSpellSlots1);
+
+    await updateCharacter(id, characterId, fresh => ({ ...fresh, currentHp, maxHp, currentSpellSlots1 }));
+    return res.json({ hpGained, currentHp, maxHp, currentSpellSlots1, maxSpellSlots1 });
   } catch (err) {
     logError('routes/campaigns:rest', err);
     return res.status(500).json({ error: err instanceof Error ? err.message : 'Rest failed' });
@@ -652,7 +663,8 @@ campaignsRouter.post('/:id/rest/long', async (req, res) => {
     if (!char) return res.status(404).json({ error: 'Character not found' });
 
     const maxHp = calcMaxHp(char);
-    await updateCharacter(id, characterId, fresh => ({ ...fresh, currentHp: maxHp, maxHp }));
+    const maxSpellSlots1 = spellSlotsForClass(char.class);
+    await updateCharacter(id, characterId, fresh => ({ ...fresh, currentHp: maxHp, maxHp, currentSpellSlots1: maxSpellSlots1 }));
 
     // Advance world state
     const HOURS = 8;
@@ -704,7 +716,7 @@ campaignsRouter.post('/:id/rest/long', async (req, res) => {
       await writeWorldState(id, state);
     }
 
-    return res.json({ currentHp: maxHp, maxHp, worldEvents: worldEvents ?? undefined });
+    return res.json({ currentHp: maxHp, maxHp, currentSpellSlots1: maxSpellSlots1, maxSpellSlots1, worldEvents: worldEvents ?? undefined });
   } catch (err) {
     logError('routes/campaigns:longRest', err);
     return res.status(500).json({ error: err instanceof Error ? err.message : 'Long rest failed' });

@@ -1,0 +1,34 @@
+[
+  {
+    "id": "steal-the-detention-ledger-to-learn-how-to-break-the-eternal-detention-curse",
+    "name": "Steal the Detention Ledger to learn how to break the eternal detention curse",
+    "description": "Steal the Detention Ledger to learn how to break the eternal detention curse",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-06"
+  },
+  {
+    "id": "find-the-principal-s-master-key-hidden-somewhere-in-the-offices",
+    "name": "Find the principal's master key hidden somewhere in the offices",
+    "description": "Find the principal's master key hidden somewhere in the offices",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-06"
+  },
+  {
+    "id": "free-the-shadow-students-trapped-in-the-classrooms",
+    "name": "Free the shadow students trapped in the classrooms",
+    "description": "Free the shadow students trapped in the classrooms",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-06"
+  },
+  {
+    "id": "exit-dungeon",
+    "name": "Escape Detention of the Damned",
+    "description": "Find a way out of Detention of the Damned.",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-06"
+  }
+]

@@ -1,24 +1,57 @@
-import type { DungeonTheme } from 'shared';
+import type { DungeonStylePack, DungeonMaterial, DungeonStructureType } from 'shared';
 
-interface ThemePalette {
-  floor: string;
+// Solid color painted under every walkable cell before textures load (or if a dungeon
+// somehow resolves to zero variants) — avoids a flash of transparent/blank floor.
+export const FLOOR_FALLBACK_COLOR = '#2d2b42';
+
+const DEFAULT_PACK: DungeonStylePack = 'high_fantasy';
+
+// Eagerly resolved at build time — dropping a new file into a Materials/<Pack>/<Material>/
+// directory picks it up automatically, no code change needed.
+const modules = import.meta.glob<string>('./assets/Materials/*/*/*.{jpg,jpeg,png}', {
+  eager: true,
+  import: 'default',
+});
+
+const TEXTURE_MAP: Record<string, Record<string, string[]>> = {};
+for (const [path, url] of Object.entries(modules)) {
+  const [, , , pack, material] = path.split('/'); // './assets/Materials/<Pack>/<Material>/file.jpg'
+  if (!pack || !material) continue;
+  const packKey = pack.toLowerCase();
+  const materialKey = material.toLowerCase();
+  (TEXTURE_MAP[packKey] ??= {})[materialKey] ??= [];
+  TEXTURE_MAP[packKey]![materialKey]!.push(url);
 }
 
-// Pure code-drawn per-room floor tint — no art assets, no generation step. `theme` comes from the
-// dungeon manifest (LLM-assigned, closed vocabulary); unrecognized/missing theme falls back to 'stone'.
-const THEME_PALETTES: Record<DungeonTheme, ThemePalette> = {
-  stone:      { floor: '#2d2b42' },
-  church:     { floor: '#3d3327' },
-  graveyard:  { floor: '#243422' },
-  prison:     { floor: '#2a2a2e' },
-  kitchen:    { floor: '#3a2c20' },
-  library:    { floor: '#2e2a3a' },
-  armory:     { floor: '#332b2b' },
-  throne:     { floor: '#3a2f18' },
-  cave:       { floor: '#26241f' },
-  laboratory: { floor: '#1f3230' },
-};
+// Room's floor material variants for this dungeon's style pack — falls back to the default
+// pack if the assigned one has no directory on disk, and to grass/wood (by indoor/outdoor)
+// if the room has no material or the pack doesn't have that material.
+export function texturesFor(
+  pack: DungeonStylePack | string | undefined,
+  material: DungeonMaterial | string | undefined,
+  structureType: DungeonStructureType | undefined,
+): string[] {
+  const packKey = pack?.toLowerCase();
+  const resolvedPack = (packKey && TEXTURE_MAP[packKey] ? packKey : DEFAULT_PACK) as string;
+  const materials = TEXTURE_MAP[resolvedPack] ?? {};
 
-export function paletteFor(theme: DungeonTheme | undefined): ThemePalette {
-  return THEME_PALETTES[theme ?? 'stone'];
+  const materialKey = material?.toLowerCase();
+  const fallbackMaterial: DungeonMaterial = structureType === 'building' ? 'wood' : 'grass';
+  const resolvedMaterial = materialKey && materials[materialKey] ? materialKey : fallbackMaterial;
+
+  return materials[resolvedMaterial] ?? [];
+}
+
+const imageCache = new Map<string, HTMLImageElement>();
+
+// Loads each texture file exactly once and reuses the decoded element across every cell/room
+// that references it — never re-fetch per cell.
+export function getImage(url: string): HTMLImageElement {
+  let img = imageCache.get(url);
+  if (!img) {
+    img = new Image();
+    img.src = url;
+    imageCache.set(url, img);
+  }
+  return img;
 }

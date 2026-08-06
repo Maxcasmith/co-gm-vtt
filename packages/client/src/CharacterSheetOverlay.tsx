@@ -17,9 +17,10 @@ import {
   calcACBreakdown,
   actionCostFromCastingTime,
   parseRangeFeet,
+  spellSlotsForClass,
 } from "shared";
 import { on, dispatch } from "./events.ts";
-import emptyFrameIcon from "./assets/Icon-Frame-Blue.jpg";
+import emptyFrameIcon from "./assets/icons/Icon-Frame-Blue.jpg";
 import {
   STAT_NAMES,
   CLASS_SAVING_THROWS,
@@ -64,6 +65,8 @@ interface Props {
   character: Character;
   currentHp?: number;
   maxHp?: number;
+  currentSpellSlots1?: number;
+  maxSpellSlots1?: number;
   sessionActive: boolean;
 }
 
@@ -842,6 +845,8 @@ function SpellsTab({
   actionAvailable,
   bonusActionAvailable,
   reactionAvailable,
+  maxSpellSlots1,
+  currentSpellSlots1,
 }: {
   character: Character;
   combatActive: boolean;
@@ -849,6 +854,8 @@ function SpellsTab({
   actionAvailable: boolean;
   bonusActionAvailable: boolean;
   reactionAvailable: boolean;
+  maxSpellSlots1: number;
+  currentSpellSlots1: number;
 }) {
   const learnedNames = character.spells ?? [];
   const [spells, setSpells] = useState<Spell[]>([]);
@@ -883,9 +890,15 @@ function SpellsTab({
     );
   }
 
+  // Only level-1 slots are tracked today, so a leveled spell is castable only while that
+  // pool has slots left — no higher tier exists yet to upcast into when it's empty.
+  function noSlotFor(spell: Spell): boolean {
+    return spell.level >= 1 && currentSpellSlots1 <= 0;
+  }
+
   function handleCast(spell: Spell) {
     const cost = actionCostFromCastingTime(spell.castingTime);
-    if (!combatActive || !isMyTurn || !cost || !resourceAvailable[cost]) return;
+    if (!combatActive || !isMyTurn || !cost || !resourceAvailable[cost] || noSlotFor(spell)) return;
 
     if (isBundledSmite(spell)) {
       if (!mainHandWeapon || !actionAvailable) return;
@@ -993,6 +1006,7 @@ function SpellsTab({
             const cost = actionCostFromCastingTime(selected.castingTime);
             const disabled =
               !combatActive || !isMyTurn || !cost || !resourceAvailable[cost] ||
+              noSlotFor(selected) ||
               (isBundledSmite(selected) && (!mainHandWeapon || !actionAvailable));
             return (
               <button
@@ -1026,7 +1040,19 @@ function SpellsTab({
         if (!group?.length) return null;
         return (
           <div key={level} className="sheet-inv-section">
-            <p className="sheet-inv-section-title">{LEVEL_HEADINGS[level]}</p>
+            <p className="sheet-inv-section-title">
+              {LEVEL_HEADINGS[level]}
+              {level === 1 && maxSpellSlots1 > 0 && (
+                <span className="sheet-spell-slots">
+                  {Array.from({ length: maxSpellSlots1 }, (_, i) => (
+                    <span
+                      key={i}
+                      className={`sheet-spell-slot${i < currentSpellSlots1 ? " sheet-spell-slot--filled" : ""}`}
+                    />
+                  ))}
+                </span>
+              )}
+            </p>
             <div className="sheet-inventory">
               {group.map((spell) => (
                 <div
@@ -1081,6 +1107,8 @@ export default function CharacterSheetOverlay({
   character,
   currentHp,
   maxHp,
+  currentSpellSlots1,
+  maxSpellSlots1,
   sessionActive,
 }: Props) {
   const [visible, setVisible] = useState(false);
@@ -1190,6 +1218,10 @@ export default function CharacterSheetOverlay({
   const derivedMaxHp = hitDie + modNum(character.stats.con);
   const displayMax = maxHp ?? character.maxHp ?? derivedMaxHp;
   const displayCurrent = currentHp ?? character.currentHp ?? displayMax;
+
+  const derivedMaxSlots1 = spellSlotsForClass(character.class);
+  const displayMaxSlots1 = maxSpellSlots1 ?? character.maxSpellSlots1 ?? derivedMaxSlots1;
+  const displayCurrentSlots1 = currentSpellSlots1 ?? character.currentSpellSlots1 ?? displayMaxSlots1;
 
   const acBreakdown = calcACBreakdown(character);
   const ac = acBreakdown.total;
@@ -1346,6 +1378,8 @@ export default function CharacterSheetOverlay({
               actionAvailable={actionAvailable}
               bonusActionAvailable={bonusActionAvailable}
               reactionAvailable={reactionAvailable}
+              maxSpellSlots1={displayMaxSlots1}
+              currentSpellSlots1={displayCurrentSlots1}
             />
           )}
         </div>

@@ -68,6 +68,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [downPlayerNames, setDownPlayerNames] = useState<Set<string>>(new Set());
   const [deadPlayerNames, setDeadPlayerNames] = useState<Set<string>>(new Set());
   const [playerHpState, setPlayerHpState] = useState<{ current: number; max: number } | null>(null);
+  const [playerSlotsState, setPlayerSlotsState] = useState<{ current: number; max: number } | null>(null);
   const [partyHp, setPartyHp] = useState<Record<string, { current: number; max: number }>>({});
   const [tokenUrls, setTokenUrls] = useState<Record<string, string>>({});
   const [portraitUrls, setPortraitUrls] = useState<Record<string, string>>({});
@@ -152,7 +153,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.emit('player:join', { name: character.name, id: character.id, campaignId: character.campaignId });
     fetch(`${API}/api/campaigns/${character.campaignId}/party/${character.id}`)
       .then(r => r.json())
-      .then((c: Character) => setEquipment(c.equipment))
+      .then((c: Character) => {
+        setEquipment(c.equipment);
+        if (c.maxSpellSlots1) setPlayerSlotsState({ current: c.currentSpellSlots1 ?? c.maxSpellSlots1, max: c.maxSpellSlots1 });
+      })
       .catch(() => {});
     socket.on('players:update', setConnected);
     socket.on('players:characters', map => {
@@ -236,6 +240,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       if (data.currentHp <= 0) setDownPlayerNames(prev => new Set([...prev, data.characterName]));
       else setDownPlayerNames(prev => { const s = new Set(prev); s.delete(data.characterName); return s; });
     });
+    socket.on('combat:player:slots', data => {
+      dispatch('vtt:combat:player:slots', data);
+      if (data.characterId === character.id) setPlayerSlotsState({ current: data.currentSpellSlots1, max: data.maxSpellSlots1 });
+    });
     socket.on('combat:death:save', data => dispatch('vtt:combat:death:save', data));
     socket.on('combat:defeat', () => { dispatch('vtt:combat:defeat', {}); setDefeated(true); });
     socket.on('combat:player:dead', data => {
@@ -253,9 +261,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       setPartyHp(prev => ({ ...prev, [data.characterName]: { current: data.currentHp, max: data.maxHp } }));
       if (data.currentHp > 0) setDownPlayerNames(prev => { const s = new Set(prev); s.delete(data.characterName); return s; });
     });
-    const unsubRest = on('vtt:rest:result', ({ currentHp, maxHp }) => {
+    const unsubRest = on('vtt:rest:result', ({ currentHp, maxHp, currentSpellSlots1, maxSpellSlots1 }) => {
       setPlayerHpState({ current: currentHp, max: maxHp });
       setPartyHp(prev => ({ ...prev, [character.name]: { current: currentHp, max: maxHp } }));
+      if (maxSpellSlots1) setPlayerSlotsState({ current: currentSpellSlots1 ?? maxSpellSlots1, max: maxSpellSlots1 });
     });
     socket.on('creature:update', data => {
       dispatch('vtt:creature:update', data);
@@ -493,7 +502,12 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       <CombatDock character={liveCharacter} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} />
       <EncounterLoadingOverlay />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} header={<span className="palette-clock">{formatWorldTime(worldTimeSecs)}</span>} />
-      <CharacterSheetOverlay character={liveCharacter} currentHp={playerHpState?.current} maxHp={playerHpState?.max} sessionActive={sessionActive} />
+      <CharacterSheetOverlay
+        character={liveCharacter}
+        currentHp={playerHpState?.current} maxHp={playerHpState?.max}
+        currentSpellSlots1={playerSlotsState?.current} maxSpellSlots1={playerSlotsState?.max}
+        sessionActive={sessionActive}
+      />
       <JournalOverlay open={journalOpen} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} />
       <QuestLog open={questLogOpen} onClose={() => setQuestLogOpen(false)} quests={quests} act={act} />
       <CombatLogOverlay open={combatLogOpen} onClose={() => setCombatLogOpen(false)} />

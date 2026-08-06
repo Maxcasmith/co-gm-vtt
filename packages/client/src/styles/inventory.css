@@ -138,7 +138,7 @@
 .sheet-accessory-slot:nth-child(-n+5) { margin-top: 0; }
 
 .sheet-inv-section { margin-bottom: 16px; }
-.sheet-inv-section-title { font-family: 'Cinzel', serif; font-size: 15px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 8px; }
+.sheet-inv-section-title { display: flex; align-items: center; justify-content: space-between; font-family: 'Cinzel', serif; font-size: 15px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 8px; }
 .sheet-inventory { padding: 4px 0; color: var(--text); }
 .sheet-inventory {
   display: grid;
