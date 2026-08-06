@@ -44,3 +44,15 @@
   font-weight: 700;
   color: #fff;
 }
+
+@keyframes item-notif-error {
+  0%   { opacity: 0; transform: translateX(1.5rem); }
+  8%   { opacity: 1; transform: translateX(0); }
+  85%  { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(0); }
+}
+
+.item-notification--error {
+  background: linear-gradient(160deg, #ef4444 0%, #b91c1c 100%);
+  animation: item-notif-error 4s ease-out forwards;
+}

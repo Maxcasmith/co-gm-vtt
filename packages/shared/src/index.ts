@@ -231,6 +231,7 @@ export interface ServerToClientEvents {
   "combat:initiative": (entry: TurnOrderEntry) => void;
   "combat:turn:order": (entries: TurnOrderEntry[]) => void;
   "combat:attack:result": (result: AttackResult) => void;
+  "combat:attack:blocked": (data: { reason: string }) => void;
   "combat:spell:attack:result": (result: SpellAttackResult) => void;
   "combat:spell:save:result": (result: SpellSaveResult) => void;
   "creature:update": (data: {
@@ -508,6 +509,7 @@ export class Weapon extends Item {
   isFinesse: boolean;
   mastery?: string;
   twoHanded?: boolean;
+  ammoSlug?: string;
 
   constructor(props: {
     id: string;
@@ -523,6 +525,7 @@ export class Weapon extends Item {
     isFinesse?: boolean;
     mastery?: string;
     twoHanded?: boolean;
+    ammoSlug?: string;
   }) {
     super({ ...props, type: "weapon" as const });
     this.damage = props.damage;
@@ -534,6 +537,7 @@ export class Weapon extends Item {
     this.isFinesse = props.isFinesse ?? false;
     this.mastery = props.mastery;
     this.twoHanded = props.twoHanded;
+    this.ammoSlug = props.ammoSlug;
   }
 }
 

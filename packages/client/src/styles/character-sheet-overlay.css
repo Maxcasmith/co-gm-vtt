@@ -194,23 +194,6 @@
 .sheet-rest-btn--disabled { opacity: 0.35; cursor: not-allowed; }
 .sheet-rest-btn--disabled:hover { color: var(--text-muted); border-color: var(--border); }
 
-.sheet-initiative-btn {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  padding: 9px 22px;
-  border-radius: 3px;
-  cursor: pointer;
-  font-family: 'Cinzel', serif;
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  flex-shrink: 0;
-  transition: color 80ms, border-color 80ms;
-}
-.sheet-initiative-btn:hover { color: var(--gold); border-color: var(--gold); }
-.sheet-initiative-btn--disabled { opacity: 0.35; cursor: not-allowed; }
-.sheet-initiative-btn--disabled:hover { color: var(--text-muted); border-color: var(--border); }
-
 /* Tabs */
 .sheet-tabs {
   display: flex;

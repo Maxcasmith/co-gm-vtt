@@ -9,11 +9,12 @@ export default function ShopTab() {
     const item = SHOP_ITEMS.find(i => i.id === shopItemId);
     if (!item || c.gold < item.cost) return;
 
+    const qty = item.quantityPerPurchase ?? 1;
     const existing = c.inventory.find(i => i.id === item.id);
-    const { cost: _cost, ...itemData } = item;
+    const { cost: _cost, quantityPerPurchase: _qpp, ...itemData } = item;
     const next: InventoryItem[] = existing
-      ? c.inventory.map(i => i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i)
-      : [...c.inventory, { ...itemData, quantity: 1 } as InventoryItem];
+      ? c.inventory.map(i => i.id === item.id ? { ...i, quantity: i.quantity + qty } : i)
+      : [...c.inventory, { ...itemData, quantity: qty } as InventoryItem];
 
     c.set('inventory', next);
     c.set('gold', c.gold - item.cost);
@@ -24,9 +25,10 @@ export default function ShopTab() {
     const invItem  = c.inventory.find(i => i.id === itemId);
     if (!shopItem || !invItem) return;
 
+    const qty = shopItem.quantityPerPurchase ?? 1;
     const refund = Math.floor(shopItem.cost / 2);
-    const next: InventoryItem[] = invItem.quantity > 1
-      ? c.inventory.map(i => i.id === itemId ? { ...i, quantity: i.quantity - 1 } : i)
+    const next: InventoryItem[] = invItem.quantity > qty
+      ? c.inventory.map(i => i.id === itemId ? { ...i, quantity: i.quantity - qty } : i)
       : c.inventory.filter(i => i.id !== itemId);
 
     c.set('inventory', next);

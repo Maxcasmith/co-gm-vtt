@@ -5,13 +5,13 @@ import type {
   Weapon,
   Armor,
   Consumable,
-  TurnOrderEntry,
   Spell,
 } from "shared";
 import {
   isWeapon,
   isArmor,
   isConsumable,
+  isAmmunition,
   CLASS_WEAPON_PROFS,
   CLASS_ARMOR_TRAINING,
   calcACBreakdown,
@@ -335,6 +335,10 @@ const SECTIONS = [
     label: "Consumables",
     test: (i: Item | Weapon | Armor | Consumable) =>
       isConsumable(i) || CONSUMABLE_NAMES.test(i.name),
+  },
+  {
+    label: "Ammunition",
+    test: (i: Item | Weapon | Armor | Consumable) => isAmmunition(i),
   },
   { label: "Other", test: () => true },
 ] as const;
@@ -1220,28 +1224,6 @@ export default function CharacterSheetOverlay({
               {character.class} · {character.species} · {character.background}
             </p>
           </div>
-          <button
-            className={`sheet-initiative-btn${!combatActive ? " sheet-initiative-btn--disabled" : ""}`}
-            disabled={!combatActive}
-            onClick={
-              combatActive
-                ? () => {
-                  const dexMod = modNum(character.stats.dex);
-                  const roll = Math.floor(Math.random() * 20) + 1;
-                  const entry: TurnOrderEntry = {
-                    id: character.id,
-                    name: character.name,
-                    initiative: roll + dexMod,
-                    isPlayer: true,
-                  };
-                  dispatch("vtt:combat:initiative:roll", { entry });
-                  dispatch("vtt:sheet:closed", {});
-                }
-                : undefined
-            }
-          >
-            Initiative
-          </button>
           <button
             className={`sheet-rest-btn${combatActive ? " sheet-rest-btn--disabled" : ""}`}
             disabled={combatActive}

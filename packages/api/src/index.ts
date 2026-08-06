@@ -4,7 +4,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import type { ServerToClientEvents, ClientToServerEvents, Player, CharacterStats, TurnOrderEntry, Character, Weapon, Spell, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, EnemyStatBlock, NemesisRecord, Dungeon, DungeonEntity, EffectSpec, CreatureType } from 'shared';
 import { hasLineOfSight, resolveForcedMovement } from 'shared';
-import { Weapon as WeaponClass, CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, resolveSpellDamageDice, parseRangeFeet, effectApplies, calcAC, isWeapon, isArmor } from 'shared';
+import { Weapon as WeaponClass, CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, resolveSpellDamageDice, parseRangeFeet, effectApplies, calcAC, isWeapon, isArmor, isAmmunition } from 'shared';
 import { configRouter } from './routes/config.ts';
 import { campaignsRouter } from './routes/campaigns.ts';
 import { compendiumRouter } from './routes/compendium.ts';
@@ -1696,6 +1696,24 @@ io.on('connection', (socket) => {
         const char = await getCharacter(cid, attackerId);
         const creature = encounter.findCreature(targetId);
         if (!char || !creature || creature.isDead()) return;
+
+        if (weapon.ammoSlug) {
+          const ammo = char.inventory?.find(i => isAmmunition(i) && i.usableBySlug === weapon.ammoSlug && i.quantity > 0);
+          if (!ammo) {
+            const sid = playerSocketIds.get(attackerId);
+            if (sid) io.to(sid).emit('combat:attack:blocked', { reason: 'No arrows left' });
+            return;
+          }
+          const quantity = ammo.quantity - 1;
+          await updateCharacter(cid, attackerId, c => ({
+            ...c,
+            inventory: quantity > 0
+              ? (c.inventory ?? []).map(i => i.id === ammo.id ? { ...i, quantity } : i)
+              : (c.inventory ?? []).filter(i => i.id !== ammo.id),
+          }));
+          const sid = playerSocketIds.get(attackerId);
+          if (sid) io.to(sid).emit('character:inventory:remove', { itemId: ammo.id, quantity: Math.max(0, quantity) });
+        }
 
         const strMod = statMod(char.stats.str);
         const dexMod = statMod(char.stats.dex);

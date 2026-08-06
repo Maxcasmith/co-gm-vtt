@@ -75,6 +75,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [itemQtyOverrides, setItemQtyOverrides] = useState<Record<string, number>>({});
   const [equipment, setEquipment] = useState<Character['equipment']>(character.equipment);
   const [itemNotifications, setItemNotifications] = useState<{ id: string; name: string }[]>([]);
+  const [errorNotifications, setErrorNotifications] = useState<{ id: string; reason: string }[]>([]);
   const [worldMapUrl, setWorldMapUrl] = useState<string | undefined>(undefined);
   const [dungeon, setDungeon] = useState<Dungeon | null>(null);
   const [dungeonGenerating, setDungeonGenerating] = useState(false);
@@ -175,6 +176,11 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     });
     socket.on('character:inventory:remove', ({ itemId, quantity }) => {
       setItemQtyOverrides(prev => ({ ...prev, [itemId]: quantity }));
+    });
+    socket.on('combat:attack:blocked', ({ reason }) => {
+      const id = crypto.randomUUID();
+      setErrorNotifications(prev => [...prev, { id, reason }]);
+      setTimeout(() => setErrorNotifications(prev => prev.filter(x => x.id !== id)), 4000);
     });
 
     // Bridge roll events from the UI → socket
@@ -455,6 +461,14 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     },
   ];
 
+  const liveCharacter: Character = {
+    ...character,
+    inventory: [...(character.inventory ?? []), ...(acquisitions ?? [])]
+      .map(item => itemQtyOverrides[item.id] != null ? { ...item, quantity: itemQtyOverrides[item.id] } : item)
+      .filter(item => item.quantity > 0),
+    equipment,
+  };
+
   return (
     <>
       <Canvas
@@ -476,10 +490,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       />
       <TurnOrderBar campaignId={character.campaignId} />
       <PartyHud connected={connected} portraitUrls={portraitUrls} self={character.name} hp={partyHp} />
-      <CombatDock character={character} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} />
+      <CombatDock character={liveCharacter} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} />
       <EncounterLoadingOverlay />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} header={<span className="palette-clock">{formatWorldTime(worldTimeSecs)}</span>} />
-      <CharacterSheetOverlay character={{ ...character, inventory: [...(character.inventory ?? []), ...(acquisitions ?? [])].map(item => itemQtyOverrides[item.id] != null ? { ...item, quantity: itemQtyOverrides[item.id] } : item).filter(item => item.quantity > 0), equipment }} currentHp={playerHpState?.current} maxHp={playerHpState?.max} sessionActive={sessionActive} />
+      <CharacterSheetOverlay character={liveCharacter} currentHp={playerHpState?.current} maxHp={playerHpState?.max} sessionActive={sessionActive} />
       <JournalOverlay open={journalOpen} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} />
       <QuestLog open={questLogOpen} onClose={() => setQuestLogOpen(false)} quests={quests} act={act} />
       <CombatLogOverlay open={combatLogOpen} onClose={() => setCombatLogOpen(false)} />
@@ -500,6 +514,11 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
           <div key={n.id} className="item-notification">
             <span className="item-notification-label">Item received</span>
             <span className="item-notification-name">{n.name}</span>
+          </div>
+        ))}
+        {errorNotifications.map(n => (
+          <div key={n.id} className="item-notification item-notification--error">
+            <span className="item-notification-name">{n.reason}</span>
           </div>
         ))}
       </div>

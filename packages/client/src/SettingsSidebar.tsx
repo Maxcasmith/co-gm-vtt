@@ -40,6 +40,8 @@ export const STORY_PROVIDERS: { id: StoryProvider; label: string; models: { id: 
     models: [
       { id: 'deepseek-chat', label: 'DeepSeek Chat' },
       { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner' },
+      { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+      { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
     ],
   },
   {

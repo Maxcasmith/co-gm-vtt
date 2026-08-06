@@ -364,6 +364,9 @@ export interface ShopItem {
   mastery?: string;
   iconPath?: string;
   twoHanded?: boolean;
+  quantityPerPurchase?: number;
+  ammoSlug?: string;
+  usableBySlug?: string;
 }
 
 export const SHOP_ITEMS: ShopItem[] = [
@@ -372,8 +375,8 @@ export const SHOP_ITEMS: ShopItem[] = [
   { id: 'handaxe',           name: 'Handaxe',             cost:  5, description: '1d6 slashing. Light, thrown (20/60 ft).',          type: 'weapon', damage: '1d6', damageType: 'slashing',  attackBonus: 0, range:  5, properties: ['light', 'thrown', 'simple'], iconPath: handaxeIcon },
   { id: 'leather-armour',    name: 'Leather Armour',      cost: 10, description: 'AC 11 + DEX modifier. Light armor.',                                            type: 'armor', armorType: 'light', acBonus: 11, isShield: false, slot: 'body', iconPath: leatherArmorIcon },
   { id: 'potion-of-healing', name: 'Potion of Healing',   cost: 50, description: 'Restores 2d4+4 HP.', iconPath: potionIcon },
-  { id: 'shortbow',          name: 'Shortbow',            cost: 25, description: '1d6 piercing. Ammunition (arrow), two-handed. Range 80/320 ft.', type: 'weapon', damage: '1d6', damageType: 'piercing', attackBonus: 0, range: 80, extendedRange: 320, properties: ['ammunition', 'two-handed', 'simple'], mastery: 'Vex', twoHanded: true, iconPath: bowIcon },
-  { id: 'arrows',            name: 'Arrows (20)',         cost:  1, description: 'Ammunition for shortbows and longbows. Bundle of 20.', iconPath: arrowIcon },
+  { id: 'shortbow',          name: 'Shortbow',            cost: 25, description: '1d6 piercing. Ammunition (arrow), two-handed. Range 80/320 ft.', type: 'weapon', damage: '1d6', damageType: 'piercing', attackBonus: 0, range: 80, extendedRange: 320, properties: ['ammunition', 'two-handed', 'simple'], mastery: 'Vex', twoHanded: true, iconPath: bowIcon, ammoSlug: 'arrow' },
+  { id: 'arrows',            name: 'Arrow',               cost:  1, description: 'Ammunition for shortbows and longbows (batch of 20).', type: 'ammunition', quantityPerPurchase: 20, iconPath: arrowIcon, usableBySlug: 'arrow' },
   { id: 'whip',              name: 'Whip',                cost:  2, description: '1d4 slashing. Finesse, Reach (10 ft).',              type: 'weapon', damage: '1d4', damageType: 'slashing',  attackBonus: 0, range: 10, properties: ['finesse', 'reach', 'martial'], isFinesse: true, mastery: 'Slow', iconPath: whipIcon },
 ];
 
