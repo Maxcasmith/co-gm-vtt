@@ -2,9 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import type { ServerToClientEvents, ClientToServerEvents, Player, CharacterStats, TurnOrderEntry, Character, Weapon, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, EnemyStatBlock, NemesisRecord, Dungeon, DungeonEntity } from 'shared';
-import { hasLineOfSight } from 'shared';
-import { Weapon as WeaponClass, CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, resolveSpellDamageDice, calcAC } from 'shared';
+import type { ServerToClientEvents, ClientToServerEvents, Player, CharacterStats, TurnOrderEntry, Character, Weapon, Spell, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, EnemyStatBlock, NemesisRecord, Dungeon, DungeonEntity, EffectSpec, CreatureType } from 'shared';
+import { hasLineOfSight, resolveForcedMovement } from 'shared';
+import { Weapon as WeaponClass, CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, resolveSpellDamageDice, parseRangeFeet, effectApplies, calcAC, isWeapon, isArmor } from 'shared';
 import { configRouter } from './routes/config.ts';
 import { campaignsRouter } from './routes/campaigns.ts';
 import { compendiumRouter } from './routes/compendium.ts';
@@ -16,7 +16,7 @@ import { generateDungeon, generateEncounterDungeon, describeDungeonState, toClie
 import { getStoryProvider, getCombatProvider } from './providers/index.ts';
 import { buildRecapPrompt } from './session-processor/prompts.ts';
 import { processSession, getDMResponse, ensureSessionQuests } from './session-processor/index.ts';
-import { generateEncounterEnemies, generateCombatFlavour, resolveImprovisedAction, generateWorldState, tickWorldNarrative, evaluateNemesisCandidates } from './session-processor/imagePrompts.ts';
+import { generateEncounterEnemies, generateCombatFlavour, generateSpellSaveFlavour, resolveImprovisedAction, generateWorldState, tickWorldNarrative, evaluateNemesisCandidates } from './session-processor/imagePrompts.ts';
 import { mapsRouter } from './routes/maps.ts';
 import { adminRouter } from './routes/admin.ts';
 import { spellsRouter } from './routes/spells.ts';
@@ -64,6 +64,10 @@ const playerSocketIds = new Map<string, string>(); // charId → socketId (for p
 const enemiesReady   = new Map<string, boolean>();  // true once rollEnemyInitiatives has fired
 const combatStartedAt = new Map<string, number>();  // timestamp when combat_init fired, for nemesis transcript slicing
 const dungeons = new Map<string, Dungeon>(); // in-memory mirror of saveDungeon/loadDungeon, mutated on reveal
+// cid → casterId → self-buff spell (e.g. Divine Smite) queued to trigger on that caster's next
+// weapon hit. Effects are stored unresolved (not pre-rolled) so appliesIf (e.g. vs Fiend/Undead)
+// can be evaluated against whichever creature actually gets hit.
+const pendingWeaponBonuses = new Map<string, Record<string, { spellName: string; effects: EffectSpec[]; casterLevel: number }>>();
 const microDungeons = new Set<string>(); // cids whose current dungeon is an ephemeral combat arena — discarded on victory instead of continued
 
 // Every dungeon:loaded broadcast must carry live positions, not just what was last saved to disk —
@@ -117,6 +121,29 @@ function rollDice(formula: string): number {
   return Math.max(1, total);
 }
 
+// Rolls every 'damage' onHit effect whose appliesIf (if any) matches the target's creature
+// type, and sums them — e.g. Divine Smite's base 2d8 plus a conditional +1d8 vs Fiend/Undead
+// are two separate EffectSpec entries that both land on the same hit.
+function rollApplicableDamage(
+  effects: EffectSpec[] | undefined,
+  targetType: CreatureType,
+  casterLevel: number,
+): { total: number; formula: string; damageType: string | undefined } | undefined {
+  const applicable = (effects ?? []).filter(e => e.type === 'damage' && effectApplies(e, targetType));
+  if (!applicable.length) return undefined;
+  let total = 0;
+  const formulas: string[] = [];
+  let damageType: string | undefined;
+  for (const e of applicable) {
+    const dice = resolveSpellDamageDice(e.scaling, casterLevel) ?? e.scaling?.base;
+    if (!dice) continue;
+    total += rollDice(dice);
+    formulas.push(dice);
+    damageType ??= e.damageType;
+  }
+  return formulas.length ? { total, formula: formulas.join(' + '), damageType } : undefined;
+}
+
 function emitTurn(cid: string) {
   if (!combatState.get(cid)) return;
   const encounter = encounters.get(cid);
@@ -166,6 +193,7 @@ async function runDeathSave(cid: string, actor: Participant): Promise<void> {
 
   if (isNat20) {
     participant.currentHp = 1;
+    void updateCharacter(cid, actor.id, c => ({ ...c, currentHp: 1 }));
     io.to(ROOM).emit('combat:player:damage', {
       characterId: actor.id,
       characterName: actor.name,
@@ -308,6 +336,7 @@ async function runEnemyAI(cid: string, actor: Participant): Promise<void> {
           if (playerParticipant) {
             const wasDown = playerParticipant.isDown();
             playerParticipant.takeDamage(damage);
+            void updateCharacter(cid, targetCharForAttack.id, c => ({ ...c, currentHp: playerParticipant.currentHp }));
             remainingHp = playerParticipant.currentHp;
             targetDead = playerParticipant.currentHp <= 0;
             io.to(ROOM).emit('combat:player:damage', {
@@ -429,6 +458,7 @@ function endCombat(cid: string): void {
   encounter?.teardown();
   encounters.delete(cid);
   combatStartedAt.delete(cid);
+  pendingWeaponBonuses.delete(cid);
   void clearEncounter(cid);
 }
 
@@ -1184,7 +1214,7 @@ async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
         }
         const statBlock: EnemyStatBlock = effect.statBlock
           ? { ...effect.statBlock, id: randomUUID(), name: effect.name }
-          : { id: randomUUID(), name: effect.name, cr: 0.25, hp: 11, ac: 12, speed: 30, stats: { str: 11, dex: 11, con: 11, int: 8, wis: 8, cha: 8 }, attacks: [{ name: 'Attack', bonus: 3, damage: '1d6+1' }] };
+          : { id: randomUUID(), name: effect.name, cr: 0.25, hp: 11, ac: 12, speed: 30, stats: { str: 11, dex: 11, con: 11, int: 8, wis: 8, cha: 8 }, attacks: [{ name: 'Attack', bonus: 3, damage: '1d6+1' }], creatureType: 'Humanoid' };
 
         records.push({
           id: slug,
@@ -1656,7 +1686,7 @@ io.on('connection', (socket) => {
       void saveEncounter(cid, encounter);
     });
 
-    socket.on('combat:attack', ({ attackerId, attackerName, targetId, weapon }: { attackerId: string; attackerName: string; targetId: string; weapon: Weapon }) => {
+    socket.on('combat:attack', ({ attackerId, attackerName, targetId, weapon, bonusSpell }: { attackerId: string; attackerName: string; targetId: string; weapon: Weapon; bonusSpell?: Spell }) => {
       void (async () => {
         const cid = campaignId;
         if (!combatState.get(cid)) return;
@@ -1669,7 +1699,7 @@ io.on('connection', (socket) => {
 
         const strMod = statMod(char.stats.str);
         const dexMod = statMod(char.stats.dex);
-        const isMelee = weapon.range <= 5;
+        const isMelee = weapon.range <= 10; // covers reach weapons (e.g. Whip, range 10) — next tier up is bows at 80+
         const useDex = !isMelee || (weapon.isFinesse && dexMod > strMod);
         const statBonus = useDex ? dexMod : strMod;
         const statName = useDex ? 'Dexterity' : 'Strength';
@@ -1691,9 +1721,34 @@ io.on('connection', (socket) => {
 
         let damage: number | undefined;
         let damageRoll: number | undefined;
+        let bonus: { spellName: string; damageType: string | undefined; total: number } | undefined;
         if (hit) {
           damageRoll = rollDice(weapon.damage);
           damage = damageRoll + statBonus;
+
+          // Divine-Smite-style bonus damage, evaluated against this actual target so appliesIf
+          // (vs Fiend/Undead, ...) can gate it. Either bundled directly onto this attack (the
+          // client sends both action + bonus action together for one-shot Instantaneous smites),
+          // or queued earlier by a separate cast (Divine Favor/Zephyr Strike-style duration buffs).
+          if (bonusSpell) {
+            const rolled = rollApplicableDamage(bonusSpell.combat?.onHit, creature.creatureType, char.level ?? 1);
+            if (rolled) {
+              bonus = { spellName: bonusSpell.name, damageType: rolled.damageType, total: rolled.total };
+              damage += rolled.total;
+            }
+          } else {
+            const bonuses = pendingWeaponBonuses.get(cid);
+            const pending = bonuses?.[attackerId];
+            if (pending) {
+              delete bonuses![attackerId];
+              const rolled = rollApplicableDamage(pending.effects, creature.creatureType, pending.casterLevel);
+              if (rolled) {
+                bonus = { spellName: pending.spellName, damageType: rolled.damageType, total: rolled.total };
+                damage += rolled.total;
+              }
+            }
+          }
+
           await applyDamageToCreature(cid, targetId, damage);
         }
 
@@ -1714,6 +1769,9 @@ io.on('connection', (socket) => {
           damageRoll,
           damageType: weapon.damageType,
           damageFormula: weapon.damage,
+          bonusSpellName: bonus?.spellName,
+          bonusDamage: bonus?.total,
+          bonusDamageType: bonus?.damageType,
           remainingHp: hit ? encounter.findCreature(targetId)?.currentHp : undefined,
           targetDead: encounter.findCreature(targetId)?.isDead() ?? false,
         };
@@ -1755,13 +1813,12 @@ io.on('connection', (socket) => {
         const total = roll + attackBonus;
         const hit = total >= creature.ac;
 
-        const damageEffect = spell.combat?.onHit?.find(e => e.type === 'damage');
-        const dice = resolveSpellDamageDice(damageEffect?.scaling, char.level ?? 1) ?? damageEffect?.scaling?.base;
+        const rolledDamage = rollApplicableDamage(spell.combat?.onHit, creature.creatureType, char.level ?? 1);
 
         let damage: number | undefined;
         let damageRoll: number | undefined;
-        if (hit && dice) {
-          damageRoll = rollDice(dice);
+        if (hit && rolledDamage) {
+          damageRoll = rolledDamage.total;
           damage = damageRoll; // no spellcasting-mod bonus on spell damage, per 5e rules
           await applyDamageToCreature(cid, targetId, damage);
         }
@@ -1780,18 +1837,29 @@ io.on('connection', (socket) => {
           hit,
           damage,
           damageRoll,
-          damageType: damageEffect?.damageType,
-          damageFormula: dice,
+          damageType: rolledDamage?.damageType,
+          damageFormula: rolledDamage?.formula,
           remainingHp: hit ? encounter.findCreature(targetId)?.currentHp : undefined,
           targetDead: encounter.findCreature(targetId)?.isDead() ?? false,
         };
         io.to(ROOM).emit('combat:spell:attack:result', atkResult);
+
+        void (async () => {
+          try {
+            const config = await getConfig();
+            if (!config.tiers[config.tasks.combat].length) return;
+            const flavour = await generateCombatFlavour(atkResult, getCombatProvider(config));
+            if (!flavour) return;
+            const msg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
+            await appendChatLog(cid, msg);
+            io.to(ROOM).emit('chat:message', msg);
+          } catch (err) { logError('index:combatFlavour', err); }
+        })();
       })();
     });
 
     // Save-based spell (single-target or AoE) — computes the DC once, then rolls each
     // affected target's save mechanically and applies damage/conditions behind the curtain.
-    // Full per-target rolls are server-logged only; clients only ever see pass/fail + outcome.
     socket.on('combat:spell:cast', ({ casterId, casterName, spell, targetIds }) => {
       void (async () => {
         const cid = campaignId;
@@ -1803,6 +1871,21 @@ io.on('connection', (socket) => {
         if (!char) return;
 
         const combat = spell.combat;
+
+        // Self-buff spells with no save (Divine Smite, Divine Favor, Zephyr Strike, ...) don't
+        // resolve now — they queue extra damage for this caster's next weapon hit this turn.
+        // ponytail: curse-style buffs that mark an enemy target over a duration (Hex, Hunter's
+        // Mark) need target-lock + duration tracking, a different shape — not handled here yet.
+        if (!combat?.save && parseRangeFeet(spell.range) === 0 && targetIds.length === 1 && targetIds[0] === casterId) {
+          const damageEffects = combat?.onHit?.filter(e => e.type === 'damage') ?? [];
+          if (damageEffects.length) {
+            const bonuses = pendingWeaponBonuses.get(cid) ?? {};
+            bonuses[casterId] = { spellName: spell.name, effects: damageEffects, casterLevel: char.level ?? 1 };
+            pendingWeaponBonuses.set(cid, bonuses);
+          }
+          return;
+        }
+
         const casterSpellAbility = CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int';
         const casterAbilityMod = statMod(char.stats[casterSpellAbility]);
         const charProf = char.proficiencyBonus ?? 2;
@@ -1810,9 +1893,6 @@ io.on('connection', (socket) => {
 
         const saveAbility = combat?.save?.ability ?? casterSpellAbility;
         const halfOnSave = combat?.save?.halfOnSave ?? false;
-        const damageEffect = combat?.onHit?.find(e => e.type === 'damage');
-        const conditionEffects = combat?.onHit?.filter(e => e.type === 'condition') ?? [];
-        const dice = resolveSpellDamageDice(damageEffect?.scaling, char.level ?? 1) ?? damageEffect?.scaling?.base;
 
         const chars = await listCharacters(cid);
         const outcomes: SpellSaveOutcome[] = [];
@@ -1839,20 +1919,26 @@ io.on('connection', (socket) => {
           const saved = total >= dc;
           console.log(`[spell-save] ${participant.name} vs ${spell.name} DC${dc}: d20=${roll}${fmtMod(saveBonus)}=${total} — ${saved ? 'SAVE' : 'FAIL'}`);
 
+          const targetType: CreatureType = participant.isPlayer ? 'Humanoid' : (participant.creature?.creatureType ?? 'Humanoid');
+          const conditionEffects = (combat?.onHit ?? []).filter(e => e.type === 'condition' && effectApplies(e, targetType));
+          const forcedMove = (combat?.onHit ?? []).find(e => (e.type === 'push' || e.type === 'pull') && effectApplies(e, targetType));
+
           let damage: number | undefined;
-          if (dice && (!saved || halfOnSave)) {
-            const rolled = rollDice(dice);
-            damage = saved ? Math.floor(rolled / 2) : rolled;
-            participant.takeDamage(damage);
+          const rolledDamage = rollApplicableDamage(combat?.onHit, targetType, char.level ?? 1);
+          if (rolledDamage && (!saved || halfOnSave)) {
+            damage = saved ? Math.floor(rolledDamage.total / 2) : rolledDamage.total;
             if (participant.isPlayer && targetChar) {
+              participant.takeDamage(damage);
+              void updateCharacter(cid, targetChar.id, c => ({ ...c, currentHp: participant.currentHp }));
               io.to(ROOM).emit('combat:player:damage', {
                 characterId: targetChar.id, characterName: participant.name,
                 damage, currentHp: participant.currentHp, maxHp: participant.maxHp,
               });
             } else if (participant.creature) {
-              io.to(ROOM).emit('creature:update', {
-                id: targetId, currentHp: participant.creature.currentHp, maxHp: participant.creature.hp, effects: participant.creature.effects,
-              });
+              // Routes through the shared helper (same one combat:attack/combat:spell:attack
+              // use) so a kill here also clears turn order and triggers the victory check —
+              // calling participant.takeDamage directly here skipped both.
+              await applyDamageToCreature(cid, targetId, damage);
             }
           }
 
@@ -1860,11 +1946,37 @@ io.on('connection', (socket) => {
             ? conditionEffects.map(e => e.condition).filter((c): c is NonNullable<typeof c> => !!c)
             : undefined;
 
+          if (!saved && forcedMove?.distance) {
+            const positions = tokenPositions.get(cid) ?? {};
+            const casterPos = positions[casterName] ?? positions[casterId];
+            const targetKey = positions[targetId] ? targetId : participant.name;
+            const targetPos = positions[targetKey];
+            if (casterPos && targetPos) {
+              const dungeon = dungeons.get(cid);
+              const occupied = new Set(
+                Object.entries(positions)
+                  .filter(([id]) => id !== targetKey)
+                  .map(([, p]) => `${p.gx},${p.gy}`),
+              );
+              const moved = resolveForcedMovement(
+                dungeon?.cells, occupied, targetPos.gx, targetPos.gy, casterPos.gx, casterPos.gy,
+                forcedMove.distance, forcedMove.type === 'pull' ? 'pull' : 'push',
+              );
+              if (moved.gx !== targetPos.gx || moved.gy !== targetPos.gy) {
+                positions[targetKey] = moved;
+                tokenPositions.set(cid, positions);
+                io.to(ROOM).emit('token:moved', { tokenId: targetKey, gx: moved.gx, gy: moved.gy });
+              }
+            }
+          }
+
           outcomes.push({
             targetId,
             targetName: participant.name,
             isPC: participant.isPlayer,
+            roll,
             saveBonus,
+            total,
             dc,
             saved,
             damage,
@@ -1876,6 +1988,20 @@ io.on('connection', (socket) => {
 
         const result: SpellSaveResult = { casterName, spellName: spell.name, dc, saveAbility, slotLevel: spell.level, outcomes };
         io.to(ROOM).emit('combat:spell:save:result', result);
+
+        if (outcomes.length) {
+          void (async () => {
+            try {
+              const config = await getConfig();
+              if (!config.tiers[config.tasks.combat].length) return;
+              const flavour = await generateSpellSaveFlavour(result, getCombatProvider(config));
+              if (!flavour) return;
+              const msg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
+              await appendChatLog(cid, msg);
+              io.to(ROOM).emit('chat:message', msg);
+            } catch (err) { logError('index:combatFlavour', err); }
+          })();
+        }
       })();
     });
 
@@ -1883,7 +2009,90 @@ io.on('connection', (socket) => {
       const encounter = encounters.get(campaignId);
       const actor = encounter?.currentActor;
       console.log(`[turn] combat:turn:end received — currentActor=${actor?.name ?? 'none'} isPlayer=${actor?.isPlayer}`);
-      if (actor?.isPlayer) advanceTurn(campaignId);
+      if (actor?.isPlayer) {
+        // Unused on-hit buffs (e.g. Divine Smite) expire if not spent by end of turn.
+        delete pendingWeaponBonuses.get(campaignId)?.[actor.id];
+        advanceTurn(campaignId);
+      }
+    });
+
+    socket.on('character:equipment:update', ({ characterId, slot, itemId }: { characterId: string; slot: 'head' | 'body' | 'gloves' | 'boots' | 'mainHand' | 'offHand'; itemId: string | null }) => {
+      void (async () => {
+        const char = await getCharacter(campaignId, characterId);
+        if (!char) return;
+        const isHandSlot = slot === 'mainHand' || slot === 'offHand';
+        const otherHand = slot === 'mainHand' ? 'offHand' : 'mainHand';
+        const updates: Partial<Record<'head' | 'body' | 'gloves' | 'boots' | 'mainHand' | 'offHand', string | undefined>> = {};
+
+        if (itemId !== null) {
+          const item = char.inventory?.find(i => i.id === itemId);
+          if (!item) return;
+          const validForSlot =
+            slot === 'mainHand' ? isWeapon(item) :
+            slot === 'offHand'  ? isWeapon(item) || (isArmor(item) && item.isShield) :
+            isArmor(item) && item.slot === slot;
+          if (!validForSlot) return;
+
+          if (isHandSlot && isWeapon(item) && item.twoHanded) {
+            updates.mainHand = itemId;
+            updates.offHand = itemId;
+          } else {
+            updates[slot] = itemId;
+          }
+        } else {
+          updates[slot] = undefined;
+        }
+
+        // A two-handed weapon occupies both hands — displacing it from either hand frees the other.
+        if (isHandSlot && !(slot in updates && otherHand in updates)) {
+          const otherItemId = char.equipment?.[otherHand];
+          const otherItem = otherItemId ? char.inventory?.find(i => i.id === otherItemId) : null;
+          if (otherItem && isWeapon(otherItem) && otherItem.twoHanded) updates[otherHand] = undefined;
+        }
+
+        await updateCharacter(campaignId, characterId, c => ({
+          ...c,
+          equipment: Object.fromEntries(Object.entries({ ...c.equipment, ...updates }).filter(([, v]) => v !== undefined)),
+        }));
+        for (const [s, id] of Object.entries(updates)) {
+          io.to(ROOM).emit('character:equipment:update', { characterId, slot: s as typeof slot, itemId: id ?? null });
+        }
+      })();
+    });
+
+    // Any consumable click burns one unit of the item, in and out of combat.
+    socket.on('consumable:used', ({ characterId, itemId }: { characterId: string; itemId: string }) => {
+      void (async () => {
+        const char = await getCharacter(campaignId, characterId);
+        const item = char?.inventory?.find(i => i.id === itemId);
+        if (!char || !item) return;
+
+        const quantity = item.quantity - 1;
+        await updateCharacter(campaignId, characterId, c => ({
+          ...c,
+          inventory: quantity > 0
+            ? (c.inventory ?? []).map(i => i.id === itemId ? { ...i, quantity } : i)
+            : (c.inventory ?? []).filter(i => i.id !== itemId),
+        }));
+
+        const sid = playerSocketIds.get(characterId);
+        if (sid) io.to(sid).emit('character:inventory:remove', { itemId, quantity: Math.max(0, quantity) });
+      })();
+    });
+
+    // Potion of Healing — works in and out of combat, since it doesn't touch encounter state.
+    socket.on('consumable:heal', ({ characterId, characterName }: { characterId: string; characterName: string }) => {
+      void (async () => {
+        const char = await getCharacter(campaignId, characterId);
+        if (!char) return;
+
+        const maxHp = calcMaxHp(char);
+        const healAmount = rollDice('2d4+4');
+        const currentHp = Math.min(maxHp, (char.currentHp ?? maxHp) + healAmount);
+
+        await updateCharacter(campaignId, characterId, c => ({ ...c, currentHp, maxHp }));
+        io.to(ROOM).emit('consumable:heal:result', { characterId, characterName, healAmount, currentHp, maxHp });
+      })();
     });
 
     socket.on('disconnect', () => {

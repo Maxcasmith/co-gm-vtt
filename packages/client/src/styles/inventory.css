@@ -1,0 +1,290 @@
+/* ── Character sheet inventory list ──────────────────────────────────────── */
+
+.sheet-inv-currency-block {
+  margin-bottom: 1em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 25px;
+}
+
+.sheet-inv-plat { 
+  color: var(--platinum)
+}
+.sheet-inv-gold { 
+  color: var(--gold)
+}
+.sheet-inv-elec { 
+  color: var(--electrum)
+}
+.sheet-inv-silver { 
+  color: var(--silver)
+}
+.sheet-inv-bronze { 
+  color: var(--bronze)
+}
+
+.sheet-inv-block { display: flex; align-items: baseline; gap: 8px; padding: 8px 0 12px; }
+.sheet-inv-label { font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); }
+.sheet-inv-value { font-size: 18px; font-family: 'Crimson Pro', Georgia, serif; }
+
+.sheet-equipment {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.sheet-equipment-col { display: flex; flex-direction: column; }
+
+.sheet-equipment-body {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.sheet-equipment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sheet-equip-slot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sheet-equip-slot-label {
+  font-size: 15px;
+  color: var(--text-muted);
+}
+
+.sheet-equipment-figure-wrap {
+  display: flex;
+  justify-content: center;
+  flex: 1;
+}
+
+.sheet-equipment-figure {
+  position: relative;
+  aspect-ratio: 1 / 2;
+  height: 280px;
+}
+
+.sheet-equipment-svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+.sheet-equip-slot {
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--border);
+  background: var(--surface-hover);
+}
+
+.sheet-equip-slot--filled {
+  border-color: var(--gold);
+}
+
+.sheet-equip-slot-icon {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sheet-equip-slot--target {
+  border-color: var(--gold);
+  border-style: dashed;
+}
+
+.sheet-equip-slot--hand-left {
+  position: absolute;
+  left: 6%;
+  top: 48%;
+  transform: translate(-50%, -50%);
+}
+
+.sheet-equip-slot--hand-right {
+  position: absolute;
+  left: 94%;
+  top: 48%;
+  transform: translate(-50%, -50%);
+}
+
+.sheet-accessories-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 48px);
+  justify-content: center;
+  align-content: center;
+  flex: 1;
+}
+
+.sheet-accessory-slot {
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--border);
+  background: var(--surface-hover);
+  margin-left: -1px;
+  margin-top: -1px;
+}
+
+.sheet-accessory-slot:nth-child(5n+1) { margin-left: 0; }
+.sheet-accessory-slot:nth-child(-n+5) { margin-top: 0; }
+
+.sheet-inv-section { margin-bottom: 16px; }
+.sheet-inv-section-title { font-family: 'Cinzel', serif; font-size: 15px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 8px; }
+.sheet-inventory { padding: 4px 0; color: var(--text); }
+.sheet-inventory {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.sheet-inv-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  min-height: 72px;
+}
+
+.sheet-inv-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 16px;
+  height: 16px;
+}
+
+.sheet-inv-badge svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sheet-inv-card--weapon {
+  cursor: pointer;
+  border-color: #1e3a2a;
+}
+
+.sheet-inv-card--weapon:hover {
+  background: var(--surface-hover);
+  border-color: #16a34a55;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.08);
+}
+
+.sheet-inv-card--consumable {
+  cursor: pointer;
+  border-color: #3a2010;
+}
+
+.sheet-inv-card--consumable:hover {
+  background: var(--surface-hover);
+  border-color: #f9731655;
+  box-shadow: 0 0 8px rgba(249, 115, 22, 0.08);
+}
+.sheet-inv-card--disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
+
+.sheet-inv-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.sheet-inv-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.sheet-inv-name {
+  font-size: 12px;
+  color: var(--text);
+  font-family: 'Crimson Pro', Georgia, serif;
+  line-height: 1.3;
+}
+
+.sheet-inv-card-header-right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.sheet-inv-qty {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: monospace;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sheet-inv-desc {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sheet-inv-attack {
+  font-size: 9px;
+  font-family: monospace;
+  color: #86efac;
+  border: 1px solid #16a34a;
+  border-radius: 3px;
+  padding: 1px 5px;
+  align-self: flex-start;
+  margin-top: auto;
+}
+
+.sheet-inv-use {
+  font-size: 9px;
+  font-family: monospace;
+  color: #fdba74;
+  border: 1px solid #f97316;
+  border-radius: 3px;
+  padding: 1px 5px;
+  align-self: flex-start;
+  margin-top: auto;
+}
+
+/* Action-economy cost dot — same palette as .combat-pip so weapon/spell cards
+   read at a glance against the CombatDock pips. */
+.sheet-cost-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.sheet-cost-dot--action      { background: #16a34a; border-color: #22c55e; }
+.sheet-cost-dot--bonusAction { background: #c2410c; border-color: #f97316; }
+.sheet-cost-dot--reaction    { background: #be185d; border-color: #ec4899; }
+

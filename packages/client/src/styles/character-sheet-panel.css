@@ -1,0 +1,839 @@
+/* ── character sheet panel ── */
+.char-sheet {
+  position: sticky;
+  top: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.char-sheet-header {
+  padding: 20px 18px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.char-sheet-name {
+  font-family: 'Cinzel', serif;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 4px;
+  letter-spacing: 0.05em;
+}
+
+.char-sheet-class {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  color: var(--gold);
+  font-style: italic;
+  margin: 0 0 2px;
+}
+
+.char-sheet-species {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.char-sheet-placeholder {
+  opacity: 0.35;
+  font-style: italic;
+}
+
+.char-sheet-hp {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.char-sheet-hp-icon {
+  font-size: 16px;
+  color: #c0392b;
+  line-height: 1;
+}
+
+.char-sheet-hp-value {
+  font-family: 'Cinzel', serif;
+  font-size: 22px;
+  color: var(--text);
+  line-height: 1;
+}
+
+.char-sheet-hp-label {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.char-sheet-features {
+  padding: 0;
+}
+
+.char-sheet-section-title {
+  font-family: 'Cinzel', serif;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin: 0 0 4px;
+  padding: 10px 18px 0;
+}
+
+.feature-item {
+  border-top: 1px solid var(--border);
+}
+
+.feature-toggle {
+  width: 100%;
+  background: transparent;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px;
+  cursor: pointer;
+  text-align: left;
+  gap: 8px;
+  transition: background 0.15s;
+}
+
+.feature-toggle:hover { background: var(--surface-hover); }
+.feature-toggle--open { background: var(--surface-hover); }
+
+.feature-name {
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--text);
+}
+
+.feature-arrow {
+  font-size: 8px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.feature-desc {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 0;
+  padding: 0 18px 12px;
+}
+
+/* ── origin feat description (Human) ── */
+.origin-feat-desc {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 8px 0 0;
+  font-style: italic;
+}
+
+/* ── portrait + name row ── */
+.portrait-name-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.portrait-name-fields {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inline-portrait-drop {
+  border: 2px dashed var(--border);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: border-color 0.2s;
+}
+
+.inline-portrait-drop--compact {
+  width: 110px;
+  height: 110px;
+}
+
+.inline-portrait-drop:hover { border-color: var(--gold); }
+.inline-portrait-drop--loading { opacity: 0.6; cursor: default; }
+
+.inline-portrait-preview {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.portrait-upload-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 8px;
+}
+
+.portrait-file-input { display: none; }
+
+.inline-token-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-token-img {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.portrait-result-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: 'Cinzel', serif;
+  letter-spacing: 0.05em;
+}
+
+/* ── spells placeholder ── */
+.spells-placeholder {
+  padding: 48px 24px;
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+}
+
+.spells-placeholder-title {
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--text);
+  margin: 0 0 8px;
+}
+
+.spells-placeholder-body {
+  font-size: 13px;
+  margin: 0;
+}
+
+/* ── spells tab ── */
+.spells-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  color: var(--text);
+}
+
+.spells-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.spells-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.spells-section-title {
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--text);
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.spells-section-counts {
+  display: flex;
+  gap: 8px;
+}
+
+.spells-count {
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.spells-count--full {
+  color: #4caf6e;
+  border-color: #4caf6e44;
+  background: #4caf6e11;
+}
+
+.spells-empty {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+  padding: 12px 0;
+}
+
+.lore-score {
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.lore-score--good { color: #4caf6e; border-color: #4caf6e44; background: #4caf6e11; }
+.lore-score--mixed { color: #d4a017; border-color: #d4a01744; background: #d4a01711; }
+.lore-score--poor { color: #c0524a; border-color: #c0524a44; background: #c0524a11; }
+
+.lore-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+/* Learned spells chips */
+.spells-learned-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.spells-learned-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+}
+
+.spells-learned-name {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.spells-learned-name:hover { color: var(--accent); }
+
+.spells-learned-level {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.spells-learned-remove {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.spells-learned-remove:hover { color: #e57373; }
+
+/* Filters */
+.spells-filters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.spells-search {
+  flex: 1;
+  min-width: 120px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
+.spells-filter-select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+/* Spell browser rows */
+.spells-browser-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.spells-browser-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--surface);
+  transition: background 0.1s;
+}
+
+.spells-browser-row:hover,
+.spells-browser-row--selected {
+  background: var(--surface-raised, #2a2a2e);
+}
+
+.spells-browser-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+}
+
+.spells-browser-name {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.spells-browser-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.spells-tag {
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.spells-tag--ritual { color: #9c7ae0; border-color: #9c7ae044; background: #9c7ae011; }
+.spells-tag--cast   { color: var(--text); }
+
+.spells-learn-btn {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+}
+
+.spells-learn-btn:hover:not(:disabled) { background: var(--accent); color: #fff; border-color: var(--accent); }
+.spells-learn-btn--learned { color: #e57373; border-color: #e5737344; }
+.spells-learn-btn--learned:hover { background: #e5737322; }
+.spells-learn-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* Spell detail panel */
+.spells-detail-section { border-top: 1px solid var(--border); padding-top: 16px; }
+
+.spells-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.spells-detail-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.spells-detail-name {
+  font-family: 'Cinzel', serif;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.spells-detail-level {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.spells-detail-stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  row-gap: 3px;
+  margin: 0;
+}
+
+.spells-detail-stats dt {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.spells-detail-stats dd {
+  font-size: 12px;
+  color: var(--text);
+  margin: 0;
+}
+
+.spells-detail-text {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.spells-detail-higher {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.spells-detail-source {
+  font-size: 10px;
+  color: var(--muted);
+  margin: 0;
+}
+
+/* ── sheet spells tab ── */
+.sheet-spells-search {
+  width: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 6px 10px;
+  box-sizing: border-box;
+  margin: 8px auto 2em;
+}
+
+.sheet-spell-ritual {
+  font-size: 9px;
+  font-weight: 700;
+  color: #9c7ae0;
+  background: #9c7ae011;
+  border: 1px solid #9c7ae044;
+  border-radius: 3px;
+  padding: 1px 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.sheet-inv-card--spell { cursor: pointer; }
+.sheet-inv-card--spell:hover { background: var(--surface-hover); }
+.sheet-inv-card--spell-active { border-color: #9c7ae0aa; background: #9c7ae00d; }
+
+.sheet-spell-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid #9c7ae044;
+  border-radius: 6px;
+  margin-bottom: 4px;
+}
+
+.sheet-spell-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sheet-spell-detail-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.sheet-inv-icon.sheet-spell-detail-icon {
+  width: 35px;
+  height: 35px;
+}
+
+.sheet-spell-detail-name {
+  display: block;
+  font-family: 'Cinzel', serif;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.sheet-spell-detail-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.sheet-spell-detail-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.sheet-spell-detail-close:hover { color: var(--text); }
+
+.sheet-spell-detail-stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  row-gap: 3px;
+  margin: 0;
+}
+
+.sheet-spell-detail-stats dt {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sheet-spell-detail-stats dd {
+  font-size: 12px;
+  color: var(--text);
+  margin: 0;
+}
+
+.sheet-spell-detail-text {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.sheet-spell-detail-higher {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.sheet-spell-cast-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 6px 12px;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: #86efac;
+  background: rgba(22, 163, 74, 0.12);
+  border: 1px solid #16a34a;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.sheet-spell-cast-btn:hover:not(:disabled) { background: rgba(22, 163, 74, 0.22); }
+.sheet-spell-cast-btn--disabled,
+.sheet-spell-cast-btn:disabled {
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--border);
+  cursor: not-allowed;
+}
+
+/* ── skill picker ── */
+.skill-picker {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.skill-picker-header {
+  padding: 10px 14px 6px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.skill-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  overflow-x: auto;
+}
+
+.skill-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-family: 'Cinzel', serif;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  padding: 10px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.2s, border-color 0.2s;
+  margin-bottom: -1px;
+}
+
+.skill-tab:hover { color: var(--text); }
+.skill-tab--active { color: var(--gold); border-bottom-color: var(--gold); }
+
+.skill-tab-count {
+  font-size: 9px;
+  color: var(--text-muted);
+  background: var(--bg);
+  border-radius: 10px;
+  padding: 1px 5px;
+}
+
+.skill-tab-count--full { color: var(--gold); }
+
+.skill-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.skill-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
+}
+
+.skill-item:last-child { border-bottom: none; }
+.skill-item:hover:not(:disabled):not(.skill-item--disabled) { background: var(--surface-hover); }
+
+.skill-item--active { background: rgba(212, 175, 55, 0.08); }
+.skill-item--active:hover { background: rgba(212, 175, 55, 0.14); }
+
+.skill-item--disabled,
+.skill-item:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.skill-item--other {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.skill-item--bg {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.skill-item--full {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.skill-stat-badge {
+  font-family: 'Cinzel', serif;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 1px 4px;
+  flex-shrink: 0;
+  min-width: 28px;
+  text-align: center;
+}
+
+.skill-name {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  color: var(--text);
+  flex: 1;
+}
+
+.skill-item--active .skill-name { color: var(--gold); }
+
+.skill-source {
+  font-family: 'Cinzel', serif;
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  border-radius: 2px;
+  padding: 2px 5px;
+  flex-shrink: 0;
+}
+
+.skill-source--mine {
+  color: var(--gold);
+  background: rgba(212, 175, 55, 0.12);
+  border: 1px solid rgba(212, 175, 55, 0.3);
+}
+
+.skill-source--other {
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.skill-source--bg {
+  color: #a08060;
+  background: rgba(160, 128, 96, 0.1);
+  border: 1px solid rgba(160, 128, 96, 0.3);
+}
+
+.skill-source--faded {
+  opacity: 0.35;
+}
+
+.char-sheet-hint {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 16px 18px;
+  margin: 0;
+  opacity: 0.5;
+}
+

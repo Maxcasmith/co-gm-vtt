@@ -101,19 +101,24 @@ export default function AdminPage() {
   if (!authed) {
     return (
       <div className="admin-gate">
-        <a className="btn-secondary" href="/">Home</a>
-        <h1 className="admin-title">Admin</h1>
-        {error && <p className="admin-error">{error}</p>}
-        <input
-          className="modal-input admin-pw-input"
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleAuth()}
-          autoFocus
-        />
-        <button className="btn-primary" onClick={handleAuth}>Enter</button>
+        <div className="admin-gate-card">
+          <span className="admin-gate-icon" aria-hidden="true">🔒</span>
+          <span className="home-eyebrow">Restricted Chamber</span>
+          <h1 className="admin-title">Dungeon Master&apos;s Study</h1>
+          <p className="admin-gate-sub">Speak the password to enter.</p>
+          {error && <p className="admin-error">{error}</p>}
+          <input
+            className="modal-input admin-pw-input"
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleAuth()}
+            autoFocus
+          />
+          <button className="btn-primary" onClick={handleAuth}>Enter</button>
+          <a className="admin-gate-back" href="/">← Back home</a>
+        </div>
       </div>
     );
   }
@@ -121,90 +126,105 @@ export default function AdminPage() {
   return (
     <>
     <div className="admin-panel">
+      <div className="admin-atmosphere" aria-hidden="true" />
       <div className="admin-header">
-        <a className="btn-secondary" href="/">Home</a>
-        <h1 className="admin-title">Admin</h1>
-        <button className="btn-secondary" onClick={() => setSettingsOpen(true)}>Settings</button>
+        <a className="btn-secondary admin-header-link admin-header-link--left" href="/">Home</a>
+        <div className="admin-header-titles">
+          <span className="home-eyebrow">Dungeon Master&apos;s Study</span>
+          <h1 className="admin-title">
+            <span className="home-title-flourish" aria-hidden="true" />
+            Admin
+            <span className="home-title-flourish" aria-hidden="true" />
+          </h1>
+        </div>
+        <button className="btn-secondary admin-header-link admin-header-link--right" onClick={() => setSettingsOpen(true)}>Settings</button>
       </div>
 
       <div className="admin-modules-header">
-        <h2 className="admin-section-title">Campaigns</h2>
+        <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">⚔</span>Campaigns</h2>
         <button className="btn-primary" onClick={() => setCreateCampaignOpen(true)}>+ Create Campaign</button>
       </div>
-      <table className="admin-table">
-        <thead>
-          <tr>
-            <th>Campaign</th>
-            <th>Chat History</th>
-            <th>Session Notes</th>
-            <th>Delete</th>
-          </tr>
-        </thead>
-        <tbody>
-          {campaigns.map(c => (
-            <tr key={c.id}>
-              <td className="admin-campaign-name">{c.name}<span className="admin-campaign-id">{c.id}</span></td>
-              <td>
-                <button className="btn-danger" onClick={() => erase(c.id, 'chat')}>Erase</button>
-                {feedback[`${c.id}:chat`] && <span className="admin-feedback">{feedback[`${c.id}:chat`]}</span>}
-              </td>
-              <td>
-                <button className="btn-danger" onClick={() => erase(c.id, 'sessions')}>Erase</button>
-                {feedback[`${c.id}:sessions`] && <span className="admin-feedback">{feedback[`${c.id}:sessions`]}</span>}
-              </td>
-              <td>
-                <button className="btn-danger" onClick={() => void deleteCampaign(c.id, c.name)}>Delete</button>
-              </td>
+      <div className="admin-table-card">
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th>Campaign</th>
+              <th>Chat History</th>
+              <th>Session Notes</th>
+              <th>Delete</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {campaigns.length === 0 && (
+              <tr><td colSpan={4} className="admin-empty">No campaigns yet.</td></tr>
+            )}
+            {campaigns.map(c => (
+              <tr key={c.id}>
+                <td className="admin-campaign-name">{c.name}<span className="admin-campaign-id">{c.id}</span></td>
+                <td>
+                  <button className="btn-danger" onClick={() => erase(c.id, 'chat')}>Erase</button>
+                  {feedback[`${c.id}:chat`] && <span className="admin-feedback">{feedback[`${c.id}:chat`]}</span>}
+                </td>
+                <td>
+                  <button className="btn-danger" onClick={() => erase(c.id, 'sessions')}>Erase</button>
+                  {feedback[`${c.id}:sessions`] && <span className="admin-feedback">{feedback[`${c.id}:sessions`]}</span>}
+                </td>
+                <td>
+                  <button className="btn-danger" onClick={() => void deleteCampaign(c.id, c.name)}>Delete</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       <div className="admin-modules-header">
-        <h2 className="admin-section-title">Adventure Modules</h2>
+        <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">📜</span>Adventure Modules</h2>
         <button className="btn-primary" onClick={() => setUploadOpen(true)}>+ Upload Module</button>
       </div>
-      <table className="admin-table">
-        <thead>
-          <tr>
-            <th>Module</th>
-            <th>Create Campaign</th>
-            <th>Delete</th>
-          </tr>
-        </thead>
-        <tbody>
-          {adventures.length === 0 && (
-            <tr><td colSpan={3} className="admin-empty">No modules uploaded yet.</td></tr>
-          )}
-          {adventures.map(adv => (
-            <tr key={adv.slug}>
-              <td className="admin-campaign-name">
-                {adv.name}
-                {adv.status === 'draft' && <span className="admin-draft-badge">draft — paused at section {adv.resumeFromChunk + 1}</span>}
-                <span className="admin-campaign-id">{adv.slug}</span>
-                <span className="admin-module-counts">
-                  {[
-                    adv.entityCount.npc > 0 && `${adv.entityCount.npc} NPCs`,
-                    adv.entityCount.creature > 0 && `${adv.entityCount.creature} creatures`,
-                    adv.entityCount.location > 0 && `${adv.entityCount.location} locations`,
-                  ].filter(Boolean).join(' · ')}
-                </span>
-              </td>
-              <td>
-                {adv.status === 'draft' ? (
-                  <button className="btn-secondary" onClick={() => { setResumeAdventure(adv); setUploadOpen(true); }}>Resume</button>
-                ) : (
-                  <button className="btn-secondary" onClick={() => setSelectedAdventure(adv)}>Create</button>
-                )}
-              </td>
-              <td>
-                <button className="btn-danger" onClick={() => void deleteAdventure(adv.slug, adv.name)}>Delete</button>
-                {feedback[`module:${adv.slug}`] && <span className="admin-feedback">{feedback[`module:${adv.slug}`]}</span>}
-              </td>
+      <div className="admin-table-card">
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th>Module</th>
+              <th>Create Campaign</th>
+              <th>Delete</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {adventures.length === 0 && (
+              <tr><td colSpan={3} className="admin-empty">No modules uploaded yet.</td></tr>
+            )}
+            {adventures.map(adv => (
+              <tr key={adv.slug}>
+                <td className="admin-campaign-name">
+                  {adv.name}
+                  {adv.status === 'draft' && <span className="admin-draft-badge">draft — paused at section {adv.resumeFromChunk + 1}</span>}
+                  <span className="admin-campaign-id">{adv.slug}</span>
+                  <span className="admin-module-counts">
+                    {[
+                      adv.entityCount.npc > 0 && `${adv.entityCount.npc} NPCs`,
+                      adv.entityCount.creature > 0 && `${adv.entityCount.creature} creatures`,
+                      adv.entityCount.location > 0 && `${adv.entityCount.location} locations`,
+                    ].filter(Boolean).join(' · ')}
+                  </span>
+                </td>
+                <td>
+                  {adv.status === 'draft' ? (
+                    <button className="btn-secondary" onClick={() => { setResumeAdventure(adv); setUploadOpen(true); }}>Resume</button>
+                  ) : (
+                    <button className="btn-secondary" onClick={() => setSelectedAdventure(adv)}>Create</button>
+                  )}
+                </td>
+                <td>
+                  <button className="btn-danger" onClick={() => void deleteAdventure(adv.slug, adv.name)}>Delete</button>
+                  {feedback[`module:${adv.slug}`] && <span className="admin-feedback">{feedback[`module:${adv.slug}`]}</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <SettingsSidebar open={settingsOpen} onClose={() => setSettingsOpen(false)} />

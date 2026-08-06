@@ -1,0 +1,46 @@
+/* ── item acquisition notifications ── */
+@keyframes item-notif {
+  0%   { opacity: 0; transform: translateX(1.5rem); }
+  5%   { opacity: 1; transform: translateX(0); }
+  90%  { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(0); }
+}
+
+.item-notifications {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  z-index: 99999;
+  pointer-events: none;
+}
+
+.item-notification {
+  background: linear-gradient(160deg, #22c55e 0%, #16a34a 100%);
+  color: #fff;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0;
+  font-family: 'Crimson Pro', Georgia, serif;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  animation: item-notif 8.5s ease-out forwards;
+  min-width: 180px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55), 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.item-notification-label {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.75);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.item-notification-name {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #fff;
+}

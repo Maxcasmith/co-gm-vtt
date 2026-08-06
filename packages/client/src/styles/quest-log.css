@@ -1,0 +1,277 @@
+/* ── Quest Log ─────────────────────────────────────────────────────────────── */
+
+.quest-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.quest-act-badge {
+  font-family: 'Cinzel', serif;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--gold);
+  border: 1px solid var(--gold);
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.quest-item {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.quest-header-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 10px 14px;
+  text-align: left;
+}
+.quest-header-btn:hover { background: rgba(255,255,255,0.03); }
+
+.quest-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.quest-dot--open     { background: var(--gold); }
+.quest-dot--resolved { background: #6dbf7e; }
+
+.quest-name {
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  flex: 1;
+}
+
+.quest-chevron {
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.quest-detail {
+  padding: 0 14px 12px 32px;
+  border-top: 1px solid var(--border);
+}
+
+.quest-description {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  color: var(--text-muted);
+  margin: 10px 0 8px;
+}
+
+.quest-log-entries {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.quest-log-entry {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.quest-log-date {
+  font-size: 10px;
+  font-style: normal;
+  color: var(--text-muted);
+  margin-right: 6px;
+  opacity: 0.6;
+}
+
+/* ── tag input ── */
+.tag-input-area {
+  flex: 1;
+  margin-bottom: 20px;
+}
+
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  min-height: 52px;
+  cursor: text;
+}
+
+.tag-chips:focus-within { border-color: var(--gold); }
+
+.tag-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 3px 10px 3px 12px;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.tag-chip-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+  display: flex;
+  align-items: center;
+}
+
+.tag-chip-remove:hover { color: var(--text); }
+
+.tag-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  flex: 1;
+  min-width: 140px;
+}
+
+.tag-input::placeholder { color: var(--text-muted); }
+
+.tag-hint {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 8px;
+}
+
+.btn-add-tag {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-muted);
+  padding: 5px 14px;
+  font-family: 'Cinzel', serif;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  margin-top: 10px;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.btn-add-tag:hover { border-color: var(--gold); color: var(--gold); }
+
+/* ── concepts header ── */
+.concepts-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.btn-refresh {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-muted);
+  width: 32px;
+  height: 32px;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.btn-refresh:hover:not(:disabled) { border-color: var(--gold); color: var(--gold); }
+.btn-refresh:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── concept tiles ── */
+.concept-tiles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 24px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.concept-tile {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 18px 20px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.concept-tile:hover { border-color: var(--gold); background: var(--surface-hover); }
+.concept-tile--selected { border-color: var(--gold); background: var(--surface-hover); }
+
+.concept-tile-name {
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  color: var(--text);
+}
+
+.concept-tile-desc {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.5;
+}
+
+/* ── stream output ── */
+.stream-output {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 16px;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--text-muted);
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 200px;
+  max-height: 340px;
+  margin-bottom: 16px;
+  line-height: 1.6;
+}
+
+.stream-output-raw {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.75;
+  min-height: 120px;
+  max-height: 180px;
+}
+

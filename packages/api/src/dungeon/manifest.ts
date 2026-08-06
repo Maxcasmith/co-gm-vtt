@@ -1,5 +1,5 @@
-import type { EnemyStatBlock, DungeonTheme } from 'shared';
-import { DUNGEON_THEMES } from 'shared';
+import type { EnemyStatBlock, DungeonTheme, CreatureType } from 'shared';
+import { DUNGEON_THEMES, CREATURE_TYPES } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { logError } from '../logger.ts';
 
@@ -30,13 +30,17 @@ function isGeneric(name: string): boolean {
   return GENERIC_RE.test(name.trim());
 }
 
+function normalizeCreatureType(t: unknown): CreatureType {
+  return CREATURE_TYPES.includes(t as CreatureType) ? (t as CreatureType) : 'Humanoid';
+}
+
 const GENERIC_ROOMS: ManifestRoom[] = [
   { name: 'Entrance', size: 'medium', role: 'entrance', theme: 'stone' },
-  { name: 'Guard Room', size: 'small', theme: 'armory', creatures: [{ id: 'guard-1', name: 'Guard', cr: 0.25, hp: 11, ac: 12, speed: 30, stats: { str: 13, dex: 12, con: 12, int: 10, wis: 10, cha: 10 }, attacks: [{ name: 'Spear', bonus: 3, damage: '1d6+1' }] }] },
+  { name: 'Guard Room', size: 'small', theme: 'armory', creatures: [{ id: 'guard-1', name: 'Guard', cr: 0.25, hp: 11, ac: 12, speed: 30, stats: { str: 13, dex: 12, con: 12, int: 10, wis: 10, cha: 10 }, attacks: [{ name: 'Spear', bonus: 3, damage: '1d6+1' }], creatureType: 'Humanoid' }] },
   { name: 'Storage Room', size: 'small', theme: 'stone', loot: [{ name: 'Supplies', hideDC: 8 }] },
   { name: 'Junction', size: 'small', theme: 'cave' },
   { name: 'Vault', size: 'medium', theme: 'stone', traps: [{ name: 'Trapped Chest', hideDC: 15 }], loot: [{ name: 'Treasure Chest', hideDC: 12 }] },
-  { name: 'Inner Chamber', size: 'large', theme: 'throne', creatures: [{ id: 'boss-1', name: 'Boss', cr: 1, hp: 27, ac: 14, speed: 30, stats: { str: 15, dex: 13, con: 14, int: 10, wis: 11, cha: 12 }, attacks: [{ name: 'Greatsword', bonus: 5, damage: '2d6+3' }] }], role: 'exit' },
+  { name: 'Inner Chamber', size: 'large', theme: 'throne', creatures: [{ id: 'boss-1', name: 'Boss', cr: 1, hp: 27, ac: 14, speed: 30, stats: { str: 15, dex: 13, con: 14, int: 10, wis: 11, cha: 12 }, attacks: [{ name: 'Greatsword', bonus: 5, damage: '2d6+3' }], creatureType: 'Humanoid' }], role: 'exit' },
 ];
 
 // A-Z, deterministic — up to 26 rooms, well past the largest room range we ask for (20).
@@ -76,7 +80,8 @@ Return ONLY valid JSON, no markdown fences, no explanation:
         "ac": 12,
         "speed": 30,
         "stats": { "str": 11, "dex": 12, "con": 12, "int": 10, "wis": 10, "cha": 10 },
-        "attacks": [{ "name": "string", "bonus": 3, "damage": "1d6+1" }]
+        "attacks": [{ "name": "string", "bonus": 3, "damage": "1d6+1" }],
+        "creatureType": "one of: ${CREATURE_TYPES.join('|')}"
       }],
       "traps": [{ "name": "string — trap description", "hideDC": 14 }],
       "loot": [{ "name": "string — item or treasure", "hideDC": 8 }]
@@ -93,8 +98,10 @@ Genre: ${dungeonType}`;
     const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
     const parsed = JSON.parse(cleaned) as Partial<DungeonManifest>;
     const rooms: ManifestRoom[] = (parsed.rooms?.length ? parsed.rooms : GENERIC_ROOMS).map(r => {
-      const { theme, ...rest } = r;
-      return DUNGEON_THEMES.includes(theme as DungeonTheme) ? { ...rest, theme: theme as DungeonTheme } : rest;
+      const { theme, creatures, ...rest } = r;
+      const themed = DUNGEON_THEMES.includes(theme as DungeonTheme) ? { ...rest, theme: theme as DungeonTheme } : rest;
+      if (!creatures?.length) return themed;
+      return { ...themed, creatures: creatures.map(c => ({ ...c, creatureType: normalizeCreatureType(c.creatureType) })) };
     });
     return { rooms: assignKeys(rooms) };
   } catch (err) {

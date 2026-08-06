@@ -75,8 +75,17 @@ export default function HomePage() {
 
   return (
       <div className="home">
+        <div className="home-atmosphere" aria-hidden="true" />
         <header className="home-header">
-          <h1 className="home-title">Games</h1>
+          <div className="home-header-titles">
+            <span className="home-eyebrow">The Chronicle Awaits</span>
+            <h1 className="home-title">
+              <span className="home-title-flourish" aria-hidden="true" />
+              Campaigns
+              <span className="home-title-flourish" aria-hidden="true" />
+            </h1>
+            <p className="home-tagline">Choose your table and step back into the story.</p>
+          </div>
           <div className="home-header-actions">
             <a className="btn-secondary" href="/admin">Admin</a>
           </div>
@@ -86,6 +95,7 @@ export default function HomePage() {
           <ul className="game-list">
             {[0, 1, 2].map(i => (
               <li key={i} className="game-card game-card--skeleton">
+                <span className="game-card-sigil skeleton-line skeleton-line--sigil" />
                 <div className="game-card-info">
                   <span className="skeleton-line skeleton-line--title" />
                   <span className="skeleton-line skeleton-line--meta" />
@@ -96,13 +106,17 @@ export default function HomePage() {
         )}
 
         {games !== null && games.length === 0 && (
-          <p className="empty-state">No campaigns yet — ask your GM to create one.</p>
+          <div className="empty-state">
+            <span className="empty-state-icon" aria-hidden="true">🎲</span>
+            <p className="empty-state-text">No campaigns yet — ask your GM to create one.</p>
+          </div>
         )}
 
         {games !== null && games.length > 0 && (
           <ul className="game-list">
             {games.map((game, i) => (
               <li key={i} className="game-card" onClick={() => openModal(game)}>
+                <span className="game-card-sigil">{game.name[0]?.toUpperCase()}</span>
                 <div className="game-card-info">
                   <span className="game-name">{game.name}</span>
                   <span className="game-meta">{game.system}</span>

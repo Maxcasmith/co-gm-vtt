@@ -117,8 +117,6 @@ campaignsRouter.post('/generate', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
-  const slug = uniqueSlug(slugify(name || concept.name));
-
   try {
     const config = await getConfig();
 
@@ -136,6 +134,10 @@ campaignsRouter.post('/generate', async (req, res) => {
         if (parsed.title) title = parsed.title;
         if (parsed.premise) premise = parsed.premise;
       } catch (err) { logError('routes/campaigns:generate:dungeonCrawlPremise', err); }
+
+      // Slugged from the generated title (like campaigns), not the tags[0] placeholder the client
+      // passes as `name`/`concept.name` before the real title exists.
+      const slug = uniqueSlug(slugify(title));
       await writeCampaignFile(slug, 'world.md', `# ${title}\n\n${premise.trim()}`);
 
       const campaignName = title;
@@ -158,6 +160,8 @@ campaignsRouter.post('/generate', async (req, res) => {
       send({ type: 'complete', id: slug, name: campaignName });
       return;
     }
+
+    const slug = uniqueSlug(slugify(name || concept.name));
 
     let accumulated = '';
     send({ type: 'progress', message: 'Generating world…' });

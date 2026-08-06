@@ -1,0 +1,17 @@
+/* ── shared ── */
+.error {
+  color: var(--text);
+  padding: 20px;
+  font-family: 'Crimson Pro', Georgia, serif;
+}
+
+/* ── canvas ── */
+.canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+.canvas--inactive { pointer-events: none; }
+

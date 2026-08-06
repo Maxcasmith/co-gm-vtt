@@ -72,6 +72,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [tokenUrls, setTokenUrls] = useState<Record<string, string>>({});
   const [portraitUrls, setPortraitUrls] = useState<Record<string, string>>({});
   const [acquisitions, setAcquisitions] = useState<Character['inventory']>([]);
+  const [itemQtyOverrides, setItemQtyOverrides] = useState<Record<string, number>>({});
+  const [equipment, setEquipment] = useState<Character['equipment']>(character.equipment);
   const [itemNotifications, setItemNotifications] = useState<{ id: string; name: string }[]>([]);
   const [worldMapUrl, setWorldMapUrl] = useState<string | undefined>(undefined);
   const [dungeon, setDungeon] = useState<Dungeon | null>(null);
@@ -147,6 +149,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     const socket = io(API);
     socketRef.current = socket;
     socket.emit('player:join', { name: character.name, id: character.id, campaignId: character.campaignId });
+    fetch(`${API}/api/campaigns/${character.campaignId}/party/${character.id}`)
+      .then(r => r.json())
+      .then((c: Character) => setEquipment(c.equipment))
+      .catch(() => {});
     socket.on('players:update', setConnected);
     socket.on('players:characters', map => {
       setTokenUrls(Object.fromEntries(
@@ -161,7 +167,14 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       setAcquisitions(prev => [...(prev ?? []), ...acquired]);
       const notifs = acquired.map(item => ({ id: crypto.randomUUID(), name: item.name }));
       setItemNotifications(prev => [...prev, ...notifs]);
-      notifs.forEach(n => setTimeout(() => setItemNotifications(prev => prev.filter(x => x.id !== n.id)), 3500));
+      notifs.forEach(n => setTimeout(() => setItemNotifications(prev => prev.filter(x => x.id !== n.id)), 8500));
+    });
+    socket.on('character:equipment:update', ({ characterId, slot, itemId }) => {
+      if (characterId !== character.id) return;
+      setEquipment(prev => ({ ...prev, [slot]: itemId ?? undefined }));
+    });
+    socket.on('character:inventory:remove', ({ itemId, quantity }) => {
+      setItemQtyOverrides(prev => ({ ...prev, [itemId]: quantity }));
     });
 
     // Bridge roll events from the UI → socket
@@ -196,7 +209,13 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('combat:state', active => {
       setCombatActive(active);
       dispatch('vtt:combat:state', { active });
-      if (!active) setEncounter(null);
+      if (!active) {
+        setEncounter(null);
+        fetch(`${API}/api/campaigns/${character.campaignId}/party/${character.id}`)
+          .then(r => r.json())
+          .then((c: Character) => onCharacterUpdateRef.current(c))
+          .catch(() => {});
+      }
     });
     socket.on('combat:turn', data => dispatch('vtt:combat:turn', data));
     socket.on('combat:initiative', entry => dispatch('vtt:combat:initiative', { entry }));
@@ -218,6 +237,16 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       setDeadPlayerNames(prev => new Set([...prev, data.characterName]));
       setDownPlayerNames(prev => { const s = new Set(prev); s.delete(data.characterName); return s; });
     });
+    const unsubConsumableUsed = on('vtt:consumable:used', ({ item, characterId }) => {
+      socket.emit('consumable:used', { characterId, itemId: item.id });
+    });
+    const unsubHeal = on('vtt:consumable:heal', payload => socket.emit('consumable:heal', payload));
+    socket.on('consumable:heal:result', data => {
+      dispatch('vtt:consumable:heal:result', data);
+      if (data.characterId === character.id) setPlayerHpState({ current: data.currentHp, max: data.maxHp });
+      setPartyHp(prev => ({ ...prev, [data.characterName]: { current: data.currentHp, max: data.maxHp } }));
+      if (data.currentHp > 0) setDownPlayerNames(prev => { const s = new Set(prev); s.delete(data.characterName); return s; });
+    });
     const unsubRest = on('vtt:rest:result', ({ currentHp, maxHp }) => {
       setPlayerHpState({ current: currentHp, max: maxHp });
       setPartyHp(prev => ({ ...prev, [character.name]: { current: currentHp, max: maxHp } }));
@@ -229,12 +258,6 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('combat:victory', data => {
       dispatch('vtt:combat:victory', data);
       setVictory(data);
-      setTimeout(() => {
-        fetch(`${API}/api/campaigns/${character.campaignId}/party/${character.id}`)
-          .then(r => r.json())
-          .then((c: Character) => onCharacterUpdateRef.current(c))
-          .catch(() => {});
-      }, 500);
     });
     socket.on('token:moved', (pos: TokenPosition) => {
       setTokenPositions(prev => ({ ...prev, [pos.tokenId]: { gx: pos.gx, gy: pos.gy } }));
@@ -268,6 +291,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       unsubTurnEnd();
       unsubInitRoll();
       unsubRest();
+      unsubHeal();
+      unsubConsumableUsed();
     };
   }, [character.name]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -277,14 +302,17 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     if (!active) { setIsMyTurn(false); setVictory(null); setDefeated(false); setDeadCreatureIds(new Set()); setDownPlayerNames(new Set()); setDeadPlayerNames(new Set()); setPlayerHpState(null); }
   }), []);
   useEffect(() => on('vtt:combat:turn', ({ actorName }) => setIsMyTurn(actorName === character.name)), [character.name]);
-  useEffect(() => on('vtt:combat:attack', ({ attackerId, attackerName, targetId, weapon }) => {
-    socketRef.current?.emit('combat:attack', { attackerId, attackerName, targetId, weapon });
+  useEffect(() => on('vtt:combat:attack', ({ attackerId, attackerName, targetId, weapon, bonusSpell }) => {
+    socketRef.current?.emit('combat:attack', { attackerId, attackerName, targetId, weapon, ...(bonusSpell ? { bonusSpell } : {}) });
   }), []);
   useEffect(() => on('vtt:combat:spell:attack', ({ casterId, casterName, targetId, spell, slotLevel }) => {
     socketRef.current?.emit('combat:spell:attack', { casterId, casterName, targetId, spell, slotLevel });
   }), []);
   useEffect(() => on('vtt:combat:spell:cast', ({ casterId, casterName, spell, slotLevel, targetIds }) => {
     socketRef.current?.emit('combat:spell:cast', { casterId, casterName, spell, slotLevel, targetIds });
+  }), []);
+  useEffect(() => on('vtt:equipment:update', payload => {
+    socketRef.current?.emit('character:equipment:update', payload);
   }), []);
   // Movement resets to full only at the START of this player's turn, not on combat start
   useEffect(() => { if (!combatActive) setMovementRemaining(0); }, [combatActive]);
@@ -451,7 +479,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       <CombatDock character={character} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} />
       <EncounterLoadingOverlay />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} header={<span className="palette-clock">{formatWorldTime(worldTimeSecs)}</span>} />
-      <CharacterSheetOverlay character={{ ...character, inventory: [...(character.inventory ?? []), ...(acquisitions ?? [])] }} currentHp={playerHpState?.current} maxHp={playerHpState?.max} />
+      <CharacterSheetOverlay character={{ ...character, inventory: [...(character.inventory ?? []), ...(acquisitions ?? [])].map(item => itemQtyOverrides[item.id] != null ? { ...item, quantity: itemQtyOverrides[item.id] } : item).filter(item => item.quantity > 0), equipment }} currentHp={playerHpState?.current} maxHp={playerHpState?.max} sessionActive={sessionActive} />
       <JournalOverlay open={journalOpen} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} />
       <QuestLog open={questLogOpen} onClose={() => setQuestLogOpen(false)} quests={quests} act={act} />
       <CombatLogOverlay open={combatLogOpen} onClose={() => setCombatLogOpen(false)} />

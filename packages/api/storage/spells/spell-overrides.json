@@ -430,7 +430,12 @@
     "onHit": [
       {
         "type": "damage",
-        "damageType": "Fire"
+        "damageType": "Fire",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "3d6",
+          "tiers": []
+        }
       }
     ]
   },
@@ -1204,7 +1209,14 @@
     "onHit": [
       {
         "type": "damage",
-        "damageType": "Radiant"
+        "damageType": "Radiant",
+        "scaling": { "mode": "spell-slot", "base": "2d8", "tiers": [] }
+      },
+      {
+        "type": "damage",
+        "damageType": "Radiant",
+        "scaling": { "mode": "spell-slot", "base": "1d8", "tiers": [] },
+        "appliesIf": { "creatureType": ["Fiend", "Undead"] }
       }
     ]
   },
@@ -4336,7 +4348,16 @@
     "onHit": [
       {
         "type": "damage",
-        "damageType": "Thunder"
+        "damageType": "Thunder",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d8",
+          "tiers": []
+        }
+      },
+      {
+        "type": "push",
+        "distance": 10
       }
     ]
   },

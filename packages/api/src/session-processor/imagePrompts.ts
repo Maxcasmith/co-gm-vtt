@@ -1,12 +1,17 @@
-import { calcAC } from 'shared';
-import type { ChatPayload, Character, EnemyStatBlock, AttackResult, WorldState, NemesisRecord } from 'shared';
+import { calcAC, CREATURE_TYPES } from 'shared';
+import type { ChatPayload, Character, EnemyStatBlock, CreatureType, AttackResult, SpellAttackResult, SpellSaveResult, WorldState, NemesisRecord } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { logError } from '../logger.ts';
+
+function normalizeCreatureType(t: unknown): CreatureType {
+  return CREATURE_TYPES.includes(t as CreatureType) ? (t as CreatureType) : 'Humanoid';
+}
 
 const FALLBACK_ENEMY: EnemyStatBlock = {
   id: 'fallback-1', name: 'Brigand', cr: 0.125, hp: 11, ac: 12, speed: 30,
   stats: { str: 11, dex: 12, con: 12, int: 10, wis: 10, cha: 10 },
   attacks: [{ name: 'Scimitar', bonus: 3, damage: '1d6+1' }],
+  creatureType: 'Humanoid',
 };
 
 export async function generateEncounterEnemies(
@@ -41,7 +46,8 @@ export async function generateEncounterEnemies(
       "ac": 13,
       "speed": 30,
       "stats": { "str": 11, "dex": 12, "con": 12, "int": 10, "wis": 10, "cha": 10 },
-      "attacks": [{ "name": "Attack", "bonus": 3, "damage": "1d6+1" }]
+      "attacks": [{ "name": "Attack", "bonus": 3, "damage": "1d6+1" }],
+      "creatureType": "one of: ${CREATURE_TYPES.join('|')}"
     }
   ]
 }
@@ -55,7 +61,9 @@ Return ONLY valid JSON, no markdown fences, no explanation.`;
     const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
     const parsed = JSON.parse(cleaned) as { enemies?: EnemyStatBlock[] };
     const enemies = parsed.enemies ?? [];
-    return enemies.length ? enemies.map((e, i) => ({ ...e, id: e.id || `enemy-${i + 1}` })) : [FALLBACK_ENEMY];
+    return enemies.length
+      ? enemies.map((e, i) => ({ ...e, id: e.id || `enemy-${i + 1}`, creatureType: normalizeCreatureType(e.creatureType) }))
+      : [FALLBACK_ENEMY];
   } catch (err) {
     logError('session-processor/imagePrompts:generateEncounterEnemies', err);
     return [FALLBACK_ENEMY];
@@ -81,7 +89,8 @@ async function llmText(messages: { role: string; content: string }[], adapter: S
   } catch (err) { logError('session-processor/imagePrompts:llmText', err); return null; }
 }
 
-export async function generateCombatFlavour(result: AttackResult, adapter: StoryProviderAdapter): Promise<string | null> {
+export async function generateCombatFlavour(result: AttackResult | SpellAttackResult, adapter: StoryProviderAdapter): Promise<string | null> {
+  const actionName = 'weaponName' in result ? result.weaponName : result.spellName;
   const outcome = result.hit
     ? `HIT for ${result.damage} ${result.damageFormula ? `(${result.damageFormula})` : ''} damage.${result.targetDead ? ' Target is slain.' : ` ${result.targetName} has ${result.remainingHp} HP remaining.`}`
     : `MISS — the blow fails to land (rolled ${result.total} vs AC ${result.ac}).`;
@@ -93,7 +102,25 @@ export async function generateCombatFlavour(result: AttackResult, adapter: Story
     },
     {
       role: 'user',
-      content: `${result.attackerName} attacks ${result.targetName} with their ${result.weaponName}. ${outcome}`,
+      content: `${result.attackerName} attacks ${result.targetName} with their ${actionName}. ${outcome}`,
+    },
+  ], adapter);
+}
+
+export async function generateSpellSaveFlavour(result: SpellSaveResult, adapter: StoryProviderAdapter): Promise<string | null> {
+  const outcomeLines = result.outcomes.map(o => {
+    const fate = o.targetDead ? 'is slain' : o.saved ? 'resists the effect' : o.damage != null ? `takes ${o.damage} damage` : 'is affected';
+    return `${o.targetName} ${fate}`;
+  }).join('; ');
+
+  return llmText([
+    {
+      role: 'system',
+      content: 'You are a punchy D&D combat narrator. Write ONE short sentence (max 20 words) describing a spell taking effect on its target(s). Style: visceral action verbs and impact — not flowery metaphor. No purple prose: no similes, no "light fading from eyes", no poetic mortality language, no internal feelings. Unless a target is slain, do NOT imply they are dying, fatally wounded, or near death. Never mention dice, numbers, DCs, or HP.',
+    },
+    {
+      role: 'user',
+      content: `${result.casterName} casts ${result.spellName}. ${outcomeLines}.`,
     },
   ], adapter);
 }

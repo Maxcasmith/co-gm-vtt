@@ -1,0 +1,158 @@
+/* ── Combat log overlay ──────────────────────────────────────────────────── */
+
+.combat-log-panel { font-family: monospace; }
+
+.combat-log-entry {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+  border-bottom: none;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.combat-log-entry--attack {
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+}
+
+.combat-log-time {
+  flex-shrink: 0;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.combat-log-text { color: #c8c8c8; word-break: break-word; }
+
+.combat-log-attack-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.combat-log-attack-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.combat-log-attack-action {
+  font-size: 14px;
+  font-weight: 700;
+  color: #e8e8e8;
+}
+
+.combat-log-attack-total {
+  width: 70px;
+  height: 70px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.5em;
+  font-weight: 700;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-radius: 5px;
+}
+
+.combat-log-attack-total--hit { color: #4ade80; border-color: rgba(74, 222, 128, 0.5); }
+.combat-log-attack-total--miss { color: #f87171; border-color: rgba(248, 113, 113, 0.4); }
+
+.combat-log-attack-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #c8c8c8;
+}
+
+.combat-log-breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.combat-log-breakdown-box {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-radius: 5px;
+}
+
+.combat-log-attack-vs {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  padding: 15px 0 0;
+  margin-top: 9px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.combat-log-damage-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  margin-top: 9px;
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.combat-log-damage-total {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fbbf24;
+  text-transform: capitalize;
+}
+
+.combat-log-attack-breakdown--damage {
+  gap: 4px;
+}
+
+.combat-log-attack-miss {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f87171;
+  text-align: right;
+}
+
+.combat-log-spell-save-card, .combat-log-spell-save-card * { color: #fff; }
+
+.combat-log-spell-save-dc {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 5px;
+}
+
+.combat-log-spell-save-outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.combat-log-spell-save-target {
+  font-size: 12px;
+  font-weight: 700;
+}
+

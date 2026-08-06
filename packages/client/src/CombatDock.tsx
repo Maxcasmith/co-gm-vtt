@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import type { Character } from 'shared';
-import { actionCostFromCastingTime } from 'shared';
+import type { Character, Weapon } from 'shared';
+import { actionCostFromCastingTime, isWeapon } from 'shared';
 import { dispatch, on } from './events.ts';
 import type { TargetingStartPayload } from './events.ts';
+import emptyFrameIcon from './assets/Icon-Frame-Blue.jpg';
 import './app.css';
 
 interface Props {
@@ -74,7 +75,10 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   }), [character.name, character.id]);
 
   useEffect(() => on('vtt:combat:attack', () => {
-    spendResource(targetingRef.current?.actionType ?? 'action');
+    const t = targetingRef.current;
+    spendResource(t?.actionType ?? 'action');
+    // Bundled smite (e.g. Divine Smite) spends its own bonus action on top of the attack's action.
+    if (t?.kind === 'weapon' && t.bonusSpell) spendResource('bonusAction');
     setTargeting(null);
   }), [character.id]);
 
@@ -105,6 +109,17 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   const isDown = (playerCurrentHp ?? Infinity) <= 0;
   const baseSpeed = character.speed ?? 30;
   const actionsDisabled = !isMyTurn || isDown;
+
+  const equippedWeapons = [character.equipment?.mainHand, character.equipment?.offHand]
+    .filter((id, i, arr): id is string => !!id && arr.indexOf(id) === i)
+    .map(id => character.inventory?.find(item => item.id === id))
+    .filter((item): item is Weapon => !!item && isWeapon(item));
+
+  function handleWeaponClick(weapon: Weapon) {
+    if (actionsDisabled || !resources.action) return;
+    dispatch('vtt:sheet:closed', {});
+    dispatch('vtt:targeting:start', { kind: 'weapon', weapon, actionType: 'action' });
+  }
 
   function spendResource(key: PipKey) {
     setResources(prev => {
@@ -139,8 +154,25 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     );
   }
 
+  const weaponsUsable = !actionsDisabled && resources.action;
+
   return (
   <div className="combat-dock-wrapper">
+    <div className="combat-dock-column">
+      {equippedWeapons.length > 0 && (
+        <div className="combat-dock-weapons">
+          {equippedWeapons.map(weapon => (
+            <button
+              key={weapon.id}
+              className={`combat-dock-weapon-btn${!weaponsUsable ? ' combat-dock-weapon-btn--spent' : ''}${targeting?.kind === 'weapon' && targeting.weapon.id === weapon.id ? ' combat-dock-weapon-btn--active' : ''}`}
+              title={weapon.name}
+              onClick={() => handleWeaponClick(weapon)}
+            >
+              <img className="combat-dock-weapon-icon" src={weapon.iconPath || emptyFrameIcon} alt="" />
+            </button>
+          ))}
+        </div>
+      )}
     <div className="combat-dock">
       <div className="combat-dock-pips">
         {PIPS.map(pip => (
@@ -175,6 +207,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
           ))}
         </div>
       )}
+    </div>
     </div>
 
     <button

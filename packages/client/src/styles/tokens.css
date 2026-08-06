@@ -1,0 +1,16 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=swap');
+
+:root {
+  --bg:             #0e0c10;
+  --surface:        #17141e;
+  --surface-hover:  #1e1b28;
+  --border:         #2a2535;
+  --text:           #ddd0bb;
+  --text-muted:     #5c5468;
+  --platinum:       #f0ebde;
+  --gold:           #c9a84c;
+  --electrum:       #939dee;
+  --silver:         #b1cbcf;
+  --bronze:         #82413a;
+}
+

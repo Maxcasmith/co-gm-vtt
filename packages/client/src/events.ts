@@ -34,10 +34,10 @@ export interface EncounterReadyPayload { enemies: EnemyStatBlock[] }
 
 export interface CombatStatePayload { active: boolean }
 export type TargetingStartPayload =
-  | { kind: 'weapon'; weapon: Weapon; actionType: 'action' | 'bonusAction' | 'reaction' }
+  | { kind: 'weapon'; weapon: Weapon; actionType: 'action' | 'bonusAction' | 'reaction'; bonusSpell?: Spell }
   | { kind: 'spell'; spell: Spell; casterId: string; actionType: 'action' | 'bonusAction' | 'reaction' };
 export type TargetingCancelPayload = Record<string, never>;
-export interface CombatAttackPayload { attackerName: string; attackerId: string; targetId: string; targetName: string; weapon: Weapon }
+export interface CombatAttackPayload { attackerName: string; attackerId: string; targetId: string; targetName: string; weapon: Weapon; bonusSpell?: Spell }
 export interface CombatAttackResultPayload extends AttackResult {}
 export interface CombatSpellAttackPayload { casterName: string; casterId: string; targetId: string; targetName: string; spell: Spell; slotLevel: number }
 export interface CombatSpellAttackResultPayload extends SpellAttackResult {}
@@ -51,6 +51,9 @@ export interface DeathSavePayload { characterName: string; roll: number; isNatur
 export type CombatDefeatPayload = Record<string, never>;
 export interface PlayerDeadPayload { characterId: string; characterName: string }
 export interface ConsumableUsedPayload { item: Consumable; characterId: string }
+export interface ConsumableHealPayload { characterId: string; characterName: string }
+export interface ConsumableHealResultPayload { characterId: string; characterName: string; healAmount: number; currentHp: number; maxHp: number }
+export interface EquipmentUpdatePayload { characterId: string; slot: 'head' | 'body' | 'gloves' | 'boots' | 'mainHand' | 'offHand'; itemId: string | null }
 export interface CombatTurnPayload { actorName: string }
 export type CombatTurnEndPayload = Record<string, never>
 export interface CombatInitiativePayload { entry: TurnOrderEntry }
@@ -79,6 +82,9 @@ export interface CombatLogAttackPayload {
   damageRoll?: number;
   damageType?: string;
   damageFormula?: string;
+  bonusSpellName?: string;
+  bonusDamage?: number;
+  bonusDamageType?: string;
   targetName: string;
 }
 export interface CombatLogSpellAttackPayload {
@@ -163,6 +169,9 @@ export interface VTTEventMap {
   'vtt:combat:defeat':          CombatDefeatPayload;
   'vtt:combat:player:dead':     PlayerDeadPayload;
   'vtt:consumable:used':        ConsumableUsedPayload;
+  'vtt:consumable:heal':        ConsumableHealPayload;
+  'vtt:consumable:heal:result': ConsumableHealResultPayload;
+  'vtt:equipment:update':       EquipmentUpdatePayload;
   'vtt:combat:turn':            CombatTurnPayload;
   'vtt:combat:turn:end':        CombatTurnEndPayload;
   'vtt:combat:initiative':      CombatInitiativePayload;

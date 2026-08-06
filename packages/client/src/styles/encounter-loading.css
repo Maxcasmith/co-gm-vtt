@@ -1,0 +1,58 @@
+/* ── Encounter loading overlay ───────────────────────────────────────────── */
+
+.encounter-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(8, 8, 18, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 1;
+  transition: opacity 0.5s ease;
+}
+
+.encounter-overlay--out { opacity: 0; pointer-events: none; }
+
+.encounter-overlay-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  width: 320px;
+}
+
+.encounter-spinner {
+  width: 52px;
+  height: 52px;
+  border: 4px solid rgba(255, 255, 255, 0.1);
+  border-top-color: var(--gold, #c8a84b);
+  border-radius: 50%;
+  animation: encounter-spin 1s linear infinite;
+}
+
+@keyframes encounter-spin { to { transform: rotate(360deg); } }
+
+.encounter-stage {
+  font-family: 'Cinzel', serif;
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  color: var(--text, #e0e0e0);
+  text-align: center;
+  margin: 0;
+}
+
+.encounter-progress {
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  border: none;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.encounter-progress::-webkit-progress-bar { background: rgba(255, 255, 255, 0.08); border-radius: 3px; }
+.encounter-progress::-webkit-progress-value { background: var(--gold, #c8a84b); border-radius: 3px; transition: width 0.4s ease; }
+.encounter-progress::-moz-progress-bar { background: var(--gold, #c8a84b); border-radius: 3px; transition: width 0.4s ease; }
+

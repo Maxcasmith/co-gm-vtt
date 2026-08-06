@@ -1,0 +1,17 @@
+/* ── Battle map background ───────────────────────────────────────────────── */
+
+.battle-map-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: #0e0c10;
+}
+
+.world-map-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  transform-origin: 0 0;
+}
+

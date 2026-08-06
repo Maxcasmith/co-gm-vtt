@@ -1,0 +1,42 @@
+/* ── Command Palette ─────────────────────────────────────────────────────── */
+
+.palette-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  justify-content: center;
+  padding-top: 16vh;
+  z-index: 900;
+}
+
+.palette {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  width: 460px;
+  max-height: 60vh;
+  overflow-y: auto;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
+}
+
+.palette-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px 20px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 80ms;
+}
+.palette-item:last-child { border-bottom: none; }
+.palette-item--active { background: var(--surface-hover); }
+.palette-item-label { color: var(--text); font-size: 15px; font-weight: 500; }
+.palette-item-desc { color: var(--text-muted); font-size: 12px; }
+.palette-header { padding: 10px 16px 8px; border-bottom: 1px solid var(--border); }
+.palette-clock { color: var(--text-muted); font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; }
+

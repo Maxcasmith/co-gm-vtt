@@ -1,4 +1,12 @@
 import { CLASS_SAVING_THROWS as CLASS_SAVING_THROWS_SHARED } from 'shared';
+import swordIcon from '../assets/Icon-Sword-Common.jpg';
+import shieldIcon from '../assets/Icon-Frame-shield.jpg';
+import bowIcon from '../assets/Icon-Frame-bow.jpg';
+import leatherArmorIcon from '../assets/Icon-Frame-armor-leather.jpg';
+import handaxeIcon from '../assets/Icon-Frame-handaxe.jpg';
+import potionIcon from '../assets/Icon-Frame-potion-of-healing.jpg';
+import arrowIcon from '../assets/Icon-Frame-arrow.jpg';
+import whipIcon from '../assets/Icon-Frame-whip.jpg';
 
 export const SPECIES = [
   'Aasimar', 'Dragonborn', 'Dwarf', 'Elf', 'Gnome', 'Goliath',
@@ -350,19 +358,23 @@ export interface ShopItem {
   armorType?: 'light' | 'medium' | 'heavy' | 'none';
   acBonus?: number;
   isShield?: boolean;
+  slot?: 'head' | 'body' | 'gloves' | 'boots';
   properties?: string[];
   isFinesse?: boolean;
   mastery?: string;
+  iconPath?: string;
+  twoHanded?: boolean;
 }
 
 export const SHOP_ITEMS: ShopItem[] = [
-  { id: 'longsword',         name: 'Longsword',          cost: 15, description: '1d8 slashing. Versatile (1d10).',                  type: 'weapon', damage: '1d8', damageType: 'slashing',  attackBonus: 0, range:  5, properties: ['versatile', 'martial'] },
-  { id: 'shield',            name: 'Shield',              cost: 10, description: '+2 AC bonus.',                                                                            type: 'armor', armorType: 'none', acBonus: 2,  isShield: true  },
-  { id: 'handaxe',           name: 'Handaxe',             cost:  5, description: '1d6 slashing. Light, thrown (20/60 ft).',          type: 'weapon', damage: '1d6', damageType: 'slashing',  attackBonus: 0, range:  5, properties: ['light', 'thrown', 'simple'] },
-  { id: 'leather-armour',    name: 'Leather Armour',      cost: 10, description: 'AC 11 + DEX modifier. Light armor.',                                            type: 'armor', armorType: 'light', acBonus: 11, isShield: false },
-  { id: 'potion-of-healing', name: 'Potion of Healing',   cost: 50, description: 'Restores 2d4+2 HP.' },
-  { id: 'shortbow',          name: 'Shortbow',            cost: 25, description: '1d6 piercing. Ammunition (arrow), two-handed. Range 80/320 ft.', type: 'weapon', damage: '1d6', damageType: 'piercing', attackBonus: 0, range: 80, extendedRange: 320, properties: ['ammunition', 'two-handed', 'simple'], mastery: 'Vex' },
-  { id: 'arrows',            name: 'Arrows (20)',         cost:  1, description: 'Ammunition for shortbows and longbows. Bundle of 20.' },
+  { id: 'longsword',         name: 'Longsword',          cost: 15, description: '1d8 slashing. Versatile (1d10).',                  type: 'weapon', damage: '1d8', damageType: 'slashing',  attackBonus: 0, range:  5, properties: ['versatile', 'martial'], iconPath: swordIcon },
+  { id: 'shield',            name: 'Shield',              cost: 10, description: '+2 AC bonus.',                                                                            type: 'armor', armorType: 'none', acBonus: 2,  isShield: true, iconPath: shieldIcon  },
+  { id: 'handaxe',           name: 'Handaxe',             cost:  5, description: '1d6 slashing. Light, thrown (20/60 ft).',          type: 'weapon', damage: '1d6', damageType: 'slashing',  attackBonus: 0, range:  5, properties: ['light', 'thrown', 'simple'], iconPath: handaxeIcon },
+  { id: 'leather-armour',    name: 'Leather Armour',      cost: 10, description: 'AC 11 + DEX modifier. Light armor.',                                            type: 'armor', armorType: 'light', acBonus: 11, isShield: false, slot: 'body', iconPath: leatherArmorIcon },
+  { id: 'potion-of-healing', name: 'Potion of Healing',   cost: 50, description: 'Restores 2d4+4 HP.', iconPath: potionIcon },
+  { id: 'shortbow',          name: 'Shortbow',            cost: 25, description: '1d6 piercing. Ammunition (arrow), two-handed. Range 80/320 ft.', type: 'weapon', damage: '1d6', damageType: 'piercing', attackBonus: 0, range: 80, extendedRange: 320, properties: ['ammunition', 'two-handed', 'simple'], mastery: 'Vex', twoHanded: true, iconPath: bowIcon },
+  { id: 'arrows',            name: 'Arrows (20)',         cost:  1, description: 'Ammunition for shortbows and longbows. Bundle of 20.', iconPath: arrowIcon },
+  { id: 'whip',              name: 'Whip',                cost:  2, description: '1d4 slashing. Finesse, Reach (10 ft).',              type: 'weapon', damage: '1d4', damageType: 'slashing',  attackBonus: 0, range: 10, properties: ['finesse', 'reach', 'martial'], isFinesse: true, mastery: 'Slow', iconPath: whipIcon },
 ];
 
 export const ORIGIN_FEAT_DETAILS: Record<string, BackgroundFeat> = {

@@ -38,6 +38,9 @@ export default function CombatLogOverlay({ open, onClose }: Props) {
         damageRoll: result.damageRoll,
         damageType: result.damageType,
         damageFormula: result.damageFormula,
+        bonusSpellName: result.bonusSpellName,
+        bonusDamage: result.bonusDamage,
+        bonusDamageType: result.bonusDamageType,
         targetName: result.targetName,
       }]);
     });
@@ -163,6 +166,12 @@ export default function CombatLogOverlay({ open, onClose }: Props) {
                                 <span className="combat-log-breakdown-box">{fmtBonus(entry.statBonus)}</span>
                               </div>
                             )}
+                            {entry.bonusDamage != null && (
+                              <div className="combat-log-breakdown-row">
+                                <span>{entry.bonusSpellName} ({entry.bonusDamageType ?? 'bonus'})</span>
+                                <span className="combat-log-breakdown-box">+{entry.bonusDamage}</span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       ) : !entry.hit ? (
@@ -227,15 +236,35 @@ export default function CombatLogOverlay({ open, onClose }: Props) {
                     <span className="combat-log-time">
                       {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                     </span>
-                    <div className="combat-log-attack-card">
+                    <div className="combat-log-attack-card combat-log-spell-save-card">
                       <div className="combat-log-attack-header">
                         <span className="combat-log-attack-action">{entry.casterName} — {entry.spellName}</span>
-                        <span className="combat-log-attack-total">DC {entry.dc}</span>
+                        <span className="combat-log-spell-save-dc">DC {entry.dc}</span>
                       </div>
                       {entry.outcomes.map((o, oi) => (
-                        <div key={oi} className="combat-log-breakdown-row">
-                          <span>{o.targetName} — {o.saved ? 'Save' : 'Fail'}{o.conditionsApplied?.length ? ` (${o.conditionsApplied.join(', ')})` : ''}</span>
-                          <span className="combat-log-breakdown-box">{o.damage != null ? `-${o.damage}` : '—'}</span>
+                        <div key={oi} className="combat-log-spell-save-outcome">
+                          <div className="combat-log-attack-header">
+                            <span className="combat-log-spell-save-target">{o.targetName} — {o.saved ? 'Save' : 'Fail'}{o.conditionsApplied?.length ? ` (${o.conditionsApplied.join(', ')})` : ''}</span>
+                          </div>
+                          <div className="combat-log-attack-breakdown">
+                            <div className="combat-log-breakdown-row">
+                              <span>Dice roll (d20)</span>
+                              <span className="combat-log-breakdown-box">{o.roll}</span>
+                            </div>
+                            <div className="combat-log-breakdown-row">
+                              <span>Save bonus</span>
+                              <span className="combat-log-breakdown-box">{fmtBonus(o.saveBonus)}</span>
+                            </div>
+                            <div className="combat-log-attack-vs">
+                              <span>Total</span>
+                              <span>{o.total} vs DC {o.dc}</span>
+                            </div>
+                          </div>
+                          {o.damage != null && (
+                            <div className="combat-log-damage-section">
+                              <div className="combat-log-damage-total">{o.damage} damage</div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>

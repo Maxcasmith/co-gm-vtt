@@ -1,0 +1,174 @@
+/* ── victory screen ── */
+.victory-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+  animation: fade-in 0.6s ease;
+}
+
+.victory-card {
+  background: rgba(10, 8, 20, 0.96);
+  border: 1px solid rgba(212, 175, 55, 0.5);
+  border-radius: 16px;
+  padding: 48px 64px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 480px;
+  width: 90vw;
+  box-shadow: 0 0 60px rgba(212, 175, 55, 0.15);
+}
+
+.victory-title {
+  font-size: 48px;
+  font-weight: 700;
+  color: #d4af37;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.victory-subtitle {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin: 0;
+}
+
+.victory-kills {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.victory-kills li {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.victory-xp {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.victory-xp-value {
+  font-size: 36px;
+  font-weight: 700;
+  color: #d4af37;
+}
+
+.victory-xp-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.victory-xp-total {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.victory-dismiss {
+  margin-top: 16px;
+  padding: 10px 32px;
+  border: 1px solid rgba(212, 175, 55, 0.4);
+  border-radius: 8px;
+  background: transparent;
+  color: #d4af37;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.victory-dismiss:hover {
+  background: rgba(212, 175, 55, 0.1);
+}
+
+/* ── Defeat screen ───────────────────────────────────────────────────────────── */
+
+.defeat-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+  animation: fade-in 1.2s ease;
+}
+
+.defeat-card {
+  background: rgba(8, 4, 4, 0.97);
+  border: 1px solid rgba(180, 50, 50, 0.45);
+  border-radius: 16px;
+  padding: 56px 72px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 440px;
+  width: 90vw;
+  box-shadow: 0 0 80px rgba(160, 30, 30, 0.2);
+}
+
+.defeat-title {
+  font-size: 52px;
+  font-weight: 700;
+  color: #c0392b;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.defeat-subtitle {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  margin: 0;
+}
+
+.defeat-flavour {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 17px;
+  color: rgba(255, 255, 255, 0.55);
+  font-style: italic;
+  margin: 8px 0 0;
+  line-height: 1.6;
+}
+
+.defeat-dismiss {
+  margin-top: 24px;
+  padding: 10px 32px;
+  border: 1px solid rgba(180, 50, 50, 0.4);
+  border-radius: 8px;
+  background: transparent;
+  color: #c0392b;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.defeat-dismiss:hover {
+  background: rgba(180, 50, 50, 0.1);
+}
+

@@ -1,0 +1,34 @@
+/* ── Shop tab ──────────────────────────────────────────────────────────────── */
+
+.shop-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 16px 0; height: 100%; color: var(--text); }
+
+.shop-col-title { font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+.shop-gold { font-size: 13px; color: var(--gold); margin-bottom: 12px; }
+.shop-inv-empty { font-size: 12px; color: var(--text-muted); font-style: italic; }
+
+.shop-inv-item { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.shop-inv-item-name { font-size: 13px; flex: 1; }
+.shop-inv-item-qty { font-size: 11px; color: var(--text-muted); }
+
+.shop-item { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.shop-item-info { flex: 1; }
+.shop-item-name { font-size: 13px; color: var(--text); }
+.shop-item-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.shop-item-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+.shop-item-cost { font-size: 11px; color: var(--gold); }
+
+.shop-buy-btn, .shop-sell-btn {
+  padding: 4px 10px;
+  font-size: 10px;
+  font-family: 'Cinzel', serif;
+  border-radius: 3px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text);
+  letter-spacing: 0.05em;
+}
+.shop-buy-btn:hover:not(:disabled), .shop-sell-btn:hover { border-color: var(--gold); color: var(--gold); }
+.shop-buy-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.shop-sell-btn { color: var(--text-muted); }
+
