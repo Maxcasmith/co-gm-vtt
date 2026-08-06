@@ -43,6 +43,50 @@ function bfsReachable(cells: number[][], startX: number, startY: number, maxStep
   return visited;
 }
 
+// Casts one ray from (ox,oy) in direction (dirX,dirY) — a unit vector — through the grid using
+// standard DDA, stopping at the exact (fractional) point it crosses into a wall or leaves bounds,
+// capped at `radius`. Exact crossing points (rather than cell centers) are what let the fog
+// boundary follow natural angled/diagonal lines instead of a cell-square staircase.
+function castVisibilityRay(cells: number[][], ox: number, oy: number, dirX: number, dirY: number, radius: number, width: number, height: number): { x: number; y: number } {
+  let mapX = Math.floor(ox), mapY = Math.floor(oy);
+  const deltaDistX = dirX === 0 ? Infinity : Math.abs(1 / dirX);
+  const deltaDistY = dirY === 0 ? Infinity : Math.abs(1 / dirY);
+  const stepX = dirX < 0 ? -1 : 1;
+  const stepY = dirY < 0 ? -1 : 1;
+  let sideDistX = dirX < 0 ? (ox - mapX) * deltaDistX : (mapX + 1 - ox) * deltaDistX;
+  let sideDistY = dirY < 0 ? (oy - mapY) * deltaDistY : (mapY + 1 - oy) * deltaDistY;
+  let dist = 0;
+  while (dist < radius) {
+    if (sideDistX < sideDistY) {
+      dist = sideDistX;
+      sideDistX += deltaDistX;
+      mapX += stepX;
+    } else {
+      dist = sideDistY;
+      sideDistY += deltaDistY;
+      mapY += stepY;
+    }
+    if (mapX < 0 || mapY < 0 || mapX >= width || mapY >= height || cells[mapY]?.[mapX] !== 1) break;
+  }
+  const hitDist = Math.min(dist, radius);
+  return { x: ox + dirX * hitDist, y: oy + dirY * hitDist };
+}
+
+const VISIBILITY_RAYS = 240; // ~1.5° apart — smooth enough at SIGHT_RADIUS without per-frame cost
+
+// Sweeps a full circle of rays from (ox,oy) to build the fog-of-war sight boundary as a polygon
+// of exact wall-crossing points, instead of a set of whole visible/hidden cells.
+function computeVisibilityPolygon(cells: number[][], ox: number, oy: number, radius: number): { x: number; y: number }[] {
+  const height = cells.length;
+  const width = cells[0]?.length ?? 0;
+  const points: { x: number; y: number }[] = [];
+  for (let i = 0; i < VISIBILITY_RAYS; i++) {
+    const angle = (i / VISIBILITY_RAYS) * Math.PI * 2;
+    points.push(castVisibilityRay(cells, ox, oy, Math.cos(angle), Math.sin(angle), radius, width, height));
+  }
+  return points;
+}
+
 // ── AoE geometry (grid cells, 1 cell = 5ft) ─────────────────────────────────────
 // Simplified templates: cone/line use a straight-triangle/rectangle approximation
 // (5e's "cone is as wide as it is long" rule of thumb) rather than exact arcs.
@@ -322,6 +366,15 @@ export default function Canvas({ player, characterId, character, connected, show
       }
     }
     return set;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dungeon, myPos?.gx, myPos?.gy]);
+
+  // Fog boundary for rendering — a ray-swept polygon so the drawn edge follows natural angled
+  // lines off walls/corners rather than a cell-square staircase. `visibleCells` above stays the
+  // grid-based source of truth for per-cell logic (token hover, floating-text gating).
+  const visiblePolygon = useMemo(() => {
+    if (!dungeon || !myPos) return null;
+    return computeVisibilityPolygon(dungeon.cells, myPos.gx + 0.5, myPos.gy + 0.5, SIGHT_RADIUS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dungeon, myPos?.gx, myPos?.gy]);
 
@@ -936,14 +989,21 @@ export default function Canvas({ player, characterId, character, connected, show
         // own position — computed from my own token only, never synced, so nobody else's sight
         // lines are visible to me or mine to them. Drawn before the AoE template, own token, and
         // floating text below, so those always render in full regardless of fog.
-        if (dungeon && visibleCells) {
-          ctx.fillStyle = DUNGEON_BG;
-          for (let row = 0; row < dungeon.height; row++) {
-            for (let col = 0; col < dungeon.width; col++) {
-              if (visibleCells.has(`${col},${row}`)) continue;
-              ctx.fillRect(col * cellSz + panX, row * cellSz + panY, cellSz, cellSz);
-            }
+        // The hole is the sight polygon; fill rule 'evenodd' keeps everything outside it dark
+        // while leaving the polygon's interior untouched, so the boundary itself reads as the
+        // ray-swept lines rather than a grid of cell edges.
+        if (dungeon && visiblePolygon && visiblePolygon.length > 0) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(panX, panY, dungeon.width * cellSz, dungeon.height * cellSz);
+          ctx.moveTo(visiblePolygon[0]!.x * cellSz + panX, visiblePolygon[0]!.y * cellSz + panY);
+          for (let i = 1; i < visiblePolygon.length; i++) {
+            ctx.lineTo(visiblePolygon[i]!.x * cellSz + panX, visiblePolygon[i]!.y * cellSz + panY);
           }
+          ctx.closePath();
+          ctx.fillStyle = DUNGEON_BG;
+          ctx.fill('evenodd');
+          ctx.restore();
         }
 
         // AoE spell template shape — drawn on top of fog so it always renders in full
@@ -1092,7 +1152,7 @@ export default function Canvas({ player, characterId, character, connected, show
     } else {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
-  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick, aoeTick, visibleCells, hoverHitChance, hoveredTokenKey]);
+  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick, aoeTick, visibleCells, visiblePolygon, hoverHitChance, hoveredTokenKey]);
 
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!showBattleMap) return;
