@@ -1,4 +1,5 @@
 import type { CharacterStats, AbilityKey } from "./character.ts";
+import type { ActiveCondition } from "./conditions.ts";
 
 export interface RollResult {
   characterName: string;
@@ -38,6 +39,9 @@ export interface EnemyStatBlock {
   level?: number;
   creatureType?: CreatureType;
   isBoss?: boolean;
+  // Combat-scoped, like the rest of a creature's live state — not persisted beyond the fight
+  // (Encounter.toJSON() only ever serialized stat blocks, same fidelity as HP/resources).
+  conditions?: ActiveCondition[] | undefined;
 }
 
 export interface TurnOrderEntry {

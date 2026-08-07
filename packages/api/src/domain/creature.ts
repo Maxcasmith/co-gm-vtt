@@ -1,4 +1,4 @@
-import type { EnemyStatBlock, CharacterStats, CreatureType } from 'shared';
+import type { EnemyStatBlock, CharacterStats, CreatureType, ActiveCondition } from 'shared';
 
 export class Creature {
   id: string;
@@ -12,6 +12,7 @@ export class Creature {
   attacks: { name: string; bonus: number; damage: string }[];
   effects: string[];
   creatureType: CreatureType;
+  conditions: ActiveCondition[];
 
   constructor(data: EnemyStatBlock) {
     this.id = data.id;
@@ -26,6 +27,7 @@ export class Creature {
     this.effects = [];
     // Old saved encounters predate creatureType — fall back to Humanoid rather than backfilling.
     this.creatureType = data.creatureType ?? 'Humanoid';
+    this.conditions = data.conditions ?? [];
   }
 
   static from(data: EnemyStatBlock): Creature {
@@ -60,6 +62,7 @@ export class Creature {
       stats: this.stats,
       attacks: this.attacks,
       creatureType: this.creatureType,
+      conditions: this.conditions,
     };
   }
 }

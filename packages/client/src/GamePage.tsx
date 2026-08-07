@@ -19,6 +19,7 @@ import PartyHud from './PartyHud.tsx';
 import TurnOrderBar from './TurnOrderBar.tsx';
 import VictoryScreen from './VictoryScreen.tsx';
 import DefeatScreen from './DefeatScreen.tsx';
+import ReactionPrompt from './ReactionPrompt.tsx';
 import { dispatch, on } from './events.ts';
 import { initNarration, narrate } from './narration.ts';
 import './app.css';
@@ -166,6 +167,18 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       setPortraitUrls(Object.fromEntries(
         Object.entries(map).map(([name, charId]) => [name, `${API}/api/campaigns/${character.campaignId}/party/${charId}/portrait`])
       ));
+      Object.entries(map).forEach(([name, charId]) => {
+        if (name === character.name) return;
+        fetch(`${API}/api/campaigns/${character.campaignId}/party/${charId}`)
+          .then(r => r.json())
+          .then((c: Character) => {
+            const derivedMax = (HIT_DICE[c.class] ?? 8) + Math.floor((c.stats.con - 10) / 2);
+            const max = c.maxHp ?? derivedMax;
+            const current = c.currentHp ?? max;
+            setPartyHp(prev => ({ ...prev, [name]: { current, max } }));
+          })
+          .catch(() => {});
+      });
     });
     socket.on('character:inventory:add', items => {
       const acquired = items as NonNullable<Character['inventory']>;
@@ -233,6 +246,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('combat:attack:result', result => dispatch('vtt:combat:attack:result', result));
     socket.on('combat:spell:attack:result', result => dispatch('vtt:combat:spell:attack:result', result));
     socket.on('combat:spell:save:result', result => dispatch('vtt:combat:spell:save:result', result));
+    socket.on('combat:damage:dealt', data => dispatch('vtt:combat:damage:dealt', data));
     socket.on('combat:player:damage', data => {
       dispatch('vtt:combat:player:damage', data);
       if (data.characterId === character.id) setPlayerHpState({ current: data.currentHp, max: data.maxHp });
@@ -261,10 +275,20 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       setPartyHp(prev => ({ ...prev, [data.characterName]: { current: data.currentHp, max: data.maxHp } }));
       if (data.currentHp > 0) setDownPlayerNames(prev => { const s = new Set(prev); s.delete(data.characterName); return s; });
     });
-    const unsubRest = on('vtt:rest:result', ({ currentHp, maxHp, currentSpellSlots1, maxSpellSlots1 }) => {
-      setPlayerHpState({ current: currentHp, max: maxHp });
-      setPartyHp(prev => ({ ...prev, [character.name]: { current: currentHp, max: maxHp } }));
-      if (maxSpellSlots1) setPlayerSlotsState({ current: currentSpellSlots1 ?? maxSpellSlots1, max: maxSpellSlots1 });
+    socket.on('rest:result', data => {
+      if (data.resting && data.currentHp != null && data.maxHp != null) {
+        setPartyHp(prev => ({ ...prev, [data.characterName]: { current: data.currentHp!, max: data.maxHp! } }));
+      }
+      if (data.characterId !== character.id) return;
+      if (data.resting && data.currentHp != null && data.maxHp != null) {
+        setPlayerHpState({ current: data.currentHp, max: data.maxHp });
+        if (data.maxSpellSlots1) setPlayerSlotsState({ current: data.currentSpellSlots1 ?? data.maxSpellSlots1, max: data.maxSpellSlots1 });
+        fetch(`${API}/api/campaigns/${character.campaignId}/party/${character.id}`)
+          .then(r => r.json())
+          .then((c: Character) => onCharacterUpdateRef.current(c))
+          .catch(() => {});
+      }
+      dispatch('vtt:rest:result', data);
     });
     socket.on('creature:update', data => {
       dispatch('vtt:creature:update', data);
@@ -282,6 +306,11 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('session:recap', ({ text, senderName, checkRequests }) => {
       dispatch('vtt:chat:message-received', { text, senderName, timestamp: Date.now(), variant: 'recap', checkRequests });
     });
+    socket.on('combat:player:resources', data => dispatch('vtt:combat:player:resources', data));
+    socket.on('rest:open', () => dispatch('vtt:rest:open', {}));
+    socket.on('rest:progress', data => dispatch('vtt:rest:progress', data));
+    socket.on('combat:reaction:offer', data => dispatch('vtt:combat:reaction:offer', data));
+    socket.on('combat:reaction:close', data => dispatch('vtt:combat:reaction:close', data));
     socket.on('combat:log', data => dispatch('vtt:combat:log', { kind: 'text', ...data }));
     socket.on('dungeon:generating', () => setDungeonGenerating(true));
     socket.on('dungeon:loaded', dungeon => { setDungeonGenerating(false); setDungeon(dungeon); dispatch('vtt:dungeon:loaded', dungeon); });
@@ -295,6 +324,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     });
     const unsubTurnEnd      = on('vtt:combat:turn:end', () => socket.emit('combat:turn:end'));
     const unsubInitRoll     = on('vtt:combat:initiative:roll', ({ entry }) => socket.emit('combat:initiative:roll', entry));
+    const unsubRestChoice   = on('vtt:rest:choice', payload => socket.emit('rest:choice', { ...payload, campaignId: character.campaignId, characterId: character.id }));
+    const unsubRestCancel   = on('vtt:rest:cancel', () => socket.emit('rest:cancel', { campaignId: character.campaignId, characterId: character.id }));
+    const unsubRestRequest  = on('vtt:rest:request', () => socket.emit('rest:open'));
 
     return () => {
       socketRef.current = null;
@@ -305,7 +337,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       unsubTokenMove();
       unsubTurnEnd();
       unsubInitRoll();
-      unsubRest();
+      unsubRestChoice();
+      unsubRestCancel();
+      unsubRestRequest();
       unsubHeal();
       unsubConsumableUsed();
     };
@@ -406,17 +440,20 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         } else {
           lastSpaceRef.current = now;
         }
-      } else if (e.key === 'c' && now - lastSpaceRef.current < DOUBLE_TAP_MS) {
+      } else if (e.key === 'c' && !journalOpen && now - lastSpaceRef.current < DOUBLE_TAP_MS) {
         lastSpaceRef.current = 0;
         setQuickChatOpen(true);
       } else if (e.key === 'q' && now - lastSpaceRef.current < DOUBLE_TAP_MS) {
         lastSpaceRef.current = 0;
         setQuestLogOpen(o => !o);
+      } else if (e.key === 'j' && now - lastSpaceRef.current < DOUBLE_TAP_MS) {
+        lastSpaceRef.current = 0;
+        setJournalOpen(o => !o);
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [journalOpen]);
 
   const paletteItems = [
     {
@@ -427,7 +464,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     ...(!combatActive ? [{
       label: 'Rest',
       description: 'Take a short or long rest',
-      onSelect: () => dispatch('vtt:rest:open', {}),
+      onSelect: () => socketRef.current?.emit('rest:open'),
     }] : []),
     {
       label: 'Journal',
@@ -511,10 +548,11 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       <JournalOverlay open={journalOpen} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} />
       <QuestLog open={questLogOpen} onClose={() => setQuestLogOpen(false)} quests={quests} act={act} />
       <CombatLogOverlay open={combatLogOpen} onClose={() => setCombatLogOpen(false)} />
-      <ChatWidget />
+      {!journalOpen && <ChatWidget />}
       <QuickChat open={quickChatOpen} onClose={() => setQuickChatOpen(false)} senderName={character.name} sessionActive={sessionActive} disabled={combatActive && !isMyTurn} />
       {victory && <VictoryScreen data={victory} onDismiss={() => setVictory(null)} />}
       {defeated && <DefeatScreen onDismiss={() => setDefeated(false)} />}
+      <ReactionPrompt onRespond={(requestId, accepted) => socketRef.current?.emit('combat:reaction:respond', { requestId, accepted })} />
       <ShortcutsOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <RestModal character={character} />
       <BattleMapBackground worldMapUrl={worldMapUrl} />

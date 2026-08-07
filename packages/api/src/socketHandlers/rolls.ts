@@ -3,6 +3,7 @@ import { statMod } from 'shared';
 import { getCharacter, appendChatLog } from '../storage.ts';
 import { io, ROOM, STAT_FULL, BG_SKILLS, SAVE_PROFS } from '../state.ts';
 import { D20Roll } from '../combat/dice.ts';
+import { rollModeFor } from '../combat/conditions/rollModeFor.ts';
 import { checkDungeonHiddenReveal } from '../dungeon/runtime.ts';
 import { dispatchDMResponse } from '../session.ts';
 import type { JoinContext } from './context.ts';
@@ -21,7 +22,8 @@ export function registerRollHandlers(ctx: JoinContext): void {
         (BG_SKILLS[char.background] ?? []).includes(skill)
       ) : false;
       const modifier = base + (proficient ? 2 : 0);
-      const roll = new D20Roll().roll();
+      const mode = rollModeFor(char, 'check', statKey);
+      const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
       const total = roll + modifier;
       const label = skill ?? (STAT_FULL[stat.toUpperCase()] ?? stat.toUpperCase());
       console.log(`[roll] ${char.name} rolls ${label}: ${total} | proficient=${proficient}`);
@@ -45,7 +47,8 @@ export function registerRollHandlers(ctx: JoinContext): void {
       const base = statMod(char.stats[statKey]);
       const proficient = (SAVE_PROFS[char.class] ?? []).includes(statUpper);
       const modifier = base + (proficient ? 2 : 0);
-      const roll = new D20Roll().roll();
+      const mode = rollModeFor(char, 'save', statKey);
+      const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
       const total = roll + modifier;
       const statLabel = STAT_FULL[statUpper] ?? statUpper;
       console.log(`[roll] ${char.name} rolls ${statLabel} Save: ${total}`);

@@ -101,6 +101,21 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     if (item.actionCost === 'action') dispatch('vtt:combat:action:spent', {});
   }), [character.id]);
 
+  // The server owns the action economy — it refills on turn start and spends on every action it
+  // accepts, including reactions spent mid-attack by a Shield-style hook that this client never
+  // initiated. The local spends above stay as optimistic prediction for responsiveness; this
+  // reconciles them against the authority whenever it reports.
+  useEffect(() => on('vtt:combat:player:resources', payload => {
+    if (payload.characterId !== character.id) return;
+    const next: Resources = {
+      action: payload.actionsRemaining > 0,
+      bonusAction: payload.bonusActionsRemaining > 0,
+      reaction: payload.reactionsRemaining > 0,
+    };
+    setResources(next);
+    saveResources(character.id, next);
+  }), [character.id]);
+
   useEffect(() => on('vtt:targeting:start', payload => { targetingRef.current = payload; setTargeting(payload); }), []);
   useEffect(() => on('vtt:targeting:cancel', () => { targetingRef.current = null; setTargeting(null); }), []);
 

@@ -36,6 +36,7 @@ function formatSender(name: string): React.ReactNode {
 export default function JournalOverlay({ open, onClose, character, sessionActive, dmThinking }: Props) {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Messages live above the open-guard so they survive close/reopen
   const [messages, setMessages] = useState<ChatMessageReceivedPayload[]>([]);
@@ -88,8 +89,6 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  if (!open) return null;
-
   function send() {
     const text = input.trim();
     if (!text) return;
@@ -107,7 +106,7 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
   }
 
   return (
-    <div className="journal-scrim">
+    <div className={`journal-dock${open ? ' journal-dock--open' : ''}`} aria-hidden={!open}>
       <div className="journal-panel">
         <div className="journal-header">
           <h2 className="journal-title">Journal</h2>
@@ -170,13 +169,13 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
 
         <div className="journal-input-row">
           <input
+            ref={inputRef}
             className="journal-input"
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') send(); }}
             placeholder={sessionActive ? 'Say something…' : 'Session hasn\'t started yet'}
             disabled={!sessionActive}
-            autoFocus
           />
           <button className="btn-primary" onClick={send} disabled={!sessionActive || !input.trim()}>Send</button>
         </div>

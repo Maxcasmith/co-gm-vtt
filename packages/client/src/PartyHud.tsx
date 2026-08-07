@@ -11,9 +11,11 @@ interface Props {
 export default function PartyHud({ connected, portraitUrls, self, hp }: Props) {
   if (!connected.length) return null;
 
+  const ordered = [...connected].sort((a, b) => (a === self ? -1 : b === self ? 1 : 0));
+
   return (
     <div className="party-hud">
-      {connected.map(name => {
+      {ordered.map(name => {
         const stats = hp[name];
         return (
           <div

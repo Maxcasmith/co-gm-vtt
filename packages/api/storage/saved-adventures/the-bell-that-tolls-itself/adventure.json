@@ -1,0 +1,13 @@
+{
+  "slug": "the-bell-that-tolls-itself",
+  "name": "The Bell That Tolls Itself",
+  "sourceType": "dungeon-crawl",
+  "savedAt": "2026-08-07T16:31:40.538Z",
+  "hasDungeon": true,
+  "entityCount": {
+    "npc": 0,
+    "creature": 0,
+    "faction": 0,
+    "location": 0
+  }
+}

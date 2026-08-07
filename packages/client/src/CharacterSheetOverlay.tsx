@@ -193,7 +193,7 @@ export default function CharacterSheetOverlay({
                 ? undefined
                 : () => {
                   dispatch("vtt:sheet:closed", {});
-                  dispatch("vtt:rest:open", {});
+                  dispatch("vtt:rest:request", {});
                 }
             }
           >

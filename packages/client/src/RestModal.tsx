@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Character } from 'shared';
 import { on, dispatch } from './events.ts';
+import type { RestResultPayload } from './events.ts';
 import { HIT_DICE } from './character-creation/srd.ts';
 
 const API = `http://${window.location.hostname}:3001`;
@@ -9,15 +10,6 @@ function modNum(score: number) { return Math.floor((score - 10) / 2); }
 
 type RestType = 'short' | 'long';
 type PartyMember = Omit<Character, 'password'>;
-
-interface RestResult {
-  hpGained?: number;
-  currentHp: number;
-  maxHp: number;
-  currentSpellSlots1?: number;
-  maxSpellSlots1?: number;
-  worldEvents?: string;
-}
 
 interface Props { character: Character }
 
@@ -28,10 +20,19 @@ export default function RestModal({ character }: Props) {
   const [restType, setRestType]         = useState<RestType>('short');
   const [hitDiceSpent, setHitDiceSpent] = useState(0);
   const [brokenTokens, setBrokenTokens] = useState<Set<string>>(new Set());
-  const [loading, setLoading]           = useState(false);
-  const [result, setResult]             = useState<RestResult | null>(null);
+  const [waiting, setWaiting]           = useState(false);
+  const [allCommitted, setAllCommitted] = useState(false);
+  const [result, setResult]             = useState<RestResultPayload | null>(null);
 
-  useEffect(() => on('vtt:rest:open', () => { setOpen(true); setResult(null); }), []);
+  useEffect(() => on('vtt:rest:open', () => { setOpen(true); setResult(null); setWaiting(false); setAllCommitted(false); }), []);
+
+  useEffect(() => on('vtt:rest:result', data => {
+    if (!data.resting) { setOpen(false); return; }
+    setResult(data);
+    setWaiting(false);
+  }), []);
+
+  useEffect(() => on('vtt:rest:progress', ({ allCommitted }) => setAllCommitted(allCommitted)), []);
 
   useEffect(() => {
     if (!open) return;
@@ -39,44 +40,30 @@ export default function RestModal({ character }: Props) {
     setRestType('short');
     setHitDiceSpent(0);
     setResult(null);
+    setWaiting(false);
+    setAllCommitted(false);
     fetch(`${API}/api/campaigns/${character.campaignId}/party`)
       .then(r => r.json() as Promise<PartyMember[]>)
       .then(setParty)
       .catch(() => {});
   }, [open, character.campaignId]);
 
-  async function handleStart() {
+  function handleStart() {
     if (!resting) {
       dispatch('vtt:chat:message-sent', { text: `(Out of character: ${character.name} skips the rest and stays on watch.)`, senderName: character.name, timestamp: Date.now() });
-      setOpen(false);
-      return;
     }
+    setWaiting(true);
+    dispatch('vtt:rest:choice', { resting, restType, hitDiceSpent });
+  }
 
-    setLoading(true);
-    try {
-      const endpoint = restType === 'long' ? 'long' : 'short';
-      const r = await fetch(`${API}/api/campaigns/${character.campaignId}/rest/${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ characterId: character.id, hitDiceSpent }),
-      });
-      const data = await r.json() as RestResult;
-      setResult(data);
-      dispatch('vtt:rest:result', {
-        currentHp: data.currentHp, maxHp: data.maxHp, hpGained: data.hpGained,
-        currentSpellSlots1: data.currentSpellSlots1, maxSpellSlots1: data.maxSpellSlots1,
-        worldEvents: data.worldEvents,
-      });
-    } catch {
-      setOpen(false);
-    } finally {
-      setLoading(false);
-    }
+  function handleCancel() {
+    setWaiting(false);
+    dispatch('vtt:rest:cancel', {});
   }
 
   if (!open) return null;
 
-  const maxHitDice = 1;
+  const hitDiceRemaining = Math.max(0, (character.level ?? 1) - (character.hitDiceUsed ?? 0));
   const dieSize    = HIT_DICE[character.class] ?? 8;
   const conMod     = modNum(character.stats.con);
 
@@ -85,7 +72,7 @@ export default function RestModal({ character }: Props) {
     return (
       <div className="rest-modal">
         <div className="rest-modal-header">
-          <span className="rest-modal-title">{restType === 'long' ? 'Long Rest' : 'Short Rest'}</span>
+          <span className="rest-modal-title">{result.restType === 'long' ? 'Long Rest' : 'Short Rest'}</span>
           <button className="rest-modal-close" onClick={() => setOpen(false)}>×</button>
         </div>
 
@@ -97,7 +84,7 @@ export default function RestModal({ character }: Props) {
           {(result.hpGained ?? 0) > 0 && (
             <p className="rest-result-gained">+{result.hpGained} HP recovered</p>
           )}
-          {restType === 'long' && (
+          {result.restType === 'long' && (
             <p className="rest-result-gained">Fully restored</p>
           )}
           {(result.maxSpellSlots1 ?? 0) > 0 && (
@@ -167,8 +154,8 @@ export default function RestModal({ character }: Props) {
                     <div className="rest-hitdice-controls">
                       <button className="rest-hitdice-btn" onClick={() => setHitDiceSpent(Math.max(0, hitDiceSpent - 1))}>−</button>
                       <span className="rest-hitdice-count">{hitDiceSpent}</span>
-                      <button className="rest-hitdice-btn" onClick={() => setHitDiceSpent(Math.min(maxHitDice, hitDiceSpent + 1))}>+</button>
-                      <span className="rest-hitdice-max">/ {maxHitDice}</span>
+                      <button className="rest-hitdice-btn" onClick={() => setHitDiceSpent(Math.min(hitDiceRemaining, hitDiceSpent + 1))}>+</button>
+                      <span className="rest-hitdice-max">/ {hitDiceRemaining}</span>
                     </div>
                   </div>
                 )}
@@ -181,9 +168,14 @@ export default function RestModal({ character }: Props) {
       </div>
 
       <div className="rest-footer">
-        <button className="btn-primary" onClick={() => void handleStart()} disabled={loading}>
-          {loading ? 'Resting…' : 'Start Rest'}
+        <button className="btn-primary" onClick={handleStart} disabled={waiting}>
+          {waiting ? 'Waiting for other players' : 'Start Rest'}
         </button>
+        {waiting && (
+          <button className="btn-secondary" onClick={handleCancel} disabled={allCommitted}>
+            Changed my mind
+          </button>
+        )}
       </div>
     </div>
   );

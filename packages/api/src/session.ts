@@ -130,7 +130,7 @@ export function dispatchDMResponse(cid: string): void {
 
       if (response.includes('[COMBAT END]') && combatState.get(cid)) {
         combatState.set(cid, false);
-        endCombat(cid);
+        void endCombat(cid);
         io.to(ROOM).emit('combat:state', false);
       }
 

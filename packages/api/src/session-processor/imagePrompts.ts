@@ -109,7 +109,11 @@ export async function generateCombatFlavour(result: AttackResult | SpellAttackRe
 
 export async function generateSpellSaveFlavour(result: SpellSaveResult, adapter: StoryProviderAdapter): Promise<string | null> {
   const outcomeLines = result.outcomes.map(o => {
-    const fate = o.targetDead ? 'is slain' : o.saved ? 'resists the effect' : o.damage != null ? `takes ${o.damage} damage` : 'is affected';
+    // A failed save with no immediate damage (e.g. Tasha's Caustic Brew — no on-cast damage,
+    // just a lingering effect that ticks next turn) still needs to read as a failure, not a
+    // no-op — 'is affected' was vague enough that narration sometimes came out sounding like
+    // everyone saved.
+    const fate = o.targetDead ? 'is slain' : o.saved ? 'resists the effect' : o.damage != null ? `takes ${o.damage} damage` : 'fails to resist and is affected';
     return `${o.targetName} ${fate}`;
   }).join('; ');
 

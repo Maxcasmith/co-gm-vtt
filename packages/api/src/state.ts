@@ -4,6 +4,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import type { ServerToClientEvents, ClientToServerEvents, Player, Dungeon, EffectSpec } from 'shared';
 import { Encounter } from './domain/encounter.ts';
+import { StateEngine } from './combat/stateEngine/StateEngine.ts';
 import { logError } from './logger.ts';
 
 export const app = express();
@@ -31,6 +32,18 @@ export const connected = new Set<Player>();
 export const sessionState = new Map<string, boolean>();
 export const combatState = new Map<string, boolean>();
 export const encounters = new Map<string, Encounter>();
+// Combat hook registry, lifecycle-matched to `encounters` — created on demand at combat start,
+// deleted by endCombat so a finished fight's hooks can never leak into the next one.
+export const stateEngines = new Map<string, StateEngine>();
+
+export function getStateEngine(cid: string): StateEngine {
+  let engine = stateEngines.get(cid);
+  if (!engine) {
+    engine = new StateEngine(cid);
+    stateEngines.set(cid, engine);
+  }
+  return engine;
+}
 export const tokenPositions = new Map<string, Record<string, { gx: number; gy: number }>>();
 export const dmQueue = new Map<string, Promise<void>>();
 export const campaignPlayers = new Map<string, string[]>();
@@ -43,6 +56,9 @@ export const dungeons = new Map<string, Dungeon>(); // in-memory mirror of saveD
 // can be evaluated against whichever creature actually gets hit.
 export const pendingWeaponBonuses = new Map<string, Record<string, { spellName: string; effects: EffectSpec[]; casterLevel: number; slotLevel: number }>>();
 export const microDungeons = new Set<string>(); // cids whose current dungeon is an ephemeral combat arena — discarded on victory instead of continued
+
+export interface RestChoice { resting: boolean; restType: 'short' | 'long'; hitDiceSpent: number }
+export const pendingRests = new Map<string, Map<string, RestChoice>>(); // campaignId → charId → choice, cleared once every online charId has voted
 
 export const PLAYER_SIGHT_RADIUS = 20; // square (Chebyshev) radius, in cells
 export const ENEMY_AGGRO_RADIUS  = 12;

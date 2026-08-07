@@ -123,29 +123,48 @@ export default function Canvas({ player, characterId, character, connected, show
     animRafRef.current = requestAnimationFrame(tick);
   }
 
-  function pushHitFloat(targetId: string, targetName: string, hit: boolean, damage: number | undefined) {
-    const posById   = tokenPositionsRef.current?.[targetId];
-    const posByName = tokenPositionsRef.current?.[targetName];
+  function resolveTokenPos(id: string, name: string): { pos: { gx: number; gy: number }; tokenKey: string } | null {
+    const posById   = tokenPositionsRef.current?.[id];
+    const posByName = tokenPositionsRef.current?.[name];
     const pos       = posById ?? posByName;
-    const tokenKey  = posById ? targetId : targetName;
-    if (!pos) return;
+    if (!pos) return null;
+    return { pos, tokenKey: posById ? id : name };
+  }
+
+  // The one place damage gets drawn — flash + floating number. Every damage source (weapon hit,
+  // spell hit, spell-save damage) routes through this instead of each pushing its own float.
+  function pushDamageFloat(targetId: string, targetName: string, damage: number) {
+    const resolved = resolveTokenPos(targetId, targetName);
+    if (!resolved) return;
     const now = Date.now();
-    if (hit && damage != null) {
-      flashEffectsRef.current.push({ tokenKey, startTime: now });
-      floatEffectsRef.current.push({ id: now, gx: pos.gx, gy: pos.gy, text: `-${damage}`, isHit: true, startTime: now });
-    } else if (!hit) {
-      floatEffectsRef.current.push({ id: now, gx: pos.gx, gy: pos.gy, text: 'Miss', isHit: false, startTime: now });
-    }
+    flashEffectsRef.current.push({ tokenKey: resolved.tokenKey, startTime: now });
+    floatEffectsRef.current.push({ id: now, gx: resolved.pos.gx, gy: resolved.pos.gy, text: `-${damage}`, isHit: true, startTime: now });
+    kickAnimLoop();
+  }
+
+  function pushMissFloat(targetId: string, targetName: string) {
+    const resolved = resolveTokenPos(targetId, targetName);
+    if (!resolved) return;
+    const now = Date.now();
+    floatEffectsRef.current.push({ id: now, gx: resolved.pos.gx, gy: resolved.pos.gy, text: 'Miss', isHit: false, startTime: now });
+    kickAnimLoop();
+  }
+
+  // Saving throws aren't attack rolls — no "Miss". A failed save with no damage (e.g. Tasha's
+  // Caustic Brew: no on-cast damage, just a lingering effect) still reads as a failure.
+  function pushSaveOutcomeFloat(targetId: string, targetName: string, saved: boolean) {
+    const resolved = resolveTokenPos(targetId, targetName);
+    if (!resolved) return;
+    const now = Date.now();
+    floatEffectsRef.current.push({ id: now, gx: resolved.pos.gx, gy: resolved.pos.gy, text: saved ? 'Saved' : 'Failed', isHit: false, startTime: now });
     kickAnimLoop();
   }
 
   function pushHealFloat(characterId: string, characterName: string, healAmount: number) {
-    const posById   = tokenPositionsRef.current?.[characterId];
-    const posByName = tokenPositionsRef.current?.[characterName];
-    const pos       = posById ?? posByName;
-    if (!pos) return;
+    const resolved = resolveTokenPos(characterId, characterName);
+    if (!resolved) return;
     const now = Date.now();
-    floatEffectsRef.current.push({ id: now, gx: pos.gx, gy: pos.gy, text: `+${healAmount}`, isHit: false, isHeal: true, startTime: now });
+    floatEffectsRef.current.push({ id: now, gx: resolved.pos.gx, gy: resolved.pos.gy, text: `+${healAmount}`, isHit: false, isHeal: true, startTime: now });
     kickAnimLoop();
   }
 
@@ -153,20 +172,24 @@ export default function Canvas({ player, characterId, character, connected, show
     pushHealFloat(result.characterId, result.characterName, result.healAmount);
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The one place damage floats come from — fired by applyDamageToPlayer/applyDamageToCreature
+  // server-side, so every damage source (weapon hit, spell hit, spell-save damage, recurring
+  // ticks) draws the same way without each attack-result handler needing its own float call.
+  useEffect(() => on('vtt:combat:damage:dealt', result => {
+    pushDamageFloat(result.targetId, result.targetName, result.damage);
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => on('vtt:combat:attack:result', result => {
-    pushHitFloat(result.targetId, result.targetName, result.hit, result.damage);
+    if (!result.hit) pushMissFloat(result.targetId, result.targetName);
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => on('vtt:combat:spell:attack:result', result => {
-    pushHitFloat(result.targetId, result.targetName, result.hit, result.damage);
+    if (!result.hit) pushMissFloat(result.targetId, result.targetName);
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => on('vtt:combat:spell:save:result', result => {
-    // A successful save doesn't mean "no effect" — halfOnSave spells (Burning Hands, etc.)
-    // still deal damage on a save, so the float text is keyed on whether damage was dealt,
-    // not on the save/fail outcome itself.
     for (const outcome of result.outcomes) {
-      pushHitFloat(outcome.targetId, outcome.targetName, outcome.damage != null, outcome.damage);
+      if (outcome.damage == null) pushSaveOutcomeFloat(outcome.targetId, outcome.targetName, outcome.saved);
     }
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 

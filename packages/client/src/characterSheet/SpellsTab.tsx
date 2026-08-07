@@ -69,10 +69,18 @@ export function SpellsTab({
     );
   }
 
+  // Redirecting an already-sustained spell (Hunter's Mark, Witch Bolt) is free — no slot spent —
+  // so the empty-slots gate must not block it.
+  function isFreeRecast(spell: Spell): boolean {
+    return character.conditions?.some(
+      (c) => c.name === "Concentrating" && c.concentration?.spellName === spell.name,
+    ) ?? false;
+  }
+
   // Only level-1 slots are tracked today, so a leveled spell is castable only while that
   // pool has slots left — no higher tier exists yet to upcast into when it's empty.
   function noSlotFor(spell: Spell): boolean {
-    return spell.level >= 1 && currentSpellSlots1 <= 0;
+    return spell.level >= 1 && currentSpellSlots1 <= 0 && !isFreeRecast(spell);
   }
 
   function handleCast(spell: Spell) {

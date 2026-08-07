@@ -3,6 +3,7 @@ import type { Dungeon, DungeonEntity } from "./dungeon.ts";
 import type { Quest } from "./world.ts";
 import type { Weapon } from "./items.ts";
 import type { Spell } from "./spells.ts";
+import type { Condition } from "./conditions.ts";
 
 export type Player = string;
 
@@ -17,6 +18,34 @@ export interface BattleMap {
   id: string;
   createdAt: string;
   locationName?: string;
+}
+
+export interface ReactionOffer {
+  /** Correlates the offer with the client's response; also the key the server waits on. */
+  requestId: string;
+  spellName: string;
+  /** Who is attacking, and with what — for the prompt copy. */
+  attackerName: string;
+  sourceName: string;
+  attackTotal: number;
+  /** AC as it stands right now, and what it would become if the reaction is taken. */
+  currentAc: number;
+  boostedAc: number;
+  /** How long the client has to answer before the server auto-declines. */
+  expiresInMs: number;
+}
+
+export interface RestResultBroadcast {
+  characterId: string;
+  characterName: string;
+  resting: boolean;
+  restType: "short" | "long";
+  hpGained?: number;
+  currentHp?: number;
+  maxHp?: number;
+  currentSpellSlots1?: number;
+  maxSpellSlots1?: number;
+  worldEvents?: string;
 }
 
 export interface ServerToClientEvents {
@@ -56,6 +85,21 @@ export interface ServerToClientEvents {
     currentHp: number;
     maxHp: number;
   }) => void;
+  /** Fired by applyDamageToPlayer/applyDamageToCreature — the one signal every damage source
+   * (weapon hit, spell hit, spell-save damage, recurring ticks) sends for client-side visual
+   * feedback (float + flash), instead of each caller having to remember to draw its own. */
+  "combat:damage:dealt": (data: {
+    targetId: string;
+    targetName: string;
+    damage: number;
+  }) => void;
+  /** The acting player's remaining action economy, pushed on refill and after every spend. */
+  "combat:player:resources": (data: {
+    characterId: string;
+    actionsRemaining: number;
+    bonusActionsRemaining: number;
+    reactionsRemaining: number;
+  }) => void;
   "combat:player:slots": (data: {
     characterId: string;
     currentSpellSlots1: number;
@@ -67,12 +111,6 @@ export interface ServerToClientEvents {
     healAmount: number;
     currentHp: number;
     maxHp: number;
-  }) => void;
-  "rest:result": (data: {
-    currentHp: number;
-    maxHp: number;
-    hpGained?: number;
-    worldEvents?: string;
   }) => void;
   "combat:death:save": (data: {
     characterName: string;
@@ -90,6 +128,14 @@ export interface ServerToClientEvents {
     characterId: string;
     characterName: string;
   }) => void;
+  /**
+   * Sent to a single player mid-attack-resolution, offering a reaction that would change the
+   * outcome (Shield). The attack is NOT broadcast until this resolves or times out, so the
+   * client never sees a hit that later becomes a miss.
+   */
+  "combat:reaction:offer": (data: ReactionOffer) => void;
+  /** Withdraws a pending offer — it timed out, or the window closed for another reason. */
+  "combat:reaction:close": (data: { requestId: string }) => void;
   "combat:log": (data: { text: string; timestamp: number }) => void;
   "players:characters": (map: Record<string, string>) => void;
   "character:inventory:add": (items: unknown[]) => void;
@@ -107,6 +153,9 @@ export interface ServerToClientEvents {
   "dungeon:cleared": () => void;
   "quest:update": (data: { quests: Quest[]; act: number }) => void;
   "clock:update": (data: { worldTimeSecs: number }) => void;
+  "rest:open": () => void;
+  "rest:result": (payload: RestResultBroadcast) => void;
+  "rest:progress": (payload: { allCommitted: boolean }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -165,4 +214,19 @@ export interface ClientToServerEvents {
     characterName: string;
   }) => void;
   "consumable:used": (payload: { characterId: string; itemId: string }) => void;
+  "combat:reaction:respond": (payload: {
+    requestId: string;
+    accepted: boolean;
+  }) => void;
+  "combat:condition:add": (payload: { targetId: string; name: Condition }) => void;
+  "combat:condition:remove": (payload: { targetId: string; name: Condition }) => void;
+  "rest:open": () => void;
+  "rest:choice": (payload: {
+    campaignId: string;
+    characterId: string;
+    resting: boolean;
+    restType: "short" | "long";
+    hitDiceSpent: number;
+  }) => void;
+  "rest:cancel": (payload: { campaignId: string; characterId: string }) => void;
 }

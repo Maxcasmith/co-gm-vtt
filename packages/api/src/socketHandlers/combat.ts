@@ -1,15 +1,38 @@
-import type { TurnOrderEntry, Weapon, Spell, SpellAttackResult, SpellSaveOutcome, SpellSaveResult, CreatureType, Character } from 'shared';
-import { CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, isAmmunition, statMod, parseRangeFeet, resolveForcedMovement, effectApplies } from 'shared';
+import type { TurnOrderEntry, Weapon, Spell, SpellAttackResult, SpellSaveOutcome, SpellSaveResult, CreatureType, Character, ActionResource, AttackContext } from 'shared';
+import { CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, isAmmunition, statMod, parseRangeFeet, resolveForcedMovement, effectApplies, actionCostFromCastingTime, requiresConcentration } from 'shared';
 import { getCharacter, updateCharacter, saveEncounter, listCharacters, getConfig, appendChatLog } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateCombatFlavour, generateSpellSaveFlavour } from '../session-processor/imagePrompts.ts';
 import { Participant } from '../domain/encounter.ts';
 import { logError } from '../logger.ts';
-import { io, ROOM, combatState, encounters, tokenPositions, dungeons, playerSocketIds, pendingWeaponBonuses, enemiesReady, connected } from '../state.ts';
+import { io, ROOM, combatState, encounters, tokenPositions, dungeons, playerSocketIds, pendingWeaponBonuses, connected, getStateEngine } from '../state.ts';
+import { registerSpellHooks } from '../combat/stateEngine/registerSpellHooks.ts';
+import { resolveReaction } from '../combat/stateEngine/reactionPrompt.ts';
 import { D20Roll, rollDice, fmtMod, rollApplicableDamage } from '../combat/dice.ts';
-import { applyDamageToCreature, advanceTurn, trySpendSpellSlot, emitTurn } from '../combat/runtime.ts';
+import { rollModeFor } from '../combat/conditions/rollModeFor.ts';
+import { applyDamageToCreature, applyDamageToPlayer, advanceTurn, trySpendSpellSlot, tryBeginCombat, emitResources, applyCondition, clearCondition, startConcentrating, isConcentratingOn } from '../combat/runtime.ts';
 import { checkDungeonProximity } from '../dungeon/runtime.ts';
 import type { JoinContext } from './context.ts';
+
+/**
+ * Spends one of the actor's per-turn resources, telling them why if they have none left.
+ * Returns false when the action must not proceed.
+ *
+ * Only gates the participant whose turn it is — a reaction spent on someone else's turn goes
+ * through ReactionOfferHook, which does its own check against the same budget.
+ */
+function trySpendAction(cid: string, actorId: string, kind: ActionResource): boolean {
+  const participant = encounters.get(cid)?.findParticipant(actorId);
+  if (!participant) return true; // not tracked in this encounter — don't block on missing state
+  if (participant.trySpend(kind)) {
+    emitResources(participant);
+    return true;
+  }
+  const sid = playerSocketIds.get(actorId);
+  const label = kind === 'bonusAction' ? 'bonus action' : kind;
+  if (sid) io.to(sid).emit('combat:attack:blocked', { reason: `No ${label} left this turn` });
+  return false;
+}
 
 export function registerCombatHandlers(ctx: JoinContext): void {
   const { socket, campaignId } = ctx;
@@ -21,6 +44,17 @@ export function registerCombatHandlers(ctx: JoinContext): void {
     socket.to(ROOM).emit('token:moved', { tokenId, gx, gy });
 
     if (connected.has(tokenId)) void checkDungeonProximity(campaignId, gx, gy, tokenId);
+  });
+
+  // Manual GM-driven condition control — traps, cures, anything outside the spell-save path
+  // that already applies conditions on a failed save. Works on players and creatures, in or
+  // out of combat (see applyCondition/clearCondition in runtime.ts for target resolution).
+  socket.on('combat:condition:add', ({ targetId, name }) => {
+    void applyCondition(campaignId, targetId, name);
+  });
+
+  socket.on('combat:condition:remove', ({ targetId, name }) => {
+    void clearCondition(campaignId, targetId, name);
   });
 
   socket.on('combat:initiative:roll', (entry: TurnOrderEntry) => {
@@ -44,12 +78,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
 
     encounter.addToTurnOrder(participant);
     io.to(ROOM).emit('combat:initiative', entry);
-
-    const expected = encounter.expectedParticipantCount;
-    if (encounter.turnOrder.length >= expected && expected > 0 && !encounter.currentRound && enemiesReady.get(cid)) {
-      encounter.beginCombat();
-      emitTurn(cid);
-    }
+    tryBeginCombat(cid);
     void saveEncounter(cid, encounter);
   });
 
@@ -63,6 +92,11 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const char = await getCharacter(cid, attackerId);
       const creature = encounter.findCreature(targetId);
       if (!char || !creature || creature.isDead()) return;
+
+      // An attack costs the action; a bundled smite costs the bonus action on top. Spent before
+      // ammunition is deducted so a blocked attack cannot silently eat an arrow.
+      if (!trySpendAction(cid, attackerId, 'action')) return;
+      if (bonusSpell && !trySpendAction(cid, attackerId, 'bonusAction')) return;
 
       if (weapon.ammoSlug) {
         const ammo = char.inventory?.find(i => isAmmunition(i) && i.usableBySlug === weapon.ammoSlug && i.quantity > 0);
@@ -100,9 +134,26 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const inExtendedRange = !!(weapon.extendedRange && attackerPos && targetPos &&
         Math.max(Math.abs(targetPos.gx - attackerPos.gx), Math.abs(targetPos.gy - attackerPos.gy)) > Math.floor(weapon.range / 5));
 
-      const roll = new D20Roll({ withDisadvantage: inExtendedRange }).roll();
-      const total = roll + attackBonus;
-      const hit = total >= creature.ac;
+      const mode = rollModeFor(char, 'attack');
+      const roll = new D20Roll({ withDisadvantage: inExtendedRange || mode < 0, withAdvantage: mode > 0 }).roll();
+      const engine = getStateEngine(cid);
+      const atkCtx = await engine.trigger('afterAttackRoll', await engine.trigger('beforeAttackRoll', {
+        attackerId, attackerName,
+        targetId, targetName: creature.name,
+        targetIsPlayer: false,
+        sourceName: weapon.name,
+        d20: roll,
+        attackBonus,
+        ac: creature.ac,
+        total: roll + attackBonus,
+        hit: roll + attackBonus >= creature.ac,
+      }));
+      if (!combatState.get(cid)) return;
+
+      // Re-derived from the context rather than the pre-hook locals — see CONTEXT MUTATION in
+      // shared/types/combat-hooks.ts.
+      const total = atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
+      const hit = atkCtx.hit = total >= atkCtx.ac;
 
       let damage: number | undefined;
       let damageRoll: number | undefined;
@@ -136,7 +187,13 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           }
         }
 
+        const dmgCtx = await engine.trigger('beforeDamage', {
+          sourceId: attackerId, targetId, targetName: creature.name,
+          amount: damage, damageType: weapon.damageType, sourceName: weapon.name,
+        });
+        damage = Math.max(0, dmgCtx.amount);
         await applyDamageToCreature(cid, targetId, damage);
+        await engine.trigger('afterDamage', dmgCtx);
       }
 
       const atkResult = {
@@ -150,7 +207,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         statName,
         weaponBonus,
         total,
-        ac: creature.ac,
+        ac: atkCtx.ac,
         hit,
         damage,
         damageRoll,
@@ -191,7 +248,14 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const creature = encounter.findCreature(targetId);
       if (!char || !creature || creature.isDead()) return;
 
-      if (!(await trySpendSpellSlot(cid, casterId, char, slotLevel))) {
+      // Reaction-cast spells are never initiated from here — they are offered mid-resolution by
+      // ReactionOfferHook, which spends the reaction itself.
+      const castCost = actionCostFromCastingTime(spell.castingTime);
+      if (castCost && castCost !== 'reaction' && !trySpendAction(cid, casterId, castCost)) return;
+
+      // Redirecting an already-sustained spell (Witch Bolt) is free — no slot, per RAW.
+      const free = await isConcentratingOn(cid, casterId, spell.name);
+      if (!free && !(await trySpendSpellSlot(cid, casterId, char, slotLevel))) {
         const sid = playerSocketIds.get(casterId);
         if (sid) io.to(sid).emit('combat:attack:blocked', { reason: 'No spell slots left' });
         return;
@@ -202,9 +266,46 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const charProf = char.proficiencyBonus ?? 2;
       const attackBonus = abilityMod + charProf;
 
-      const roll = new D20Roll().roll();
-      const total = roll + attackBonus;
-      const hit = total >= creature.ac;
+      const engine = getStateEngine(cid);
+      await engine.trigger('beforeSpellCast', {
+        casterId, casterName, spellName: spell.name,
+        spellLevel: spell.level, slotLevel, targetIds: [targetId],
+      });
+
+      // Redirecting an already-sustained spell (Witch Bolt) auto-hits, no roll — only the
+      // initial slotted cast is a real attack roll that can miss.
+      let roll = 0;
+      let atkCtx: AttackContext;
+      let total: number;
+      let hit: boolean;
+      if (free) {
+        atkCtx = {
+          attackerId: casterId, attackerName: casterName,
+          targetId, targetName: creature.name, targetIsPlayer: false,
+          sourceName: spell.name, d20: 0, attackBonus, ac: creature.ac,
+          total: attackBonus, hit: true,
+        };
+        total = attackBonus;
+        hit = true;
+      } else {
+        const spellMode = rollModeFor(char, 'attack');
+        roll = new D20Roll({ withDisadvantage: spellMode < 0, withAdvantage: spellMode > 0 }).roll();
+        atkCtx = await engine.trigger('afterAttackRoll', await engine.trigger('beforeAttackRoll', {
+          attackerId: casterId, attackerName: casterName,
+          targetId, targetName: creature.name,
+          targetIsPlayer: false,
+          sourceName: spell.name,
+          d20: roll,
+          attackBonus,
+          ac: creature.ac,
+          total: roll + attackBonus,
+          hit: roll + attackBonus >= creature.ac,
+        }));
+        if (!combatState.get(cid)) return;
+
+        total = atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
+        hit = atkCtx.hit = total >= atkCtx.ac;
+      }
 
       const rolledDamage = rollApplicableDamage(spell.combat?.onHit, creature.creatureType, char.level ?? 1, slotLevel);
 
@@ -212,9 +313,29 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       let damageRoll: number | undefined;
       if (hit && rolledDamage) {
         damageRoll = rolledDamage.total;
-        damage = damageRoll; // no spellcasting-mod bonus on spell damage, per 5e rules
+        const dmgCtx = await engine.trigger('beforeDamage', {
+          sourceId: casterId, targetId, targetName: creature.name,
+          amount: damageRoll, // no spellcasting-mod bonus on spell damage, per 5e rules
+          damageType: rolledDamage.damageType, sourceName: spell.name,
+        });
+        damage = Math.max(0, dmgCtx.amount);
         await applyDamageToCreature(cid, targetId, damage);
+        await engine.trigger('afterDamage', dmgCtx);
       }
+
+      if (hit) {
+        registerSpellHooks(engine, spell, {
+          ownerId: targetId, casterId, casterLevel: char.level ?? 1, slotLevel,
+          currentRound: encounter.currentRound?.number ?? 1,
+        });
+      }
+      if (requiresConcentration(spell)) {
+        await startConcentrating(cid, casterId, spell.name, hit ? [targetId] : []);
+      }
+      await engine.trigger('afterSpellCast', {
+        casterId, casterName, spellName: spell.name,
+        spellLevel: spell.level, slotLevel, targetIds: [targetId],
+      });
 
       const atkResult: SpellAttackResult = {
         attackerName: casterName,
@@ -226,7 +347,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         statBonus: abilityMod,
         statName: 'Spellcasting',
         total,
-        ac: creature.ac,
+        ac: atkCtx.ac,
         hit,
         damage,
         damageRoll,
@@ -263,7 +384,12 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const char = await getCharacter(cid, casterId);
       if (!char) return;
 
-      if (!(await trySpendSpellSlot(cid, casterId, char, slotLevel))) {
+      const castCost = actionCostFromCastingTime(spell.castingTime);
+      if (castCost && castCost !== 'reaction' && !trySpendAction(cid, casterId, castCost)) return;
+
+      // Redirecting an already-sustained spell (Hunter's Mark, Witch Bolt) is free — no slot, per RAW.
+      const free = await isConcentratingOn(cid, casterId, spell.name);
+      if (!free && !(await trySpendSpellSlot(cid, casterId, char, slotLevel))) {
         const sid = playerSocketIds.get(casterId);
         if (sid) io.to(sid).emit('combat:attack:blocked', { reason: 'No spell slots left' });
         return;
@@ -275,6 +401,10 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       // resolve now — they queue extra damage for this caster's next weapon hit this turn.
       // ponytail: curse-style buffs that mark an enemy target over a duration (Hex, Hunter's
       // Mark) need target-lock + duration tracking, a different shape — not handled here yet.
+      // Also: self-buff concentration spells (Antimagic Field, Arcane Eye, ...) return here
+      // without starting concentration — fine today since none of them have `hooks` declared
+      // (only Shield/Caustic Brew do), so there's nothing yet for losing concentration to tear
+      // down. Wire startConcentrating in here too the day one of them gets hooks.
       if (!combat?.save && parseRangeFeet(spell.range) === 0 && targetIds.length === 1 && targetIds[0] === casterId) {
         const damageEffects = combat?.onHit?.filter(e => e.type === 'damage') ?? [];
         if (damageEffects.length) {
@@ -284,6 +414,60 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         }
         return;
       }
+
+      const engine = getStateEngine(cid);
+
+      // No attack roll, no save — the target is simply marked (Hunter's Mark, Hex). Registers
+      // whatever hooks the spell declares onto the caster (not the target) and links
+      // concentration to the caster's own ownerId, so a broken save/attack path never applies.
+      if (combat?.autoHit) {
+        const targetId = targetIds[0];
+        if (!targetId) return;
+        const participant = encounter.findParticipant(targetId);
+        if (!participant || participant.isDead()) return;
+
+        if (combat?.hooks?.length) {
+          registerSpellHooks(engine, spell, {
+            ownerId: casterId, markedTargetId: targetId, casterId,
+            casterLevel: char.level ?? 1, slotLevel,
+            currentRound: encounter.currentRound?.number ?? 1,
+          });
+        }
+
+        // Instant auto-hit damage on the spot (Witch Bolt) — no roll, applies immediately rather
+        // than waiting on a hook, so redirecting to a new target each activation needs no persistent
+        // mark to track.
+        const targetType: CreatureType = participant.isPlayer ? 'Humanoid' : (participant.creature?.creatureType ?? 'Humanoid');
+        const rolledDamage = rollApplicableDamage(combat?.onHit, targetType, char.level ?? 1, slotLevel);
+        if (rolledDamage) {
+          const dmgCtx = await engine.trigger('beforeDamage', {
+            sourceId: casterId, targetId, targetName: participant.name,
+            amount: rolledDamage.total, damageType: rolledDamage.damageType, sourceName: spell.name,
+          });
+          const damage = Math.max(0, dmgCtx.amount);
+          if (participant.isPlayer) {
+            await applyDamageToPlayer(cid, participant, damage, { sourceId: casterId });
+          } else if (participant.creature) {
+            await applyDamageToCreature(cid, targetId, damage);
+          }
+          await engine.trigger('afterDamage', dmgCtx);
+        }
+
+        if (requiresConcentration(spell)) {
+          await startConcentrating(cid, casterId, spell.name, [casterId]);
+        }
+        const verb = rolledDamage ? 'hits' : 'marks';
+        console.log(`[spell-mark] ${casterName} ${verb} ${participant.name} with ${spell.name}`);
+        const msg = { text: `${casterName} ${verb} ${participant.name} with ${spell.name}.`, senderName: 'System', timestamp: Date.now() };
+        void appendChatLog(cid, msg);
+        io.to(ROOM).emit('chat:message', msg);
+        return;
+      }
+
+      await engine.trigger('beforeSpellCast', {
+        casterId, casterName, spellName: spell.name,
+        spellLevel: spell.level, slotLevel, targetIds,
+      });
 
       const casterSpellAbility = CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int';
       const casterAbilityMod = statMod(char.stats[casterSpellAbility]);
@@ -295,6 +479,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
 
       const chars = await listCharacters(cid);
       const outcomes: SpellSaveOutcome[] = [];
+      const hookedTargetIds: string[] = [];
 
       for (const targetId of targetIds) {
         const participant = encounter.findParticipant(targetId);
@@ -313,10 +498,31 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           saveBonus = participant.creature ? statMod(participant.creature.stats[saveAbility]) : 0;
         }
 
-        const roll = new D20Roll().roll();
-        const total = roll + saveBonus;
-        const saved = total >= dc;
-        console.log(`[spell-save] ${participant.name} vs ${spell.name} DC${dc}: d20=${roll}${fmtMod(saveBonus)}=${total} — ${saved ? 'SAVE' : 'FAIL'}`);
+        const saveMode = rollModeFor(targetChar ?? participant.creature ?? {}, 'save', saveAbility);
+        const d20 = new D20Roll({ withDisadvantage: saveMode < 0, withAdvantage: saveMode > 0 }).roll();
+        const saveCtx = await engine.trigger('beforeSave', {
+          casterId, targetId, targetName: participant.name,
+          targetIsPlayer: participant.isPlayer,
+          spellName: spell.name,
+          ability: saveAbility,
+          dc,
+          d20,
+          saveBonus,
+          total: d20 + saveBonus,
+          saved: d20 + saveBonus >= dc,
+        });
+        if (!combatState.get(cid)) return;
+
+        // Re-derived from the context, so a hook that moved the DC or the bonus is reflected
+        // before afterSave (and everything downstream) reads the outcome.
+        saveCtx.total = saveCtx.d20 + saveCtx.saveBonus;
+        saveCtx.saved = saveCtx.total >= saveCtx.dc;
+        await engine.trigger('afterSave', saveCtx);
+
+        const roll = saveCtx.d20;
+        const total = saveCtx.total;
+        const saved = saveCtx.saved;
+        console.log(`[spell-save] ${participant.name} vs ${spell.name} DC${saveCtx.dc}: d20=${roll}${fmtMod(saveCtx.saveBonus)}=${total} — ${saved ? 'SAVE' : 'FAIL'}`);
 
         const targetType: CreatureType = participant.isPlayer ? 'Humanoid' : (participant.creature?.creatureType ?? 'Humanoid');
         const conditionEffects = (combat?.onHit ?? []).filter(e => e.type === 'condition' && effectApplies(e, targetType));
@@ -325,25 +531,44 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         let damage: number | undefined;
         const rolledDamage = rollApplicableDamage(combat?.onHit, targetType, char.level ?? 1, slotLevel);
         if (rolledDamage && (!saved || halfOnSave)) {
-          damage = saved ? Math.floor(rolledDamage.total / 2) : rolledDamage.total;
+          const dmgCtx = await engine.trigger('beforeDamage', {
+            sourceId: casterId, targetId, targetName: participant.name,
+            amount: saved ? Math.floor(rolledDamage.total / 2) : rolledDamage.total,
+            damageType: rolledDamage.damageType, sourceName: spell.name,
+          });
+          damage = Math.max(0, dmgCtx.amount);
+
+          // Both branches go through the shared appliers so a kill here clears turn order,
+          // triggers the victory check, and fires onDown/onKill — the player branch used to
+          // inline its own HP write and skipped all three.
           if (participant.isPlayer && targetChar) {
-            participant.takeDamage(damage);
-            void updateCharacter(cid, targetChar.id, c => ({ ...c, currentHp: participant.currentHp }));
-            io.to(ROOM).emit('combat:player:damage', {
-              characterId: targetChar.id, characterName: participant.name,
-              damage, currentHp: participant.currentHp, maxHp: participant.maxHp,
-            });
+            await applyDamageToPlayer(cid, participant, damage, { charId: targetChar.id, sourceId: casterId });
           } else if (participant.creature) {
-            // Routes through the shared helper (same one combat:attack/combat:spell:attack
-            // use) so a kill here also clears turn order and triggers the victory check —
-            // calling participant.takeDamage directly here skipped both.
             await applyDamageToCreature(cid, targetId, damage);
           }
+          await engine.trigger('afterDamage', dmgCtx);
         }
 
         const conditionsApplied = !saved
           ? conditionEffects.map(e => e.condition).filter((c): c is NonNullable<typeof c> => !!c)
           : undefined;
+
+        if (conditionsApplied?.length) {
+          for (const name of conditionsApplied) await applyCondition(cid, targetId, name);
+        }
+
+        // Lingering effects attach to whoever failed — Tasha's Caustic Brew coating a creature
+        // in acid that ticks at the start of each of its turns until the spell ends.
+        if (!saved && combat?.hooks?.length) {
+          registerSpellHooks(engine, spell, {
+            ownerId: targetId,
+            casterId,
+            casterLevel: char.level ?? 1,
+            slotLevel,
+            currentRound: encounter.currentRound?.number ?? 1,
+          });
+          hookedTargetIds.push(targetId);
+        }
 
         if (!saved && forcedMove?.distance) {
           const positions = tokenPositions.get(cid) ?? {};
@@ -385,6 +610,10 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         });
       }
 
+      if (requiresConcentration(spell)) {
+        await startConcentrating(cid, casterId, spell.name, hookedTargetIds);
+      }
+
       const result: SpellSaveResult = { casterName, spellName: spell.name, dc, saveAbility, slotLevel: spell.level, outcomes };
       io.to(ROOM).emit('combat:spell:save:result', result);
 
@@ -402,6 +631,10 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         })();
       }
     })();
+  });
+
+  socket.on('combat:reaction:respond', ({ requestId, accepted }) => {
+    resolveReaction(requestId, accepted);
   });
 
   socket.on('combat:turn:end', () => {

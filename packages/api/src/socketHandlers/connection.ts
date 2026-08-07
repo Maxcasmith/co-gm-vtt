@@ -1,6 +1,7 @@
 import { readChatLog, readQuests, readManifest, listCharacters, loadDungeon, loadEncounter } from '../storage.ts';
 import { toClientDungeon } from '../dungeon/index.ts';
 import { io, ROOM, connected, playerSocketIds, campaignPlayers, sessionState, combatState, dungeons, tokenPositions, microDungeons, encounters, enemiesReady, withLivePositions } from '../state.ts';
+import { maybeResolveRest, broadcastRestProgress } from './rest.ts';
 import type { JoinContext } from './context.ts';
 
 export function registerJoin(ctx: JoinContext): void {
@@ -76,10 +77,13 @@ export function registerJoin(ctx: JoinContext): void {
 }
 
 export function registerDisconnectHandler(ctx: JoinContext): void {
-  const { socket, player, charId } = ctx;
+  const { socket, player, charId, campaignId } = ctx;
   socket.on('disconnect', () => {
     connected.delete(player);
     playerSocketIds.delete(charId);
     io.to(ROOM).emit('players:update', [...connected]);
+    // Removing this player may have been the last thing blocking a pending group rest.
+    void broadcastRestProgress(campaignId);
+    void maybeResolveRest(campaignId);
   });
 }

@@ -95,6 +95,16 @@ function loadSpells(): Spell[] {
 // Load once at startup
 const ALL_SPELLS = loadSpells();
 
+/**
+ * Case-insensitive lookup against the startup-loaded catalogue. Used by combat to resolve the
+ * spells a character knows (stored as plain names on Character.spells) into full Spell objects —
+ * needed to find reaction-cast spells like Shield before their owner is ever attacked.
+ */
+export function findSpell(name: string): Spell | undefined {
+  const wanted = name.trim().toLowerCase();
+  return ALL_SPELLS.find(s => s.name.toLowerCase() === wanted);
+}
+
 // ── Router ────────────────────────────────────────────────────────────────────
 
 export const spellsRouter = Router();

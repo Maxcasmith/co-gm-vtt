@@ -2234,11 +2234,14 @@
     ]
   },
   "Hunter's Mark": {
+    "autoHit": true,
     "resolution": "none",
-    "onHit": [
+    "hooks": [
       {
-        "type": "damage",
-        "damageType": "Force"
+        "type": "onHitBonusDamage",
+        "damageType": "Force",
+        "scaling": { "mode": "spell-slot", "base": "1d6", "tiers": [] },
+        "duration": { "until": "endOfCombat" }
       }
     ]
   },
@@ -3582,7 +3585,15 @@
     ]
   },
   "Shield": {
-    "resolution": "none"
+    "resolution": "none",
+    "reactionTrigger": { "on": "beingHit" },
+    "hooks": [
+      {
+        "type": "acModifier",
+        "value": 5,
+        "duration": { "until": "startOfOwnerTurn" }
+      }
+    ]
   },
   "Shield of Faith": {
     "resolution": "none"
@@ -4151,10 +4162,31 @@
       "ability": "dex",
       "halfOnSave": false
     },
-    "onHit": [
+    "area": {
+      "shape": "line",
+      "size": 30,
+      "width": 5,
+      "origin": "self"
+    },
+    "hooks": [
       {
-        "type": "damage",
-        "damageType": "Acid"
+        "type": "recurringDamage",
+        "damageType": "Acid",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d4",
+          "tiers": [
+            { "atLevel": 2, "value": "4d4" },
+            { "atLevel": 3, "value": "6d4" },
+            { "atLevel": 4, "value": "8d4" },
+            { "atLevel": 5, "value": "10d4" },
+            { "atLevel": 6, "value": "12d4" },
+            { "atLevel": 7, "value": "14d4" },
+            { "atLevel": 8, "value": "16d4" },
+            { "atLevel": 9, "value": "18d4" }
+          ]
+        },
+        "duration": { "until": "rounds", "rounds": 10 }
       }
     ]
   },
@@ -4710,7 +4742,21 @@
     "onHit": [
       {
         "type": "damage",
-        "damageType": "Lightning"
+        "damageType": "Lightning",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d12",
+          "tiers": [
+            { "atLevel": 2, "value": "3d12" },
+            { "atLevel": 3, "value": "4d12" },
+            { "atLevel": 4, "value": "5d12" },
+            { "atLevel": 5, "value": "6d12" },
+            { "atLevel": 6, "value": "7d12" },
+            { "atLevel": 7, "value": "8d12" },
+            { "atLevel": 8, "value": "9d12" },
+            { "atLevel": 9, "value": "10d12" }
+          ]
+        }
       }
     ]
   },

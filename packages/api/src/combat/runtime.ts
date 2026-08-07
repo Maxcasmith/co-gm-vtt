@@ -1,14 +1,17 @@
-import type { Character, EffectSpec, CreatureType } from 'shared';
-import { statMod, calcAC, spellSlotsForClass } from 'shared';
-import { updateCharacter, readChatLog, appendChatLog, saveEncounter, clearEncounter, clearDungeon, saveDungeon, listCharacters, loadPartyAllies, readQuests, writeQuests, readManifest, readNemeses, getConfig } from '../storage.ts';
+import type { Character, EffectSpec, CreatureType, Condition as ConditionName, ActiveCondition } from 'shared';
+import { statMod, calcAC, spellSlotsForClass, CLASS_SAVING_THROWS } from 'shared';
+import { getCharacter, updateCharacter, readChatLog, appendChatLog, saveEncounter, clearEncounter, clearDungeon, saveDungeon, listCharacters, loadPartyAllies, readQuests, writeQuests, readManifest, readNemeses, getConfig } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateCombatFlavour, evaluateNemesisCandidates } from '../session-processor/imagePrompts.ts';
 import { toClientDungeon } from '../dungeon/index.ts';
 import { Team, Participant } from '../domain/encounter.ts';
 import { Creature } from '../domain/creature.ts';
 import { logError } from '../logger.ts';
-import { io, ROOM, combatState, encounters, tokenPositions, campaignPlayers, playerSocketIds, enemiesReady, combatStartedAt, dungeons, pendingWeaponBonuses, microDungeons, connected, withLivePositions } from '../state.ts';
+import { io, ROOM, combatState, encounters, tokenPositions, campaignPlayers, playerSocketIds, enemiesReady, combatStartedAt, dungeons, pendingWeaponBonuses, microDungeons, connected, withLivePositions, getStateEngine, stateEngines } from '../state.ts';
 import { D20Roll, rollDice, fmtMod, calcMaxHp, crToXp } from './dice.ts';
+import { rollModeFor, addCondition, removeCondition } from './conditions/rollModeFor.ts';
+import { ReactionOfferHook } from './stateEngine/hooks/ReactionOfferHook.ts';
+import { findSpell } from '../routes/spells.ts';
 import { applyEffects } from '../effects.ts';
 import { endSession, dispatchDMResponse } from '../session.ts';
 
@@ -18,6 +21,57 @@ function delay(ms: number): Promise<void> {
 
 function isOccupied(positions: Record<string, { gx: number; gy: number }>, gx: number, gy: number, excludeId: string): boolean {
   return Object.entries(positions).some(([id, p]) => id !== excludeId && p.gx === gx && p.gy === gy);
+}
+
+/** Pushes a participant's remaining action economy to the room so the combat dock can show it. */
+export function emitResources(participant: Participant): void {
+  io.to(ROOM).emit('combat:player:resources', {
+    characterId: participant.id,
+    actionsRemaining: participant.actionsRemaining,
+    bonusActionsRemaining: participant.bonusActionsRemaining,
+    reactionsRemaining: participant.reactionsRemaining,
+  });
+}
+
+/**
+ * Refills the incoming actor's action economy and fires `beforeTurn`. Shared by the combat-start
+ * path and every turn advance, so the very first actor of a fight gets the same treatment as
+ * everyone after them.
+ */
+async function runTurnStart(cid: string): Promise<void> {
+  const encounter = encounters.get(cid);
+  const actor = encounter?.currentActor;
+  if (!encounter || !actor) return;
+  actor.refillResources();
+  emitResources(actor);
+  await getStateEngine(cid).trigger('beforeTurn', {
+    participantId: actor.id,
+    participantName: actor.name,
+    isPlayer: actor.isPlayer,
+    round: encounter.currentRound?.number ?? 1,
+  });
+}
+
+/**
+ * Starts the fight once every expected participant has rolled initiative. Previously this guard
+ * plus beginCombat/emitTurn was copy-pasted into both the initiative paths (addToTurnOrder's
+ * callback and the combat:initiative:roll handler); they now share this one function so the
+ * beforeCombat stage cannot fire on one path and not the other.
+ */
+export function tryBeginCombat(cid: string): void {
+  const encounter = encounters.get(cid);
+  if (!encounter) return;
+  const expected = encounter.expectedParticipantCount;
+  if (expected <= 0 || encounter.turnOrder.length < expected || encounter.currentRound || !enemiesReady.get(cid)) return;
+
+  encounter.beginCombat();
+  void (async () => {
+    await getStateEngine(cid).trigger('beforeCombat', { round: encounter.currentRound?.number ?? 1 });
+    if (!combatState.get(cid)) return;
+    await runTurnStart(cid);
+    if (!combatState.get(cid)) return;
+    emitTurn(cid);
+  })();
 }
 
 export function emitTurn(cid: string) {
@@ -91,10 +145,7 @@ export async function runDeathSave(cid: string, actor: Participant): Promise<voi
   if (socketId) io.to(socketId).emit('combat:death:save', saveData);
 
   if (dead) {
-    const deadMsg = { text: `${actor.name} has perished.`, senderName: 'Combat', timestamp: Date.now() };
-    io.to(ROOM).emit('combat:player:dead', { characterId: actor.id, characterName: actor.name });
-    io.to(ROOM).emit('chat:message', deadMsg);
-    void appendChatLog(cid, deadMsg);
+    await markPlayerDead(cid, participant, actor.id);
   } else if (stable && !isNat20) {
     const stableMsg = { text: `${actor.name} has stabilized.`, senderName: 'Combat', timestamp: Date.now() };
     io.to(ROOM).emit('chat:message', stableMsg);
@@ -189,59 +240,72 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
         targetAc = encounter.findCreature(targetParticipant.id)?.ac ?? 10;
       }
 
-      const roll = new D20Roll().roll();
-      const total = roll + atk.bonus;
-      const hit = total >= targetAc;
+      const mode = rollModeFor(creature, 'attack');
+      const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
+      const engine = getStateEngine(cid);
+      const targetKeyId = targetParticipant.isPlayer
+        ? (targetCharForAttack?.id ?? targetParticipant.id)
+        : targetParticipant.id;
+
+      // Two-phase resolution: roll, let the afterAttackRoll chain run (which may suspend here for
+      // several seconds while the defender decides whether to spend a reaction), then re-derive
+      // the outcome from the possibly-modified context. Nothing is broadcast until after this, so
+      // the client never renders a hit that a reaction later turns into a miss.
+      const atkCtx = await engine.trigger('afterAttackRoll', await engine.trigger('beforeAttackRoll', {
+        attackerId: actor.id,
+        attackerName: actor.name,
+        targetId: targetKeyId,
+        targetName: targetParticipant.name,
+        targetIsPlayer: targetParticipant.isPlayer,
+        sourceName: atk.name,
+        d20: roll,
+        attackBonus: atk.bonus,
+        ac: targetAc,
+        total: roll + atk.bonus,
+        hit: roll + atk.bonus >= targetAc,
+      }));
+      if (!combatState.get(cid)) return;
+
+      atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
+      atkCtx.hit = atkCtx.total >= atkCtx.ac;
+
+      const total = atkCtx.total;
+      const hit = atkCtx.hit;
+      targetAc = atkCtx.ac;
       let damage: number | undefined;
       let remainingHp: number | undefined;
       let targetDead = false;
 
       if (hit) {
-        damage = rollDice(atk.damage);
+        const dmgCtx = await engine.trigger('beforeDamage', {
+          sourceId: actor.id,
+          targetId: targetKeyId,
+          targetName: targetParticipant.name,
+          amount: rollDice(atk.damage),
+          damageType: undefined,
+          sourceName: atk.name,
+        });
+        damage = Math.max(0, dmgCtx.amount);
 
         if (targetParticipant.isPlayer && targetCharForAttack) {
           const playerParticipant = encounter.players.find(p => p.id === targetCharForAttack!.id);
           if (playerParticipant) {
-            const wasDown = playerParticipant.isDown();
-            playerParticipant.takeDamage(damage);
-            void updateCharacter(cid, targetCharForAttack.id, c => ({ ...c, currentHp: playerParticipant.currentHp }));
+            await applyDamageToPlayer(cid, playerParticipant, damage, {
+              charId: targetCharForAttack.id,
+              sourceId: actor.id,
+            });
             remainingHp = playerParticipant.currentHp;
             targetDead = playerParticipant.currentHp <= 0;
-            io.to(ROOM).emit('combat:player:damage', {
-              characterId: targetCharForAttack.id,
-              characterName: targetParticipant.name,
-              damage,
-              currentHp: playerParticipant.currentHp,
-              maxHp: playerParticipant.maxHp,
-            });
             console.log(`[ai] ${actor.name} attacks ${targetParticipant.name} with ${atk.name}: ${roll}${fmtMod(atk.bonus)} = ${total} vs AC ${targetAc} — HIT ${damage} (${playerParticipant.currentHp}/${playerParticipant.maxHp} HP)`);
-
-            if (wasDown) {
-              playerParticipant.deathSaves.failures = Math.min(3, playerParticipant.deathSaves.failures + 2);
-              playerParticipant.deathSaves.stable = false;
-              const nowDead = playerParticipant.deathSaves.failures >= 3;
-              const socketId = playerSocketIds.get(targetParticipant.id);
-              if (socketId) {
-                io.to(socketId).emit('combat:death:save', {
-                  characterName: targetParticipant.name, roll: 0, isNatural20: false, isNatural1: false,
-                  success: false, successes: playerParticipant.deathSaves.successes,
-                  failures: playerParticipant.deathSaves.failures, stable: false, dead: nowDead,
-                });
-              }
-              if (nowDead) {
-                io.to(ROOM).emit('combat:player:dead', { characterId: targetCharForAttack.id, characterName: targetParticipant.name });
-                const deadMsg = { text: `${targetParticipant.name} has perished.`, senderName: 'Combat', timestamp: Date.now() };
-                io.to(ROOM).emit('chat:message', deadMsg);
-                void appendChatLog(cid, deadMsg);
-              }
-            }
           }
         } else {
           // Ally or other non-player target — use creature damage path
-          void applyDamageToCreature(cid, targetParticipant.id, damage);
+          await applyDamageToCreature(cid, targetParticipant.id, damage);
           remainingHp = encounter.findCreature(targetParticipant.id)?.currentHp;
           targetDead = encounter.findCreature(targetParticipant.id)?.isDead() ?? false;
         }
+
+        await engine.trigger('afterDamage', dmgCtx);
       } else {
         console.log(`[ai] ${actor.name} attacks ${targetParticipant.name} with ${atk.name}: ${roll}${fmtMod(atk.bonus)} = ${total} vs AC ${targetAc} — MISS`);
       }
@@ -275,6 +339,209 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
 
   await delay(600);
   advanceTurn(cid);
+}
+
+/**
+ * Single place a player character is declared dead. Both routes here (failing a third death save,
+ * and being hit while already at 0 HP) used to inline these same three emits, which meant an
+ * `onKill` hook wired into one would silently miss the other.
+ */
+export async function markPlayerDead(cid: string, participant: Participant, charId: string, sourceId?: string): Promise<void> {
+  io.to(ROOM).emit('combat:player:dead', { characterId: charId, characterName: participant.name });
+  const deadMsg = { text: `${participant.name} has perished.`, senderName: 'Combat', timestamp: Date.now() };
+  io.to(ROOM).emit('chat:message', deadMsg);
+  void appendChatLog(cid, deadMsg);
+  await getStateEngine(cid).trigger('onKill', {
+    participantId: charId, participantName: participant.name, isPlayer: true, sourceId,
+  });
+}
+
+/**
+ * Resolves targetId to whoever holds its live conditions array — a creature or player mid-combat
+ * (checked via the live encounter first), or a plain character lookup so conditions still work
+ * outside combat — e.g. poisoned by a trap between fights. Every condition mutator (add/remove,
+ * concentration) goes through this so there's one place that knows how to find + persist either kind.
+ */
+async function conditionsHolder(cid: string, targetId: string): Promise<
+  | { label: string; conditions: ActiveCondition[] | undefined; write: (c: ActiveCondition[]) => void }
+  | undefined
+> {
+  const encounter = encounters.get(cid);
+  const participant = encounter?.findParticipant(targetId);
+
+  if (participant?.creature) {
+    const creature = participant.creature;
+    return {
+      label: participant.name,
+      conditions: creature.conditions,
+      write: c => { creature.conditions = c; if (encounter) void saveEncounter(cid, encounter); },
+    };
+  }
+
+  const charId = participant?.id ?? targetId;
+  const char = await getCharacter(cid, charId);
+  if (!char) return undefined;
+  return {
+    label: char.name,
+    conditions: char.conditions,
+    write: c => { void updateCharacter(cid, charId, cur => ({ ...cur, conditions: c })); },
+  };
+}
+
+async function setCondition(
+  cid: string, targetId: string, name: ConditionName, fn: typeof addCondition,
+): Promise<string | undefined> {
+  const holder = await conditionsHolder(cid, targetId);
+  if (!holder) return undefined;
+  holder.write(fn(holder.conditions, name));
+  return holder.label;
+}
+
+export async function applyCondition(cid: string, targetId: string, name: ConditionName): Promise<void> {
+  const label = await setCondition(cid, targetId, name, addCondition);
+  if (!label) return;
+  console.log(`[condition] ${label} gains ${name}`);
+  const msg = { text: `${label} is now ${name}.`, senderName: 'System', timestamp: Date.now() };
+  void appendChatLog(cid, msg);
+  io.to(ROOM).emit('chat:message', msg);
+  // 5e: incapacitated ends concentration outright, no save.
+  if (name === 'Incapacitated') await breakConcentration(cid, targetId);
+}
+
+export async function clearCondition(cid: string, targetId: string, name: ConditionName): Promise<void> {
+  // Concentrating carries linked hooks that need tearing down, not just the marker removed.
+  if (name === 'Concentrating') return breakConcentration(cid, targetId);
+
+  const label = await setCondition(cid, targetId, name, removeCondition);
+  if (!label) return;
+  console.log(`[condition] ${label} loses ${name}`);
+  const msg = { text: `${label} is no longer ${name}.`, senderName: 'System', timestamp: Date.now() };
+  void appendChatLog(cid, msg);
+  io.to(ROOM).emit('chat:message', msg);
+}
+
+/** Ends whatever targetId is concentrating on — tears down its linked hooks. No-op if not concentrating. */
+export async function breakConcentration(cid: string, targetId: string): Promise<void> {
+  const holder = await conditionsHolder(cid, targetId);
+  const link = holder?.conditions?.find(c => c.name === 'Concentrating')?.concentration;
+  if (!holder || !link) return;
+
+  const engine = getStateEngine(cid);
+  for (const ownerId of link.targetIds) engine.unregisterBySource(ownerId, link.spellName);
+  holder.write(removeCondition(holder.conditions, 'Concentrating'));
+
+  console.log(`[concentration] ${holder.label} loses concentration on ${link.spellName}`);
+  const msg = { text: `${holder.label} loses concentration on ${link.spellName}.`, senderName: 'System', timestamp: Date.now() };
+  void appendChatLog(cid, msg);
+  io.to(ROOM).emit('chat:message', msg);
+}
+
+/** True when casterId is currently concentrating on exactly spellName — gates free recasts (Hunter's Mark, Witch Bolt). */
+export async function isConcentratingOn(cid: string, casterId: string, spellName: string): Promise<boolean> {
+  const holder = await conditionsHolder(cid, casterId);
+  return holder?.conditions?.find(c => c.name === 'Concentrating')?.concentration?.spellName === spellName;
+}
+
+/**
+ * Starts casterId concentrating on spellName, sustained via hooks registered on hookedTargetIds.
+ * 2024 rules: casting another concentration spell ends the previous one automatically, no choice
+ * — so any existing concentration is broken first rather than stacking or being rejected.
+ */
+export async function startConcentrating(
+  cid: string, casterId: string, spellName: string, hookedTargetIds: string[],
+): Promise<void> {
+  await breakConcentration(cid, casterId);
+  const holder = await conditionsHolder(cid, casterId);
+  if (!holder) return;
+  const withoutOld = removeCondition(holder.conditions, 'Concentrating');
+  holder.write([...withoutOld, { name: 'Concentrating', concentration: { spellName, targetIds: hookedTargetIds } }]);
+  console.log(`[concentration] ${holder.label} begins concentrating on ${spellName}`);
+}
+
+const CONCENTRATION_MIN_DC = 10;
+
+/**
+ * Called after damage lands on targetId — if they're concentrating, rolls the Constitution save
+ * 5e requires (DC 10 or half the damage taken, whichever is higher) and breaks concentration on a fail.
+ */
+export async function checkConcentration(cid: string, targetId: string, damage: number): Promise<void> {
+  const holder = await conditionsHolder(cid, targetId);
+  const link = holder?.conditions?.find(c => c.name === 'Concentrating')?.concentration;
+  if (!holder || !link) return;
+
+  const encounter = encounters.get(cid);
+  const participant = encounter?.findParticipant(targetId);
+  const creature = participant?.creature;
+  const char = creature ? undefined : await getCharacter(cid, participant?.id ?? targetId);
+  const stats = creature?.stats ?? char?.stats;
+  if (!stats) return;
+
+  const classSaves: readonly string[] = char ? (CLASS_SAVING_THROWS[char.class] ?? []) : [];
+  const proficient = classSaves.includes('con');
+  const bonus = statMod(stats.con) + (proficient ? (char?.proficiencyBonus ?? 2) : 0);
+
+  const dc = Math.max(CONCENTRATION_MIN_DC, Math.floor(damage / 2));
+  const mode = rollModeFor(creature ?? char ?? {}, 'save', 'con');
+  const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
+  const total = roll + bonus;
+  const saved = total >= dc;
+  console.log(`[concentration] ${holder.label} save vs DC${dc}: d20=${roll}${fmtMod(bonus)}=${total} — ${saved ? 'MAINTAINED' : 'BROKEN'}`);
+  if (!saved) await breakConcentration(cid, targetId);
+}
+
+/**
+ * Applies damage to a player participant and runs everything that follows from it — HP persistence,
+ * the damage broadcast, death-save failures for damage taken while down, and the onDown/onKill
+ * stages. Shared by enemy attacks, save-based spell damage, and start-of-turn recurring damage.
+ */
+export async function applyDamageToPlayer(
+  cid: string,
+  participant: Participant,
+  damage: number,
+  opts?: { charId?: string; sourceId?: string },
+): Promise<void> {
+  const charId = opts?.charId ?? participant.id;
+  const wasDown = participant.isDown();
+
+  participant.takeDamage(damage);
+  void updateCharacter(cid, charId, c => ({ ...c, currentHp: participant.currentHp }));
+  io.to(ROOM).emit('combat:player:damage', {
+    characterId: charId,
+    characterName: participant.name,
+    damage,
+    currentHp: participant.currentHp,
+    maxHp: participant.maxHp,
+  });
+  // One event drives the damage float/flash for every source — weapon hit, spell hit, spell-save
+  // damage, recurring ticks — since they all funnel through this function to apply HP loss.
+  if (damage > 0) io.to(ROOM).emit('combat:damage:dealt', { targetId: charId, targetName: participant.name, damage });
+
+  if (wasDown) {
+    // Damage while already at 0 HP burns two death saves (5e: a hit on a downed creature).
+    participant.deathSaves.failures = Math.min(3, participant.deathSaves.failures + 2);
+    participant.deathSaves.stable = false;
+    const nowDead = participant.deathSaves.failures >= 3;
+    const socketId = playerSocketIds.get(charId);
+    if (socketId) {
+      io.to(socketId).emit('combat:death:save', {
+        characterName: participant.name, roll: 0, isNatural20: false, isNatural1: false,
+        success: false, successes: participant.deathSaves.successes,
+        failures: participant.deathSaves.failures, stable: false, dead: nowDead,
+      });
+    }
+    if (nowDead) await markPlayerDead(cid, participant, charId, opts?.sourceId);
+    return;
+  }
+
+  if (participant.isDown()) {
+    // 5e: being incapacitated ends concentration outright, no save.
+    await breakConcentration(cid, charId);
+    await getStateEngine(cid).trigger('onDown', {
+      participantId: charId, participantName: participant.name, isPlayer: true, sourceId: opts?.sourceId,
+    });
+  } else if (damage > 0) {
+    await checkConcentration(cid, charId, damage);
+  }
 }
 
 export async function evaluateNemesisAfterCombat(cid: string): Promise<void> {
@@ -320,11 +587,16 @@ export async function evaluateNemesisAfterCombat(cid: string): Promise<void> {
   }
 }
 
-export function endCombat(cid: string): void {
-  void evaluateNemesisAfterCombat(cid);
+export async function endCombat(cid: string): Promise<void> {
   const encounter = encounters.get(cid);
+  // Awaited before teardown so afterCombat hooks still see a live encounter.
+  const engine = stateEngines.get(cid);
+  if (engine) await engine.trigger('afterCombat', { round: encounter?.currentRound?.number ?? 0 });
+
+  void evaluateNemesisAfterCombat(cid);
   encounter?.teardown();
   encounters.delete(cid);
+  stateEngines.delete(cid);
   combatStartedAt.delete(cid);
   pendingWeaponBonuses.delete(cid);
   void clearEncounter(cid);
@@ -336,7 +608,7 @@ export function endCombatDefeated(cid: string): void {
   enemiesReady.delete(cid);
   io.to(ROOM).emit('combat:defeat');
   setTimeout(() => {
-    endCombat(cid);
+    void endCombat(cid);
     io.to(ROOM).emit('combat:state', false);
     microDungeons.delete(cid);
     endSession(cid);
@@ -369,12 +641,23 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
     maxHp: creature.hp,
     effects: creature.effects,
   });
+  if (damage > 0) io.to(ROOM).emit('combat:damage:dealt', { targetId, targetName: creature.name, damage });
   void saveEncounter(cid, encounter);
 
   if (creature.isDead()) {
     console.log(`[combat] ${creature.name} is dead`);
     encounter.removeFromTurnOrder(targetId);
     void saveEncounter(cid, encounter);
+    // 5e: death ends concentration outright, no save — monsters have no death-save stage to
+    // route this through, so it's checked directly rather than via a wasDown-style branch.
+    await breakConcentration(cid, targetId);
+
+    const engine = getStateEngine(cid);
+    await engine.trigger('onKill', {
+      participantId: targetId, participantName: creature.name, isPlayer: false,
+    });
+    // A dead participant's lingering effects go with it — nothing should tick for a corpse.
+    engine.unregisterByOwner(targetId);
 
     // Creature.from() doesn't carry isBoss (combat participants only need combat-relevant fields),
     // so check the dungeon entity itself rather than the live creature/encounter — it's the
@@ -412,7 +695,7 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
       setTimeout(() => {
         const superseded = encounters.get(cid) !== wonEncounter;
         if (!superseded) {
-          endCombat(cid);
+          void endCombat(cid);
           io.to(ROOM).emit('combat:state', false);
 
           if (microDungeons.has(cid)) {
@@ -449,19 +732,87 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
         });
       }, 7000);
     }
+  } else if (damage > 0) {
+    await checkConcentration(cid, targetId, damage);
   }
 }
+
+// Advancing a turn is asynchronous now that hook stages are awaited, which opens a window the old
+// synchronous version did not have: a second advanceTurn arriving mid-flight (a client's
+// combat:turn:end racing the enemy AI's own end-of-turn call) would fire afterTurn twice for the
+// same actor and skip a participant. One advance in flight per fight.
+const advancingTurn = new Set<string>();
 
 export function advanceTurn(cid: string) {
   if (!combatState.get(cid)) return;
   const encounter = encounters.get(cid);
   if (!encounter?.turnOrder.length) return;
-  const before = encounter.currentActor?.name ?? '?';
-  encounter.advanceTurn();
-  const after = encounter.currentActor?.name ?? '?';
-  console.log(`[turn] advanceTurn: ${before} → ${after} (order=[${encounter.turnOrder.map(p => p.name).join(',')}])`);
-  emitTurn(cid);
-  void saveEncounter(cid, encounter);
+  if (advancingTurn.has(cid)) {
+    console.log('[turn] advanceTurn ignored — an advance is already in flight');
+    return;
+  }
+  advancingTurn.add(cid);
+
+  void (async () => {
+    try {
+      const engine = getStateEngine(cid);
+      const round = encounter.currentRound?.number ?? 1;
+
+      const outgoing = encounter.currentActor;
+      if (outgoing) {
+        await engine.trigger('afterTurn', {
+          participantId: outgoing.id, participantName: outgoing.name, isPlayer: outgoing.isPlayer, round,
+        });
+        // Hook chains are awaited, so combat may have ended (or been superseded) while suspended —
+        // same re-guard the delay()-based paths in runEnemyAI already use.
+        if (!combatState.get(cid)) return;
+      }
+
+      const before = encounter.currentActor?.name ?? '?';
+      const { roundStarted } = encounter.advanceTurn();
+      const after = encounter.currentActor?.name ?? '?';
+      console.log(`[turn] advanceTurn: ${before} → ${after} (order=[${encounter.turnOrder.map(p => p.name).join(',')}])`);
+
+      if (roundStarted) {
+        await engine.trigger('afterRound', { round });
+        await engine.trigger('beforeRound', { round: encounter.currentRound?.number ?? round + 1 });
+        if (!combatState.get(cid)) return;
+      }
+
+      // beforeTurn hooks can damage the incoming actor (a lingering acid/poison effect ticking at
+      // the start of its turn). A creature killed here is spliced out of the turn order by
+      // applyDamageToCreature, which leaves currentActor pointing at the next live participant —
+      // so emitTurn below still lands correctly without needing to re-advance.
+      await runTurnStart(cid);
+      if (!combatState.get(cid)) return;
+
+      emitTurn(cid);
+      void saveEncounter(cid, encounter);
+    } finally {
+      advancingTurn.delete(cid);
+    }
+  })();
+}
+
+/**
+ * Registers a ReactionOfferHook for each reaction-cast spell this character knows, so the offer
+ * exists before anything attacks them. Spells are stored on the character as bare names, so they
+ * are resolved against the compendium here.
+ */
+function registerReactionOffers(cid: string, char: Character): void {
+  const engine = getStateEngine(cid);
+  for (const name of char.spells ?? []) {
+    const spell = findSpell(name);
+    if (!spell?.combat?.reactionTrigger) continue;
+    engine.register(new ReactionOfferHook({
+      // Deterministic so the two paths that roll player initiative (dungeon entry and the
+      // combat_init effect) cannot register the same offer twice and double-prompt.
+      id: `reaction-offer:${char.id}:${spell.name}`,
+      ownerId: char.id,
+      source: `Reaction: ${spell.name}`,
+      spell,
+    }));
+  }
 }
 
 export async function rollPlayerInitiatives(cid: string, chars: Character[]): Promise<void> {
@@ -491,6 +842,7 @@ export async function rollPlayerInitiatives(cid: string, chars: Character[]): Pr
       maxHp,
     });
     playerTeam!.addParticipant(participant);
+    if (char) registerReactionOffers(cid, char);
     return participant;
   });
 
@@ -538,12 +890,7 @@ export function addToTurnOrder(cid: string, entries: Participant[], baseDelay = 
       if (!combatState.get(cid)) return;
       encounter.addToTurnOrder(entry);
       io.to(ROOM).emit('combat:initiative', entry.toTurnOrderEntry());
-
-      const expected = encounter.expectedParticipantCount;
-      if (encounter.turnOrder.length >= expected && expected > 0 && !encounter.currentRound && enemiesReady.get(cid)) {
-        encounter.beginCombat();
-        emitTurn(cid);
-      }
+      tryBeginCombat(cid);
       void saveEncounter(cid, encounter);
     }, baseDelay + i * 500);
   });

@@ -5,6 +5,7 @@ import { registerRollHandlers } from './rolls.ts';
 import { registerChatHandlers } from './chat.ts';
 import { registerCombatHandlers } from './combat.ts';
 import { registerInventoryHandlers } from './inventory.ts';
+import { registerRestHandlers } from './rest.ts';
 import type { JoinContext } from './context.ts';
 
 export function registerSocketHandlers(): void {
@@ -17,6 +18,7 @@ export function registerSocketHandlers(): void {
       registerChatHandlers(ctx);
       registerCombatHandlers(ctx);
       registerInventoryHandlers(ctx);
+      registerRestHandlers(ctx);
       registerDisconnectHandler(ctx);
     });
   });

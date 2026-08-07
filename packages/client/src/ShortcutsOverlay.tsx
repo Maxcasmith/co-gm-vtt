@@ -6,6 +6,8 @@ interface Props {
 const SHORTCUTS: { keys: string; description: string }[] = [
   { keys: 'Space Space',  description: 'Open command palette' },
   { keys: 'Space C',      description: 'Quick chat' },
+  { keys: 'Space Q',      description: 'Toggle quest log' },
+  { keys: 'Space J',      description: 'Toggle journal' },
   { keys: 'Escape',       description: 'Close any overlay' },
 ];
 

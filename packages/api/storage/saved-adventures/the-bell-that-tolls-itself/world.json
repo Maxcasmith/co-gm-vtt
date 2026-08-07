@@ -1,0 +1,10 @@
+{
+  "id": "4f522463-5cf4-4363-bd9e-c9e755143415",
+  "name": "The Bell That Tolls Itself",
+  "campaignDir": "the-bell-that-tolls-itself",
+  "type": "dungeon-crawl",
+  "concept": {
+    "name": "Gothic Horror",
+    "description": "Gothic Horror, Dark, Set in a church, Undead"
+  }
+}

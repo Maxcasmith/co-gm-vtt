@@ -1,4 +1,5 @@
 import type { Item, Weapon, Armor, Consumable, Ammunition } from "./items.ts";
+import type { ActiveCondition } from "./conditions.ts";
 
 export type AbilityKey = "str" | "dex" | "con" | "int" | "wis" | "cha";
 
@@ -36,6 +37,7 @@ export interface Character {
   currentHp?: number;
   maxSpellSlots1?: number;
   currentSpellSlots1?: number;
+  hitDiceUsed?: number;
   spells?: string[]; // learned spell names
   equipment?: {
     head?: string;
@@ -45,6 +47,9 @@ export interface Character {
     mainHand?: string;
     offHand?: string;
   };
+  // `| undefined` (not bare `?:`) so functional updaters like `c => ({ ...c, conditions })`
+  // can assign a variable that's sometimes undefined under exactOptionalPropertyTypes.
+  conditions?: ActiveCondition[] | undefined;
 }
 
 // Level-1 max spell slots: Warlock's Pact Magic starts with 1, every other spellcasting

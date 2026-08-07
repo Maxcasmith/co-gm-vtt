@@ -1,4 +1,4 @@
-import type { EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon } from 'shared';
+import type { EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon, ReactionOffer } from 'shared';
 
 // ── Payload types ─────────────────────────────────────────────────────────────
 //
@@ -29,6 +29,10 @@ export interface SheetOpenedPayload {
 // ponytail: empty payload — payload shape reserved for future use (e.g. close reason)
 export type SheetClosedPayload       = Record<string, never>;
 export type RestOpenPayload          = Record<string, never>;
+export type RestRequestPayload       = Record<string, never>;
+export interface RestChoicePayload { resting: boolean; restType: 'short' | 'long'; hitDiceSpent: number }
+export type RestCancelPayload         = Record<string, never>;
+export interface RestProgressPayload { allCommitted: boolean }
 export type EncounterGeneratingPayload = Record<string, never>;
 export interface EncounterReadyPayload { enemies: EnemyStatBlock[] }
 
@@ -46,8 +50,9 @@ export interface CombatSpellSaveResultPayload extends SpellSaveResult {}
 export interface CreatureUpdatePayload { id: string; currentHp: number; maxHp: number; effects: string[] }
 export interface CombatVictoryPayload extends CombatVictory {}
 export interface PlayerDamagePayload { characterId: string; characterName: string; damage: number; currentHp: number; maxHp: number }
+export interface DamageDealtPayload { targetId: string; targetName: string; damage: number }
 export interface PlayerSlotsPayload { characterId: string; currentSpellSlots1: number; maxSpellSlots1: number }
-export interface RestResultPayload { currentHp: number; maxHp: number; hpGained?: number; currentSpellSlots1?: number; maxSpellSlots1?: number; worldEvents?: string }
+export interface RestResultPayload { resting: boolean; restType: 'short' | 'long'; currentHp?: number; maxHp?: number; hpGained?: number; currentSpellSlots1?: number; maxSpellSlots1?: number; worldEvents?: string }
 export interface DeathSavePayload { characterName: string; roll: number; isNatural20: boolean; isNatural1: boolean; success: boolean; successes: number; failures: number; stable: boolean; dead: boolean }
 export type CombatDefeatPayload = Record<string, never>;
 export interface PlayerDeadPayload { characterId: string; characterName: string }
@@ -61,6 +66,16 @@ export interface CombatInitiativePayload { entry: TurnOrderEntry }
 export interface CombatInitiativeRollPayload { entry: TurnOrderEntry }
 export interface CombatTurnOrderPayload { entries: TurnOrderEntry[] }
 export interface MovementUsedPayload  { ft: number }
+/** Server is holding an attack open, waiting to hear whether this player spends their reaction. */
+export type ReactionOfferPayload = ReactionOffer;
+export interface ReactionClosePayload { requestId: string }
+/** Server-authoritative action economy for one character, pushed on refill and after each spend. */
+export interface PlayerResourcesPayload {
+  characterId: string;
+  actionsRemaining: number;
+  bonusActionsRemaining: number;
+  reactionsRemaining: number;
+}
 export interface MovementGainedPayload { ft: number }
 export interface ViewportChangedPayload { x: number; y: number; zoom: number }
 export type CombatActionSpentPayload = Record<string, never>
@@ -149,6 +164,10 @@ export interface VTTEventMap {
   'vtt:roll:save':              RollRequestPayload;
   'vtt:roll:result':            RollResultPayload;
   'vtt:rest:open':              RestOpenPayload;
+  'vtt:rest:request':           RestRequestPayload;
+  'vtt:rest:choice':            RestChoicePayload;
+  'vtt:rest:cancel':            RestCancelPayload;
+  'vtt:rest:progress':          RestProgressPayload;
   'vtt:combat:state':           CombatStatePayload;
   'vtt:encounter:generating':   EncounterGeneratingPayload;
   'vtt:encounter:ready':        EncounterReadyPayload;
@@ -165,6 +184,7 @@ export interface VTTEventMap {
   'vtt:creature:update':        CreatureUpdatePayload;
   'vtt:combat:victory':         CombatVictoryPayload;
   'vtt:combat:player:damage':   PlayerDamagePayload;
+  'vtt:combat:damage:dealt':    DamageDealtPayload;
   'vtt:combat:player:slots':    PlayerSlotsPayload;
   'vtt:rest:result':            RestResultPayload;
   'vtt:combat:death:save':      DeathSavePayload;
@@ -179,6 +199,9 @@ export interface VTTEventMap {
   'vtt:combat:initiative':      CombatInitiativePayload;
   'vtt:combat:initiative:roll': CombatInitiativeRollPayload;
   'vtt:combat:turn:order':      CombatTurnOrderPayload;
+  'vtt:combat:player:resources': PlayerResourcesPayload;
+  'vtt:combat:reaction:offer':  ReactionOfferPayload;
+  'vtt:combat:reaction:close':  ReactionClosePayload;
   'vtt:movement:used':          MovementUsedPayload;
   'vtt:movement:gained':        MovementGainedPayload;
   'vtt:combat:action:spent':    CombatActionSpentPayload;

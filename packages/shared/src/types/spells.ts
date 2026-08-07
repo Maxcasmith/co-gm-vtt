@@ -1,5 +1,7 @@
 import type { AbilityKey } from "./character.ts";
 import type { CreatureType } from "./combat.ts";
+import type { HookDuration, ReactionTrigger } from "./combat-hooks.ts";
+import type { Condition } from "./conditions.ts";
 
 // One tier of a scaling progression, e.g. { atLevel: 5, value: '2d10' }
 export interface ScalingTier {
@@ -13,25 +15,6 @@ export interface Scaling {
   base: string;
   tiers: ScalingTier[];
 }
-
-export const CONDITIONS = [
-  "Blinded",
-  "Charmed",
-  "Deafened",
-  "Exhaustion",
-  "Frightened",
-  "Grappled",
-  "Incapacitated",
-  "Invisible",
-  "Paralyzed",
-  "Petrified",
-  "Poisoned",
-  "Prone",
-  "Restrained",
-  "Stunned",
-  "Unconscious",
-] as const;
-export type Condition = (typeof CONDITIONS)[number];
 
 export interface EffectSpec {
   type: "damage" | "condition" | "push" | "pull";
@@ -49,7 +32,38 @@ export interface EffectSpec {
   appliesIf?: { creatureType?: CreatureType[] };
 }
 
+/**
+ * The hook behaviours a spell can declare in data. Kept deliberately small — a new type is
+ * only worth adding when no existing one covers the spell, the same discipline EffectSpec
+ * follows. 'acModifier' is Shield's +5; 'recurringDamage' is Tasha's Caustic Brew's 2d4 at
+ * the start of each affected creature's turn; 'onHitBonusDamage' is Hunter's Mark's extra
+ * 1d6 whenever its caster (the owner) hits the marked target.
+ */
+export type HookType = "acModifier" | "recurringDamage" | "onHitBonusDamage";
+
+/**
+ * A hook declared by a spell, instantiated into a live Hook class by the engine's factory
+ * when the spell is cast. Expiry hooks are not declarable here — the engine derives those
+ * from `duration`.
+ */
+export interface HookSpec {
+  type: HookType;
+  /**
+   * Which stage this fires on is a property of the hook class, not the data — and which
+   * participant it attaches to is decided by the casting path (the caster for a reaction,
+   * each failed-save target for an area effect). Neither is declared here.
+   */
+  duration: HookDuration;
+  /** Higher runs first. Modifiers should outrank reaction offers so an offer sees the final value. */
+  priority?: number;
+  value?: number; // acModifier: the AC bonus
+  scaling?: Scaling; // recurringDamage/onHitBonusDamage: dice, upcast-aware
+  damageType?: string; // recurringDamage/onHitBonusDamage: Fire, Acid, Force, ...
+}
+
 export interface SpellCombatMeta {
+  /** No attack roll or save — the target is affected automatically (Hunter's Mark, Hex). */
+  autoHit?: boolean;
   resolution: "attack" | "save" | "auto" | "none";
   attackType?: "melee" | "ranged"; // when resolution === 'attack'
   save?: { ability: AbilityKey; halfOnSave: boolean }; // when resolution === 'save'
@@ -62,6 +76,13 @@ export interface SpellCombatMeta {
   targets?: number; // discrete non-AoE multi-target (e.g. Magic Missile darts)
   onHit?: EffectSpec[];
   onSave?: EffectSpec[];
+  /** Persistent effects this spell registers with the StateEngine when cast. */
+  hooks?: HookSpec[];
+  /**
+   * Present on reaction-cast spells (castingTime 'Reaction', see actionCostFromCastingTime).
+   * Tells the engine what mid-resolution event should offer this spell to its owner.
+   */
+  reactionTrigger?: ReactionTrigger;
 }
 
 export interface Spell {
@@ -81,15 +102,27 @@ export interface Spell {
   combat?: SpellCombatMeta; // GM/engine-only metadata; not for player-facing display
 }
 
+/**
+ * The per-turn action economy resources a participant spends. Named here because the same
+ * union is the return of actionCostFromCastingTime, the client's targeting actionType, and
+ * the server-side budget on Participant.
+ */
+export type ActionResource = "action" | "bonusAction" | "reaction";
+
 /** 'Action' → 'action', 'Bonus Action' → 'bonusAction', reactions → 'reaction'; rituals/long casts → null (not castable mid-combat). */
 export function actionCostFromCastingTime(
   castingTime: string,
-): "action" | "bonusAction" | "reaction" | null {
+): ActionResource | null {
   const t = castingTime.trim().toLowerCase();
   if (t === "action") return "action";
   if (t === "bonus" || t === "bonus action") return "bonusAction";
   if (t.includes("reaction")) return "reaction";
   return null;
+}
+
+/** True for spells whose `duration` text starts with 'Concentration' (e.g. 'Concentration, up to 1 minute'). */
+export function requiresConcentration(spell: Spell): boolean {
+  return spell.duration.trim().toLowerCase().startsWith("concentration");
 }
 
 /** Parses a spell's `range` field into feet for targeting math. 'Self'→0, 'Touch'→5, 'Sight'/'Unlimited'→Infinity. */

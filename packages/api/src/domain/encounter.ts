@@ -1,4 +1,4 @@
-import type { TurnOrderEntry } from 'shared';
+import type { TurnOrderEntry, ActionResource } from 'shared';
 import { Creature } from './creature.ts';
 
 // ── Turn ──────────────────────────────────────────────────────────────────────
@@ -63,6 +63,18 @@ export class Participant {
     stable: false,
   };
 
+  // 5e action economy for the current turn, refilled by the StateEngine's beforeTurn step.
+  // Reactions refresh at the start of your turn (not the end), which is what makes one
+  // available during every *other* participant's turn — the window Shield is cast in.
+  //
+  // ponytail: movement is deliberately absent — the client already owns movementRemaining
+  // (GamePage refills it on vtt:combat:turn and decrements on vtt:movement:used), and
+  // mirroring it here without also moving distance validation into the token:move handler
+  // would leave two sources of truth. Move it server-side when movement needs enforcing.
+  actionsRemaining = 1;
+  bonusActionsRemaining = 1;
+  reactionsRemaining = 1;
+
   constructor(props: {
     id: string;
     name: string;
@@ -107,6 +119,31 @@ export class Participant {
       return;
     }
     this.currentHp = Math.min(this.maxHp, this.currentHp + amount);
+  }
+
+  refillResources(): void {
+    this.actionsRemaining = 1;
+    this.bonusActionsRemaining = 1;
+    this.reactionsRemaining = 1;
+  }
+
+  hasResource(kind: ActionResource): boolean {
+    return this.resourceCount(kind) > 0;
+  }
+
+  /** Spends one of `kind` if available. Returns false (and changes nothing) when the budget is empty. */
+  trySpend(kind: ActionResource): boolean {
+    if (!this.hasResource(kind)) return false;
+    if (kind === 'action') this.actionsRemaining--;
+    else if (kind === 'bonusAction') this.bonusActionsRemaining--;
+    else this.reactionsRemaining--;
+    return true;
+  }
+
+  private resourceCount(kind: ActionResource): number {
+    if (kind === 'action') return this.actionsRemaining;
+    if (kind === 'bonusAction') return this.bonusActionsRemaining;
+    return this.reactionsRemaining;
   }
 
   toTurnOrderEntry(): TurnOrderEntry {
@@ -247,16 +284,23 @@ export class Encounter {
     return round;
   }
 
-  advanceTurn(): void {
-    if (!this.turnOrder.length) return;
+  /**
+   * Advances to the next actor. Reports whether lapping the order started a new round —
+   * the wrap is invisible from outside this class otherwise, and the runtime needs it to
+   * fire the afterRound/beforeRound hook stages.
+   */
+  advanceTurn(): { roundStarted: boolean } {
+    if (!this.turnOrder.length) return { roundStarted: false };
     this.currentTurn?.complete();
     this._turnIndex = (this._turnIndex + 1) % this.turnOrder.length;
 
     // Start a new round when we've lapped the order
-    if (this._turnIndex === 0) this.startNextRound();
+    const roundStarted = this._turnIndex === 0;
+    if (roundStarted) this.startNextRound();
 
     const actor = this.currentActor;
     if (actor) this.currentRound?.addTurn(actor);
+    return { roundStarted };
   }
 
   beginCombat(): void {
