@@ -1,288 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Player, EnemyStatBlock, Spell, Dungeon, Character } from 'shared';
-import { parseRangeFeet, hasLineOfSight, statMod, CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY } from 'shared';
+import type { Player, EnemyStatBlock, Dungeon, Character } from 'shared';
+import { parseRangeFeet, hasLineOfSight } from 'shared';
 import { dispatch, on } from './events.ts';
 import type { TargetingStartPayload } from './events.ts';
 import { texturesFor, getImage, FLOOR_FALLBACK_COLOR } from './dungeonThemes.ts';
+import { CELL, TOKEN_R, DUNGEON_ENTITY_R, FLOAT_DUR, FLASH_DUR, SIGHT_RADIUS, DUNGEON_BG, MIN_ZOOM, MAX_ZOOM } from './canvas/constants.ts';
+import { bfsReachable, computeVisibilityPolygon } from './canvas/geometry.ts';
+import { inArea, resolveAoeOrigin, drawAoeShape } from './canvas/aoe.ts';
+import { attackBonusFor, hitChancePercent } from './canvas/combatMath.ts';
+import { drawToken, drawHitFlash, drawTargetRing, drawDeadMarker } from './canvas/drawToken.ts';
+import type { FloatEffect, FlashEffect } from './canvas/types.ts';
 import './app.css';
-
-const CELL = 64;
-const TOKEN_R = 24;
-const DUNGEON_ENTITY_R = 10;
-const FLOAT_DUR  = 950;   // ms for floating text
-const FLASH_DUR  = 220;   // ms for token flash
-const SIGHT_RADIUS = 20;  // square (Chebyshev) fog-of-war radius, in cells — mirrors PLAYER_SIGHT_RADIUS server-side
-const DUNGEON_BG = '#0e0c14';
-const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 2.0;
-
-// Wall-aware reachable cells within `maxSteps` (8-directional, uniform cost) — exploration movement
-// cap + highlight. Returns "gx,gy" keys, including the start cell.
-function bfsReachable(cells: number[][], startX: number, startY: number, maxSteps: number): Set<string> {
-  const key = (x: number, y: number) => `${x},${y}`;
-  const height = cells.length;
-  const width = cells[0]?.length ?? 0;
-  const visited = new Set<string>([key(startX, startY)]);
-  const queue: { x: number; y: number; steps: number }[] = [{ x: startX, y: startY, steps: 0 }];
-  for (let i = 0; i < queue.length; i++) {
-    const { x, y, steps } = queue[i]!;
-    if (steps >= maxSteps) continue;
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        if (dx === 0 && dy === 0) continue;
-        const nx = x + dx, ny = y + dy;
-        if (nx < 0 || ny < 0 || ny >= height || nx >= width) continue;
-        if (cells[ny]?.[nx] !== 1) continue;
-        const k = key(nx, ny);
-        if (visited.has(k)) continue;
-        visited.add(k);
-        queue.push({ x: nx, y: ny, steps: steps + 1 });
-      }
-    }
-  }
-  return visited;
-}
-
-// Casts one ray from (ox,oy) in direction (dirX,dirY) — a unit vector — through the grid using
-// standard DDA, stopping at the exact (fractional) point it crosses into a wall or leaves bounds,
-// capped at `radius`. Exact crossing points (rather than cell centers) are what let the fog
-// boundary follow natural angled/diagonal lines instead of a cell-square staircase.
-function castVisibilityRay(cells: number[][], ox: number, oy: number, dirX: number, dirY: number, radius: number, width: number, height: number): { x: number; y: number } {
-  let mapX = Math.floor(ox), mapY = Math.floor(oy);
-  const deltaDistX = dirX === 0 ? Infinity : Math.abs(1 / dirX);
-  const deltaDistY = dirY === 0 ? Infinity : Math.abs(1 / dirY);
-  const stepX = dirX < 0 ? -1 : 1;
-  const stepY = dirY < 0 ? -1 : 1;
-  let sideDistX = dirX < 0 ? (ox - mapX) * deltaDistX : (mapX + 1 - ox) * deltaDistX;
-  let sideDistY = dirY < 0 ? (oy - mapY) * deltaDistY : (mapY + 1 - oy) * deltaDistY;
-  let dist = 0;
-  while (dist < radius) {
-    if (sideDistX < sideDistY) {
-      dist = sideDistX;
-      sideDistX += deltaDistX;
-      mapX += stepX;
-    } else {
-      dist = sideDistY;
-      sideDistY += deltaDistY;
-      mapY += stepY;
-    }
-    if (mapX < 0 || mapY < 0 || mapX >= width || mapY >= height || cells[mapY]?.[mapX] !== 1) break;
-  }
-  const hitDist = Math.min(dist, radius);
-  return { x: ox + dirX * hitDist, y: oy + dirY * hitDist };
-}
-
-const VISIBILITY_RAYS = 240; // ~1.5° apart — smooth enough at SIGHT_RADIUS without per-frame cost
-
-// Sweeps a full circle of rays from (ox,oy) to build the fog-of-war sight boundary as a polygon
-// of exact wall-crossing points, instead of a set of whole visible/hidden cells.
-function computeVisibilityPolygon(cells: number[][], ox: number, oy: number, radius: number): { x: number; y: number }[] {
-  const height = cells.length;
-  const width = cells[0]?.length ?? 0;
-  const points: { x: number; y: number }[] = [];
-  for (let i = 0; i < VISIBILITY_RAYS; i++) {
-    const angle = (i / VISIBILITY_RAYS) * Math.PI * 2;
-    points.push(castVisibilityRay(cells, ox, oy, Math.cos(angle), Math.sin(angle), radius, width, height));
-  }
-  return points;
-}
-
-// ── AoE geometry (grid cells, 1 cell = 5ft) ─────────────────────────────────────
-// Simplified templates: cone/line use a straight-triangle/rectangle approximation
-// (5e's "cone is as wide as it is long" rule of thumb) rather than exact arcs.
-
-type SpellArea = NonNullable<NonNullable<Spell['combat']>['area']>;
-
-function ft2cells(feet: number) { return feet / 5; }
-
-// Slack added to every AoE boundary check, in grid cells. A token's cell-center exactly on
-// a shape's edge is a coin-flip against float/pixel noise (e.g. aiming Acid Splash at the
-// corner where 4 tokens meet); this tolerance makes near-edge hits land consistently instead
-// of depending on sub-pixel cursor position.
-const AOE_EDGE_TOLERANCE = 0.3;
-
-function inArea(
-  area: SpellArea,
-  originGx: number, originGy: number,
-  dirGx: number, dirGy: number,
-  tgx: number, tgy: number,
-  isSelf: boolean,
-): boolean {
-  if (isSelf && Math.floor(tgx) === Math.floor(originGx) && Math.floor(tgy) === Math.floor(originGy)) return false;
-  const dx = tgx - originGx;
-  const dy = tgy - originGy;
-  const sizeCells = ft2cells(area.size) + AOE_EDGE_TOLERANCE;
-  switch (area.shape) {
-    case 'sphere':
-    case 'cylinder':
-      return Math.hypot(dx, dy) <= sizeCells;
-    case 'emanation':
-      // Grid-square emanation (e.g. Thunderclap "within 5 ft of you") fills every
-      // surrounding square at that Chebyshev distance, not a circular sweep.
-      return Math.max(Math.abs(dx), Math.abs(dy)) <= sizeCells;
-    case 'cube': {
-      // A self-origin cube (e.g. Thunderwave) emanates from the caster's edge toward the
-      // aimed direction and rotates with the mouse, same as a cone/line — it does not
-      // surround the caster. A point-placed cube (e.g. Fireball) stays a centered square.
-      if (isSelf) {
-        const len = Math.hypot(dirGx - originGx, dirGy - originGy) || 1;
-        const ux = (dirGx - originGx) / len;
-        const uy = (dirGy - originGy) / len;
-        const forward = dx * ux + dy * uy;
-        const perp = Math.abs(dx * uy - dy * ux);
-        return forward >= -AOE_EDGE_TOLERANCE && forward <= sizeCells && perp <= sizeCells / 2;
-      }
-      const half = sizeCells / 2;
-      return Math.abs(dx) <= half && Math.abs(dy) <= half;
-    }
-    case 'line': {
-      const len = Math.hypot(dirGx - originGx, dirGy - originGy) || 1;
-      const ux = (dirGx - originGx) / len;
-      const uy = (dirGy - originGy) / len;
-      const forward = dx * ux + dy * uy;
-      const perp = Math.abs(dx * uy - dy * ux);
-      const widthCells = ft2cells(area.width ?? 5) + AOE_EDGE_TOLERANCE;
-      return forward >= -AOE_EDGE_TOLERANCE && forward <= sizeCells && perp <= widthCells / 2;
-    }
-    case 'cone': {
-      const len = Math.hypot(dirGx - originGx, dirGy - originGy) || 1;
-      const ux = (dirGx - originGx) / len;
-      const uy = (dirGy - originGy) / len;
-      const forward = dx * ux + dy * uy;
-      const perp = Math.abs(dx * uy - dy * ux);
-      return forward >= -AOE_EDGE_TOLERANCE && forward <= sizeCells && perp <= forward / 2 + AOE_EDGE_TOLERANCE;
-    }
-  }
-}
-
-/**
- * Where an AoE template currently sits: self-origin follows the caster and points at the
- * mouse (cone/line/cube rotation); point-origin follows the mouse, clamped to spell range.
- * A spell counts as self-origin whenever its range is Self, regardless of the area's own
- * `origin` tag — compendium data mistags several directional spells (e.g. Burning Hands)
- * as 'point', which would otherwise collapse the direction vector to zero and fill the
- * entire padded box.
- */
-function resolveAoeOrigin(
-  area: SpellArea,
-  playerPos: { gx: number; gy: number },
-  mouse: { gx: number; gy: number } | null,
-  rangeFeet: number,
-): { originGx: number; originGy: number; dirGx: number; dirGy: number; isSelf: boolean } {
-  const isSelf = area.origin === 'self' || rangeFeet <= 0;
-  if (isSelf) {
-    const originGx = playerPos.gx + 0.5;
-    const originGy = playerPos.gy + 0.5;
-    const m = mouse ?? { gx: playerPos.gx + 1, gy: playerPos.gy };
-    return { originGx, originGy, dirGx: m.gx, dirGy: m.gy, isSelf: true };
-  }
-  const rangeCells = ft2cells(rangeFeet);
-  const m = mouse ?? { gx: playerPos.gx, gy: playerPos.gy };
-  const dx = m.gx - playerPos.gx;
-  const dy = m.gy - playerPos.gy;
-  const dist = Math.hypot(dx, dy);
-  const clamped = Number.isFinite(rangeCells) && dist > rangeCells && dist > 0
-    ? { gx: playerPos.gx + (dx / dist) * rangeCells, gy: playerPos.gy + (dy / dist) * rangeCells }
-    : m;
-  return { originGx: clamped.gx, originGy: clamped.gy, dirGx: clamped.gx, dirGy: clamped.gy, isSelf: false };
-}
-
-/** Draws the AoE's true continuous geometry (circle/wedge/rectangle) over the cell highlight,
- *  so the grid approximation's edges are legible against the exact shape it's covering. */
-function drawAoeShape(
-  ctx: CanvasRenderingContext2D,
-  area: SpellArea,
-  originGx: number, originGy: number,
-  dirGx: number, dirGy: number,
-  isSelf: boolean,
-  cellSz: number, panX: number, panY: number,
-) {
-  const ox = originGx * cellSz + panX;
-  const oy = originGy * cellSz + panY;
-  const sizePx = ft2cells(area.size) * cellSz;
-  const len = Math.hypot(dirGx - originGx, dirGy - originGy) || 1;
-  const ux = (dirGx - originGx) / len;
-  const uy = (dirGy - originGy) / len;
-  const px = -uy;
-  const py = ux;
-
-  ctx.save();
-  ctx.fillStyle = 'rgba(180, 90, 255, 0.28)';
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  switch (area.shape) {
-    case 'sphere':
-    case 'cylinder':
-      ctx.arc(ox, oy, sizePx, 0, Math.PI * 2);
-      break;
-    case 'emanation':
-      ctx.rect(ox - sizePx, oy - sizePx, sizePx * 2, sizePx * 2);
-      break;
-    case 'cube': {
-      if (isSelf) {
-        const half = sizePx / 2;
-        const p1 = { x: ox + px * half, y: oy + py * half };
-        const p2 = { x: ox - px * half, y: oy - py * half };
-        const p3 = { x: p2.x + ux * sizePx, y: p2.y + uy * sizePx };
-        const p4 = { x: p1.x + ux * sizePx, y: p1.y + uy * sizePx };
-        ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.closePath();
-      } else {
-        const half = sizePx / 2;
-        ctx.rect(ox - half, oy - half, sizePx, sizePx);
-      }
-      break;
-    }
-    case 'line': {
-      const halfW = (ft2cells(area.width ?? 5) * cellSz) / 2;
-      const p1 = { x: ox + px * halfW, y: oy + py * halfW };
-      const p2 = { x: ox - px * halfW, y: oy - py * halfW };
-      const p3 = { x: p2.x + ux * sizePx, y: p2.y + uy * sizePx };
-      const p4 = { x: p1.x + ux * sizePx, y: p1.y + uy * sizePx };
-      ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.closePath();
-      break;
-    }
-    case 'cone': {
-      const halfW = sizePx / 2;
-      const base1 = { x: ox + ux * sizePx + px * halfW, y: oy + uy * sizePx + py * halfW };
-      const base2 = { x: ox + ux * sizePx - px * halfW, y: oy + uy * sizePx - py * halfW };
-      ctx.moveTo(ox, oy); ctx.lineTo(base1.x, base1.y); ctx.lineTo(base2.x, base2.y); ctx.closePath();
-      break;
-    }
-  }
-  ctx.fill();
-  ctx.stroke();
-  ctx.restore();
-}
-
-interface FloatEffect { id: number; gx: number; gy: number; text: string; isHit: boolean; isHeal?: boolean; startTime: number }
-interface FlashEffect { tokenKey: string; startTime: number }
-
-// Mirrors the server's attack-roll math (packages/api/src/index.ts combat:attack / combat:spell:attack)
-// so the hover readout matches the actual roll odds, including extended-range disadvantage.
-function attackBonusFor(character: Character, targeting: TargetingStartPayload): number | null {
-  const charProf = character.proficiencyBonus ?? 2;
-  if (targeting.kind === 'weapon') {
-    const weapon = targeting.weapon;
-    const strMod = statMod(character.stats.str);
-    const dexMod = statMod(character.stats.dex);
-    const isMelee = weapon.range <= 10; // covers reach weapons (e.g. Whip, range 10) — next tier up is bows at 80+
-    const useDex = !isMelee || (weapon.isFinesse && dexMod > strMod);
-    const statBonus = useDex ? dexMod : strMod;
-    const classWeaponProfs = CLASS_WEAPON_PROFS[character.class] ?? [];
-    const isProficient = weapon.properties?.some(p => classWeaponProfs.includes(p as 'simple' | 'martial'));
-    const weaponBonus = (weapon.attackBonus ?? 0) + (isProficient ? charProf : 0);
-    return statBonus + weaponBonus;
-  }
-  if (targeting.spell.combat?.resolution !== 'attack') return null;
-  const spellAbility = CLASS_SPELLCASTING_ABILITY[character.class] ?? 'int';
-  return statMod(character.stats[spellAbility]) + charProf;
-}
-
-function hitChancePercent(attackBonus: number, ac: number, withDisadvantage: boolean): number {
-  const single = Math.max(0, Math.min(1, (21 - (ac - attackBonus)) / 20));
-  return Math.round((withDisadvantage ? single * single : single) * 100);
-}
 
 interface Props {
   player: Player;
@@ -300,47 +28,6 @@ interface Props {
   dungeon?: Dungeon;
   speed?: number;
   sessionActive?: boolean;
-}
-
-function drawToken(
-  ctx: CanvasRenderingContext2D,
-  x: number, y: number,
-  label: string, name: string,
-  color: string,
-  tokenR: number,
-  hovered: boolean,
-  img?: HTMLImageElement,
-) {
-  if (img) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(x, y, tokenR, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.drawImage(img, x - tokenR, y - tokenR, tokenR * 2, tokenR * 2);
-    ctx.restore();
-  } else {
-    ctx.beginPath();
-    ctx.arc(x, y, tokenR, 0, Math.PI * 2);
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.font = `bold ${Math.round(18 * (tokenR / TOKEN_R))}px monospace`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, x, y);
-  }
-  ctx.beginPath();
-  ctx.arc(x, y, tokenR, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-  if (hovered) {
-    ctx.fillStyle = '#fff';
-    ctx.font = `${Math.round(11 * (tokenR / TOKEN_R))}px monospace`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillText(name.length > 10 ? name.slice(0, 9) + '…' : name, x, y + tokenR + 12 * (tokenR / TOKEN_R));
-  }
 }
 
 export default function Canvas({ player, characterId, character, connected, showBattleMap, encounter, tokenUrls, tokenPositions, movementRemaining = 0, deadCreatureIds, downPlayerNames, deadPlayerNames, dungeon, speed = 30, sessionActive = true }: Props) {
@@ -888,11 +575,7 @@ export default function Canvas({ player, characterId, character, connected, show
 
           // Ally caught in an AoE template — same red ring as enemies, so friendly fire is visible before confirming
           if (spellArea && aoeOrigin && inArea(spellArea, aoeOrigin.originGx, aoeOrigin.originGy, aoeOrigin.dirGx, aoeOrigin.dirGy, pos.gx + 0.5, pos.gy + 0.5, aoeOrigin.isSelf)) {
-            ctx.beginPath();
-            ctx.arc(x, y, tokenR + 6, 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(255, 60, 60, 0.85)';
-            ctx.lineWidth = 2.5;
-            ctx.stroke();
+            drawTargetRing(ctx, x, y, tokenR);
           }
 
           if (isDead) ctx.filter = 'grayscale(1) opacity(0.25)';
@@ -901,28 +584,10 @@ export default function Canvas({ player, characterId, character, connected, show
           ctx.filter = 'none';
 
           // Hit flash overlay
-          const playerFlash = flashEffectsRef.current.find(f => f.tokenKey === name);
-          if (playerFlash) {
-            const ft = (Date.now() - playerFlash.startTime) / FLASH_DUR;
-            ctx.save();
-            ctx.globalAlpha = Math.sin(ft * Math.PI) * 0.6;
-            ctx.fillStyle = '#ff2222';
-            ctx.beginPath(); ctx.arc(x, y, tokenR, 0, Math.PI * 2); ctx.fill();
-            ctx.restore();
-          }
+          drawHitFlash(ctx, x, y, tokenR, flashEffectsRef.current.find(f => f.tokenKey === name));
 
           // Dead marker: a red × over the token
-          if (isDead) {
-            const r = tokenR * 0.45;
-            ctx.save();
-            ctx.globalAlpha = 0.85;
-            ctx.strokeStyle = '#c0392b';
-            ctx.lineWidth = 3;
-            ctx.lineCap = 'round';
-            ctx.beginPath(); ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(x + r, y - r); ctx.lineTo(x - r, y + r); ctx.stroke();
-            ctx.restore();
-          }
+          if (isDead) drawDeadMarker(ctx, x, y, tokenR);
         });
 
         // Enemy tokens
@@ -937,11 +602,7 @@ export default function Canvas({ player, characterId, character, connected, show
           if (targeting && playerPos) {
             if (spellArea && aoeOrigin) {
               if (inArea(spellArea, aoeOrigin.originGx, aoeOrigin.originGy, aoeOrigin.dirGx, aoeOrigin.dirGy, pos.gx + 0.5, pos.gy + 0.5, aoeOrigin.isSelf)) {
-                ctx.beginPath();
-                ctx.arc(x, y, tokenR + 6, 0, Math.PI * 2);
-                ctx.strokeStyle = 'rgba(255, 60, 60, 0.85)';
-                ctx.lineWidth = 2.5;
-                ctx.stroke();
+                drawTargetRing(ctx, x, y, tokenR);
               }
             } else if (!spellArea) {
               const range = targeting.kind === 'weapon' ? targeting.weapon.range : parseRangeFeet(targeting.spell.range);
@@ -950,11 +611,7 @@ export default function Canvas({ player, characterId, character, connected, show
               const inNormal = dist <= Math.floor(range / 5);
               const inExtended = !inNormal && !!extendedRange && dist <= Math.floor(extendedRange / 5);
               if (inNormal) {
-                ctx.beginPath();
-                ctx.arc(x, y, tokenR + 6, 0, Math.PI * 2);
-                ctx.strokeStyle = 'rgba(255, 60, 60, 0.85)';
-                ctx.lineWidth = 2.5;
-                ctx.stroke();
+                drawTargetRing(ctx, x, y, tokenR);
               } else if (inExtended) {
                 ctx.save();
                 ctx.setLineDash([4, 4]);
@@ -974,15 +631,7 @@ export default function Canvas({ player, characterId, character, connected, show
           if (isDead) ctx.filter = 'none';
 
           // Hit flash overlay
-          const enemyFlash = flashEffectsRef.current.find(f => f.tokenKey === enemy.id);
-          if (enemyFlash) {
-            const ft = (Date.now() - enemyFlash.startTime) / FLASH_DUR;
-            ctx.save();
-            ctx.globalAlpha = Math.sin(ft * Math.PI) * 0.6;
-            ctx.fillStyle = '#ff2222';
-            ctx.beginPath(); ctx.arc(x, y, tokenR, 0, Math.PI * 2); ctx.fill();
-            ctx.restore();
-          }
+          drawHitFlash(ctx, x, y, tokenR, flashEffectsRef.current.find(f => f.tokenKey === enemy.id));
         });
 
         // Fog-of-war: black over anything outside my own sight radius OR behind a wall from my
@@ -1030,11 +679,7 @@ export default function Canvas({ player, characterId, character, connected, show
 
           // Caught in own AoE template — same red ring as enemies/allies, so friendly fire is visible before confirming
           if (spellArea && aoeOrigin && inArea(spellArea, aoeOrigin.originGx, aoeOrigin.originGy, aoeOrigin.dirGx, aoeOrigin.dirGy, playerPos.gx + 0.5, playerPos.gy + 0.5, aoeOrigin.isSelf)) {
-            ctx.beginPath();
-            ctx.arc(x, y, tokenR + 6, 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(255, 60, 60, 0.85)';
-            ctx.lineWidth = 2.5;
-            ctx.stroke();
+            drawTargetRing(ctx, x, y, tokenR);
           }
 
           if (isDead) ctx.filter = 'grayscale(1) opacity(0.25)';
@@ -1043,28 +688,10 @@ export default function Canvas({ player, characterId, character, connected, show
           ctx.filter = 'none';
 
           // Hit flash overlay
-          const playerFlash = flashEffectsRef.current.find(f => f.tokenKey === player);
-          if (playerFlash) {
-            const ft = (Date.now() - playerFlash.startTime) / FLASH_DUR;
-            ctx.save();
-            ctx.globalAlpha = Math.sin(ft * Math.PI) * 0.6;
-            ctx.fillStyle = '#ff2222';
-            ctx.beginPath(); ctx.arc(x, y, tokenR, 0, Math.PI * 2); ctx.fill();
-            ctx.restore();
-          }
+          drawHitFlash(ctx, x, y, tokenR, flashEffectsRef.current.find(f => f.tokenKey === player));
 
           // Dead marker: a red × over the token
-          if (isDead) {
-            const r = tokenR * 0.45;
-            ctx.save();
-            ctx.globalAlpha = 0.85;
-            ctx.strokeStyle = '#c0392b';
-            ctx.lineWidth = 3;
-            ctx.lineCap = 'round';
-            ctx.beginPath(); ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(x + r, y - r); ctx.lineTo(x - r, y + r); ctx.stroke();
-            ctx.restore();
-          }
+          if (isDead) drawDeadMarker(ctx, x, y, tokenR);
         }
 
         // Floating hit/miss text — drawn above tokens, walls, and fog so the animation (which

@@ -1,0 +1,9 @@
+export const CELL = 64;
+export const TOKEN_R = 24;
+export const DUNGEON_ENTITY_R = 10;
+export const FLOAT_DUR = 950;   // ms for floating text
+export const FLASH_DUR = 220;   // ms for token flash
+export const SIGHT_RADIUS = 20; // square (Chebyshev) fog-of-war radius, in cells — mirrors PLAYER_SIGHT_RADIUS server-side
+export const DUNGEON_BG = '#0e0c14';
+export const MIN_ZOOM = 0.5;
+export const MAX_ZOOM = 2.0;

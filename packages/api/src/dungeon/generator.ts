@@ -74,6 +74,7 @@ export function generateGrid(manifest: DungeonManifest, opts?: { width?: number;
       height: h,
       ...(manifestRoom.role ? { role: manifestRoom.role } : {}),
       ...(manifestRoom.material ? { material: manifestRoom.material } : {}),
+      ...(manifestRoom.description ? { description: manifestRoom.description } : {}),
     });
     centers.push({ x: cursorX + Math.floor(w / 2), y: cursorY + Math.floor(h / 2) });
 

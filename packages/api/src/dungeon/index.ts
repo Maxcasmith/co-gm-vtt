@@ -117,7 +117,7 @@ export function toClientDungeon(dungeon: Dungeon): Dungeon {
   return { ...dungeon, entities: dungeon.entities.filter(e => e.discovered) };
 }
 
-function roomAt(dungeon: Dungeon, gx: number, gy: number): DungeonRoom | undefined {
+export function roomAt(dungeon: Dungeon, gx: number, gy: number): DungeonRoom | undefined {
   return dungeon.rooms.find(r => gx >= r.x && gx < r.x + r.width && gy >= r.y && gy < r.y + r.height);
 }
 

@@ -19,6 +19,7 @@ export interface ManifestRoom {
   material?: DungeonMaterial; // floor tile material for this room — clamped to DUNGEON_MATERIALS on parse
   isHallway?: boolean; // building layouts only — a passage/circulation room, not a destination
   connectsTo?: string[]; // building layouts only — names of other rooms in this manifest it directly opens onto
+  description?: string; // 1-2 sentence read-aloud description, shown verbatim the moment a party first enters
 }
 
 export interface DungeonManifest {
@@ -82,6 +83,7 @@ Return ONLY valid JSON, no markdown fences, no explanation:
       "isHallway": "boolean — BUILDING ONLY. true if this room's job is passage/circulation (a corridor, hallway, stairwell) rather than being a destination in itself.",
       "connectsTo": "string[] — BUILDING ONLY, REQUIRED for every room. Names of the other rooms in THIS list that this room directly opens onto (a door or opening exists there). Every room must be reachable from the entrance room through this graph — no isolated rooms.",
       "material": "one of: ${DUNGEON_MATERIALS.join('|')} — floor material fitting this room's actual purpose (grass for an outdoor/dirt-floored space, wood for an indoor wood-floored room, stone for an indoor stone-floored room like a dungeon or crypt).",
+      "description": "string — 1-2 sentence read-aloud description for the moment a party first steps into this room. Evocative, sensory, scene-setting. Never mention who is present or what they do — this text is shown verbatim regardless of which characters enter or when.",
       "creatures": [{
         "id": "string, unique per creature",
         "name": "string",
