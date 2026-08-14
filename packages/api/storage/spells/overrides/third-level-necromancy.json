@@ -1,0 +1,58 @@
+{
+  "Animate Dead": {
+    "resolution": "none"
+  },
+  "Bestow Curse": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic"
+      }
+    ]
+  },
+  "Feign Death": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Poisoned"
+      }
+    ]
+  },
+  "Life Transference": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic"
+      }
+    ]
+  },
+  "Revivify": {
+    "resolution": "none"
+  },
+  "Speak with Dead": {
+    "resolution": "none"
+  },
+  "Spirit Shroud": {
+    "resolution": "none"
+  },
+  "Summon Undead": {
+    "resolution": "none"
+  },
+  "Vampiric Touch": {
+    "resolution": "attack",
+    "attackType": "melee",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic"
+      }
+    ]
+  }
+}

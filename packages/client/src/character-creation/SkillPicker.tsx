@@ -31,7 +31,7 @@ export default function SkillPicker() {
     sources.push({ key: 'class', label: c.characterClass, skills: cs.skills, count: cs.count });
   }
 
-  const bgFeatName = c.background ? BACKGROUND_FEAT[c.background]?.name : '';
+  const bgFeatName = c.background ? BACKGROUND_FEAT[c.background] : '';
   if (bgFeatName === 'Skilled') {
     sources.push({ key: 'bg-skilled', label: 'Skilled', skills: [], count: 3 });
   }
@@ -105,13 +105,13 @@ export default function SkillPicker() {
             return (
               <button
                 key={skill.name}
-                className={['skill-item', isExpert ? 'skill-item--active' : '', !isProficient ? 'skill-item--disabled' : ''].filter(Boolean).join(' ')}
+                className={['skill-item', isExpert ? 'skill-item--active skill-item--expertise' : '', !isProficient ? 'skill-item--disabled' : ''].filter(Boolean).join(' ')}
                 onClick={() => { if (canToggle) toggleExpertise(skill.name); }}
                 disabled={!isProficient}
               >
                 <span className="skill-stat-badge">{skill.stat}</span>
                 <span className="skill-name">{skill.name}</span>
-                {isExpert && <span className="skill-source skill-source--mine">Expertise</span>}
+                {isExpert && <span className="skill-source skill-source--expertise">Expertise</span>}
                 {!isProficient && <span className="skill-source skill-source--faded">not proficient</span>}
               </button>
             );

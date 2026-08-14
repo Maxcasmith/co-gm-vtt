@@ -1,4 +1,4 @@
-import type { EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon, ReactionOffer } from 'shared';
+import type { EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon, ReactionOffer, Condition } from 'shared';
 
 // ── Payload types ─────────────────────────────────────────────────────────────
 //
@@ -39,29 +39,38 @@ export interface EncounterReadyPayload { enemies: EnemyStatBlock[] }
 export interface CombatStatePayload { active: boolean }
 export type TargetingStartPayload =
   | { kind: 'weapon'; weapon: Weapon; actionType: 'action' | 'bonusAction' | 'reaction'; bonusSpell?: Spell }
-  | { kind: 'spell'; spell: Spell; casterId: string; actionType: 'action' | 'bonusAction' | 'reaction'; slotLevel?: number };
+  | { kind: 'spell'; spell: Spell; casterId: string; actionType: 'action' | 'bonusAction' | 'reaction'; slotLevel?: number; chosenDamageType?: string; chosenCommand?: string; casterLevel?: number };
 export type TargetingCancelPayload = Record<string, never>;
 export interface CombatAttackPayload { attackerName: string; attackerId: string; targetId: string; targetName: string; weapon: Weapon; bonusSpell?: Spell }
 export interface CombatAttackResultPayload extends AttackResult {}
-export interface CombatSpellAttackPayload { casterName: string; casterId: string; targetId: string; targetName: string; spell: Spell; slotLevel: number }
+export interface CombatSpellAttackPayload { casterName: string; casterId: string; targetIds: string[]; spell: Spell; slotLevel: number; chosenDamageType?: string }
 export interface CombatSpellAttackResultPayload extends SpellAttackResult {}
-export interface CombatSpellCastPayload { casterName: string; casterId: string; spell: Spell; slotLevel: number; targetIds: string[] }
+export interface CombatSpellCastPayload { casterName: string; casterId: string; spell: Spell; slotLevel: number; targetIds: string[]; chosenDamageType?: string; chosenCommand?: string; originGx?: number; originGy?: number }
 export interface CombatSpellSaveResultPayload extends SpellSaveResult {}
+export interface CombatEffectAuraStartPayload { casterId: string; casterName: string; color: string; style?: 'fire' | undefined }
+export interface CombatEffectAuraEndPayload { casterId: string; casterName: string }
+export interface CombatEffectImpactPayload { targetId: string; targetName: string; color: string; style?: 'fire' | undefined }
 export interface CreatureUpdatePayload { id: string; currentHp: number; maxHp: number; effects: string[] }
 export interface CombatVictoryPayload extends CombatVictory {}
-export interface PlayerDamagePayload { characterId: string; characterName: string; damage: number; currentHp: number; maxHp: number }
+export interface PlayerDamagePayload { characterId: string; characterName: string; damage: number; currentHp: number; maxHp: number; tempHp: number }
+export interface PlayerTempHpPayload { characterId: string; characterName: string; tempHp: number }
+export interface PlayerHealPayload { characterId: string; characterName: string; healAmount: number; currentHp: number; maxHp: number; sourceName: string }
 export interface DamageDealtPayload { targetId: string; targetName: string; damage: number }
+export interface CombatConcentrationPayload { targetId: string; targetName: string; spellName: string | null }
 export interface PlayerSlotsPayload { characterId: string; currentSpellSlots1: number; maxSpellSlots1: number }
 export interface RestResultPayload { resting: boolean; restType: 'short' | 'long'; currentHp?: number; maxHp?: number; hpGained?: number; currentSpellSlots1?: number; maxSpellSlots1?: number; worldEvents?: string }
 export interface DeathSavePayload { characterName: string; roll: number; isNatural20: boolean; isNatural1: boolean; success: boolean; successes: number; failures: number; stable: boolean; dead: boolean }
 export type CombatDefeatPayload = Record<string, never>;
 export interface PlayerDeadPayload { characterId: string; characterName: string }
 export interface ConsumableUsedPayload { item: Consumable; characterId: string }
-export interface ConsumableHealPayload { characterId: string; characterName: string }
+export interface ConsumableHealPayload { characterId: string; characterName: string; healDice?: string }
 export interface ConsumableHealResultPayload { characterId: string; characterName: string; healAmount: number; currentHp: number; maxHp: number }
 export interface EquipmentUpdatePayload { characterId: string; slot: 'head' | 'body' | 'gloves' | 'boots' | 'mainHand' | 'offHand'; itemId: string | null }
-export interface CombatTurnPayload { actorName: string }
+export interface CombatTurnPayload { actorName: string; speedMultiplier?: number; speedBonusFt?: number; buffs?: string[] }
 export type CombatTurnEndPayload = Record<string, never>
+export interface ConditionEscapeAttemptPayload { targetId: string; name: Condition }
+export interface ElevationSetPayload { targetId: string; elevationFt: number }
+export interface DisengagePayload { actorId: string }
 export interface CombatInitiativePayload { entry: TurnOrderEntry }
 export interface CombatInitiativeRollPayload { entry: TurnOrderEntry }
 export interface CombatTurnOrderPayload { entries: TurnOrderEntry[] }
@@ -181,10 +190,16 @@ export interface VTTEventMap {
   'vtt:combat:spell:attack:result': CombatSpellAttackResultPayload;
   'vtt:combat:spell:cast':          CombatSpellCastPayload;
   'vtt:combat:spell:save:result':   CombatSpellSaveResultPayload;
+  'vtt:combat:effect:aura:start': CombatEffectAuraStartPayload;
+  'vtt:combat:effect:aura:end':   CombatEffectAuraEndPayload;
+  'vtt:combat:effect:impact':     CombatEffectImpactPayload;
   'vtt:creature:update':        CreatureUpdatePayload;
   'vtt:combat:victory':         CombatVictoryPayload;
   'vtt:combat:player:damage':   PlayerDamagePayload;
+  'vtt:combat:player:tempHp':   PlayerTempHpPayload;
+  'vtt:combat:player:heal':     PlayerHealPayload;
   'vtt:combat:damage:dealt':    DamageDealtPayload;
+  'vtt:combat:concentration':   CombatConcentrationPayload;
   'vtt:combat:player:slots':    PlayerSlotsPayload;
   'vtt:rest:result':            RestResultPayload;
   'vtt:combat:death:save':      DeathSavePayload;
@@ -196,6 +211,9 @@ export interface VTTEventMap {
   'vtt:equipment:update':       EquipmentUpdatePayload;
   'vtt:combat:turn':            CombatTurnPayload;
   'vtt:combat:turn:end':        CombatTurnEndPayload;
+  'vtt:condition:escape:attempt': ConditionEscapeAttemptPayload;
+  'vtt:combat:elevation:set': ElevationSetPayload;
+  'vtt:combat:disengage': DisengagePayload;
   'vtt:combat:initiative':      CombatInitiativePayload;
   'vtt:combat:initiative:roll': CombatInitiativeRollPayload;
   'vtt:combat:turn:order':      CombatTurnOrderPayload;

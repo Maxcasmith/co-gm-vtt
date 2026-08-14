@@ -7,6 +7,7 @@ import handaxeIcon from '../assets/icons/Icon-Frame-handaxe.jpg';
 import potionIcon from '../assets/icons/Icon-Frame-potion-of-healing.jpg';
 import arrowIcon from '../assets/icons/Icon-Frame-arrow.jpg';
 import whipIcon from '../assets/icons/Icon-Frame-whip.jpg';
+import chainMailIcon from '../assets/icons/Icon-Frame-Chain-Mail.jpg';
 
 export const SPECIES = [
   'Aasimar', 'Dragonborn', 'Dwarf', 'Elf', 'Gnome', 'Goliath',
@@ -172,25 +173,6 @@ export const BACKGROUND_ASI: Record<string, StatName[]> = {
 };
 
 export interface BackgroundFeat { name: string; description: string }
-
-export const BACKGROUND_FEAT: Record<string, BackgroundFeat> = {
-  Acolyte:    { name: "Magic Initiate (Cleric)", description: "You learn two cantrips and one 1st-level spell from the Cleric spell list. You can cast the 1st-level spell once per Long Rest without a spell slot, or use spell slots if you have them. Wisdom is your spellcasting ability for these spells." },
-  Artisan:    { name: "Crafter", description: "You gain proficiency with three Artisan's Tools of your choice. Whenever you buy a non-magical item, you receive a 20% discount. You can also craft items faster using your proficient tools." },
-  Charlatan:  { name: "Skilled", description: "You gain proficiency in three skills of your choice." },
-  Criminal:   { name: "Alert", description: "You gain a +5 bonus to Initiative rolls and you can't be surprised while conscious." },
-  Entertainer:{ name: "Musician", description: "You gain proficiency with three Musical Instruments of your choice. You can use a Musical Instrument as a Spellcasting Focus. Creatures who hear you play for at least 1 minute gain Heroic Inspiration, up to your Proficiency Bonus per Long Rest." },
-  Farmer:     { name: "Tough", description: "Your hit point maximum increases by 2 for every character level you have, and it increases by 2 again each time you gain a level." },
-  Guard:      { name: "Alert", description: "You gain a +5 bonus to Initiative rolls and you can't be surprised while conscious." },
-  Guide:      { name: "Magic Initiate (Druid)", description: "You learn two cantrips and one 1st-level spell from the Druid spell list. You can cast the 1st-level spell once per Long Rest without a spell slot. Wisdom is your spellcasting ability for these spells." },
-  Hermit:     { name: "Magic Initiate (Druid)", description: "You learn two cantrips and one 1st-level spell from the Druid spell list. You can cast the 1st-level spell once per Long Rest without a spell slot. Wisdom is your spellcasting ability for these spells." },
-  Merchant:   { name: "Lucky", description: "You have 3 Luck Points. Whenever you make an attack roll, ability check, or saving throw, you can spend 1 Luck Point to roll an additional d20 and choose which die to use. You regain expended Luck Points when you finish a Long Rest." },
-  Noble:      { name: "Skilled", description: "You gain proficiency in three skills of your choice." },
-  Sage:       { name: "Magic Initiate (Wizard)", description: "You learn two cantrips and one 1st-level spell from the Wizard spell list. You can cast the 1st-level spell once per Long Rest without a spell slot. Intelligence is your spellcasting ability for these spells." },
-  Sailor:     { name: "Lucky", description: "You have 3 Luck Points. Whenever you make an attack roll, ability check, or saving throw, you can spend 1 Luck Point to roll an additional d20 and choose which die to use. You regain expended Luck Points when you finish a Long Rest." },
-  Scribe:     { name: "Skilled", description: "You gain proficiency in three skills of your choice." },
-  Soldier:    { name: "Savage Attacker", description: "Once per turn when you hit a target with a weapon attack, you can roll the weapon's damage dice twice and use either total." },
-  Wayfarer:   { name: "Lucky", description: "You have 3 Luck Points. Whenever you make an attack roll, ability check, or saving throw, you can spend 1 Luck Point to roll an additional d20 and choose which die to use. You regain expended Luck Points when you finish a Long Rest." },
-};
 
 // ── Classes ───────────────────────────────────────────────────────────────────
 
@@ -378,22 +360,28 @@ export const SHOP_ITEMS: ShopItem[] = [
   { id: 'shortbow',          name: 'Shortbow',            cost: 25, description: '1d6 piercing. Ammunition (arrow), two-handed. Range 80/320 ft.', type: 'weapon', damage: '1d6', damageType: 'piercing', attackBonus: 0, range: 80, extendedRange: 320, properties: ['ammunition', 'two-handed', 'simple'], mastery: 'Vex', twoHanded: true, iconPath: bowIcon, ammoSlug: 'arrow' },
   { id: 'arrows',            name: 'Arrow',               cost:  1, description: 'Ammunition for shortbows and longbows (batch of 20).', type: 'ammunition', quantityPerPurchase: 20, iconPath: arrowIcon, usableBySlug: 'arrow' },
   { id: 'whip',              name: 'Whip',                cost:  2, description: '1d4 slashing. Finesse, Reach (10 ft).',              type: 'weapon', damage: '1d4', damageType: 'slashing',  attackBonus: 0, range: 10, properties: ['finesse', 'reach', 'martial'], isFinesse: true, mastery: 'Slow', iconPath: whipIcon },
+  { id: 'scale-mail',        name: 'Scale Mail',          cost: 50, description: 'AC 14 + DEX modifier (max 2). Medium armor.',                                          type: 'armor', armorType: 'medium', acBonus: 14, isShield: false, slot: 'body' },
+  { id: 'chain-mail',        name: 'Chain Mail',          cost: 75, description: 'AC 16. Heavy armor.',                                                                  type: 'armor', armorType: 'heavy',  acBonus: 16, isShield: false, slot: 'body', iconPath: chainMailIcon },
+  { id: 'dagger',            name: 'Dagger',              cost:  2, description: '1d4 piercing. Finesse, light, thrown (20/60 ft).', type: 'weapon', damage: '1d4', damageType: 'piercing', attackBonus: 0, range: 5, extendedRange: 60, properties: ['finesse', 'light', 'thrown', 'simple'], isFinesse: true },
+  { id: 'warhammer',         name: 'Warhammer',           cost: 15, description: '1d8 bludgeoning. Versatile (1d10).',               type: 'weapon', damage: '1d8', damageType: 'bludgeoning', attackBonus: 0, range: 5, properties: ['versatile', 'martial'] },
 ];
 
 export const ORIGIN_FEAT_DETAILS: Record<string, BackgroundFeat> = {
-  'Alert':                    { name: "Alert", description: "You gain a +5 bonus to Initiative rolls and you can't be surprised while conscious." },
-  'Crafter':                  { name: "Crafter", description: "You gain proficiency with three Artisan's Tools of your choice and receive a 20% discount when purchasing nonmagical items." },
-  'Healer':                   { name: "Healer", description: "You can use a Healer's Kit as a Bonus Action to stabilize a creature at 0 HP. When you use a Healer's Kit to restore HP, the target also regains 1d6 + 4 additional HP." },
-  'Lucky':                    { name: "Lucky", description: "You have 3 Luck Points. Spend one to roll an extra d20 on any attack roll, ability check, or saving throw and choose which die to use. Luck Points refresh on a Long Rest." },
+  'Alert':                    { name: "Alert", description: "You can add your Proficiency Bonus to Initiative rolls. Immediately after you roll Initiative, you can swap it with a willing ally's in the same combat (neither of you can be Incapacitated)." },
+  'Crafter':                  { name: "Crafter", description: "You gain proficiency with three Artisan's Tools of your choice, receive a 20% discount when purchasing nonmagical items, and can craft one item from the Fast Crafting table when you finish a Long Rest (if you're proficient with the tool it requires). The item lasts until you finish another Long Rest, then falls apart." },
+  'Healer':                   { name: "Healer", description: "As a Utilize action, expend a use of a Healer's Kit to tend a creature within 5 feet. That creature spends one of its Hit Point Dice, which you roll — it regains HP equal to the roll plus your Proficiency Bonus. Any die rolled to restore HP this way or with a spell can be rerolled once if it comes up 1." },
+  'Lucky':                    { name: "Lucky", description: "You have a number of Luck Points equal to your Proficiency Bonus. Spend one when you roll a d20 for a D20 Test to give yourself Advantage on it, or when a creature makes an attack roll against you to impose Disadvantage on it. Luck Points refresh on a Long Rest." },
   'Magic Initiate (Cleric)':  { name: "Magic Initiate (Cleric)", description: "You learn two Cleric cantrips and one 1st-level Cleric spell, castable once per Long Rest without a spell slot. Wisdom is your spellcasting ability." },
   'Magic Initiate (Druid)':   { name: "Magic Initiate (Druid)", description: "You learn two Druid cantrips and one 1st-level Druid spell, castable once per Long Rest without a spell slot. Wisdom is your spellcasting ability." },
   'Magic Initiate (Wizard)':  { name: "Magic Initiate (Wizard)", description: "You learn two Wizard cantrips and one 1st-level Wizard spell, castable once per Long Rest without a spell slot. Intelligence is your spellcasting ability." },
-  'Musician':                 { name: "Musician", description: "You gain proficiency with three Musical Instruments. Creatures who hear you play for 1 minute gain Heroic Inspiration (up to your Proficiency Bonus per Long Rest)." },
+  'Musician':                 { name: "Musician", description: "You gain proficiency with three Musical Instruments. As you finish a Short or Long Rest, you can play one and give Heroic Inspiration to a number of allies who hear it equal to your Proficiency Bonus." },
   'Savage Attacker':          { name: "Savage Attacker", description: "Once per turn when you hit with a weapon, roll the damage dice twice and use either total." },
-  'Skilled':                  { name: "Skilled", description: "You gain proficiency in three skills of your choice." },
-  'Tavern Brawler':           { name: "Tavern Brawler", description: "Your unarmed strikes deal 1d4 + STR damage. You can use improvised weapons. Once per turn when you hit with an unarmed strike or improvised weapon, you can attempt to grapple as a Bonus Action." },
+  'Skilled':                  { name: "Skilled", description: "You gain proficiency in any combination of three skills or tools of your choice." },
+  'Tavern Brawler':           { name: "Tavern Brawler", description: "Your unarmed strikes deal 1d4 + STR bludgeoning damage instead of the normal amount, and the damage die can be rerolled once if it comes up 1. You're proficient with improvised weapons. Once per turn, when you hit with an unarmed strike as part of the Attack action, you can also push the target 5 feet away." },
   'Tough':                    { name: "Tough", description: "Your hit point maximum increases by 2 for every character level you have, and increases by 2 again each time you gain a level." },
 };
+
+export { BACKGROUND_FEAT } from 'shared';
 
 // ── Spell allowances at level 1 ───────────────────────────────────────────────
 // cantrips: max cantrips learnable; spells: max 1st-level spells learnable.
@@ -412,10 +400,4 @@ export const CLASS_SPELL_ALLOWANCE: Record<string, SpellAllowance> = {
   Wizard:    { cantrips: 3, spells: 6, spellLevels: [1] },
 };
 
-// Feats that grant extra spells (beyond class allowance)
-// Values are additive on top of the class allowance.
-export const FEAT_SPELL_GRANTS: Record<string, { cantrips: number; spells: number; forClass: string }> = {
-  'Magic Initiate (Cleric)': { cantrips: 2, spells: 1, forClass: 'Cleric' },
-  'Magic Initiate (Druid)':  { cantrips: 2, spells: 1, forClass: 'Druid'  },
-  'Magic Initiate (Wizard)': { cantrips: 2, spells: 1, forClass: 'Wizard' },
-};
+export { FEAT_SPELL_GRANTS } from 'shared';

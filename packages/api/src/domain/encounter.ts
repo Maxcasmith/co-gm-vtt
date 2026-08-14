@@ -1,4 +1,5 @@
 import type { TurnOrderEntry, ActionResource } from 'shared';
+import { setTempHp } from 'shared';
 import { Creature } from './creature.ts';
 
 // ── Turn ──────────────────────────────────────────────────────────────────────
@@ -52,10 +53,13 @@ export class Participant {
   isPlayer: boolean;
   teamId: string;
   creature?: Creature;
+  /** See EnemyStatBlock.ownerId — which player controls this ally's token, if any. */
+  ownerId?: string;
 
   // Player-only HP tracking
   currentHp: number;
   maxHp: number;
+  tempHp: number;
 
   deathSaves: { successes: number; failures: number; stable: boolean } = {
     successes: 0,
@@ -75,6 +79,15 @@ export class Participant {
   bonusActionsRemaining = 1;
   reactionsRemaining = 1;
 
+  /** Wardaway's "only an action or a Bonus Action, not both" — armed/disarmed by LinkedActionEconomyHook. */
+  linkedActionEconomy = false;
+
+  /** Height off the ground (Feather Fall, falling damage) — set via combat:elevation:set, see applyElevationChange in runtime.ts. */
+  elevationFt = 0;
+
+  /** Took the Disengage action this turn — its movement doesn't provoke Opportunity Attacks (see checkOpportunityAttacks, runtime.ts). Cleared on refillResources like every other per-turn flag. */
+  disengaging = false;
+
   constructor(props: {
     id: string;
     name: string;
@@ -82,8 +95,10 @@ export class Participant {
     isPlayer: boolean;
     teamId?: string;
     creature?: Creature;
+    ownerId?: string | undefined;
     currentHp?: number;
     maxHp?: number;
+    tempHp?: number;
   }) {
     this.id = props.id;
     this.name = props.name;
@@ -91,8 +106,10 @@ export class Participant {
     this.isPlayer = props.isPlayer;
     this.teamId = props.teamId ?? (props.isPlayer ? 'players' : 'enemies');
     if (props.creature !== undefined) this.creature = props.creature;
+    if (props.ownerId !== undefined) this.ownerId = props.ownerId;
     this.currentHp = props.currentHp ?? (props.creature?.currentHp ?? 0);
     this.maxHp = props.maxHp ?? (props.creature?.hp ?? 0);
+    this.tempHp = props.tempHp ?? 0;
   }
 
   isDown(): boolean {
@@ -110,7 +127,10 @@ export class Participant {
       this.creature?.takeDamage(amount);
       return;
     }
-    this.currentHp = Math.max(0, this.currentHp - amount);
+    // Temp HP absorbs first and is never restored by it — a separate pool from real HP.
+    const absorbed = Math.min(this.tempHp, amount);
+    this.tempHp -= absorbed;
+    this.currentHp = Math.max(0, this.currentHp - (amount - absorbed));
   }
 
   heal(amount: number): void {
@@ -121,10 +141,16 @@ export class Participant {
     this.currentHp = Math.min(this.maxHp, this.currentHp + amount);
   }
 
+  /** Sets (not adds) temp HP — the higher of what's already there and this grant wins. */
+  grantTempHp(amount: number): void {
+    this.tempHp = setTempHp(this.tempHp, amount);
+  }
+
   refillResources(): void {
     this.actionsRemaining = 1;
     this.bonusActionsRemaining = 1;
     this.reactionsRemaining = 1;
+    this.disengaging = false;
   }
 
   hasResource(kind: ActionResource): boolean {
@@ -137,6 +163,12 @@ export class Participant {
     if (kind === 'action') this.actionsRemaining--;
     else if (kind === 'bonusAction') this.bonusActionsRemaining--;
     else this.reactionsRemaining--;
+    // Wardaway: spending either action or bonus action this turn forfeits the other.
+    if (this.linkedActionEconomy && (kind === 'action' || kind === 'bonusAction')) {
+      this.linkedActionEconomy = false;
+      this.actionsRemaining = 0;
+      this.bonusActionsRemaining = 0;
+    }
     return true;
   }
 
@@ -153,6 +185,7 @@ export class Participant {
       initiative: this.initiative,
       isPlayer: this.isPlayer,
       teamId: this.teamId,
+      ...(this.ownerId !== undefined ? { ownerId: this.ownerId } : {}),
     };
   }
 }

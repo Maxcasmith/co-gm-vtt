@@ -11,6 +11,7 @@
 .shop-inv-item-qty { font-size: 11px; color: var(--text-muted); }
 
 .shop-item { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.shop-item-icon { width: 28px; height: 28px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
 .shop-item-info { flex: 1; }
 .shop-item-name { font-size: 13px; color: var(--text); }
 .shop-item-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; }

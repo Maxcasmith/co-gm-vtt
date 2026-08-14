@@ -1,0 +1,27 @@
+{
+  "Mental Prison": {
+    "resolution": "save",
+    "save": {
+      "ability": "int",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic"
+      },
+      {
+        "type": "condition",
+        "condition": "Restrained"
+      }
+    ]
+  },
+  "Programmed Illusion": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 30,
+      "origin": "point"
+    }
+  }
+}

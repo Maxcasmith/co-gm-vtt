@@ -15,6 +15,7 @@ interface Props {
   character: Character;
   currentHp?: number;
   maxHp?: number;
+  tempHp?: number;
   currentSpellSlots1?: number;
   maxSpellSlots1?: number;
   sessionActive: boolean;
@@ -36,6 +37,7 @@ export default function CharacterSheetOverlay({
   character,
   currentHp,
   maxHp,
+  tempHp,
   currentSpellSlots1,
   maxSpellSlots1,
   sessionActive,
@@ -147,6 +149,7 @@ export default function CharacterSheetOverlay({
   const derivedMaxHp = hitDie + modNum(character.stats.con);
   const displayMax = maxHp ?? character.maxHp ?? derivedMaxHp;
   const displayCurrent = currentHp ?? character.currentHp ?? displayMax;
+  const displayTempHp = tempHp ?? character.tempHp ?? 0;
 
   const derivedMaxSlots1 = spellSlotsForClass(character.class);
   const displayMaxSlots1 = maxSpellSlots1 ?? character.maxSpellSlots1 ?? derivedMaxSlots1;
@@ -215,6 +218,9 @@ export default function CharacterSheetOverlay({
           >
             {displayCurrent} / {displayMax}
           </span>
+          {displayTempHp > 0 && (
+            <span className="sheet-hp-strip-temp">+{displayTempHp} temp</span>
+          )}
           <span className="sheet-hp-strip-sep" />
           <span
             className="sheet-hp-strip-label sheet-ac-tooltip"

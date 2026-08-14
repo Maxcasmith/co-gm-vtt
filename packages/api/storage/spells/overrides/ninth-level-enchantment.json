@@ -1,0 +1,37 @@
+{
+  "Power Word Heal": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Prone"
+      }
+    ]
+  },
+  "Power Word Kill": {
+    "resolution": "auto",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic"
+      }
+    ]
+  },
+  "Psychic Scream": {
+    "resolution": "save",
+    "save": {
+      "ability": "int",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic"
+      },
+      {
+        "type": "condition",
+        "condition": "Stunned"
+      }
+    ]
+  }
+}

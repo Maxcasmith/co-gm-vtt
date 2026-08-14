@@ -1,0 +1,117 @@
+{
+  "Crown of Stars": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant"
+      }
+    ]
+  },
+  "Delayed Blast Fireball": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    }
+  },
+  "Divine Word": {
+    "resolution": "save",
+    "save": {
+      "ability": "cha",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Deafened"
+      }
+    ]
+  },
+  "Fire Storm": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 10,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      }
+    ]
+  },
+  "Forcecage": {
+    "resolution": "save",
+    "save": {
+      "ability": "cha",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    }
+  },
+  "Mordenkainen's Sword": {
+    "resolution": "attack",
+    "attackType": "melee",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "4d12",
+          "tiers": []
+        }
+      }
+    ]
+  },
+  "Prismatic Spray": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cone",
+      "size": 60,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      },
+      {
+        "type": "condition",
+        "condition": "Blinded"
+      }
+    ]
+  },
+  "Whirlwind": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Bludgeoning"
+      }
+    ]
+  }
+}

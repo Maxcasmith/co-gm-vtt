@@ -1,0 +1,88 @@
+{
+  "Blur": {
+    "resolution": "none"
+  },
+  "Invisibility": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Invisible"
+      }
+    ]
+  },
+  "Magic Mouth": {
+    "resolution": "none"
+  },
+  "Mirror Image": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Blinded"
+      }
+    ]
+  },
+  "Nathair's Mischief": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Incapacitated"
+      }
+    ]
+  },
+  "Nystul's Magic Aura": {
+    "resolution": "none"
+  },
+  "Phantasmal Force": {
+    "resolution": "save",
+    "save": {
+      "ability": "int",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cube",
+      "size": 10,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic"
+      }
+    ]
+  },
+  "Shadow Blade": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic"
+      }
+    ]
+  },
+  "Silence": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Deafened"
+      }
+    ]
+  }
+}

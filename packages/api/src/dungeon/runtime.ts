@@ -11,7 +11,7 @@ import { Creature } from '../domain/creature.ts';
 import { logError, logDebug } from '../logger.ts';
 import { io, ROOM, combatState, encounters, tokenPositions, dungeons, microDungeons, withLivePositions, PLAYER_SIGHT_RADIUS, ENEMY_AGGRO_RADIUS, enemiesReady, combatStartedAt } from '../state.ts';
 import { D20Roll } from '../combat/dice.ts';
-import { addToTurnOrder, rollPlayerInitiatives, rollEnemyInitiatives } from '../combat/runtime.ts';
+import { addToTurnOrder, rollPlayerInitiatives, rollEnemyInitiatives, checkTrapAt } from '../combat/runtime.ts';
 
 // Runs on every player token move while a dungeon is loaded: reveals creatures within sight,
 // fires room_entered the first time a room is stepped into, and either starts combat (not
@@ -32,6 +32,8 @@ export async function checkDungeonProximity(cid: string, gx: number, gy: number,
     changed = true;
     dungeonEvents.emit('room_entered', { cid, room, characterName });
   }
+
+  await checkTrapAt(cid, gx, gy, characterName, characterName, true);
 
   for (const entity of dungeon.entities) {
     if (entity.type !== 'creature') continue;

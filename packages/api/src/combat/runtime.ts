@@ -1,16 +1,28 @@
-import type { Character, EffectSpec, CreatureType, Condition as ConditionName, ActiveCondition } from 'shared';
-import { statMod, calcAC, spellSlotsForClass, CLASS_SAVING_THROWS } from 'shared';
+import type { Character, EffectSpec, CreatureType, Condition as ConditionName, ActiveCondition, AbilityKey, TrapEffect, SpellSaveResult } from 'shared';
+import { statMod, calcAC, spellSlotsForClass, CLASS_SAVING_THROWS, CLASS_WEAPON_PROFS, findPath, hasOriginFeat, isWeapon, SKILL_ABILITY } from 'shared';
 import { getCharacter, updateCharacter, readChatLog, appendChatLog, saveEncounter, clearEncounter, clearDungeon, saveDungeon, listCharacters, loadPartyAllies, readQuests, writeQuests, readManifest, readNemeses, getConfig } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateCombatFlavour, evaluateNemesisCandidates } from '../session-processor/imagePrompts.ts';
 import { toClientDungeon } from '../dungeon/index.ts';
 import { Team, Participant } from '../domain/encounter.ts';
 import { Creature } from '../domain/creature.ts';
-import { logError } from '../logger.ts';
+import { logError, logDebug } from '../logger.ts';
 import { io, ROOM, combatState, encounters, tokenPositions, campaignPlayers, playerSocketIds, enemiesReady, combatStartedAt, dungeons, pendingWeaponBonuses, microDungeons, connected, withLivePositions, getStateEngine, stateEngines } from '../state.ts';
-import { D20Roll, rollDice, fmtMod, calcMaxHp, crToXp } from './dice.ts';
-import { rollModeFor, addCondition, removeCondition } from './conditions/rollModeFor.ts';
+import { D20Roll, rollDice, fmtMod, calcMaxHp, crToXp, rollApplicableDamage } from './dice.ts';
+import { rollModeFor, addCondition, removeCondition, attackModeAgainstTarget, combineModes } from './conditions/rollModeFor.ts';
 import { ReactionOfferHook } from './stateEngine/hooks/ReactionOfferHook.ts';
+import { RetaliationOfferHook } from './stateEngine/hooks/RetaliationOfferHook.ts';
+import { offerReaction } from './stateEngine/reactionPrompt.ts';
+import { DamageResistanceHook } from './stateEngine/hooks/DamageResistanceHook.ts';
+import type { AttackerDisadvantageHook } from './stateEngine/hooks/AttackerDisadvantageHook.ts';
+import type { SanctuaryWardHook } from './stateEngine/hooks/SanctuaryWardHook.ts';
+import type { SpeedModifierHook } from './stateEngine/hooks/SpeedModifierHook.ts';
+import type { ActionUnlockHook } from './stateEngine/hooks/ActionUnlockHook.ts';
+import type { GameTimeExpiryHook } from './stateEngine/hooks/ExpiryHook.ts';
+import { RecurringDamageHook } from './stateEngine/hooks/RecurringDamageHook.ts';
+import type { ConditionImmunityHook } from './stateEngine/hooks/ConditionImmunityHook.ts';
+import type { RollModifierHook } from './stateEngine/hooks/RollModifierHook.ts';
+import type { IllusionTagHook } from './stateEngine/hooks/IllusionTagHook.ts';
 import { findSpell } from '../routes/spells.ts';
 import { applyEffects } from '../effects.ts';
 import { endSession, dispatchDMResponse } from '../session.ts';
@@ -87,7 +99,24 @@ export function emitTurn(cid: string) {
   const actor = encounter.currentActor;
   if (!actor) return;
   console.log(`[turn] emitTurn: actor=${actor.name} idx=${encounter.turnOrder.indexOf(actor)} order=[${encounter.turnOrder.map(p => p.name).join(',')}]`);
-  io.to(ROOM).emit('combat:turn', { actorName: actor.name });
+  // Wardaway's halved speed (multiplier) / Longstrider's +10ft (bonusFt) — the client applies
+  // both to its own known base speed rather than the server tracking base speed itself
+  // (players/creatures store it differently): bonuses sum first, then the multiplier applies to
+  // that total, so a halved-and-lengthened stride still halves the boosted number. Multiple
+  // stacked modifiers of the same kind combine the same way (multiply / sum).
+  const speedHooks = getStateEngine(cid).getHooksOwnedBy(actor.id, 'speedModifier') as SpeedModifierHook[];
+  const speedMultiplier = speedHooks.reduce((mult, h) => mult * h.multiplier, 1);
+  const speedBonusFt = speedHooks.reduce((sum, h) => sum + h.bonusFt, 0);
+  // Extra HUD actions unlocked this turn (Expeditious Retreat's Dash-as-Bonus-Action, Jump) —
+  // CombatDock's ACTION_UNLOCKS table turns each string into a button. Generic on purpose: a
+  // future feat adds an `action` string and a table entry, nothing here changes.
+  const buffs = (getStateEngine(cid).getHooksOwnedBy(actor.id, 'actionUnlock') as ActionUnlockHook[]).map(h => h.action);
+  io.to(ROOM).emit('combat:turn', {
+    actorName: actor.name,
+    ...(speedMultiplier !== 1 ? { speedMultiplier } : {}),
+    ...(speedBonusFt !== 0 ? { speedBonusFt } : {}),
+    ...(buffs.length ? { buffs } : {}),
+  });
 
   if (!actor.isPlayer) {
     setTimeout(() => void runEnemyAI(cid, actor), 800);
@@ -122,6 +151,7 @@ export async function runDeathSave(cid: string, actor: Participant): Promise<voi
       damage: -1,
       currentHp: 1,
       maxHp: participant.maxHp,
+      tempHp: participant.tempHp,
     });
     saves.successes = 3;
     stable = true;
@@ -192,23 +222,35 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
   if (!target) return advanceTurn(cid);
 
   let { gx, gy } = epos;
-  const maxSteps = Math.floor(creature.speed / 5);
+  // Restrained: speed 0, can't move — still gets its attack if already in range.
+  const maxSteps = creature.conditions?.some(c => c.name === 'Restrained') ? 0 : Math.floor(creature.speed / 5);
+
+  // Wall-aware route when a dungeon grid is loaded — walked one cell at a time so it can still
+  // stop early (adjacent to target) or pull up short of an occupied cell. No grid (arena combat)
+  // falls back to the old greedy step-toward-target walk, same as before.
+  const cells = dungeons.get(cid)?.cells;
+  const path = cells ? findPath(cells, gx, gy, target.gx, target.gy) : null;
 
   for (let step = 0; step < maxSteps; step++) {
     const dist = Math.max(Math.abs(target.gx - gx), Math.abs(target.gy - gy));
     if (dist <= 1) break;
 
-    const dx = Math.sign(target.gx - gx);
-    const dy = Math.sign(target.gy - gy);
     const pos = tokenPositions.get(cid) ?? {};
-    const candidates = [
-      { gx: gx + dx, gy: gy + dy },
-      { gx: gx + dx, gy },
-      { gx,          gy: gy + dy },
-    ].filter(c => c.gx >= 0 && c.gy >= 0 && !isOccupied(pos, c.gx, c.gy, actor.id));
-
-    const next = candidates[0];
-    if (!next) break;
+    let next: { gx: number; gy: number } | undefined;
+    if (cells) {
+      next = path?.[step];
+      if (!next || isOccupied(pos, next.gx, next.gy, actor.id)) break;
+    } else {
+      const dx = Math.sign(target.gx - gx);
+      const dy = Math.sign(target.gy - gy);
+      const candidates = [
+        { gx: gx + dx, gy: gy + dy },
+        { gx: gx + dx, gy },
+        { gx,          gy: gy + dy },
+      ].filter(c => c.gx >= 0 && c.gy >= 0 && !isOccupied(pos, c.gx, c.gy, actor.id));
+      next = candidates[0];
+      if (!next) break;
+    }
 
     gx = next.gx;
     gy = next.gy;
@@ -220,6 +262,12 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
     updatedPos[actor.id] = { gx, gy };
     tokenPositions.set(cid, updatedPos);
     io.to(ROOM).emit('token:moved', { tokenId: actor.id, gx, gy });
+    await checkTrapAt(cid, gx, gy, actor.id, actor.name, false);
+    if (!combatState.get(cid)) return;
+    // maxSteps was fixed before this loop started off the pre-move speed — a trap sprung
+    // mid-walk (Snare) needs its own check here, or a restrained creature just keeps stepping
+    // for the rest of its already-decided move.
+    if (creature.conditions?.some(c => c.name === 'Restrained')) break;
   }
 
   // Attack
@@ -240,12 +288,18 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
         targetAc = encounter.findCreature(targetParticipant.id)?.ac ?? 10;
       }
 
-      const mode = rollModeFor(creature, 'attack');
-      const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
       const engine = getStateEngine(cid);
       const targetKeyId = targetParticipant.isPlayer
         ? (targetCharForAttack?.id ?? targetParticipant.id)
         : targetParticipant.id;
+      const targetHolder = targetParticipant.isPlayer ? targetCharForAttack : encounter.findCreature(targetParticipant.id);
+      // Protection from Evil and Good — disadvantage imposed on the warded target's attacker
+      // when the attacker's own creature type is on the spell's list, checked pre-roll same as
+      // grantAdvantage (the d20 is already picked by the time beforeAttackRoll's chain runs).
+      const wardedAgainst = engine.getHooksOwnedBy(targetKeyId, 'attackerDisadvantage')
+        .some(h => (h as AttackerDisadvantageHook).appliesTo(creature.creatureType ?? 'Humanoid'));
+      const mode = combineModes(rollModeFor(creature, 'attack'), attackModeAgainstTarget(targetHolder ?? {}), wardedAgainst ? -1 : 0);
+      const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
 
       // Two-phase resolution: roll, let the afterAttackRoll chain run (which may suspend here for
       // several seconds while the defender decides whether to spend a reaction), then re-derive
@@ -268,6 +322,14 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
 
       atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
       atkCtx.hit = atkCtx.total >= atkCtx.ac;
+
+      // Sanctuary — only worth checking on a roll that would otherwise land; a miss doesn't
+      // need the save. ponytail: no retargeting (RAW lets the attacker pick a new target
+      // instead) — a failed save just wastes the attack, same as if nothing else were in range.
+      if (atkCtx.hit && !(await checkSanctuary(cid, actor.id, targetKeyId, targetParticipant.name))) {
+        atkCtx.hit = false;
+        console.log(`[ai] ${actor.name}'s attack on ${targetParticipant.name} fails — Sanctuary`);
+      }
 
       const total = atkCtx.total;
       const hit = atkCtx.hit;
@@ -300,7 +362,7 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
           }
         } else {
           // Ally or other non-player target — use creature damage path
-          await applyDamageToCreature(cid, targetParticipant.id, damage);
+          await applyDamageToCreature(cid, targetParticipant.id, damage, { sourceId: actor.id });
           remainingHp = encounter.findCreature(targetParticipant.id)?.currentHp;
           targetDead = encounter.findCreature(targetParticipant.id)?.isDead() ?? false;
         }
@@ -313,7 +375,7 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
       const targetId = targetParticipant.isPlayer ? (targetCharForAttack?.id ?? targetParticipant.name) : targetParticipant.id;
       io.to(ROOM).emit('combat:attack:result', {
         attackerName: actor.name, targetName: targetParticipant.name, targetId,
-        weaponName: atk.name, d20: roll, attackBonus: atk.bonus, statBonus: atk.bonus, statName: 'Attack', weaponBonus: 0, total, ac: targetAc,
+        weaponName: atk.name, isMelee: true, d20: roll, attackBonus: atk.bonus, statBonus: atk.bonus, statName: 'Attack', weaponBonus: 0, total, ac: targetAc,
         hit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
       });
 
@@ -322,7 +384,9 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
       {
         const atkResult = {
           attackerName: actor.name, targetName: targetParticipant.name, targetId,
-          weaponName: atk.name, d20: roll, attackBonus: atk.bonus, statBonus: atk.bonus, statName: 'Attack', weaponBonus: 0, total, ac: targetAc,
+          // Monster attacks aren't modeled with a range yet (see EnemyStatBlock.attacks) — the client
+          // only reads isMelee for player-sourced swing effects, so this is inert here regardless.
+          weaponName: atk.name, isMelee: true, d20: roll, attackBonus: atk.bonus, statBonus: atk.bonus, statName: 'Attack', weaponBonus: 0, total, ac: targetAc,
           hit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
         };
         const flavour = await generateCombatFlavour(atkResult, cfgAdapter);
@@ -362,7 +426,7 @@ export async function markPlayerDead(cid: string, participant: Participant, char
  * outside combat — e.g. poisoned by a trap between fights. Every condition mutator (add/remove,
  * concentration) goes through this so there's one place that knows how to find + persist either kind.
  */
-async function conditionsHolder(cid: string, targetId: string): Promise<
+export async function conditionsHolder(cid: string, targetId: string): Promise<
   | { label: string; conditions: ActiveCondition[] | undefined; write: (c: ActiveCondition[]) => void }
   | undefined
 > {
@@ -393,11 +457,17 @@ async function setCondition(
 ): Promise<string | undefined> {
   const holder = await conditionsHolder(cid, targetId);
   if (!holder) return undefined;
-  holder.write(fn(holder.conditions, name));
+  const conditions = fn(holder.conditions, name);
+  holder.write(conditions);
+  io.to(ROOM).emit('character:condition:update', { targetId, conditions });
   return holder.label;
 }
 
 export async function applyCondition(cid: string, targetId: string, name: ConditionName): Promise<void> {
+  const immune = (getStateEngine(cid).getHooksOwnedBy(targetId, 'conditionImmunity') as ConditionImmunityHook[])
+    .some(h => h.immuneConditions.includes(name));
+  if (immune) return;
+
   const label = await setCondition(cid, targetId, name, addCondition);
   if (!label) return;
   console.log(`[condition] ${label} gains ${name}`);
@@ -420,6 +490,355 @@ export async function clearCondition(cid: string, targetId: string, name: Condit
   io.to(ROOM).emit('chat:message', msg);
 }
 
+/**
+ * Server-side movement authority — previously absent entirely (see the ponytail note on
+ * Participant's action-economy fields: the client owns movementRemaining, nothing server-side
+ * enforced it). Restrained's "speed 0" is the first thing that actually needs blocking. Resolves
+ * tokenId either as a live participant id (enemies/allies) or, for players, the character name
+ * token-position convention uses (see checkTrapAt for the same dual-path lookup).
+ */
+export async function canMove(cid: string, tokenId: string): Promise<boolean> {
+  let holder = await conditionsHolder(cid, tokenId);
+  if (!holder) {
+    const char = (await listCharacters(cid)).find(c => c.name === tokenId);
+    if (char) holder = await conditionsHolder(cid, char.id);
+  }
+  return !holder?.conditions?.some(c => c.name === 'Restrained');
+}
+
+// ── Movement triggers & Opportunity Attacks ─────────────────────────────────
+
+const DEFAULT_REACH_FT = 5;
+
+/** Chebyshev distance in feet between two grid cells — same convention as every other range check in this codebase. */
+function cellDistFt(ax: number, ay: number, bx: number, by: number): number {
+  return Math.max(Math.abs(ax - bx), Math.abs(ay - by)) * 5;
+}
+
+/**
+ * The movement counterpart to advanceTurn's beforeTurn/afterTurn firing — called once from
+ * token:move whenever a tracked participant's token actually lands somewhere new. Drives two
+ * independent things: spell-registered `onMove` hooks (Booming Blade) via the normal
+ * StateEngine.trigger(), and the innate Opportunity Attack check, which isn't hook-registered at
+ * all since every creature with a reaction has it, not just ones a spell touched.
+ */
+export async function checkMovementTriggers(
+  cid: string, moverId: string, fromGx: number, fromGy: number, toGx: number, toGy: number,
+): Promise<void> {
+  const encounter = encounters.get(cid);
+  const mover = encounter?.findParticipant(moverId);
+  if (!mover) return;
+  const distanceFt = cellDistFt(fromGx, fromGy, toGx, toGy);
+  if (distanceFt === 0) return;
+
+  await getStateEngine(cid).trigger('onMove', {
+    participantId: moverId, participantName: mover.name, fromGx, fromGy, toGx, toGy, distanceFt,
+  });
+
+  if (combatState.get(cid)) await checkOpportunityAttacks(cid, mover, fromGx, fromGy, toGx, toGy);
+}
+
+/** Conditions that already strip reactions outright per RAW — the first place any of these four actually block one, rather than just being a narrated marker. */
+const REACTION_LOCKING_CONDITIONS = new Set(['Incapacitated', 'Stunned', 'Paralyzed', 'Unconscious']);
+
+/**
+ * 2024 PHB: "You can make an Opportunity Attack when a creature that you can see leaves your
+ * reach. To make the Opportunity Attack, you use your Reaction to make one melee attack against
+ * the provoking creature." Checked against every hostile participant for the mover's team,
+ * reach being that participant's equipped/first melee weapon's range (5ft default, 10ft for a
+ * reach weapon). A player reactor is offered the choice (same reaction-prompt flow as Shield);
+ * an NPC reactor auto-resolves, matching how enemy actions already auto-resolve with no
+ * human decision layer behind them.
+ *
+ * Skipped for a mover who Disengaged this turn (Participant.disengaging) and for a reactor with
+ * no reaction available, a reactionLock (Shocking Grasp), or one of the conditions that already
+ * strip reactions outright (REACTION_LOCKING_CONDITIONS).
+ *
+ * ponytail: only checks the two endpoints, not the path between them — a mover who steps into
+ * and back out of the same reach zone within one drag won't provoke, and one who passes through
+ * a second reach zone mid-move without ending outside it won't either. Real path-stepping would
+ * need the client to send intermediate cells (it only ever sends the final destination); upgrade
+ * if "walk past two attackers in one drag" turns out to matter more than "walk straight away
+ * from one." Also doesn't check line of sight/obscurement (Fog Cloud) — that check lives in
+ * combat.ts, not here, and reach is close enough that it rarely matters.
+ */
+async function checkOpportunityAttacks(
+  cid: string, mover: Participant, fromGx: number, fromGy: number, toGx: number, toGy: number,
+): Promise<void> {
+  if (mover.disengaging || mover.isDead()) return;
+  const encounter = encounters.get(cid);
+  if (!encounter) return;
+  const reactors = mover.teamId === 'players' ? encounter.enemies : encounter.players;
+  const positions = tokenPositions.get(cid) ?? {};
+
+  for (const reactor of reactors) {
+    if (reactor.isDead() || !reactor.hasResource('reaction')) continue;
+    const engine = getStateEngine(cid);
+    if (engine.hasHookOwnedBy(reactor.id, 'reactionLock') || engine.hasHookOwnedBy(reactor.id, 'opportunityAttackLock')) continue;
+    const holder = await conditionsHolder(cid, reactor.id);
+    if (holder?.conditions?.some(c => REACTION_LOCKING_CONDITIONS.has(c.name))) continue;
+
+    const reactorPos = positions[reactor.id] ?? positions[reactor.name];
+    if (!reactorPos) continue;
+
+    const reach = await reactorReachFt(cid, reactor);
+    const wasInReach = cellDistFt(reactorPos.gx, reactorPos.gy, fromGx, fromGy) <= reach;
+    const stillInReach = cellDistFt(reactorPos.gx, reactorPos.gy, toGx, toGy) <= reach;
+    if (!wasInReach || stillInReach) continue;
+
+    if (reactor.isPlayer) {
+      const picked = await offerReaction(reactor.id, [{
+        spellName: 'Attack of Opportunity', attackerName: reactor.name, sourceName: mover.name, kind: 'opportunity',
+      }]);
+      if (!picked || !combatState.get(cid) || !reactor.hasResource('reaction')) continue;
+    }
+
+    reactor.trySpend('reaction');
+    emitResources(reactor);
+    await resolveOpportunityAttack(cid, reactor, mover);
+  }
+}
+
+/** Players: their equipped weapon's reach if it's a reach weapon (10ft), else the unarmed-strike default. Creatures: EnemyStatBlock.attacks carries no range/type data at all, so every creature is treated as 5ft reach regardless of what its attacks actually are — a real simplification, upgrade if a ranged-only creature ever needs to NOT get one. */
+async function reactorReachFt(cid: string, reactor: Participant): Promise<number> {
+  if (!reactor.isPlayer) return DEFAULT_REACH_FT;
+  const char = await getCharacter(cid, reactor.id);
+  const mainHandId = char?.equipment?.mainHand;
+  const item = mainHandId ? char?.inventory?.find(i => i.id === mainHandId) : undefined;
+  return item && isWeapon(item) && item.range === 10 ? 10 : DEFAULT_REACH_FT;
+}
+
+/**
+ * The actual weapon swing an Opportunity Attack resolves into — one melee attack, no ammo spend,
+ * no Savage Attacker reroll, no bundled smite (none of those apply to a reflexive reaction swing).
+ * Broadcasts the same `combat:attack:result` shape a normal weapon attack does, so it renders
+ * identically (hit flash, floating damage) with no client changes needed.
+ */
+async function resolveOpportunityAttack(cid: string, reactor: Participant, target: Participant): Promise<void> {
+  const engine = getStateEngine(cid);
+  const encounter = encounters.get(cid);
+  if (!encounter) return;
+
+  let weaponName = 'Unarmed Strike';
+  let damageFormula = '1';
+  let damageType: string | undefined = 'Bludgeoning';
+  let attackBonus = 0;
+  let statBonus = 0;
+  let statName = 'Strength';
+  let reactorChar: Character | undefined;
+
+  if (reactor.isPlayer) {
+    const char = await getCharacter(cid, reactor.id);
+    if (!char) return;
+    reactorChar = char;
+    const mainHandId = char.equipment?.mainHand;
+    const item = mainHandId ? char.inventory?.find(i => i.id === mainHandId) : undefined;
+    const weapon = item && isWeapon(item) ? item : undefined;
+    const strMod = statMod(char.stats.str);
+    const dexMod = statMod(char.stats.dex);
+    const isMeleeReach = !weapon || weapon.range <= 10;
+    const useDex = isMeleeReach && weapon?.isFinesse && dexMod > strMod;
+    statBonus = useDex ? dexMod : strMod;
+    statName = useDex ? 'Dexterity' : 'Strength';
+    const charProf = char.proficiencyBonus ?? 2;
+    const classWeaponProfs = CLASS_WEAPON_PROFS[char.class] ?? [];
+    const isProficient = !weapon || weapon.properties?.some(p => classWeaponProfs.includes(p as 'simple' | 'martial'));
+    const weaponBonus = (weapon?.attackBonus ?? 0) + (isProficient ? charProf : 0);
+    attackBonus = statBonus + weaponBonus;
+    weaponName = weapon?.name ?? 'Unarmed Strike';
+    damageFormula = weapon?.damage ?? '1';
+    damageType = weapon?.damageType ?? 'Bludgeoning';
+  } else if (reactor.creature) {
+    const atk = reactor.creature.attacks[0];
+    if (!atk) return;
+    weaponName = atk.name;
+    damageFormula = atk.damage;
+    damageType = undefined;
+    attackBonus = atk.bonus;
+    statBonus = atk.bonus;
+    statName = 'Attack';
+  } else {
+    return;
+  }
+
+  let targetAc: number;
+  let targetChar: Character | undefined;
+  if (target.isPlayer) {
+    targetChar = (await listCharacters(cid)).find(c => c.id === target.id || c.name === target.name);
+    targetAc = targetChar ? calcAC(targetChar) : 10;
+  } else {
+    targetAc = target.creature?.ac ?? 10;
+  }
+  const targetKeyId = target.isPlayer ? (targetChar?.id ?? target.id) : target.id;
+
+  const mode = combineModes(
+    rollModeFor(reactorChar ?? reactor.creature ?? {}, 'attack'),
+    attackModeAgainstTarget(targetChar ?? target.creature ?? {}),
+  );
+  const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
+  const atkCtx = await engine.trigger('afterAttackRoll', await engine.trigger('beforeAttackRoll', {
+    attackerId: reactor.id, attackerName: reactor.name,
+    targetId: targetKeyId, targetName: target.name, targetIsPlayer: target.isPlayer,
+    sourceName: weaponName, d20: roll, attackBonus, ac: targetAc,
+    total: roll + attackBonus, hit: roll + attackBonus >= targetAc,
+  }));
+  if (!combatState.get(cid)) return;
+  atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
+  atkCtx.hit = atkCtx.total >= atkCtx.ac;
+
+  let damage: number | undefined;
+  let remainingHp: number | undefined;
+  let targetDead = false;
+  if (atkCtx.hit) {
+    const dmgCtx = await engine.trigger('beforeDamage', {
+      sourceId: reactor.id, targetId: targetKeyId, targetName: target.name,
+      amount: rollDice(damageFormula) + (reactor.isPlayer ? statBonus : 0),
+      damageType, sourceName: weaponName,
+    });
+    damage = Math.max(0, dmgCtx.amount);
+    if (target.isPlayer && targetChar) {
+      await applyDamageToPlayer(cid, target, damage, { charId: targetChar.id, sourceId: reactor.id });
+      remainingHp = target.currentHp;
+      targetDead = target.currentHp <= 0;
+    } else {
+      await applyDamageToCreature(cid, target.id, damage, { sourceId: reactor.id });
+      remainingHp = encounter.findCreature(target.id)?.currentHp;
+      targetDead = encounter.findCreature(target.id)?.isDead() ?? false;
+    }
+    await engine.trigger('afterDamage', dmgCtx);
+  }
+
+  console.log(`[aoo] ${reactor.name} makes an Opportunity Attack on ${target.name}: ${roll}${fmtMod(attackBonus)}=${atkCtx.total} vs AC ${targetAc} — ${atkCtx.hit ? `HIT ${damage}` : 'MISS'}`);
+  io.to(ROOM).emit('combat:attack:result', {
+    attackerName: reactor.name, targetName: target.name, targetId: targetKeyId,
+    weaponName, isMelee: true, d20: roll, attackBonus, statBonus, statName, weaponBonus: attackBonus - statBonus,
+    total: atkCtx.total, ac: targetAc, hit: atkCtx.hit, damage, damageFormula: atkCtx.hit ? damageFormula : undefined,
+    remainingHp, targetDead,
+  });
+  const msg = { text: `${reactor.name} makes an Opportunity Attack on ${target.name}${atkCtx.hit ? ` — hit for ${damage}!` : ' — misses.'}`, senderName: 'System', timestamp: Date.now() };
+  void appendChatLog(cid, msg);
+  io.to(ROOM).emit('chat:message', msg);
+}
+
+/**
+ * Sanctuary — gate checked directly before an attack roll happens (mirrors canMove), not through
+ * the normal Hook trigger chain: RAW cancels the attack outright on a failed save, which has to
+ * be decided before the d20 is rolled. No ward on targetId = true (attack proceeds normally).
+ */
+export async function checkSanctuary(cid: string, attackerId: string, targetId: string, targetName: string): Promise<boolean> {
+  const engine = getStateEngine(cid);
+  const ward = engine.getHooksOwnedBy(targetId, 'sanctuaryWard')[0] as SanctuaryWardHook | undefined;
+  if (!ward) return true;
+  const { saved, roll, bonus, total } = await rollSavingThrow(cid, attackerId, 'wis', ward.dc);
+  logDebug(`[sanctuary] attack on ${targetName} — attacker save vs DC${ward.dc}: d20=${roll}+${bonus}=${total} — ${saved ? 'SAVE, attack proceeds' : 'FAIL, attack blocked'}`);
+  return saved;
+}
+
+/**
+ * Animal Friendship/Charm Person's "ends if you [the caster] damage it" — checked at the one
+ * choke point all damage already funnels through (applyDamageToPlayer/applyDamageToCreature),
+ * against every recurringDamage hook targetId owns that opted into `endsIfCasterDamages` and
+ * whose casterId matches whoever just hit them. Allies dealing the damage don't break it (RAW
+ * says "you or an ally" — not tracked here, see the spell's own todo).
+ */
+function checkEndsIfCasterDamages(cid: string, targetId: string, sourceId: string | undefined): void {
+  if (!sourceId) return;
+  const engine = stateEngines.get(cid);
+  if (!engine) return;
+  for (const hook of engine.getHooksOwnedBy(targetId, 'recurringDamage')) {
+    if (hook instanceof RecurringDamageHook && hook.endsIfCasterDamages && hook.casterId === sourceId) {
+      void hook.forceEnd(engine);
+    }
+  }
+}
+
+/**
+ * Sanctuary "ends if the warded creature makes an attack roll, casts a spell, or deals damage" —
+ * called once at the top of the warded creature's own attack/spell-cast, after resource spend
+ * succeeds (a blocked action shouldn't cost the ward) but before anything resolves. No ward on
+ * actorId = no-op, same as checkSanctuary's "nothing registered" shape.
+ */
+export async function breakSanctuaryOn(cid: string, actorId: string): Promise<void> {
+  const engine = getStateEngine(cid);
+  const ward = engine.getHooksOwnedBy(actorId, 'sanctuaryWard')[0];
+  if (!ward) return;
+  engine.unregister(ward.id);
+  const label = encounters.get(cid)?.findParticipant(actorId)?.name ?? actorId;
+  console.log(`[sanctuary] ${label}'s Sanctuary ends — they acted`);
+  const msg = { text: `${label}'s Sanctuary ends.`, senderName: 'System', timestamp: Date.now() };
+  void appendChatLog(cid, msg);
+  io.to(ROOM).emit('chat:message', msg);
+}
+
+/**
+ * The other half of HookDuration's 'gameTime' — round/turn expiries fire off the combat turn
+ * loop (ExpiryHook/RoundExpiryHook), but game-time ones have no turn loop to ride during
+ * exploration, so nothing fires them automatically. Call this wherever worldTimeSecs actually
+ * advances (today: effects.ts's 'advanceTime' narration effect) and it sweeps every campaign
+ * with a live StateEngine for GameTimeExpiryHooks whose timestamp has passed. Reusable by any
+ * future gameTime spell — it doesn't know or care which one registered a given hook.
+ */
+export function sweepGameTimeExpiries(cid: string, currentSecs: number): void {
+  const engine = stateEngines.get(cid);
+  if (!engine) return;
+  const due = engine.getHooksByKind('gameTimeExpiry') as GameTimeExpiryHook[];
+  for (const hook of due) {
+    if (hook.expiresAtSecs > currentSecs) continue;
+    void hook.apply({ round: 0 }, engine);
+  }
+}
+
+/** Current worldTimeSecs for a campaign — the anchor a `gameTime` duration's relative `gameSecs` is added to at cast time. */
+export async function getWorldTimeSecs(cid: string): Promise<number> {
+  const manifest = await readManifest(cid);
+  return manifest?.worldTimeSecs ?? 43200;
+}
+
+/**
+ * Sets targetId's height off the ground. Dropping it 10ft or more (climbing/being lifted down
+ * doesn't call this at all — only an actual fall does) rolls 1d6 Bludgeoning per 10ft fallen,
+ * capped at 20d6 (RAW), no save, routed through the normal beforeDamage/afterDamage chain so any
+ * hook gets a say — specifically DamageResistanceHook keyed to `spellName: 'Falling'`, which is
+ * exactly the shape Feather Fall registers (same mechanism Shield already uses against Magic
+ * Missile, reused rather than building a fall-specific negation path).
+ */
+export async function applyElevationChange(cid: string, targetId: string, elevationFt: number): Promise<void> {
+  const encounter = encounters.get(cid);
+  const participant = encounter?.findParticipant(targetId);
+  if (!participant) return;
+
+  const clamped = Math.max(0, elevationFt);
+  const fellFt = participant.elevationFt - clamped;
+  participant.elevationFt = clamped;
+  io.to(ROOM).emit('combat:elevation:update', { targetId, elevationFt: clamped });
+  if (fellFt < 10) return;
+
+  const dice = Math.min(20, Math.floor(fellFt / 10));
+  const engine = getStateEngine(cid);
+  const dmgCtx = await engine.trigger('beforeDamage', {
+    sourceId: targetId, targetId, targetName: participant.name,
+    amount: rollDice(`${dice}d6`), damageType: 'Bludgeoning', sourceName: 'Falling',
+  });
+  const damage = Math.max(0, dmgCtx.amount);
+  if (damage > 0) {
+    if (participant.isPlayer) await applyDamageToPlayer(cid, participant, damage, { sourceId: targetId });
+    else await applyDamageToCreature(cid, targetId, damage);
+  }
+  await engine.trigger('afterDamage', dmgCtx);
+  console.log(`[elevation] ${participant.name} falls ${fellFt}ft — ${damage} damage`);
+}
+
+/** Drops any Dungeon.hazardCells (Difficult Terrain) whose expiresOnRound has passed — called every time a new round starts (see advanceTurn). */
+function pruneExpiredHazardCells(cid: string, round: number): void {
+  const dungeon = dungeons.get(cid);
+  if (!dungeon?.hazardCells?.length) return;
+  const kept = dungeon.hazardCells.filter(h => h.expiresOnRound === undefined || h.expiresOnRound > round);
+  if (kept.length === dungeon.hazardCells.length) return;
+  dungeon.hazardCells = kept;
+  void saveDungeon(cid, dungeon);
+  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+}
+
 /** Ends whatever targetId is concentrating on — tears down its linked hooks. No-op if not concentrating. */
 export async function breakConcentration(cid: string, targetId: string): Promise<void> {
   const holder = await conditionsHolder(cid, targetId);
@@ -434,6 +853,7 @@ export async function breakConcentration(cid: string, targetId: string): Promise
   const msg = { text: `${holder.label} loses concentration on ${link.spellName}.`, senderName: 'System', timestamp: Date.now() };
   void appendChatLog(cid, msg);
   io.to(ROOM).emit('chat:message', msg);
+  io.to(ROOM).emit('combat:concentration', { targetId, targetName: holder.label, spellName: null });
 }
 
 /** True when casterId is currently concentrating on exactly spellName — gates free recasts (Hunter's Mark, Witch Bolt). */
@@ -456,9 +876,90 @@ export async function startConcentrating(
   const withoutOld = removeCondition(holder.conditions, 'Concentrating');
   holder.write([...withoutOld, { name: 'Concentrating', concentration: { spellName, targetIds: hookedTargetIds } }]);
   console.log(`[concentration] ${holder.label} begins concentrating on ${spellName}`);
+  io.to(ROOM).emit('combat:concentration', { targetId: casterId, targetName: holder.label, spellName });
 }
 
 const CONCENTRATION_MIN_DC = 10;
+
+/**
+ * Rolls a saving throw for targetId (player or creature) against a fixed DC — the piece shared
+ * by concentration checks and any other "target rolls a save mid-combat" mechanic (Searing
+ * Smite's Burning re-saving each turn to end early). No stats found (untracked participant)
+ * auto-succeeds rather than crashing; that should not happen for anyone actually in the fight.
+ */
+export async function rollSavingThrow(
+  cid: string, targetId: string, ability: AbilityKey, dc: number,
+): Promise<{ saved: boolean; roll: number; bonus: number; total: number }> {
+  const encounter = encounters.get(cid);
+  const participant = encounter?.findParticipant(targetId);
+  const creature = participant?.creature;
+  const char = creature ? undefined : await getCharacter(cid, participant?.id ?? targetId);
+  const stats = creature?.stats ?? char?.stats;
+  if (!stats) return { saved: true, roll: 0, bonus: 0, total: 0 };
+
+  const classSaves: readonly string[] = char ? (CLASS_SAVING_THROWS[char.class] ?? []) : [];
+  const proficient = classSaves.includes(ability);
+  // Bless/Bane — rerolled fresh against every save, not fixed at cast time (see RollModifierHook).
+  const rollMods = getStateEngine(cid).getHooksOwnedBy(targetId, 'rollModifier') as RollModifierHook[];
+  const modBonus = rollMods.reduce((sum, h) => sum + h.sign * rollDice(`1d${h.dieSize}`), 0);
+  const bonus = statMod(stats[ability]) + (proficient ? (char?.proficiencyBonus ?? 2) : 0) + modBonus;
+
+  const mode = rollModeFor(creature ?? char ?? {}, 'save', ability);
+  const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
+  const total = roll + bonus;
+  return { saved: total >= dc, roll, bonus, total };
+}
+
+/**
+ * Rolls a skill check (Athletics, Perception, ...) for targetId against a fixed DC — the ability
+ * check counterpart to rollSavingThrow, for anything a player attempts on their own initiative
+ * rather than something rolled in response to an effect (Ensnaring Strike/Entangle's "make a
+ * Strength (Athletics) check to escape"). Proficiency doubles for expertiseSkills, same as any
+ * 5e skill; a creature (no character sheet, no skillProficiencies) rolls flat ability mod, same
+ * fallback rollSavingThrow uses for class-save proficiency.
+ */
+export async function rollSkillCheck(
+  cid: string, targetId: string, skill: string, dc: number,
+): Promise<{ succeeded: boolean; roll: number; bonus: number; total: number }> {
+  const ability = SKILL_ABILITY[skill];
+  if (!ability) return { succeeded: true, roll: 0, bonus: 0, total: 0 };
+
+  const encounter = encounters.get(cid);
+  const participant = encounter?.findParticipant(targetId);
+  const creature = participant?.creature;
+  const char = creature ? undefined : await getCharacter(cid, participant?.id ?? targetId);
+  const stats = creature?.stats ?? char?.stats;
+  if (!stats) return { succeeded: true, roll: 0, bonus: 0, total: 0 };
+
+  const proficient = !!char?.skillProficiencies.includes(skill);
+  const expertise = !!char?.expertiseSkills?.includes(skill);
+  const profBonus = char?.proficiencyBonus ?? 2;
+  const bonus = statMod(stats[ability]) + (proficient ? profBonus * (expertise ? 2 : 1) : 0);
+
+  const mode = rollModeFor(creature ?? char ?? {}, 'check', ability);
+  const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
+  const total = roll + bonus;
+  return { succeeded: total >= dc, roll, bonus, total };
+}
+
+/**
+ * Rolls Investigation for investigatorId against every illusionTag hook targetId carries
+ * (Disguise Self's "Disguised") — each tag's own DC is the caster's spell save DC, frozen at
+ * cast time. Doesn't touch the tag either way: seeing through an illusion is knowledge specific
+ * to the investigator, not something that ends the spell for anyone else (RAW), so the hook
+ * stays registered and a second creature can still fail against the exact same disguise.
+ */
+export async function investigateIllusion(
+  cid: string, targetId: string, investigatorId: string,
+): Promise<{ tagName: string; succeeded: boolean; roll: number; bonus: number; total: number; dc: number }[]> {
+  const tags = getStateEngine(cid).getHooksOwnedBy(targetId, 'illusionTag') as IllusionTagHook[];
+  const results = [];
+  for (const tag of tags) {
+    const result = await rollSkillCheck(cid, investigatorId, 'Investigation', tag.dc);
+    results.push({ tagName: tag.tagName, dc: tag.dc, ...result });
+  }
+  return results;
+}
 
 /**
  * Called after damage lands on targetId — if they're concentrating, rolls the Constitution save
@@ -469,22 +970,8 @@ export async function checkConcentration(cid: string, targetId: string, damage: 
   const link = holder?.conditions?.find(c => c.name === 'Concentrating')?.concentration;
   if (!holder || !link) return;
 
-  const encounter = encounters.get(cid);
-  const participant = encounter?.findParticipant(targetId);
-  const creature = participant?.creature;
-  const char = creature ? undefined : await getCharacter(cid, participant?.id ?? targetId);
-  const stats = creature?.stats ?? char?.stats;
-  if (!stats) return;
-
-  const classSaves: readonly string[] = char ? (CLASS_SAVING_THROWS[char.class] ?? []) : [];
-  const proficient = classSaves.includes('con');
-  const bonus = statMod(stats.con) + (proficient ? (char?.proficiencyBonus ?? 2) : 0);
-
   const dc = Math.max(CONCENTRATION_MIN_DC, Math.floor(damage / 2));
-  const mode = rollModeFor(creature ?? char ?? {}, 'save', 'con');
-  const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
-  const total = roll + bonus;
-  const saved = total >= dc;
+  const { saved, roll, bonus, total } = await rollSavingThrow(cid, targetId, 'con', dc);
   console.log(`[concentration] ${holder.label} save vs DC${dc}: d20=${roll}${fmtMod(bonus)}=${total} — ${saved ? 'MAINTAINED' : 'BROKEN'}`);
   if (!saved) await breakConcentration(cid, targetId);
 }
@@ -504,17 +991,19 @@ export async function applyDamageToPlayer(
   const wasDown = participant.isDown();
 
   participant.takeDamage(damage);
-  void updateCharacter(cid, charId, c => ({ ...c, currentHp: participant.currentHp }));
+  void updateCharacter(cid, charId, c => ({ ...c, currentHp: participant.currentHp, tempHp: participant.tempHp }));
   io.to(ROOM).emit('combat:player:damage', {
     characterId: charId,
     characterName: participant.name,
     damage,
     currentHp: participant.currentHp,
     maxHp: participant.maxHp,
+    tempHp: participant.tempHp,
   });
   // One event drives the damage float/flash for every source — weapon hit, spell hit, spell-save
   // damage, recurring ticks — since they all funnel through this function to apply HP loss.
   if (damage > 0) io.to(ROOM).emit('combat:damage:dealt', { targetId: charId, targetName: participant.name, damage });
+  if (damage > 0) checkEndsIfCasterDamages(cid, charId, opts?.sourceId);
 
   if (wasDown) {
     // Damage while already at 0 HP burns two death saves (5e: a hit on a downed creature).
@@ -542,6 +1031,48 @@ export async function applyDamageToPlayer(
   } else if (damage > 0) {
     await checkConcentration(cid, charId, damage);
   }
+}
+
+/** Applies spell/effect healing to a player and persists/broadcasts the result (Cure Wounds, Healing Word). */
+export function applyHealingToPlayer(cid: string, participant: Participant, charId: string, amount: number, sourceName: string): void {
+  participant.heal(amount);
+  void updateCharacter(cid, charId, c => ({ ...c, currentHp: participant.currentHp }));
+  io.to(ROOM).emit('combat:player:heal', {
+    characterId: charId,
+    characterName: participant.name,
+    healAmount: amount,
+    currentHp: participant.currentHp,
+    maxHp: participant.maxHp,
+    sourceName,
+  });
+}
+
+/** Same as applyHealingToPlayer but for an NPC/ally creature target. */
+export function applyHealingToCreature(cid: string, targetId: string, amount: number): void {
+  const creature = encounters.get(cid)?.findCreature(targetId);
+  if (!creature) return;
+  creature.heal(amount);
+  io.to(ROOM).emit('creature:update', {
+    id: targetId,
+    currentHp: creature.currentHp,
+    maxHp: creature.hp,
+    effects: creature.effects,
+  });
+}
+
+/**
+ * Grants temp HP to a player and persists/broadcasts the result — the one place spell effects
+ * (Armor of Agathys, False Life, ...) and consumables should call rather than writing
+ * `participant.tempHp = amount` inline. Set semantics (not additive) live in Participant.grantTempHp.
+ */
+export function grantTempHpToPlayer(cid: string, participant: Participant, amount: number): void {
+  participant.grantTempHp(amount);
+  void updateCharacter(cid, participant.id, c => ({ ...c, tempHp: participant.tempHp }));
+  io.to(ROOM).emit('combat:player:tempHp', {
+    characterId: participant.id,
+    characterName: participant.name,
+    tempHp: participant.tempHp,
+  });
 }
 
 export async function evaluateNemesisAfterCombat(cid: string): Promise<void> {
@@ -627,7 +1158,7 @@ export async function resolveQuest(cid: string, questId: string): Promise<void> 
   io.to(ROOM).emit('quest:update', { quests, act: manifest?.act ?? 1 });
 }
 
-export async function applyDamageToCreature(cid: string, targetId: string, damage: number): Promise<void> {
+export async function applyDamageToCreature(cid: string, targetId: string, damage: number, opts?: { sourceId?: string }): Promise<void> {
   const encounter = encounters.get(cid);
   if (!encounter) return;
 
@@ -642,6 +1173,7 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
     effects: creature.effects,
   });
   if (damage > 0) io.to(ROOM).emit('combat:damage:dealt', { targetId, targetName: creature.name, damage });
+  if (damage > 0) checkEndsIfCasterDamages(cid, targetId, opts?.sourceId);
   void saveEncounter(cid, encounter);
 
   if (creature.isDead()) {
@@ -698,12 +1230,21 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
           void endCombat(cid);
           io.to(ROOM).emit('combat:state', false);
 
-          if (microDungeons.has(cid)) {
+          const arenaDungeon = dungeons.get(cid);
+          const arenaHasTraps = arenaDungeon?.entities.some(e => e.type === 'trap');
+          if (microDungeons.has(cid) && !arenaHasTraps) {
             // Combat-arena dungeon served its purpose — discard it and return to the world map
             microDungeons.delete(cid);
             dungeons.delete(cid);
             void clearDungeon(cid);
             io.to(ROOM).emit('dungeon:cleared');
+          } else if (microDungeons.has(cid)) {
+            // A trap (Snare, ...) is still armed on this arena — keep the map loaded instead of
+            // discarding it, so the trap survives past this fight to be triggered later.
+            const killedIds = new Set(enemyStatBlocks.map(e => e.id));
+            arenaDungeon!.entities = arenaDungeon!.entities.filter(e => !(e.type === 'creature' && killedIds.has(e.id)));
+            void saveDungeon(cid, arenaDungeon!);
+            io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, arenaDungeon!)));
           } else {
             const dungeon = dungeons.get(cid);
             if (dungeon) {
@@ -734,6 +1275,118 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
     }
   } else if (damage > 0) {
     await checkConcentration(cid, targetId, damage);
+  }
+}
+
+// Generic fallback for dungeon-authored traps that don't carry their own effect data yet
+// (manifest.ts traps are just {name, hideDC} today) — a plain "ouch" rather than nothing.
+const DEFAULT_TRAP_EFFECT: TrapEffect = {
+  save: { ability: 'dex', dc: 13, halfOnSave: true },
+  effects: [{ type: 'damage', damageType: 'Piercing', scaling: { mode: 'spell-slot', base: '2d10', tiers: [] } }],
+};
+
+/**
+ * The one trap-trigger listener, called from every place a token can step onto a trap's cell:
+ * checkDungeonProximity (dungeon exploration and in-combat player movement both flow through
+ * player token:move) and the AI movement loop below (enemy steps). Single-use — the trap is
+ * removed from the dungeon the instant it springs, matching Snare and the "trap springs" trope.
+ */
+export async function checkTrapAt(cid: string, gx: number, gy: number, triggerId: string, triggerName: string, isPlayer: boolean): Promise<void> {
+  const dungeon = dungeons.get(cid);
+  const entity = dungeon?.entities.find(e => {
+    if (e.type !== 'trap') return false;
+    const radius = e.trap?.radiusFt ?? 0;
+    return Math.max(Math.abs(e.x - gx), Math.abs(e.y - gy)) * 5 <= radius;
+  });
+  if (!dungeon || !entity) return;
+
+  const trapDef = entity.trap ?? DEFAULT_TRAP_EFFECT;
+  dungeon.entities = dungeon.entities.filter(e => e.id !== entity.id);
+  void saveDungeon(cid, dungeon);
+  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+
+  // Alert-only trap (Alarm) — no save, no effects, nothing to resolve. Notify just the caster
+  // who set it rather than broadcasting a "triggers!" line to the whole table.
+  if (!trapDef.save && trapDef.effects.length === 0) {
+    const caster = entity.placedBy ? (await listCharacters(cid)).find(c => c.name === entity.placedBy) : undefined;
+    const sid = caster ? playerSocketIds.get(caster.id) : undefined;
+    if (sid) {
+      io.to(sid).emit('chat:message', { text: `Your ${entity.name} alerts you — ${triggerName} passed through it.`, senderName: 'System', timestamp: Date.now() });
+    }
+    logDebug(`[trap] ${entity.name} (alert-only) triggered by ${triggerName} at (${gx},${gy}), notified ${entity.placedBy ?? 'nobody (unplaced)'}`);
+    return;
+  }
+
+  const encounter = encounters.get(cid);
+  let participant: Participant | undefined;
+  let targetId = triggerId;
+
+  if (isPlayer) {
+    const char = (await listCharacters(cid)).find(c => c.name === triggerName);
+    if (!char) return;
+    targetId = char.id;
+    participant = encounter?.findParticipant(char.id) ?? new Participant({
+      id: char.id, name: char.name, initiative: 0, isPlayer: true,
+      currentHp: char.currentHp ?? calcMaxHp(char), maxHp: calcMaxHp(char), tempHp: char.tempHp ?? 0,
+    });
+  } else {
+    participant = encounter?.findParticipant(triggerId);
+    if (!participant) return;
+  }
+
+  logDebug(`[trap] ${triggerName} (isPlayer=${isPlayer}) steps on ${entity.name} at (${gx},${gy})`);
+  let saved = false;
+  let saveRoll: { roll: number; bonus: number; total: number } | undefined;
+  if (trapDef.save) {
+    const result = await rollSavingThrow(cid, targetId, trapDef.save.ability, trapDef.save.dc);
+    saved = result.saved;
+    saveRoll = result;
+    console.log(`[trap] ${triggerName} triggers ${entity.name} — save vs DC${trapDef.save.dc}: ${saved ? 'SAVE' : 'FAIL'}`);
+    logDebug(`[trap] ${triggerName} triggers ${entity.name} — save vs DC${trapDef.save.dc}: ${saved ? 'SAVE' : 'FAIL'}`);
+  }
+
+  const targetType: CreatureType = isPlayer ? 'Humanoid' : (participant.creature?.creatureType ?? 'Humanoid');
+  const rolledDamage = rollApplicableDamage(trapDef.effects, targetType, 1, 1);
+  let damage: number | undefined;
+  if (rolledDamage && (!saved || trapDef.save?.halfOnSave)) {
+    damage = saved ? Math.floor(rolledDamage.total / 2) : rolledDamage.total;
+    if (isPlayer) await applyDamageToPlayer(cid, participant, damage, { charId: targetId });
+    else await applyDamageToCreature(cid, targetId, damage);
+  }
+
+  const conditionsApplied: string[] = [];
+  if (!saved) {
+    for (const effect of trapDef.effects) {
+      if (effect.type === 'condition' && effect.condition) {
+        await applyCondition(cid, targetId, effect.condition);
+        conditionsApplied.push(effect.condition);
+      }
+    }
+  }
+
+  const msg = { text: `${triggerName} triggers ${entity.name}!`, senderName: 'System', timestamp: Date.now() };
+  io.to(ROOM).emit('chat:message', msg);
+  void appendChatLog(cid, msg);
+
+  // Reuses the same SpellSaveResult broadcast every other save-based spell renders through the
+  // combat log — a trap's save roll should be just as visible as Snare's DC was when it was cast.
+  if (saveRoll && trapDef.save) {
+    const result: SpellSaveResult = {
+      casterName: entity.placedBy ?? entity.name,
+      spellName: entity.name,
+      dc: trapDef.save.dc,
+      saveAbility: trapDef.save.ability,
+      slotLevel: 1,
+      outcomes: [{
+        targetId, targetName: triggerName, isPC: isPlayer,
+        roll: saveRoll.roll, saveBonus: saveRoll.bonus, total: saveRoll.total, dc: trapDef.save.dc,
+        saved, damage,
+        conditionsApplied: conditionsApplied.length ? conditionsApplied : undefined,
+        remainingHp: isPlayer ? participant.currentHp : participant.creature?.currentHp,
+        targetDead: participant.isDead(),
+      }],
+    };
+    io.to(ROOM).emit('combat:spell:save:result', result);
   }
 }
 
@@ -777,6 +1430,7 @@ export function advanceTurn(cid: string) {
         await engine.trigger('afterRound', { round });
         await engine.trigger('beforeRound', { round: encounter.currentRound?.number ?? round + 1 });
         if (!combatState.get(cid)) return;
+        pruneExpiredHazardCells(cid, encounter.currentRound?.number ?? round + 1);
       }
 
       // beforeTurn hooks can damage the incoming actor (a lingering acid/poison effect ticking at
@@ -799,19 +1453,40 @@ export function advanceTurn(cid: string) {
  * exists before anything attacks them. Spells are stored on the character as bare names, so they
  * are resolved against the compendium here.
  */
+/** Registers a participant's innate damage-type modifiers as endOfCombat DamageResistanceHooks. */
+function registerStaticDamageModifiers(
+  cid: string,
+  ownerId: string,
+  mods: { damageResistances?: string[]; damageVulnerabilities?: string[]; damageImmunities?: string[] },
+): void {
+  const engine = getStateEngine(cid);
+  const entries: [string[] | undefined, 'resistance' | 'vulnerability' | 'immunity'][] = [
+    [mods.damageResistances, 'resistance'],
+    [mods.damageVulnerabilities, 'vulnerability'],
+    [mods.damageImmunities, 'immunity'],
+  ];
+  for (const [types, mode] of entries) {
+    for (const damageType of types ?? []) {
+      // Deterministic id, same reasoning as registerReactionOffers — combat can be (re)entered
+      // from more than one path, and re-registering must replace rather than duplicate.
+      const id = `innate-resist:${ownerId}:${damageType}:${mode}`;
+      engine.register(new DamageResistanceHook({ id, ownerId, source: `innate:${damageType}`, kind: 'damageResistance', damageType, mode }));
+    }
+  }
+}
+
 function registerReactionOffers(cid: string, char: Character): void {
   const engine = getStateEngine(cid);
-  for (const name of char.spells ?? []) {
-    const spell = findSpell(name);
-    if (!spell?.combat?.reactionTrigger) continue;
-    engine.register(new ReactionOfferHook({
-      // Deterministic so the two paths that roll player initiative (dungeon entry and the
-      // combat_init effect) cannot register the same offer twice and double-prompt.
-      id: `reaction-offer:${char.id}:${spell.name}`,
-      ownerId: char.id,
-      source: `Reaction: ${spell.name}`,
-      spell,
-    }));
+  const triggers = (char.spells ?? []).map(n => findSpell(n)?.combat?.reactionTrigger?.on);
+  // One broker per kind per player — not one hook per spell — so multiple eligible reaction
+  // spells surface together as a single combined offer instead of one prompt after another.
+  // Deterministic ids so the two paths that roll player initiative (dungeon entry and the
+  // combat_init effect) cannot register the same broker twice.
+  if (triggers.includes('beingHit')) {
+    engine.register(new ReactionOfferHook({ id: `reaction-broker:defend:${char.id}`, ownerId: char.id, source: 'Reaction (defend)' }));
+  }
+  if (triggers.includes('takingDamage')) {
+    engine.register(new RetaliationOfferHook({ id: `reaction-broker:retaliate:${char.id}`, ownerId: char.id, source: 'Reaction (retaliate)' }));
   }
 }
 
@@ -830,7 +1505,8 @@ export async function rollPlayerInitiatives(cid: string, chars: Character[]): Pr
 
   const entries: Participant[] = players.map(name => {
     const char = chars.find(c => c.name === name);
-    const mod = (char ? statMod(char.stats.dex) : 0) + (char?.initiativeBonus ?? 0);
+    const alertBonus = char && hasOriginFeat(char, 'Alert') ? (char.proficiencyBonus ?? 2) : 0;
+    const mod = (char ? statMod(char.stats.dex) : 0) + (char?.initiativeBonus ?? 0) + alertBonus;
     const maxHp = char ? calcMaxHp(char) : 0;
     const participant = new Participant({
       id: char?.id ?? name,
@@ -840,9 +1516,13 @@ export async function rollPlayerInitiatives(cid: string, chars: Character[]): Pr
       teamId: 'players',
       currentHp: char?.currentHp ?? maxHp,
       maxHp,
+      tempHp: char?.tempHp ?? 0,
     });
     playerTeam!.addParticipant(participant);
-    if (char) registerReactionOffers(cid, char);
+    if (char) {
+      registerReactionOffers(cid, char);
+      registerStaticDamageModifiers(cid, char.id, char);
+    }
     return participant;
   });
 
@@ -860,8 +1540,10 @@ export async function rollPlayerInitiatives(cid: string, chars: Character[]): Pr
         isPlayer: false,
         teamId: 'players',
         creature,
+        ownerId: sb.ownerId,
       });
       playerTeam!.addParticipant(p);
+      registerStaticDamageModifiers(cid, creature.id, creature);
       return p;
     });
     encounter.expectedParticipantCount += allyEntries.length;
@@ -876,6 +1558,7 @@ export function rollEnemyInitiatives(cid: string): void {
   const existing = encounter.turnOrder.length;
   const entries = encounter.enemies.map(p => {
     p.initiative = new D20Roll().roll() + statMod(p.creature?.stats.dex ?? 10);
+    if (p.creature) registerStaticDamageModifiers(cid, p.id, p.creature);
     return p;
   });
   addToTurnOrder(cid, entries, existing * 500);

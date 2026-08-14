@@ -1,0 +1,87 @@
+{
+  "Chill Touch": {
+    "resolution": "attack",
+    "attackType": "melee",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d10",
+          "tiers": [
+            {
+              "atLevel": 5,
+              "value": "2d10"
+            },
+            {
+              "atLevel": 11,
+              "value": "3d10"
+            },
+            {
+              "atLevel": 17,
+              "value": "4d10"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "Poison Spray": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Poison",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d12",
+          "tiers": [
+            {
+              "atLevel": 5,
+              "value": "2d12"
+            },
+            {
+              "atLevel": 11,
+              "value": "3d12"
+            },
+            {
+              "atLevel": 17,
+              "value": "4d12"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "Sapping Sting": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic"
+      }
+    ]
+  },
+  "Spare the Dying": {
+    "resolution": "none"
+  },
+  "Toll the Dead": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic"
+      }
+    ]
+  }
+}

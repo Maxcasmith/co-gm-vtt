@@ -1,0 +1,52 @@
+{
+  "Color Spray": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cone",
+      "size": 15,
+      "origin": "self"
+    },
+    "hooks": [
+      {
+        "type": "recurringDamage",
+        "conditionName": "Blinded",
+        "duration": { "until": "rounds", "rounds": 2 }
+      }
+    ]
+  },
+  "Disguise Self": {
+    "resolution": "none",
+    "explorationCastable": true,
+    "todo": "No visual/token change — deliberately not modeled, this only marks the caster with an internal 'Disguised' tag. Detection is real: combat:illusion:investigate rolls the investigator's Investigation against the tag's DC (the caster's own spell save DC) and replies privately with the result, same as RAW ('you' see through it, not the whole table). No UI button triggers it yet — needs a target-picker, same shape the escape-attempt button would need for someone else's condition.",
+    "hooks": [
+      {
+        "type": "illusionTag",
+        "illusionTagName": "Disguised",
+        "duration": { "until": "gameTime", "gameSecs": 3600 }
+      }
+    ]
+  },
+  "Distort Value": {
+    "resolution": "none",
+    "explorationCastable": true,
+    "todo": "Detection would reuse the same illusionTag+Investigation-vs-DC mechanism Disguise Self now uses, but there's nothing to tag: items have no tracked market value field at all, so there's no true/perceived-value pair to distort in the first place. Blocked on that, not on the detection roll. Casting only spends the slot and announces."
+  },
+  "Illusory Script": {
+    "resolution": "none",
+    "explorationCastable": true
+  },
+  "Silent Image": {
+    "resolution": "none",
+    "placesIllusion": true,
+    "todo": "Only static placement is modeled (a labeled marker at the cast point). Moving it with a Magic action, animating its appearance to sell the illusion, and revealing it on physical interaction or a successful Investigation check are all unimplemented.",
+    "area": {
+      "shape": "cube",
+      "size": 15,
+      "origin": "point"
+    }
+  }
+}

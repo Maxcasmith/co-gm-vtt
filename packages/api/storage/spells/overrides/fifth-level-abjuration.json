@@ -1,0 +1,60 @@
+{
+  "Alustriel's Mooncloak": {
+    "resolution": "none",
+    "area": {
+      "shape": "emanation",
+      "size": 20,
+      "origin": "self"
+    }
+  },
+  "Antilife Shell": {
+    "resolution": "none",
+    "area": {
+      "shape": "emanation",
+      "size": 10,
+      "origin": "self"
+    }
+  },
+  "Circle of Power": {
+    "resolution": "none",
+    "area": {
+      "shape": "emanation",
+      "size": 30,
+      "origin": "self"
+    }
+  },
+  "Dispel Evil and Good": {
+    "resolution": "save",
+    "save": {
+      "ability": "cha",
+      "halfOnSave": false
+    }
+  },
+  "Greater Restoration": {
+    "resolution": "none"
+  },
+  "Hallow": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Frightened"
+      }
+    ]
+  },
+  "Mass Cure Wounds": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 30,
+      "origin": "point"
+    }
+  },
+  "Planar Binding": {
+    "resolution": "save",
+    "save": {
+      "ability": "cha",
+      "halfOnSave": false
+    }
+  }
+}

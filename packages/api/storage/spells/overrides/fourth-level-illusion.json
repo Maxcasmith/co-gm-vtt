@@ -1,0 +1,32 @@
+{
+  "Greater Invisibility": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Invisible"
+      }
+    ]
+  },
+  "Hallucinatory Terrain": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 150,
+      "origin": "point"
+    }
+  },
+  "Phantasmal Killer": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic"
+      }
+    ]
+  }
+}

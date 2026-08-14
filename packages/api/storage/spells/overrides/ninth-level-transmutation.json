@@ -1,0 +1,22 @@
+{
+  "Mass Polymorph": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    }
+  },
+  "Shapechange": {
+    "resolution": "none"
+  },
+  "Time Stop": {
+    "resolution": "none"
+  },
+  "True Polymorph": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    }
+  }
+}

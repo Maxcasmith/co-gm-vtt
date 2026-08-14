@@ -1,0 +1,38 @@
+{
+  "Imprisonment": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Restrained"
+      }
+    ]
+  },
+  "Invulnerability": {
+    "resolution": "none"
+  },
+  "Mass Heal": {
+    "resolution": "none"
+  },
+  "Prismatic Wall": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      },
+      {
+        "type": "condition",
+        "condition": "Blinded"
+      }
+    ]
+  }
+}

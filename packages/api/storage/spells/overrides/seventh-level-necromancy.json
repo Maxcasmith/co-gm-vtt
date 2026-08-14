@@ -1,0 +1,30 @@
+{
+  "Finger of Death": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "7d8+30",
+          "tiers": []
+        }
+      }
+    ]
+  },
+  "Resurrection": {
+    "resolution": "none"
+  },
+  "Tether Essence": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    }
+  }
+}

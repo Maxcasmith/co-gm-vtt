@@ -1,0 +1,175 @@
+{
+  "Blinding Smite": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant"
+      },
+      {
+        "type": "condition",
+        "condition": "Blinded"
+      }
+    ]
+  },
+  "Cacophonic Shield": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "emanation",
+      "size": 10,
+      "origin": "self"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Thunder"
+      },
+      {
+        "type": "condition",
+        "condition": "Deafened"
+      }
+    ]
+  },
+  "Crusader's Mantle": {
+    "resolution": "none",
+    "area": {
+      "shape": "emanation",
+      "size": 30,
+      "origin": "self"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant"
+      }
+    ]
+  },
+  "Daylight": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 60,
+      "origin": "point"
+    }
+  },
+  "Fireball": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      }
+    ]
+  },
+  "Laeral's Silver Lance": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      },
+      {
+        "type": "condition",
+        "condition": "Prone"
+      }
+    ]
+  },
+  "Leomund's Tiny Hut": {
+    "resolution": "none",
+    "area": {
+      "shape": "emanation",
+      "size": 10,
+      "origin": "self"
+    }
+  },
+  "Lightning Bolt": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Lightning"
+      }
+    ]
+  },
+  "Melf's Minute Meteors": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      }
+    ]
+  },
+  "Pulse Wave": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cone",
+      "size": 30,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      }
+    ]
+  },
+  "Wall of Sand": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Blinded"
+      }
+    ]
+  },
+  "Wall of Water": {
+    "resolution": "none"
+  },
+  "Wind Wall": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Bludgeoning"
+      }
+    ]
+  }
+}

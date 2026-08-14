@@ -13,6 +13,9 @@ export class Creature {
   effects: string[];
   creatureType: CreatureType;
   conditions: ActiveCondition[];
+  damageResistances: string[];
+  damageVulnerabilities: string[];
+  damageImmunities: string[];
 
   constructor(data: EnemyStatBlock) {
     this.id = data.id;
@@ -28,6 +31,9 @@ export class Creature {
     // Old saved encounters predate creatureType — fall back to Humanoid rather than backfilling.
     this.creatureType = data.creatureType ?? 'Humanoid';
     this.conditions = data.conditions ?? [];
+    this.damageResistances = data.damageResistances ?? [];
+    this.damageVulnerabilities = data.damageVulnerabilities ?? [];
+    this.damageImmunities = data.damageImmunities ?? [];
   }
 
   static from(data: EnemyStatBlock): Creature {
@@ -63,6 +69,9 @@ export class Creature {
       attacks: this.attacks,
       creatureType: this.creatureType,
       conditions: this.conditions,
+      damageResistances: this.damageResistances,
+      damageVulnerabilities: this.damageVulnerabilities,
+      damageImmunities: this.damageImmunities,
     };
   }
 }

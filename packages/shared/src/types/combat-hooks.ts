@@ -26,6 +26,7 @@ export const HOOK_STAGES = [
   "afterSpellCast",
   "onDown",
   "onKill",
+  "onMove",
 ] as const;
 export type HookStage = (typeof HOOK_STAGES)[number];
 
@@ -135,6 +136,30 @@ export interface DeathContext {
   sourceId?: string | undefined;
 }
 
+/**
+ * Fired once per token:move, independent of the attack/turn/round chain above — the movement
+ * counterpart, driving anything that reacts to a creature actually changing cells (Booming
+ * Blade's "takes damage if it moves before your next turn", future terrain effects like a
+ * Spike-Growth-shaped "damage per foot moved through this area"). Opportunity Attacks are NOT
+ * driven through this — every creature with a reaction has that innately, not just ones a spell
+ * touched, so it's checked directly in checkOpportunityAttacks (runtime.ts) rather than needing
+ * a hook registered on anyone.
+ *
+ * Only the two endpoints are known (see checkOpportunityAttacks' own doc for why), so a hook
+ * reacting to "did they cross into/out of some area" only ever sees where they started and
+ * ended, not the cells in between.
+ */
+export interface MoveContext {
+  participantId: string;
+  participantName: string;
+  fromGx: number;
+  fromGy: number;
+  toGx: number;
+  toGy: number;
+  /** Chebyshev distance in feet between the from/to cells — same convention as every other range check. */
+  distanceFt: number;
+}
+
 /** Maps each stage to the context type the engine passes to hooks registered on it. */
 export interface HookContextMap {
   beforeCombat: CombatContext;
@@ -153,24 +178,50 @@ export interface HookContextMap {
   afterSpellCast: SpellCastContext;
   onDown: DeathContext;
   onKill: DeathContext;
+  onMove: MoveContext;
 }
 
 // ── Duration & triggers ───────────────────────────────────────────────────────
 
 /**
  * When a registered hook stops applying. 'startOfOwnerTurn' is the 5e "until the start of
- * your next turn" window (Shield); 'rounds' covers fixed-length effects (Tasha's Caustic
- * Brew's 1 minute = 10 rounds).
+ * your next turn" window where "your" is whoever the hook is attached to (Shield, cast on and
+ * watching the caster). 'startOfCasterNextTurn' is the same window but for an effect planted on
+ * a target that must instead watch the CASTER's turn (Ray of Sickness's "until the end of your
+ * next turn" — the target is Poisoned, but "your" means the caster who threw the ray, not the
+ * target's own turn). 'rounds' covers fixed-length effects measured in combat rounds (Tasha's
+ * Caustic Brew's 1 minute = 10 rounds) — these only ever tick while an encounter is running,
+ * since rounds don't exist outside one. 'gameTime' is the same idea measured against the
+ * campaign's real clock instead (Mage Armor's 8 hours, Comprehend Languages' 1 hour) — it
+ * expires by wall-clock/narrative time passing (see sweepGameTimeExpiries in runtime.ts, called
+ * wherever worldTimeSecs advances) regardless of whether combat is active, so it's the right
+ * choice for anything cast during exploration that needs to actually run out.
  */
 export interface HookDuration {
-  until: "startOfOwnerTurn" | "endOfCombat" | "rounds";
+  until: "startOfOwnerTurn" | "startOfCasterNextTurn" | "endOfCombat" | "rounds" | "gameTime";
   rounds?: number;
+  /** gameTime only — how many game-seconds from the moment of casting until this expires. */
+  gameSecs?: number;
 }
 
 /**
  * What prompts a reaction-cast spell to be offered to its owner mid-resolution. Declared on
  * the spell rather than inferred, so the engine knows *why* it is interrupting.
+ *
+ * 'beingHit' fires on afterAttackRoll, before damage — a defensive boost that might turn the
+ * incoming hit into a miss (Shield). 'takingDamage' fires on afterDamage, after the hit already
+ * landed — a retaliation cast back at whoever dealt the damage (Hellish Rebuke). The two need
+ * different Hook classes (ReactionOfferHook vs RetaliationOfferHook in the api package) since
+ * the shape of what's being decided is different, not just the stage.
  */
 export interface ReactionTrigger {
-  on: "beingHit";
+  on: "beingHit" | "takingDamage";
+  /**
+   * How an accepted 'takingDamage' pick resolves — 'retaliate' (default, Hellish Rebuke) casts
+   * back at whoever dealt the damage; 'resist' (Absorb Elements) instead grants the owner
+   * resistance to the triggering damage type and arms bonus damage on their next weapon hit.
+   * Both shapes fire on the same afterDamage broker so a player who knows both sees them
+   * together in one offer. Irrelevant for 'beingHit', which is always the defend shape.
+   */
+  resolve?: "retaliate" | "resist";
 }

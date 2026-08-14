@@ -1,8 +1,10 @@
 import type { Character } from "shared";
-import { CLASS_FEATURES, SPECIES_FEATURES, BACKGROUND_FEAT, BACKGROUND_SKILLS } from "../character-creation/srd.ts";
+import { CLASS_FEATURES, SPECIES_FEATURES, BACKGROUND_FEAT, BACKGROUND_SKILLS, ORIGIN_FEAT_DETAILS } from "../character-creation/srd.ts";
 
 export function FeaturesTab({ character }: { character: Character }) {
   const cls = character.class;
+  const bgFeatName = BACKGROUND_FEAT[character.background];
+  const bgFeat = bgFeatName ? ORIGIN_FEAT_DETAILS[bgFeatName] : undefined;
   return (
     <>
       {(CLASS_FEATURES[cls] ?? []).length > 0 && (
@@ -31,19 +33,19 @@ export function FeaturesTab({ character }: { character: Character }) {
         </div>
       )}
 
-      {(BACKGROUND_FEAT[character.background] ||
+      {(bgFeat ||
         (BACKGROUND_SKILLS[character.background] ?? []).length > 0) && (
           <div className="sheet-feature-group">
             <p className="sheet-feature-group-title">
               {character.background} Background
             </p>
-            {BACKGROUND_FEAT[character.background] && (
+            {bgFeat && (
               <div className="sheet-feature">
                 <div className="sheet-feature-name">
-                  {BACKGROUND_FEAT[character.background]!.name}
+                  {bgFeat.name}
                 </div>
                 <div className="sheet-feature-desc">
-                  {BACKGROUND_FEAT[character.background]!.description}
+                  {bgFeat.description}
                 </div>
               </div>
             )}

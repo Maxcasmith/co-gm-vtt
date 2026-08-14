@@ -1,0 +1,25 @@
+{
+  "Animal Shapes": {
+    "resolution": "none"
+  },
+  "Control Weather": {
+    "resolution": "none"
+  },
+  "Earthquake": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Bludgeoning"
+      },
+      {
+        "type": "condition",
+        "condition": "Prone"
+      }
+    ]
+  }
+}

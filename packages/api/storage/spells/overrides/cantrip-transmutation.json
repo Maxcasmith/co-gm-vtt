@@ -1,0 +1,117 @@
+{
+  "Control Flames": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 5,
+      "origin": "point"
+    }
+  },
+  "Druidcraft": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 5,
+      "origin": "point"
+    }
+  },
+  "Elementalism": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 5,
+      "origin": "point"
+    }
+  },
+  "Gust": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": false
+    }
+  },
+  "Magic Stone": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Bludgeoning",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d6",
+          "tiers": []
+        }
+      }
+    ]
+  },
+  "Mending": {
+    "resolution": "none"
+  },
+  "Message": {
+    "resolution": "none"
+  },
+  "Mold Earth": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 5,
+      "origin": "point"
+    }
+  },
+  "Prestidigitation": {
+    "resolution": "none"
+  },
+  "Primal Savagery": {
+    "resolution": "attack",
+    "attackType": "melee",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Acid"
+      }
+    ]
+  },
+  "Shape Water": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 5,
+      "origin": "point"
+    }
+  },
+  "Shillelagh": {
+    "resolution": "none"
+  },
+  "Thaumaturgy": {
+    "resolution": "none"
+  },
+  "Thorn Whip": {
+    "resolution": "attack",
+    "attackType": "melee",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Piercing",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d6",
+          "tiers": [
+            {
+              "atLevel": 5,
+              "value": "2d6"
+            },
+            {
+              "atLevel": 11,
+              "value": "3d6"
+            },
+            {
+              "atLevel": 17,
+              "value": "4d6"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

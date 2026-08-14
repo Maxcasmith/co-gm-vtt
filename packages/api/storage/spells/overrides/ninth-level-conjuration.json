@@ -1,0 +1,40 @@
+{
+  "Blade of Disaster": {
+    "resolution": "auto",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      }
+    ]
+  },
+  "Gate": {
+    "resolution": "none"
+  },
+  "Storm of Vengeance": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Thunder"
+      },
+      {
+        "type": "condition",
+        "condition": "Deafened"
+      }
+    ]
+  },
+  "Wish": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic"
+      }
+    ]
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "Contagion": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic"
+      },
+      {
+        "type": "condition",
+        "condition": "Poisoned"
+      }
+    ]
+  },
+  "Danse Macabre": {
+    "resolution": "none"
+  },
+  "Enervation": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic"
+      }
+    ]
+  },
+  "Negative Energy Flood": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic"
+      }
+    ]
+  },
+  "Raise Dead": {
+    "resolution": "none"
+  },
+  "Reincarnate": {
+    "resolution": "none"
+  }
+}

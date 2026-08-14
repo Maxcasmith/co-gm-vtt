@@ -1,0 +1,49 @@
+{
+  "Fear": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cone",
+      "size": 30,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Frightened"
+      }
+    ]
+  },
+  "Hypnotic Pattern": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cube",
+      "size": 30,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Charmed"
+      }
+    ]
+  },
+  "Major Image": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    }
+  },
+  "Phantom Steed": {
+    "resolution": "none"
+  }
+}

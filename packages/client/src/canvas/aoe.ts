@@ -67,6 +67,39 @@ export function inArea(
 }
 
 /**
+ * The discrete grid cell (of the 8 surrounding playerPos, ring pattern — no diagonal-adjacent
+ * gaps, no including your own cell) closest to the mouse's direction from the player. Used for
+ * trap placement (Snare) rather than resolveAoeOrigin's continuous point — a persisted trap
+ * needs an integer cell, and Touch range (1 cell) is too short for resolveAoeOrigin's
+ * corner-anchored clamp to reach all 8 neighbors evenly (it was landing in a lopsided 2x2
+ * quadrant next to the player instead of the full ring). Only handles range === 1 cell today
+ * (every placesTrap spell so far is Touch); generalize the distance the day a longer-range one
+ * shows up.
+ */
+// E, SE, S, SW, W, NW, N, NE — order matches the octant index below (0 = pointing at +x/E).
+const RING_DIRS = [
+  { gx: 1, gy: 0 }, { gx: 1, gy: 1 }, { gx: 0, gy: 1 }, { gx: -1, gy: 1 },
+  { gx: -1, gy: 0 }, { gx: -1, gy: -1 }, { gx: 0, gy: -1 }, { gx: 1, gy: -1 },
+];
+
+export function nearestRingCell(
+  playerPos: { gx: number; gy: number },
+  mouse: { gx: number; gy: number } | null,
+): { gx: number; gy: number } {
+  const cx = playerPos.gx + 0.5;
+  const cy = playerPos.gy + 0.5;
+  const m = mouse ?? { gx: cx + 1, gy: cy };
+  const dx = m.gx - cx;
+  const dy = m.gy - cy;
+  if (dx === 0 && dy === 0) return { gx: playerPos.gx + 1, gy: playerPos.gy };
+  // Per-axis sign() only ever lands on the 4 corners (dx,dy both nonzero) — the 4 edge cells
+  // (straight N/S/E/W) need the angle bucketed into 8 equal 45° wedges instead.
+  const octant = (Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) % 8 + 8) % 8;
+  const dir = RING_DIRS[octant]!;
+  return { gx: playerPos.gx + dir.gx, gy: playerPos.gy + dir.gy };
+}
+
+/**
  * Where an AoE template currently sits: self-origin follows the caster and points at the
  * mouse (cone/line/cube rotation); point-origin follows the mouse, clamped to spell range.
  * A spell counts as self-origin whenever its range is Self, regardless of the area's own

@@ -1,30 +1,34 @@
-/* ── reaction prompt ── */
-/* Sits above the victory/defeat overlays: combat is suspended server-side while this is open,
-   so nothing behind it is actionable and it must never be visually buried. */
-.reaction-overlay {
+/* ── reaction sidebar ── */
+/* Docked to the right edge: combat is suspended server-side while this is open, so nothing
+   behind it is actionable, but it doesn't need to block the view of the board like a modal did. */
+.reaction-sidebar {
   position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9500;
-  animation: fade-in 0.2s ease;
-}
-
-.reaction-card {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 340px;
+  max-width: 90vw;
   background: rgba(10, 8, 20, 0.97);
-  border: 1px solid rgba(120, 170, 255, 0.55);
-  border-radius: 16px;
-  padding: 32px 40px;
-  text-align: center;
+  border-left: 1px solid rgba(120, 170, 255, 0.55);
+  box-shadow: -20px 0 60px rgba(120, 170, 255, 0.12);
+  z-index: 9500;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  max-width: 440px;
-  width: 90vw;
-  box-shadow: 0 0 60px rgba(120, 170, 255, 0.18);
+  gap: 16px;
+  padding: 20px;
+  overflow-y: auto;
+  animation: slide-in-right 0.2s ease;
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.reaction-sidebar-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .reaction-eyebrow {
@@ -35,29 +39,54 @@
   margin: 0;
 }
 
-.reaction-title {
-  font-size: 26px;
+.reaction-timer-track {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.reaction-timer-fill {
+  height: 100%;
+  width: calc(var(--pct) * 1%);
+  background: rgba(120, 170, 255, 0.9);
+  transition: width 0.1s linear;
+}
+
+.reaction-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.reaction-option {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(120, 170, 255, 0.08);
+  border: 1px solid rgba(120, 170, 255, 0.3);
+}
+
+.reaction-option-title {
+  font-size: 18px;
   font-weight: 700;
   color: #eaeaf2;
   margin: 0;
 }
 
 .reaction-detail {
-  font-size: 14px;
+  font-size: 13px;
   color: rgba(255, 255, 255, 0.6);
   margin: 0;
 }
 
 .reaction-outcome {
-  font-size: 14px;
+  font-size: 13px;
   color: rgba(120, 170, 255, 0.95);
-  margin: 0 0 6px;
-}
-
-.reaction-actions {
-  display: flex;
-  gap: 12px;
-  margin-top: 6px;
+  margin: 0;
 }
 
 .reaction-accept,
@@ -73,6 +102,8 @@
   background: rgba(120, 170, 255, 0.22);
   border: 1px solid rgba(120, 170, 255, 0.7);
   color: #dce8ff;
+  align-self: flex-start;
+  margin-top: 4px;
 }
 
 .reaction-accept:hover {
@@ -83,6 +114,7 @@
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.25);
   color: rgba(255, 255, 255, 0.65);
+  margin-top: auto;
 }
 
 .reaction-decline:hover {

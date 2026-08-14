@@ -2,6 +2,7 @@ import { readChatLog, readQuests, readManifest, listCharacters, loadDungeon, loa
 import { toClientDungeon } from '../dungeon/index.ts';
 import { io, ROOM, connected, playerSocketIds, campaignPlayers, sessionState, combatState, dungeons, tokenPositions, microDungeons, encounters, enemiesReady, withLivePositions } from '../state.ts';
 import { maybeResolveRest, broadcastRestProgress } from './rest.ts';
+import { conditionsHolder } from '../combat/runtime.ts';
 import type { JoinContext } from './context.ts';
 
 export function registerJoin(ctx: JoinContext): void {
@@ -71,6 +72,14 @@ export function registerJoin(ctx: JoinContext): void {
         socket.emit('combat:turn:order', encounter.turnOrder.map(p => p.toTurnOrderEntry()));
         const actor = encounter.currentActor;
         if (actor) socket.emit('combat:turn', { actorName: actor.name });
+
+        // Re-sync any concentration badges a reconnecting client would otherwise have missed
+        // (combat:concentration only fires at the moment it starts/breaks).
+        for (const p of encounter.turnOrder) {
+          const holder = await conditionsHolder(campaignId, p.id);
+          const link = holder?.conditions?.find(c => c.name === 'Concentrating')?.concentration;
+          if (link) socket.emit('combat:concentration', { targetId: p.id, targetName: p.name, spellName: link.spellName });
+        }
       }
     }
   })();

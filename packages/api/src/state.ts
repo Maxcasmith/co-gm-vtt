@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import type { ServerToClientEvents, ClientToServerEvents, Player, Dungeon, EffectSpec } from 'shared';
+import type { ServerToClientEvents, ClientToServerEvents, Player, Dungeon, EffectSpec, HookSpec, AbilityKey } from 'shared';
 import { Encounter } from './domain/encounter.ts';
 import { StateEngine } from './combat/stateEngine/StateEngine.ts';
 import { logError } from './logger.ts';
@@ -53,8 +53,27 @@ export const combatStartedAt = new Map<string, number>();  // timestamp when com
 export const dungeons = new Map<string, Dungeon>(); // in-memory mirror of saveDungeon/loadDungeon, mutated on reveal
 // cid → casterId → self-buff spell (e.g. Divine Smite) queued to trigger on that caster's next
 // weapon hit. Effects are stored unresolved (not pre-rolled) so appliesIf (e.g. vs Fiend/Undead)
-// can be evaluated against whichever creature actually gets hit.
-export const pendingWeaponBonuses = new Map<string, Record<string, { spellName: string; effects: EffectSpec[]; casterLevel: number; slotLevel: number }>>();
+// can be evaluated against whichever creature actually gets hit. `save`/`hooks` are only present
+// for spells with a secondary save-gated effect on top of unconditional damage (Thunderous
+// Smite's push+Prone, Searing Smite's Burning) — damage-only smites (Divine Smite) omit both.
+export const pendingWeaponBonuses = new Map<string, Record<string, {
+  spellName: string;
+  effects: EffectSpec[];
+  casterLevel: number;
+  slotLevel: number;
+  save?: { ability: AbilityKey; halfOnSave: boolean } | undefined;
+  hooks?: HookSpec[] | undefined;
+  /** Burst color played on the target when this buff's weapon hit lands (SpellCombatMeta.impactColor). */
+  impactColor?: string | undefined;
+  /** Visual variant for the impact burst (SpellCombatMeta.impactStyle). */
+  impactStyle?: 'fire' | undefined;
+  /** Hail of Thorns' splash — every other living creature within this many feet of the hit target rolls the same `save` against the same gated damage effects too. */
+  splashRadiusFt?: number | undefined;
+  /** Green-Flame Blade's splash — a single nearest enemy within splashRadiusFt of the hit target takes this flat, no-save damage instead of rolling a save against `effects` (mutually exclusive with the Hail-of-Thorns save-based splash above). */
+  splashOnHit?: EffectSpec[] | undefined;
+  /** Caster's spellcasting ability modifier, needed to resolve a 'cantrip-plus-ability-mod' or 'ability-mod' Scaling on splashOnHit. */
+  casterAbilityMod?: number | undefined;
+}>>();
 export const microDungeons = new Set<string>(); // cids whose current dungeon is an ephemeral combat arena — discarded on victory instead of continued
 
 export interface RestChoice { resting: boolean; restType: 'short' | 'long'; hitDiceSpent: number }

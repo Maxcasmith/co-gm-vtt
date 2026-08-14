@@ -1,0 +1,80 @@
+{
+  "Encode Thoughts": {
+    "resolution": "none"
+  },
+  "Friends": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Charmed"
+      }
+    ]
+  },
+  "Mind Sliver": {
+    "resolution": "save",
+    "save": {
+      "ability": "int",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d6",
+          "tiers": [
+            {
+              "atLevel": 5,
+              "value": "2d6"
+            },
+            {
+              "atLevel": 11,
+              "value": "3d6"
+            },
+            {
+              "atLevel": 17,
+              "value": "4d6"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "Vicious Mockery": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d6",
+          "tiers": [
+            {
+              "atLevel": 5,
+              "value": "2d6"
+            },
+            {
+              "atLevel": 11,
+              "value": "3d6"
+            },
+            {
+              "atLevel": 17,
+              "value": "4d6"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

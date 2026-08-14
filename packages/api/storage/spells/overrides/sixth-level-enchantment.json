@@ -1,0 +1,50 @@
+{
+  "Dirge": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "emanation",
+      "size": 60,
+      "origin": "self"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic"
+      },
+      {
+        "type": "condition",
+        "condition": "Prone"
+      }
+    ]
+  },
+  "Mass Suggestion": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Charmed"
+      }
+    ]
+  },
+  "Otto's Irresistible Dance": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Charmed"
+      }
+    ]
+  }
+}

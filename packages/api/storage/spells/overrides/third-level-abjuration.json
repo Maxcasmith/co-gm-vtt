@@ -1,0 +1,63 @@
+{
+  "Aura of Vitality": {
+    "resolution": "none",
+    "area": {
+      "shape": "emanation",
+      "size": 30,
+      "origin": "self"
+    }
+  },
+  "Beacon of Hope": {
+    "resolution": "none"
+  },
+  "Counterspell": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    }
+  },
+  "Dispel Magic": {
+    "resolution": "none"
+  },
+  "Glyph of Warding": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    }
+  },
+  "Intellect Fortress": {
+    "resolution": "none"
+  },
+  "Magic Circle": {
+    "resolution": "save",
+    "save": {
+      "ability": "cha",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cylinder",
+      "size": 10,
+      "width": 20,
+      "origin": "point"
+    }
+  },
+  "Mass Healing Word": {
+    "resolution": "none"
+  },
+  "Nondetection": {
+    "resolution": "none"
+  },
+  "Protection from Energy": {
+    "resolution": "none"
+  },
+  "Remove Curse": {
+    "resolution": "none"
+  }
+}

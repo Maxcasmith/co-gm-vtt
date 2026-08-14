@@ -21,7 +21,11 @@ export interface RestOutcome {
 export function applyLongRest(char: Character): RestOutcome {
   const maxHp = calcMaxHp(char);
   const maxSpellSlots1 = spellSlotsForClass(char.class);
-  return { currentHp: maxHp, maxHp, currentSpellSlots1: maxSpellSlots1, maxSpellSlots1, hitDiceUsed: 0 };
+  // RAW: HP fully restored, but Hit Dice only regain half your total (min 1), not all of them.
+  const totalHitDice = char.level ?? 1;
+  const restored = Math.max(1, Math.floor(totalHitDice / 2));
+  const hitDiceUsed = Math.max(0, (char.hitDiceUsed ?? 0) - restored);
+  return { currentHp: maxHp, maxHp, currentSpellSlots1: maxSpellSlots1, maxSpellSlots1, hitDiceUsed };
 }
 
 export function applyShortRest(char: Character, hitDiceSpent: number): RestOutcome {

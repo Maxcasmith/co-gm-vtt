@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Character, Spell } from "shared";
-import { isWeapon, actionCostFromCastingTime, parseRangeFeet } from "shared";
+import { isWeapon, actionCostFromCastingTime, parseRangeFeet, FEAT_SPELL_GRANTS } from "shared";
 import { dispatch } from "../events.ts";
 import { API, ActionCostDot } from "./helpers.tsx";
+import { BACKGROUND_FEAT } from "../character-creation/srd.ts";
 
 const LEVEL_HEADINGS: Record<number, string> = {
   0: "Cantrips",
@@ -40,6 +41,34 @@ export function SpellsTab({
   const [spells, setSpells] = useState<Spell[]>([]);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Spell | null>(null);
+  const [damageType, setDamageType] = useState<string | undefined>(undefined);
+  const [command, setCommand] = useState<string | undefined>(undefined);
+  const [customCommand, setCustomCommand] = useState("");
+
+  function damageTypeOptionsFor(spell: Spell): string[] | undefined {
+    return spell.combat?.onHit?.find((e) => e.damageTypeOptions?.length)?.damageTypeOptions;
+  }
+
+  function commandOptionsFor(spell: Spell): string[] | undefined {
+    return spell.combat?.commandOptions;
+  }
+
+  // Magic Initiate can grant spells from a different class entirely, so the fetch has to cover
+  // every class list or a feat-only spell would 404 out of the results. A character can have up
+  // to two independent sources: their Background's fixed feat, and (Human only) their own
+  // "Versatile" pick — same dual-source shape as character-creation/SpellsTab.tsx.
+  const bgFeatName = BACKGROUND_FEAT[character.background];
+  const featSourceNames = [...new Set([bgFeatName, character.species === 'Human' ? character.speciesOriginFeat : undefined])]
+    .filter((name): name is string => !!name && name in FEAT_SPELL_GRANTS);
+  const featSources = featSourceNames.map(name => ({ name, grant: FEAT_SPELL_GRANTS[name]! }));
+  function featSpellSource(spell: Spell): string | undefined {
+    return featSources.find(fs => spell.classes.includes(fs.grant.forClass) && !spell.classes.includes(character.class))?.name;
+  }
+  // Recorded at learn time going forward; older saves without spellSources fall back to the
+  // structural heuristic (only correct when the feat's class differs from the character's own).
+  function sourceOf(spell: Spell): string {
+    return character.spellSources?.[spell.name] ?? featSpellSource(spell) ?? character.class;
+  }
 
   const resourceAvailable: Record<
     "action" | "bonusAction" | "reaction",
@@ -56,15 +85,16 @@ export function SpellsTab({
   const mainHandWeapon =
     mainHandItem && isWeapon(mainHandItem) ? mainHandItem : undefined;
 
-  // One-shot self-buffs that only matter on the weapon hit they're cast for (Divine Smite, ...) —
-  // bundle cast + attack into one interaction rather than a separate "next hit" queue. Duration
-  // buffs like Divine Favor/Zephyr Strike stay on the old immediate-self-cast path below.
+  // One-shot self-buffs that only matter on the weapon hit they're cast for (Divine Smite,
+  // Booming Blade/Green-Flame Blade, ...) — bundle cast + attack into one interaction rather than
+  // a separate "next hit" queue. Duration buffs like Divine Favor/Zephyr Strike stay on the old
+  // immediate-self-cast path below — they carry hooks now, not an onHit damage effect, so the
+  // damage-effect check below already excludes them without needing a duration check too.
   function isBundledSmite(spell: Spell): boolean {
     return (
-      spell.combat?.resolution === "none" &&
+      spell.combat?.resolution !== "attack" &&
       !spell.combat?.save &&
       parseRangeFeet(spell.range) === 0 &&
-      spell.duration === "Instantaneous" &&
       !!spell.combat?.onHit?.some((e) => e.type === "damage")
     );
   }
@@ -84,8 +114,16 @@ export function SpellsTab({
   }
 
   function handleCast(spell: Spell) {
-    const cost = actionCostFromCastingTime(spell.castingTime);
-    if (!combatActive || !isMyTurn || !cost || !resourceAvailable[cost] || noSlotFor(spell)) return;
+    // Casting times outside action/bonus/reaction (Snare/Alarm's "1 Min.", ...) cost a full
+    // action in this app's simplified combat model — same fallback CombatDock already uses.
+    const cost = actionCostFromCastingTime(spell.castingTime) ?? 'action';
+    // Exploration-castable spells (Snare) skip the action-economy gate entirely outside combat —
+    // same spell slot spend, no action/turn requirement. Cast mid-fight, they're gated normally.
+    // journalOnly (Ceremony) needs the same bypass since it never resolves through combat at all
+    // — the server hard-blocks it separately if combat is active.
+    const explorationCast = (spell.combat?.explorationCastable || spell.combat?.journalOnly) && !combatActive;
+    if (!explorationCast && (!combatActive || !isMyTurn || !resourceAvailable[cost])) return;
+    if (noSlotFor(spell)) return;
 
     if (isBundledSmite(spell)) {
       if (!mainHandWeapon || !actionAvailable) return;
@@ -117,19 +155,33 @@ export function SpellsTab({
       spell,
       casterId: character.id,
       actionType: cost,
+      chosenDamageType: damageTypeOptionsFor(spell) ? damageType : undefined,
+      chosenCommand: commandOptionsFor(spell) ? (customCommand.trim() || command) : undefined,
+      casterLevel: character.level,
     });
   }
 
   useEffect(() => {
+    const options = selected ? damageTypeOptionsFor(selected) : undefined;
+    setDamageType(options ? (options.includes("Thunder") ? "Thunder" : options[0]) : undefined);
+    const commandOptions = selected ? commandOptionsFor(selected) : undefined;
+    setCommand(commandOptions?.[0]);
+    setCustomCommand("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.name]);
+
+  useEffect(() => {
     if (!learnedNames.length) return;
-    fetch(`${API}/api/spells?class=${encodeURIComponent(character.class)}`)
+    const classes = [character.class, ...featSources.map((fs) => fs.grant.forClass)];
+    const params = classes.map((cl) => `class=${encodeURIComponent(cl)}`).join("&");
+    fetch(`${API}/api/spells?${params}`)
       .then((r) => r.json())
       .then((all: Spell[]) =>
         setSpells(all.filter((s) => learnedNames.includes(s.name))),
       )
       .catch(() => { });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [character.class, learnedNames.join(",")]);
+  }, [character.class, featSourceNames.join(","), learnedNames.join(",")]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return spells;
@@ -146,6 +198,40 @@ export function SpellsTab({
     }
     return map;
   }, [filtered]);
+
+  function spellCard(spell: Spell) {
+    const source = sourceOf(spell);
+    return (
+      <div
+        key={spell.name}
+        className={`sheet-inv-card sheet-inv-card--spell${selected?.name === spell.name ? " sheet-inv-card--spell-active" : ""}`}
+        onClick={() =>
+          setSelected((s) => (s?.name === spell.name ? null : spell))
+        }
+      >
+        <div className="sheet-inv-card-header">
+          <span className="sheet-inv-name">{spell.name}</span>
+          <div className="sheet-inv-card-header-right">
+            <ActionCostDot
+              cost={actionCostFromCastingTime(spell.castingTime) ?? 'action'}
+            />
+            {spell.isRitual && (
+              <span className="sheet-spell-ritual">R</span>
+            )}
+          </div>
+        </div>
+        <p className="sheet-inv-desc">
+          {spell.school} · {spell.castingTime}
+        </p>
+        <p className="sheet-inv-desc">
+          {spell.range} · {spell.duration}
+        </p>
+        {source && source !== character.class && (
+          <p className="sheet-inv-desc sheet-spell-source">{source}</p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <>
@@ -189,10 +275,44 @@ export function SpellsTab({
               <em>At Higher Levels.</em> {selected.atHigherLevels}
             </p>
           )}
+          {damageTypeOptionsFor(selected) && (
+            <div className="sheet-spell-damage-types">
+              {damageTypeOptionsFor(selected)!.map((type) => (
+                <button
+                  key={type}
+                  className={`sheet-damage-type-btn sheet-damage-type-btn--${type.toLowerCase()}${damageType === type ? " sheet-damage-type-btn--active" : ""}`}
+                  onClick={() => setDamageType(type)}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+          )}
+          {commandOptionsFor(selected) && (
+            <div className="sheet-spell-damage-types">
+              {commandOptionsFor(selected)!.map((word) => (
+                <button
+                  key={word}
+                  className={`sheet-damage-type-btn${!customCommand && command === word ? " sheet-damage-type-btn--active" : ""}`}
+                  onClick={() => { setCommand(word); setCustomCommand(""); }}
+                >
+                  {word}
+                </button>
+              ))}
+              <input
+                className="sheet-command-custom-input"
+                placeholder="Or your own word…"
+                value={customCommand}
+                maxLength={20}
+                onChange={(e) => setCustomCommand(e.target.value.replace(/\s+/g, ""))}
+              />
+            </div>
+          )}
           {(() => {
-            const cost = actionCostFromCastingTime(selected.castingTime);
+            const cost = actionCostFromCastingTime(selected.castingTime) ?? 'action';
+            const explorationCast = (selected.combat?.explorationCastable || selected.combat?.journalOnly) && !combatActive;
             const disabled =
-              !combatActive || !isMyTurn || !cost || !resourceAvailable[cost] ||
+              (!explorationCast && (!combatActive || !isMyTurn || !resourceAvailable[cost])) ||
               noSlotFor(selected) ||
               (isBundledSmite(selected) && (!mainHandWeapon || !actionAvailable));
             return (
@@ -240,35 +360,7 @@ export function SpellsTab({
                 </span>
               )}
             </p>
-            <div className="sheet-inventory">
-              {group.map((spell) => (
-                <div
-                  key={spell.name}
-                  className={`sheet-inv-card sheet-inv-card--spell${selected?.name === spell.name ? " sheet-inv-card--spell-active" : ""}`}
-                  onClick={() =>
-                    setSelected((s) => (s?.name === spell.name ? null : spell))
-                  }
-                >
-                  <div className="sheet-inv-card-header">
-                    <span className="sheet-inv-name">{spell.name}</span>
-                    <div className="sheet-inv-card-header-right">
-                      <ActionCostDot
-                        cost={actionCostFromCastingTime(spell.castingTime)}
-                      />
-                      {spell.isRitual && (
-                        <span className="sheet-spell-ritual">R</span>
-                      )}
-                    </div>
-                  </div>
-                  <p className="sheet-inv-desc">
-                    {spell.school} · {spell.castingTime}
-                  </p>
-                  <p className="sheet-inv-desc">
-                    {spell.range} · {spell.duration}
-                  </p>
-                </div>
-              ))}
-            </div>
+            <div className="sheet-inventory">{group.map(spellCard)}</div>
           </div>
         );
       })}

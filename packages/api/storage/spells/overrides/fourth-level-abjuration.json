@@ -1,0 +1,74 @@
+{
+  "Aura of Life": {
+    "resolution": "none",
+    "area": {
+      "shape": "emanation",
+      "size": 30,
+      "origin": "self"
+    }
+  },
+  "Aura of Purity": {
+    "resolution": "none",
+    "area": {
+      "shape": "emanation",
+      "size": 30,
+      "origin": "self"
+    }
+  },
+  "Backlash": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      }
+    ]
+  },
+  "Banishment": {
+    "resolution": "save",
+    "save": {
+      "ability": "cha",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Incapacitated"
+      }
+    ]
+  },
+  "Death Ward": {
+    "resolution": "none"
+  },
+  "Freedom of Movement": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Grappled"
+      }
+    ]
+  },
+  "Gate Seal": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 30,
+      "origin": "point"
+    }
+  },
+  "Mordenkainen's Private Sanctum": {
+    "resolution": "none"
+  },
+  "Otiluke's Resilient Sphere": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    }
+  }
+}

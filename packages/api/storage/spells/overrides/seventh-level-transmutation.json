@@ -1,0 +1,51 @@
+{
+  "Create Magen": {
+    "resolution": "none"
+  },
+  "Draconic Transformation": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cone",
+      "size": 60,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      }
+    ]
+  },
+  "Regenerate": {
+    "resolution": "none"
+  },
+  "Reverse Gravity": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cylinder",
+      "size": 50,
+      "width": 100,
+      "origin": "point"
+    }
+  },
+  "Sequester": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Invisible"
+      }
+    ]
+  },
+  "Simbul's Synostodweomer": {
+    "resolution": "none"
+  }
+}

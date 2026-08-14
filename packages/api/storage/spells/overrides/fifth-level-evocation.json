@@ -1,0 +1,208 @@
+{
+  "Bigby's Hand": {
+    "resolution": "attack",
+    "attackType": "melee",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "5d8",
+          "tiers": [
+            {
+              "atLevel": 6,
+              "value": "2d8"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "Cone of Cold": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cone",
+      "size": 60,
+      "origin": "self"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Cold"
+      }
+    ]
+  },
+  "Dawn": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant"
+      }
+    ]
+  },
+  "Destructive Wave": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "emanation",
+      "size": 30,
+      "origin": "self"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Thunder"
+      },
+      {
+        "type": "condition",
+        "condition": "Prone"
+      }
+    ]
+  },
+  "Flame Strike": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      }
+    ]
+  },
+  "Holy Weapon": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant"
+      },
+      {
+        "type": "condition",
+        "condition": "Blinded"
+      }
+    ]
+  },
+  "Immolation": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      }
+    ]
+  },
+  "Jallarzi's Storm of Radiance": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant"
+      }
+    ]
+  },
+  "Maelstrom": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Bludgeoning"
+      }
+    ]
+  },
+  "Wall of Force": {
+    "resolution": "none"
+  },
+  "Wall of Light": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "4d8",
+          "tiers": [
+            {
+              "atLevel": 6,
+              "value": "1d8"
+            }
+          ]
+        }
+      },
+      {
+        "type": "condition",
+        "condition": "Blinded",
+        "duration": {
+          "value": 1,
+          "unit": "minute"
+        }
+      }
+    ]
+  },
+  "Wall of Stone": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    }
+  },
+  "Wrath of Nature": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cube",
+      "size": 60,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Slashing",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "4d6",
+          "tiers": []
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "Beast Bond": {
+    "resolution": "none",
+    "explorationCastable": true,
+    "todo": "The linked beast's advantage on attacks against creatures within 5ft of the caster is unimplemented — no hook shape covers 'advantage on your own attacks, conditioned on proximity to another creature' yet, and this is its only consumer so far."
+  },
+  "Comprehend Languages": {
+    "resolution": "none",
+    "explorationCastable": true
+  },
+  "Detect Evil and Good": {
+    "resolution": "none",
+    "explorationCastable": true
+  },
+  "Detect Magic": {
+    "resolution": "none",
+    "explorationCastable": true
+  },
+  "Detect Poison and Disease": {
+    "resolution": "none",
+    "explorationCastable": true
+  },
+  "Gift of Alacrity": {
+    "resolution": "none",
+    "explorationCastable": true,
+    "todo": "The +1d8 to the target's initiative rolls is unimplemented — initiative is rolled with no hook consultation today (see calcInitiative-equivalent in effects.ts), and no other spell grants a flat bonus to a specific roll type yet."
+  },
+  "Hunter's Mark": {
+    "autoHit": true,
+    "resolution": "none",
+    "todo": "Advantage on Wisdom (Perception/Survival) checks to find the marked target is unimplemented — no skill-check system exists yet for spell buffs to hook into.",
+    "hooks": [
+      {
+        "type": "onHitBonusDamage",
+        "damageType": "Force",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d6",
+          "tiers": []
+        },
+        "duration": {
+          "until": "endOfCombat"
+        }
+      }
+    ]
+  },
+  "Identify": {
+    "resolution": "none",
+    "explorationCastable": true
+  },
+  "Speak with Animals": {
+    "resolution": "none",
+    "explorationCastable": true
+  }
+}

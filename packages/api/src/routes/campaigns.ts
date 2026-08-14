@@ -112,7 +112,7 @@ campaignsRouter.post('/concepts', async (req, res) => {
 // ── world generation (SSE) ────────────────────────────────────────────────────
 
 campaignsRouter.post('/generate', async (req, res) => {
-  const { tags, concept, name, type = 'campaign' } = req.body as { tags: string[]; concept: WorldConcept; name: string; type?: 'campaign' | 'one-shot' | 'dungeon-crawl' };
+  const { tags, concept, name, type = 'campaign', partySize = 4 } = req.body as { tags: string[]; concept: WorldConcept; name: string; type?: 'campaign' | 'one-shot' | 'dungeon-crawl'; partySize?: number };
   if (!concept || !tags?.length) { res.status(400).json({ error: 'tags and concept required' }); return; }
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -155,7 +155,7 @@ campaignsRouter.post('/generate', async (req, res) => {
       send({ type: 'progress', message: 'Generating dungeon…' });
       const dungeon = await generateDungeon(
         title, 'dungeon-crawl', getFeatureProvider(config, 'dungeonGeneration'), tags.join(', '),
-        { width: 100, height: 100, roomRange: [14, 20] },
+        { width: 100, height: 100, roomRange: [14, 20], partySize },
         token => send({ type: 'token', text: token }),
       );
       await saveDungeon(slug, dungeon);

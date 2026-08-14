@@ -1,0 +1,60 @@
+{
+  "Arcane Gate": {
+    "resolution": "none"
+  },
+  "Conjure Fey": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Frightened"
+      }
+    ]
+  },
+  "Drawmij's Instant Summons": {
+    "resolution": "none"
+  },
+  "Heroes' Feast": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 10,
+      "origin": "point"
+    }
+  },
+  "Planar Ally": {
+    "resolution": "none"
+  },
+  "Scatter": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    }
+  },
+  "Summon Fiend": {
+    "resolution": "none"
+  },
+  "Tasha's Bubbling Cauldron": {
+    "resolution": "none"
+  },
+  "Transport via Plants": {
+    "resolution": "none"
+  },
+  "Wall of Thorns": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Piercing"
+      }
+    ]
+  },
+  "Word of Recall": {
+    "resolution": "none"
+  }
+}

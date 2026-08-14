@@ -87,6 +87,37 @@ export class StateEngine {
   }
 
   /**
+   * True if ownerId currently has a hook of the given kind registered, on any stage. For
+   * questions that must be answered *before* a stage fires — advantage/disadvantage (Faerie
+   * Fire, Guiding Bolt) has to be decided before the d20 is rolled, which is earlier than
+   * beforeAttackRoll's trigger() chain ever runs.
+   */
+  hasHookOwnedBy(ownerId: string, kind: string): boolean {
+    for (const list of this.hooks.values()) {
+      if (list.some(h => h.ownerId === ownerId && h.kind === kind)) return true;
+    }
+    return false;
+  }
+
+  /** Same pre-roll use case as hasHookOwnedBy, but for callers that need the hooks' own data (creatureTypes gate, a stored DC) rather than a yes/no. */
+  getHooksOwnedBy(ownerId: string, kind: string): Hook[] {
+    const result: Hook[] = [];
+    for (const list of this.hooks.values()) {
+      for (const h of list) if (h.ownerId === ownerId && h.kind === kind) result.push(h);
+    }
+    return result;
+  }
+
+  /** Same as getHooksOwnedBy but across every owner — sweepGameTimeExpiries needs every gameTimeExpiry hook in the fight, not just one participant's. */
+  getHooksByKind(kind: string): Hook[] {
+    const result: Hook[] = [];
+    for (const list of this.hooks.values()) {
+      for (const h of list) if (h.kind === kind) result.push(h);
+    }
+    return result;
+  }
+
+  /**
    * Runs every matching hook for a stage, in priority order, and returns the (mutated) context.
    *
    * Hooks may register or unregister other hooks while running — accepting Shield registers its

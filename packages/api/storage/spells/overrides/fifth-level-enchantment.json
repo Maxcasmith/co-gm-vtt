@@ -1,0 +1,98 @@
+{
+  "Dominate Person": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Charmed"
+      }
+    ]
+  },
+  "Geas": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic"
+      },
+      {
+        "type": "condition",
+        "condition": "Charmed"
+      }
+    ]
+  },
+  "Hold Monster": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Paralyzed"
+      }
+    ]
+  },
+  "Modify Memory": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Charmed"
+      }
+    ]
+  },
+  "Synaptic Static": {
+    "resolution": "save",
+    "save": {
+      "ability": "int",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic"
+      }
+    ]
+  },
+  "Yolande's Regal Presence": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "emanation",
+      "size": 10,
+      "origin": "self"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic"
+      },
+      {
+        "type": "condition",
+        "condition": "Prone"
+      }
+    ]
+  }
+}

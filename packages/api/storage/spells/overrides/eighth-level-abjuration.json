@@ -1,0 +1,37 @@
+{
+  "Antimagic Field": {
+    "resolution": "none",
+    "area": {
+      "shape": "emanation",
+      "size": 10,
+      "origin": "self"
+    }
+  },
+  "Holy Aura": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "emanation",
+      "size": 30,
+      "origin": "self"
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Blinded"
+      }
+    ]
+  },
+  "Mind Blank": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Charmed"
+      }
+    ]
+  }
+}

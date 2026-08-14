@@ -1,0 +1,53 @@
+{
+  "Conjure Celestial": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant"
+      }
+    ]
+  },
+  "Dream of the Blue Veil": {
+    "resolution": "none"
+  },
+  "Etherealness": {
+    "resolution": "none"
+  },
+  "Mordenkainen's Magnificent Mansion": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 10,
+      "origin": "point"
+    }
+  },
+  "Plane Shift": {
+    "resolution": "none"
+  },
+  "Teleport": {
+    "resolution": "auto",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      }
+    ]
+  },
+  "Temple of the Gods": {
+    "resolution": "save",
+    "save": {
+      "ability": "cha",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cube",
+      "size": 120,
+      "origin": "point"
+    }
+  }
+}

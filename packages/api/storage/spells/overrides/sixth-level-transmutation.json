@@ -1,0 +1,165 @@
+{
+  "Bones of the Earth": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Bludgeoning"
+      },
+      {
+        "type": "condition",
+        "condition": "Restrained"
+      }
+    ]
+  },
+  "Create Homunculus": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Piercing"
+      }
+    ]
+  },
+  "Disintegrate": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "10d6+40",
+          "tiers": [
+            {
+              "atLevel": 7,
+              "value": "3d6"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "Flesh to Stone": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Petrified"
+      }
+    ]
+  },
+  "Investiture of Flame": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      }
+    ]
+  },
+  "Investiture of Ice": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cone",
+      "size": 15,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Cold"
+      }
+    ]
+  },
+  "Investiture of Stone": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "emanation",
+      "size": 15,
+      "origin": "self"
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Prone"
+      }
+    ]
+  },
+  "Investiture of Wind": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 15,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Bludgeoning"
+      }
+    ]
+  },
+  "Move Earth": {
+    "resolution": "none"
+  },
+  "Tasha's Otherworldly Guise": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Charmed"
+      }
+    ]
+  },
+  "Tenser's Transformation": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      }
+    ]
+  },
+  "Wind Walk": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Prone"
+      }
+    ]
+  }
+}

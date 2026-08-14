@@ -125,7 +125,8 @@ export default function PlayerInfoTab({ campaignId }: { campaignId: string }) {
     c.set('backgroundAsi', { ...c.backgroundAsi, [stat]: next });
   }
 
-  const feat = c.background ? BACKGROUND_FEAT[c.background] : undefined;
+  const bgFeatName = c.background ? BACKGROUND_FEAT[c.background] : undefined;
+  const feat = bgFeatName ? ORIGIN_FEAT_DETAILS[bgFeatName] : undefined;
   const subspecies = SPECIES_SUBSPECIES[c.species] ?? [];
   const savingThrows = c.characterClass ? (CLASS_SAVING_THROWS[c.characterClass] ?? []) : [];
 

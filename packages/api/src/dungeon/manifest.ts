@@ -60,6 +60,8 @@ export async function fetchManifest(
   adapter: StoryProviderAdapter,
   storyContext = '',
   roomRange: [number, number] = [6, 10],
+  partySize = 4,
+  partyLevel = 1,
   onToken: (t: string) => void = () => {},
 ): Promise<DungeonManifest> {
   if (isGeneric(name)) return { rooms: assignKeys(GENERIC_ROOMS), structureType: 'organic', theme: 'high_fantasy', goals: [] };
@@ -107,6 +109,8 @@ IF BUILDING: produce the ${minRooms}-${maxRooms} REAL rooms a location of this e
 IF ORGANIC: produce ${minRooms}-${maxRooms} rooms with location-authentic, atmospheric names fitting a natural/dug space (e.g. for a crypt: "Ossuary", "Collapsed Passage"). Omit "isHallway" and "connectsTo" entirely for organic rooms — layout is handled separately.
 
 Omit "creatures"/"traps"/"loot" for rooms that don't have any — not every room needs them. Match creature types and stat blocks (use official 5e monster stat blocks as reference) to the genre. hideDC ranges 1-22 (higher = harder to spot); scale it to how well-concealed the trap/item narratively is. If the story context implies a non-hostile purpose (e.g. sneaking in to gather information), it's fine for rooms to have no creatures at all — don't force combat that doesn't fit.
+
+This dungeon is built for a party of ${partySize} level ${partyLevel} player characters. Scale creature counts and CRs per room to that party size and level using standard 5e encounter-building guidance — a larger party can handle more/tougher creatures per room, a smaller party needs fewer/weaker ones. The final room (or wherever the boss sits) should be a genuine threat for ${partySize} characters, not a single trivial monster.
 
 At most ONE creature in the entire dungeon may have "isBoss": true — only set it when the scenario genuinely supports a climactic final threat (a named leader, the thing the story context is building toward). Leave every other creature without the field entirely; not every dungeon needs a boss.
 

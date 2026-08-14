@@ -1,0 +1,259 @@
+{
+  "Absorb Elements": {
+    "resolution": "none",
+    "reactionTrigger": {
+      "on": "takingDamage",
+      "resolve": "resist"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageTypeOptions": ["Acid", "Cold", "Fire", "Lightning", "Thunder"],
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d6",
+          "tiers": [
+            { "atLevel": 2, "value": "2d6" },
+            { "atLevel": 3, "value": "3d6" },
+            { "atLevel": 4, "value": "4d6" },
+            { "atLevel": 5, "value": "5d6" },
+            { "atLevel": 6, "value": "6d6" },
+            { "atLevel": 7, "value": "7d6" },
+            { "atLevel": 8, "value": "8d6" },
+            { "atLevel": 9, "value": "9d6" }
+          ]
+        }
+      }
+    ]
+  },
+  "Alarm": {
+    "resolution": "none",
+    "placesTrap": true,
+    "explorationCastable": true,
+    "trapRadiusFt": 20,
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    }
+  },
+  "Armor of Agathys": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "tempHp",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d1+4",
+          "tiers": [
+            { "atLevel": 2, "value": "1d1+9" },
+            { "atLevel": 3, "value": "1d1+14" },
+            { "atLevel": 4, "value": "1d1+19" },
+            { "atLevel": 5, "value": "1d1+24" },
+            { "atLevel": 6, "value": "1d1+29" },
+            { "atLevel": 7, "value": "1d1+34" },
+            { "atLevel": 8, "value": "1d1+39" },
+            { "atLevel": 9, "value": "1d1+44" }
+          ]
+        }
+      }
+    ],
+    "hooks": [
+      {
+        "type": "retaliateDamage",
+        "damageType": "Cold",
+        "duration": { "until": "endOfCombat" },
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d1+4",
+          "tiers": [
+            { "atLevel": 2, "value": "1d1+9" },
+            { "atLevel": 3, "value": "1d1+14" },
+            { "atLevel": 4, "value": "1d1+19" },
+            { "atLevel": 5, "value": "1d1+24" },
+            { "atLevel": 6, "value": "1d1+29" },
+            { "atLevel": 7, "value": "1d1+34" },
+            { "atLevel": 8, "value": "1d1+39" },
+            { "atLevel": 9, "value": "1d1+44" }
+          ]
+        }
+      }
+    ]
+  },
+  "Ceremony": {
+    "resolution": "none",
+    "journalOnly": true
+  },
+  "Cure Wounds": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "heal",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d8",
+          "tiers": [
+            { "atLevel": 2, "value": "4d8" },
+            { "atLevel": 3, "value": "6d8" },
+            { "atLevel": 4, "value": "8d8" },
+            { "atLevel": 5, "value": "10d8" },
+            { "atLevel": 6, "value": "12d8" },
+            { "atLevel": 7, "value": "14d8" },
+            { "atLevel": 8, "value": "16d8" },
+            { "atLevel": 9, "value": "18d8" }
+          ]
+        }
+      }
+    ]
+  },
+  "Healing Word": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "heal",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d4",
+          "tiers": [
+            { "atLevel": 2, "value": "4d4" },
+            { "atLevel": 3, "value": "6d4" },
+            { "atLevel": 4, "value": "8d4" },
+            { "atLevel": 5, "value": "10d4" },
+            { "atLevel": 6, "value": "12d4" },
+            { "atLevel": 7, "value": "14d4" },
+            { "atLevel": 8, "value": "16d4" },
+            { "atLevel": 9, "value": "18d4" }
+          ]
+        }
+      }
+    ]
+  },
+  "Mage Armor": {
+    "resolution": "none",
+    "hooks": [
+      {
+        "type": "acOverride",
+        "baseValue": 13,
+        "requiresUnarmored": true,
+        "duration": {
+          "until": "gameTime",
+          "gameSecs": 28800
+        }
+      }
+    ]
+  },
+  "Protection from Evil and Good": {
+    "resolution": "none",
+    "todo": "Condition-immunity (can't be Charmed/Frightened/possessed by the listed types) and save-advantage-if-already-affected are unimplemented — blocked on there being no enemy-spellcasting system yet to ever trigger them. Disadvantage-on-their-attacks (below) is fully working.",
+    "hooks": [
+      {
+        "type": "attackerDisadvantage",
+        "creatureTypes": ["Aberration", "Celestial", "Elemental", "Fey", "Fiend", "Undead"],
+        "duration": { "until": "gameTime", "gameSecs": 600 }
+      }
+    ]
+  },
+  "Sanctuary": {
+    "resolution": "none",
+    "hooks": [
+      {
+        "type": "sanctuaryWard",
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
+  },
+  "Shield": {
+    "resolution": "none",
+    "reactionTrigger": {
+      "on": "beingHit"
+    },
+    "hooks": [
+      {
+        "type": "acModifier",
+        "value": 5,
+        "duration": {
+          "until": "startOfOwnerTurn"
+        }
+      },
+      {
+        "type": "damageResistance",
+        "resistanceMode": "immunity",
+        "spellName": "Magic Missile",
+        "duration": {
+          "until": "startOfOwnerTurn"
+        }
+      }
+    ]
+  },
+  "Shield of Faith": {
+    "resolution": "none",
+    "hooks": [
+      {
+        "type": "acModifier",
+        "value": 2,
+        "duration": {
+          "until": "gameTime",
+          "gameSecs": 600
+        }
+      }
+    ]
+  },
+  "Snare": {
+    "resolution": "save",
+    "placesTrap": true,
+    "explorationCastable": true,
+    "area": {
+      "shape": "cube",
+      "size": 5,
+      "origin": "point"
+    },
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Restrained"
+      }
+    ]
+  },
+  "Wardaway": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d4",
+          "tiers": [
+            { "atLevel": 2, "value": "4d4" },
+            { "atLevel": 3, "value": "6d4" },
+            { "atLevel": 4, "value": "8d4" },
+            { "atLevel": 5, "value": "10d4" },
+            { "atLevel": 6, "value": "12d4" },
+            { "atLevel": 7, "value": "14d4" },
+            { "atLevel": 8, "value": "16d4" },
+            { "atLevel": 9, "value": "18d4" }
+          ]
+        }
+      }
+    ],
+    "hooks": [
+      {
+        "type": "speedModifier",
+        "multiplier": 0.5,
+        "duration": { "until": "startOfCasterNextTurn" }
+      },
+      {
+        "type": "linkedActionEconomy",
+        "duration": { "until": "endOfCombat" }
+      }
+    ]
+  }
+}

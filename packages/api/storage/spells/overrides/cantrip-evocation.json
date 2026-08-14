@@ -1,0 +1,457 @@
+{
+  "Acid Splash": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "sphere",
+      "size": 5,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Acid",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d6",
+          "tiers": [
+            {
+              "atLevel": 5,
+              "value": "2d6"
+            },
+            {
+              "atLevel": 11,
+              "value": "3d6"
+            },
+            {
+              "atLevel": 17,
+              "value": "4d6"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "Booming Blade": {
+    "resolution": "none",
+    "todo": "The on-hit bonus is 1d8 below character level 5 instead of the true 0, since rollDice always returns at least 1 and there's no way to express a real zero through it.",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Thunder",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d1",
+          "tiers": [
+            { "atLevel": 5, "value": "1d8" },
+            { "atLevel": 11, "value": "2d8" },
+            { "atLevel": 17, "value": "3d8" }
+          ]
+        }
+      }
+    ],
+    "hooks": [
+      {
+        "type": "movementDamage",
+        "damageType": "Thunder",
+        "thresholdFt": 5,
+        "consumeOnUse": true,
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d8",
+          "tiers": [
+            { "atLevel": 5, "value": "2d8" },
+            { "atLevel": 11, "value": "3d8" },
+            { "atLevel": 17, "value": "4d8" }
+          ]
+        },
+        "duration": { "until": "startOfCasterNextTurn" }
+      }
+    ]
+  },
+  "Eldritch Blast": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "targetsMin": 1,
+    "targetsMax": 1,
+    "targetsScaleWithCantripLevel": true,
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d10",
+          "tiers": []
+        }
+      }
+    ]
+  },
+  "Fire Bolt": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d10",
+          "tiers": [
+            {
+              "atLevel": 5,
+              "value": "2d10"
+            },
+            {
+              "atLevel": 11,
+              "value": "3d10"
+            },
+            {
+              "atLevel": 17,
+              "value": "4d10"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "Frostbite": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Cold",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d6",
+          "tiers": [
+            { "atLevel": 5, "value": "2d6" },
+            { "atLevel": 11, "value": "3d6" },
+            { "atLevel": 17, "value": "4d6" }
+          ]
+        }
+      }
+    ],
+    "hooks": [
+      {
+        "type": "grantAdvantage",
+        "self": true,
+        "disadvantage": true,
+        "consumeOnUse": true,
+        "duration": { "until": "rounds", "rounds": 2 }
+      }
+    ]
+  },
+  "Green-Flame Blade": {
+    "resolution": "none",
+    "todo": "The primary hit's on-hit bonus and the splash are both 1d8 below character level 5 instead of the true 0, same rollDice floor-to-1 gap as Booming Blade. Splash always targets the nearest enemy within 5ft of the primary target (pickChainTarget) rather than a caster-chosen one — no secondary-target picker exists client-side.",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d1",
+          "tiers": [
+            { "atLevel": 5, "value": "1d8" },
+            { "atLevel": 11, "value": "2d8" },
+            { "atLevel": 17, "value": "3d8" }
+          ]
+        }
+      }
+    ],
+    "splashRadiusFt": 5,
+    "splashOnHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire",
+        "scaling": {
+          "mode": "cantrip-plus-ability-mod",
+          "base": "",
+          "tiers": [
+            { "atLevel": 5, "value": "1d8" },
+            { "atLevel": 11, "value": "2d8" },
+            { "atLevel": 17, "value": "3d8" }
+          ]
+        }
+      }
+    ]
+  },
+  "Light": {
+    "resolution": "none",
+    "explorationCastable": true,
+    "todo": "No lighting/illumination system exists — the object doesn't actually shed light on the map (no darkness/light-radius mechanic at all, separate from the fog-of-war/LoS system). Casting only spends the slot and announces."
+  },
+  "Lightning Lure": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "pull",
+        "distance": 10,
+        "requireEndWithinFt": 5
+      },
+      {
+        "type": "damage",
+        "damageType": "Lightning",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d8",
+          "tiers": [
+            { "atLevel": 5, "value": "2d8" },
+            { "atLevel": 11, "value": "3d8" },
+            { "atLevel": 17, "value": "4d8" }
+          ]
+        }
+      }
+    ]
+  },
+  "Ray of Frost": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Cold",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d8",
+          "tiers": [
+            {
+              "atLevel": 5,
+              "value": "2d8"
+            },
+            {
+              "atLevel": 11,
+              "value": "3d8"
+            },
+            {
+              "atLevel": 17,
+              "value": "4d8"
+            }
+          ]
+        }
+      }
+    ],
+    "hooks": [
+      {
+        "type": "speedModifier",
+        "bonusFt": -10,
+        "duration": { "until": "startOfCasterNextTurn" }
+      }
+    ]
+  },
+  "Sacred Flame": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d8",
+          "tiers": [
+            {
+              "atLevel": 5,
+              "value": "2d8"
+            },
+            {
+              "atLevel": 11,
+              "value": "3d8"
+            },
+            {
+              "atLevel": 17,
+              "value": "4d8"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "Shocking Grasp": {
+    "resolution": "attack",
+    "attackType": "melee",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Lightning",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d8",
+          "tiers": [
+            {
+              "atLevel": 5,
+              "value": "2d8"
+            },
+            {
+              "atLevel": 11,
+              "value": "3d8"
+            },
+            {
+              "atLevel": 17,
+              "value": "4d8"
+            }
+          ]
+        }
+      }
+    ],
+    "hooks": [
+      {
+        "type": "reactionLock",
+        "opportunityOnly": true,
+        "duration": { "until": "startOfOwnerTurn" }
+      }
+    ]
+  },
+  "Sorcerous Burst": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Thunder",
+        "damageTypeOptions": ["Acid", "Cold", "Fire", "Lightning", "Poison", "Psychic", "Thunder"],
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d8",
+          "tiers": [
+            {
+              "atLevel": 5,
+              "value": "2d8"
+            },
+            {
+              "atLevel": 11,
+              "value": "3d8"
+            },
+            {
+              "atLevel": 17,
+              "value": "4d8"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "Starry Wisp": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "todo": "Emitting Dim Light in a 10ft radius isn't modeled — no lighting system exists (same gap as Light).",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d8",
+          "tiers": [
+            {
+              "atLevel": 5,
+              "value": "2d8"
+            },
+            {
+              "atLevel": 11,
+              "value": "3d8"
+            },
+            {
+              "atLevel": 17,
+              "value": "4d8"
+            }
+          ]
+        }
+      }
+    ],
+    "hooks": [
+      {
+        "type": "conditionImmunity",
+        "immuneConditions": ["Invisible"],
+        "duration": { "until": "rounds", "rounds": 2 }
+      }
+    ]
+  },
+  "Thunderclap": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "emanation",
+      "size": 5,
+      "origin": "self"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Thunder",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d6",
+          "tiers": [
+            {
+              "atLevel": 5,
+              "value": "2d6"
+            },
+            {
+              "atLevel": 11,
+              "value": "3d6"
+            },
+            {
+              "atLevel": 17,
+              "value": "4d6"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "Word of Radiance": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "emanation",
+      "size": 5,
+      "origin": "self"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d6",
+          "tiers": [
+            {
+              "atLevel": 5,
+              "value": "2d6"
+            },
+            {
+              "atLevel": 11,
+              "value": "3d6"
+            },
+            {
+              "atLevel": 17,
+              "value": "4d6"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

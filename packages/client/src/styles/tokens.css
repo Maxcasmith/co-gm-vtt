@@ -9,8 +9,19 @@
   --text-muted:     #5c5468;
   --platinum:       #f0ebde;
   --gold:           #c9a84c;
+  --cyan:           #4fd1e0;
   --electrum:       #939dee;
   --silver:         #b1cbcf;
   --bronze:         #82413a;
+
+  /* Damage types — reused anywhere a spell offers a choice of damage type (toggle buttons, tooltips, ...) */
+  --dmg-acid:       #7cb518;
+  --dmg-cold:       #5ec8d8;
+  --dmg-fire:       #e8542a;
+  --dmg-force:      #d94fd5;
+  --dmg-lightning:  #f2c94c;
+  --dmg-poison:     #7a4fbf;
+  --dmg-psychic:    #e05fb0;
+  --dmg-thunder:    #5c7cfa;
 }
 

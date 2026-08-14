@@ -9,6 +9,14 @@ export interface HookProps {
   source: string;
   /** Higher runs first. Value modifiers should outrank reaction offers so an offer sees the final numbers. */
   priority?: number;
+  /**
+   * The HookType this instance was built from — lets code ask "does ownerId have an active
+   * X" (StateEngine.hasHookOwnedBy) without importing every concrete Hook subclass to check
+   * with instanceof. Only needed by callers that must know an answer *before* a stage fires
+   * (advantage/disadvantage has to be decided before the d20 is rolled, too early for the
+   * normal trigger() chain) — most hooks never get queried this way and can leave it unset.
+   */
+  kind?: string;
 }
 
 /**
@@ -23,6 +31,7 @@ export abstract class Hook<S extends HookStage = HookStage> {
   readonly ownerId: string;
   readonly source: string;
   readonly priority: number;
+  readonly kind: string | undefined;
 
   /** The stage this hook fires on. Declared by the subclass, not the caller. */
   abstract readonly stage: S;
@@ -32,6 +41,7 @@ export abstract class Hook<S extends HookStage = HookStage> {
     this.ownerId = props.ownerId;
     this.source = props.source;
     this.priority = props.priority ?? 0;
+    this.kind = props.kind;
   }
 
   /** Cheap gate run before apply — return false when this context is not the hook's business. */

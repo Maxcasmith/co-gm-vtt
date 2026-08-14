@@ -1,0 +1,107 @@
+{
+  "Animal Messenger": {
+    "resolution": "save",
+    "save": {
+      "ability": "cha",
+      "halfOnSave": false
+    }
+  },
+  "Calm Emotions": {
+    "resolution": "save",
+    "save": {
+      "ability": "cha",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    }
+  },
+  "Crown of Madness": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Charmed"
+      }
+    ]
+  },
+  "Enthrall": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    }
+  },
+  "Gift of Gab": {
+    "resolution": "none"
+  },
+  "Hold Person": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Paralyzed"
+      }
+    ]
+  },
+  "Jim's Glowing Coin": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cube",
+      "size": 30,
+      "origin": "point"
+    }
+  },
+  "Suggestion": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Charmed"
+      }
+    ]
+  },
+  "Tasha's Mind Whip": {
+    "resolution": "save",
+    "save": {
+      "ability": "int",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic"
+      }
+    ]
+  },
+  "Zone of Truth": {
+    "resolution": "save",
+    "save": {
+      "ability": "cha",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cube",
+      "size": 15,
+      "origin": "point"
+    }
+  }
+}

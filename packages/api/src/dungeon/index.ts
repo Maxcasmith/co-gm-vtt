@@ -11,10 +11,10 @@ export async function generateDungeon(
   dungeonType: string,
   adapter: StoryProviderAdapter,
   storyContext = '',
-  opts?: { width?: number; height?: number; roomRange?: [number, number] },
+  opts?: { width?: number; height?: number; roomRange?: [number, number]; partySize?: number; partyLevel?: number },
   onToken: (t: string) => void = () => {},
 ): Promise<Dungeon> {
-  const manifest = await fetchManifest(name, dungeonType, adapter, storyContext, opts?.roomRange, onToken);
+  const manifest = await fetchManifest(name, dungeonType, adapter, storyContext, opts?.roomRange, opts?.partySize, opts?.partyLevel, onToken);
   // Man-made structures get a deterministic floor-plan layout driven by the manifest's adjacency
   // graph; natural/carved spaces (cave, crypt, tomb) go straight to the procedural row-packer —
   // no LLM geometry call, and no attempt to force building-shaped rooms onto a cave.
@@ -114,7 +114,8 @@ export function renderDungeonAscii(dungeon: Dungeon): string {
 // Server keeps the full dungeon (hidden entities included) in storage/memory —
 // this strips anything not yet discovered before it goes out over the wire.
 export function toClientDungeon(dungeon: Dungeon): Dungeon {
-  return { ...dungeon, entities: dungeon.entities.filter(e => e.discovered) };
+  // Party-placed traps skip the discovered gate — you always know where your own trap is.
+  return { ...dungeon, entities: dungeon.entities.filter(e => e.discovered || e.placedBy) };
 }
 
 export function roomAt(dungeon: Dungeon, gx: number, gy: number): DungeonRoom | undefined {

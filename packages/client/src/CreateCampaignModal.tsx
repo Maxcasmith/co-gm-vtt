@@ -22,6 +22,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
 
   const [step, setStep] = useState<Step>('tags');
   const [campaignType, setCampaignType] = useState<'campaign' | 'one-shot' | 'dungeon-crawl'>('campaign');
+  const [partySize, setPartySize] = useState(4);
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [loadingConcepts, setLoadingConcepts] = useState(false);
@@ -36,6 +37,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
   function reset() {
     setStep('tags');
     setCampaignType('campaign');
+    setPartySize(4);
     setTagInput('');
     setTags([]);
     setLoadingConcepts(false);
@@ -126,7 +128,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
       const res = await fetch(`${API}/api/campaigns/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tags, concept, name: concept.name, type: campaignType }),
+        body: JSON.stringify({ tags, concept, name: concept.name, type: campaignType, partySize }),
       });
 
       const reader = res.body!.getReader();
@@ -192,6 +194,19 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
                 <option value="dungeon-crawl">Dungeon Crawl</option>
               </select>
             </label>
+            {campaignType === 'dungeon-crawl' && (
+              <label className="modal-label">
+                Party Size
+                <input
+                  type="number"
+                  className="modal-select"
+                  min={1}
+                  max={8}
+                  value={partySize}
+                  onChange={e => setPartySize(Math.max(1, Math.min(8, Number(e.target.value) || 1)))}
+                />
+              </label>
+            )}
             <div className="tag-input-area">
               <div className="tag-chips">
                 {tags.map(tag => (

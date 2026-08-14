@@ -1,0 +1,77 @@
+{
+  "Create Bonfire": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cube",
+      "size": 5,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      }
+    ]
+  },
+  "Infestation": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Poison"
+      }
+    ]
+  },
+  "Mage Hand": {
+    "resolution": "none"
+  },
+  "Produce Flame": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d8",
+          "tiers": [
+            {
+              "atLevel": 5,
+              "value": "2d8"
+            },
+            {
+              "atLevel": 11,
+              "value": "3d8"
+            },
+            {
+              "atLevel": 17,
+              "value": "4d8"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "Sword Burst": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      }
+    ]
+  }
+}

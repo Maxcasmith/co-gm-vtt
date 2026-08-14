@@ -1,0 +1,108 @@
+{
+  "Blade Barrier": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      }
+    ]
+  },
+  "Chain Lightning": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Lightning"
+      }
+    ]
+  },
+  "Elminster's Effulgent Spheres": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Variable (caster chooses: Acid/Cold/Fire/Lightning/Thunder)",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "3d6",
+          "tiers": []
+        }
+      }
+    ]
+  },
+  "Gravity Fissure": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      }
+    ]
+  },
+  "Otiluke's Freezing Sphere": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 60,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Cold"
+      },
+      {
+        "type": "condition",
+        "condition": "Restrained"
+      }
+    ]
+  },
+  "Sunbeam": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant"
+      },
+      {
+        "type": "condition",
+        "condition": "Blinded"
+      }
+    ]
+  },
+  "Wall of Ice": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Cold"
+      }
+    ]
+  }
+}

@@ -8,8 +8,9 @@ import { ActionCostDot } from "./helpers.tsx";
 const WEAPON_NAMES =
   /sword|dagger|axe|mace|staff|bow|spear|lance|rapier|club|flail|hammer|trident|whip|blade/i;
 const ARMOUR_NAMES = /armou?r|shield|helmet|gauntlet|boot|plate|chain|mail/i;
-const CONSUMABLE_NAMES = /potion|scroll|ration|herb|tincture|elixir/i;
+const CONSUMABLE_NAMES = /potion|scroll|ration|herb|tincture|elixir|berry/i;
 const POTION_OF_HEALING_NAME = /potion of healing/i;
+const GOODBERRY_NAME = /goodberry/i;
 
 const SECTIONS = [
   {
@@ -154,6 +155,12 @@ export function InventoryTab({
       dispatch("vtt:consumable:heal", {
         characterId: character.id,
         characterName: character.name,
+      });
+    } else if (GOODBERRY_NAME.test(item.name)) {
+      dispatch("vtt:consumable:heal", {
+        characterId: character.id,
+        characterName: character.name,
+        healDice: "1d1",
       });
     }
   }

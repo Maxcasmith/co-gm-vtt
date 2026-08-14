@@ -1,0 +1,43 @@
+{
+  "Creation": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 5,
+      "origin": "point"
+    }
+  },
+  "Dream": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic"
+      },
+      {
+        "type": "condition",
+        "condition": "Incapacitated"
+      }
+    ]
+  },
+  "Mislead": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Invisible"
+      }
+    ]
+  },
+  "Seeming": {
+    "resolution": "save",
+    "save": {
+      "ability": "cha",
+      "halfOnSave": false
+    }
+  }
+}

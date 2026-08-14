@@ -1,0 +1,14 @@
+{
+  "Illusory Dragon": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cone",
+      "size": 60,
+      "origin": "point"
+    }
+  }
+}

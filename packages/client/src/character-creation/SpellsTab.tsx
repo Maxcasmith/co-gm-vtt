@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import type { Spell } from 'shared';
 import { useCharacter } from './CharacterContext.tsx';
-import { CLASS_FEATURES, CLASS_SPELL_ALLOWANCE, FEAT_SPELL_GRANTS } from './srd.ts';
+import { CLASS_FEATURES, CLASS_SPELL_ALLOWANCE, FEAT_SPELL_GRANTS, BACKGROUND_FEAT } from './srd.ts';
 import CharacterSheet from './CharacterSheet.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
@@ -37,10 +37,24 @@ export default function SpellsTab() {
     : false;
 
   const allowance = CLASS_SPELL_ALLOWANCE[c.characterClass] ?? null;
-  const featGrant = FEAT_SPELL_GRANTS[c.speciesOriginFeat ?? ''] ?? null;
 
-  const maxCantrips = (allowance?.cantrips ?? 0) + (featGrant?.cantrips ?? 0);
-  const maxSpells   = (allowance?.spells  ?? 0) + (featGrant?.spells  ?? 0);
+  // Every character's Background grants a fixed Origin feat; a Human additionally gets one of
+  // their own choice (Versatile). Either or both can be a Magic Initiate variant, and each is
+  // tracked as an independent pool (own cantrip/spell cap, own label) so they never merge.
+  const bgFeatName = c.background ? BACKGROUND_FEAT[c.background] : undefined;
+  const featSourceNames = [...new Set([bgFeatName, c.species === 'Human' ? c.speciesOriginFeat : undefined])]
+    .filter((name): name is string => !!name && name in FEAT_SPELL_GRANTS);
+  const featSources = featSourceNames.map(name => ({ name, grant: FEAT_SPELL_GRANTS[name]! }));
+
+  // A spell only reachable through a feat's class (not also on the character's own class list)
+  // is feat-only — it can never draw from the class pool. Used for the "foreign spell" badge in
+  // the browser; the actual pool a *learned* spell drew from is its recorded source.
+  function featOnlySource(spell: Spell): string | undefined {
+    return featSources.find(fs => spell.classes.includes(fs.grant.forClass) && !spell.classes.includes(c.characterClass))?.name;
+  }
+
+  const maxCantrips = allowance?.cantrips ?? 0;
+  const maxSpells   = allowance?.spells  ?? 0;
 
   const [allSpells, setAllSpells] = useState<Spell[]>([]);
   const [loading, setLoading]    = useState(false);
@@ -55,9 +69,8 @@ export default function SpellsTab() {
     if (!c.characterClass) return;
     setLoading(true);
 
-    // Which classes to fetch: own class + any feat-granted class
-    const classList = [c.characterClass];
-    if (featGrant) classList.push(featGrant.forClass);
+    // Which classes to fetch: own class + every feat-granted class
+    const classList = [c.characterClass, ...featSources.map(fs => fs.grant.forClass)];
     const params = classList.map(cl => `class=${encodeURIComponent(cl)}`).join('&');
 
     fetch(`${API}/api/spells?${params}`)
@@ -66,7 +79,7 @@ export default function SpellsTab() {
       .then((data: Spell[]) => setAllSpells(data.filter(s => s.level <= 1)))
       .catch(() => setAllSpells([]))
       .finally(() => setLoading(false));
-  }, [c.characterClass, featGrant?.forClass]);
+  }, [c.characterClass, featSourceNames.join(',')]);
 
   const schools = useMemo(() => [...new Set(allSpells.map(s => s.school))].sort(), [allSpells]);
 
@@ -83,23 +96,52 @@ export default function SpellsTab() {
     return list;
   }, [allSpells, filterLevel, filterSchool, filterRitual, search]);
 
-  const learnedSet = new Set(c.learnedSpells);
+  const learnedSet = new Set(Object.keys(c.learnedSpells));
 
-  const learnedCantrips = c.learnedSpells.filter(name => allSpells.find(s => s.name === name && s.level === 0)).length;
-  const learnedSpellCount = c.learnedSpells.filter(name => allSpells.find(s => s.name === name && s.level > 0)).length;
+  function countBySource(level0: boolean, source: string): number {
+    return Object.entries(c.learnedSpells).filter(([name, src]) => {
+      if (src !== source) return false;
+      const s = allSpells.find(sp => sp.name === name && (level0 ? sp.level === 0 : sp.level > 0));
+      return !!s;
+    }).length;
+  }
+  const learnedCantrips     = countBySource(true, c.characterClass);
+  const learnedSpellCount   = countBySource(false, c.characterClass);
+
+  // A same-class Magic Initiate merges its spell list with the class's own, so most spells are
+  // eligible for either pool. Class slots fill first; once those are full, eligible spells spill
+  // into a feat's own slots instead of being blocked outright.
+  function classSlot(spell: Spell): boolean {
+    const isCantrip = spell.level === 0;
+    return spell.classes.includes(c.characterClass) &&
+      (isCantrip ? learnedCantrips < maxCantrips : learnedSpellCount < maxSpells);
+  }
+  function featSlotSource(spell: Spell): string | undefined {
+    const isCantrip = spell.level === 0;
+    return featSources.find(fs => {
+      if (!spell.classes.includes(fs.grant.forClass)) return false;
+      const learned = countBySource(isCantrip, fs.name);
+      return isCantrip ? learned < fs.grant.cantrips : learned < fs.grant.spells;
+    })?.name;
+  }
+
+  function limitReached(spell: Spell): boolean {
+    return !classSlot(spell) && !featSlotSource(spell);
+  }
 
   function toggleLearn(spell: Spell) {
-    const isCantrip = spell.level === 0;
     if (learnedSet.has(spell.name)) {
-      c.set('learnedSpells', c.learnedSpells.filter(n => n !== spell.name));
+      const next = { ...c.learnedSpells };
+      delete next[spell.name];
+      c.set('learnedSpells', next);
     } else {
-      const atLimit = isCantrip ? learnedCantrips >= maxCantrips : learnedSpellCount >= maxSpells;
-      if (atLimit) return;
-      c.set('learnedSpells', [...c.learnedSpells, spell.name]);
+      const source = classSlot(spell) ? c.characterClass : featSlotSource(spell);
+      if (!source) return;
+      c.set('learnedSpells', { ...c.learnedSpells, [spell.name]: source });
     }
   }
 
-  if (!isSpellcaster && !featGrant) {
+  if (!isSpellcaster && featSources.length === 0) {
     return (
       <div className="player-info-layout">
         <div className="tab-content">
@@ -128,18 +170,27 @@ export default function SpellsTab() {
             <span className="spells-section-counts">
               {maxCantrips > 0 && <span className={learnedCantrips >= maxCantrips ? 'spells-count spells-count--full' : 'spells-count'}>{learnedCantrips}/{maxCantrips} cantrips</span>}
               {maxSpells > 0   && <span className={learnedSpellCount >= maxSpells ? 'spells-count spells-count--full' : 'spells-count'}>{learnedSpellCount}/{maxSpells} spells</span>}
+              {featSources.flatMap(fs => {
+                const learnedFeatCantrips = countBySource(true, fs.name);
+                const learnedFeatSpells   = countBySource(false, fs.name);
+                return [
+                  fs.grant.cantrips > 0 && <span key={`${fs.name}-c`} className={learnedFeatCantrips >= fs.grant.cantrips ? 'spells-count spells-count--full' : 'spells-count'}>{learnedFeatCantrips}/{fs.grant.cantrips} {fs.name} cantrips</span>,
+                  fs.grant.spells > 0   && <span key={`${fs.name}-s`} className={learnedFeatSpells >= fs.grant.spells ? 'spells-count spells-count--full' : 'spells-count'}>{learnedFeatSpells}/{fs.grant.spells} {fs.name} spells</span>,
+                ];
+              })}
             </span>
           </div>
-          {c.learnedSpells.length === 0 ? (
+          {learnedSet.size === 0 ? (
             <p className="spells-empty">No spells learned yet — browse below and click Learn to add them.</p>
           ) : (
             <div className="spells-learned-list">
-              {c.learnedSpells.map(name => {
+              {Object.entries(c.learnedSpells).map(([name, source]) => {
                 const spell = allSpells.find(s => s.name === name);
                 if (!spell) return null;
                 return (
                   <div key={name} className="spells-learned-chip">
                     <button className="spells-learned-name" onClick={() => setSelected(spell)}>{name}</button>
+                    {source !== c.characterClass && <span className="spells-tag spells-tag--ritual">{source}</span>}
                     <span className="spells-learned-level">{spell.levelLabel}</span>
                     <button className="spells-learned-remove" onClick={() => toggleLearn(spell)} title="Forget">×</button>
                   </div>
@@ -184,9 +235,9 @@ export default function SpellsTab() {
           {!loading && filtered.length > 0 && (
             <div className="spells-browser-list">
               {filtered.map(spell => {
-                const isCantrip = spell.level === 0;
                 const learned = learnedSet.has(spell.name);
-                const atLimit = isCantrip ? learnedCantrips >= maxCantrips : learnedSpellCount >= maxSpells;
+                const atLimit = limitReached(spell);
+                const source = c.learnedSpells[spell.name] ?? featOnlySource(spell) ?? null;
                 return (
                   <div key={spell.name} className={`spells-browser-row ${selected?.name === spell.name ? 'spells-browser-row--selected' : ''}`}>
                     <button className="spells-browser-info" onClick={() => setSelected(selected?.name === spell.name ? null : spell)}>
@@ -194,6 +245,7 @@ export default function SpellsTab() {
                       <span className="spells-browser-tags">
                         <span className="spells-tag">{spell.levelLabel}</span>
                         <span className="spells-tag">{spell.school}</span>
+                        {source && source !== c.characterClass && <span className="spells-tag spells-tag--ritual">{source}</span>}
                         {spell.isRitual && <span className="spells-tag spells-tag--ritual">Ritual</span>}
                         <span className="spells-tag spells-tag--cast">{spell.castingTime}</span>
                       </span>

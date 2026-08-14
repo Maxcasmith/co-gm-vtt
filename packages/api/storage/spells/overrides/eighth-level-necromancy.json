@@ -1,0 +1,23 @@
+{
+  "Abi-Dalzim's Horrid Wilting": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 30,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic"
+      }
+    ]
+  },
+  "Clone": {
+    "resolution": "none"
+  }
+}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Spell } from 'shared';
 import { useCharacter } from './CharacterContext.tsx';
-import { STAT_NAMES } from './srd.ts';
+import { FEAT_SPELL_GRANTS, BACKGROUND_FEAT, STAT_NAMES } from './srd.ts';
 import CharacterSheet from './CharacterSheet.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
@@ -18,13 +18,22 @@ export default function FinishedTab({ onCreate, canCreate, saving, error }: Prop
   const stats = c.toStats();
   const [spellDetails, setSpellDetails] = useState<Spell[]>([]);
 
+  const learnedNames = Object.keys(c.learnedSpells);
+  const bgFeatName = c.background ? BACKGROUND_FEAT[c.background] : undefined;
+  const featSourceNames = [...new Set([bgFeatName, c.species === 'Human' ? c.speciesOriginFeat : undefined])]
+    .filter((name): name is string => !!name && name in FEAT_SPELL_GRANTS);
+  const featForClasses = featSourceNames.map(name => FEAT_SPELL_GRANTS[name]!.forClass);
+
   useEffect(() => {
-    if (!c.characterClass || c.learnedSpells.length === 0) { setSpellDetails([]); return; }
-    fetch(`${API}/api/spells?class=${encodeURIComponent(c.characterClass)}`)
+    if (!c.characterClass || learnedNames.length === 0) { setSpellDetails([]); return; }
+    const classList = [c.characterClass, ...featForClasses];
+    const params = classList.map(cl => `class=${encodeURIComponent(cl)}`).join('&');
+    fetch(`${API}/api/spells?${params}`)
       .then(r => r.json())
-      .then((data: Spell[]) => setSpellDetails(data.filter(s => c.learnedSpells.includes(s.name))))
+      .then((data: Spell[]) => setSpellDetails(data.filter(s => learnedNames.includes(s.name))))
       .catch(() => setSpellDetails([]));
-  }, [c.characterClass, c.learnedSpells]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [c.characterClass, featSourceNames.join(','), learnedNames.join(',')]);
 
   return (
     <div className="player-info-layout">
@@ -71,12 +80,16 @@ export default function FinishedTab({ onCreate, canCreate, saving, error }: Prop
             <p className="spells-empty">No spells learned.</p>
           ) : (
             <div className="spells-learned-list">
-              {spellDetails.map(spell => (
-                <div key={spell.name} className="spells-learned-chip">
-                  <span className="spells-learned-name">{spell.name}</span>
-                  <span className="spells-learned-level">{spell.levelLabel}</span>
-                </div>
-              ))}
+              {spellDetails.map(spell => {
+                const source = c.learnedSpells[spell.name];
+                return (
+                  <div key={spell.name} className="spells-learned-chip">
+                    <span className="spells-learned-name">{spell.name}</span>
+                    {source && source !== c.characterClass && <span className="spells-tag spells-tag--ritual">{source}</span>}
+                    <span className="spells-learned-level">{spell.levelLabel}</span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>

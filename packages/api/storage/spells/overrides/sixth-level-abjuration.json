@@ -1,0 +1,47 @@
+{
+  "Contingency": {
+    "resolution": "none"
+  },
+  "Druid Grove": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 30,
+      "origin": "point"
+    }
+  },
+  "Fizban's Platinum Shield": {
+    "resolution": "none"
+  },
+  "Forbiddance": {
+    "resolution": "auto",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Variable (caster chooses: Radiant or Necrotic)",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "5d10",
+          "tiers": []
+        }
+      }
+    ]
+  },
+  "Globe of Invulnerability": {
+    "resolution": "none",
+    "area": {
+      "shape": "emanation",
+      "size": 10,
+      "origin": "self"
+    }
+  },
+  "Guards and Wards": {
+    "resolution": "none"
+  },
+  "Heal": {
+    "resolution": "none"
+  },
+  "Primordial Ward": {
+    "resolution": "none"
+  }
+}

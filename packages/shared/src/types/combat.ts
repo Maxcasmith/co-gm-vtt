@@ -39,9 +39,17 @@ export interface EnemyStatBlock {
   level?: number;
   creatureType?: CreatureType;
   isBoss?: boolean;
+  /** The player who controls this ally on the map (Find Familiar/Unseen Servant's summoner) — omitted for GM-recruited party allies, which stay GM-controlled. Same idea as "the telepathic link," simplified to full token control instead of a separate see/hear/command mechanic. */
+  ownerId?: string;
   // Combat-scoped, like the rest of a creature's live state — not persisted beyond the fight
   // (Encounter.toJSON() only ever serialized stat blocks, same fidelity as HP/resources).
   conditions?: ActiveCondition[] | undefined;
+  // Innate damage-type modifiers, e.g. ["Fire"] or ["Bludgeoning, Piercing, and Slashing"] as
+  // printed on the stat block. Registered as endOfCombat DamageResistanceHooks at combat start
+  // — same application path a spell-granted one (Absorb Elements) uses, just a longer duration.
+  damageResistances?: string[];
+  damageVulnerabilities?: string[];
+  damageImmunities?: string[];
 }
 
 export interface TurnOrderEntry {
@@ -50,6 +58,8 @@ export interface TurnOrderEntry {
   initiative: number;
   isPlayer: boolean;
   teamId: string;
+  /** See EnemyStatBlock.ownerId. */
+  ownerId?: string;
 }
 
 export interface TokenPosition {
@@ -63,6 +73,7 @@ export interface AttackResult {
   targetName: string;
   targetId: string;
   weaponName: string;
+  isMelee: boolean;
   d20: number;
   attackBonus: number;
   statBonus: number;

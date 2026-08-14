@@ -1,0 +1,152 @@
+{
+  "Aganazzar's Scorcher": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      }
+    ]
+  },
+  "Continual Flame": {
+    "resolution": "none"
+  },
+  "Darkness": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 15,
+      "origin": "point"
+    }
+  },
+  "Flame Blade": {
+    "resolution": "attack",
+    "attackType": "melee",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "3d6",
+          "tiers": [
+            {
+              "atLevel": 3,
+              "value": "1d6"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "Gust of Wind": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "line",
+      "size": 60,
+      "width": 10,
+      "origin": "self"
+    }
+  },
+  "Melf's Acid Arrow": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Acid"
+      }
+    ]
+  },
+  "Moonbeam": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant"
+      }
+    ]
+  },
+  "Rime's Binding Ice": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cone",
+      "size": 30,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Cold"
+      }
+    ]
+  },
+  "Scorching Ray": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      }
+    ]
+  },
+  "Shatter": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 10,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Thunder"
+      }
+    ]
+  },
+  "Snilloc's Snowball Swarm": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 5,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Cold"
+      }
+    ]
+  },
+  "Spiritual Weapon": {
+    "resolution": "none"
+  },
+  "Warding Wind": {
+    "resolution": "none"
+  }
+}

@@ -13,7 +13,7 @@ import {
   NEMESIS_COOLDOWN_SESSIONS, NEMESIS_CAP_PER_TARGET, NEMESIS_MAX_DEATHS, ALLY_XP_PER_LEVEL, withLivePositions,
 } from './state.ts';
 import { D20Roll, toSlug, escalateCr } from './combat/dice.ts';
-import { rollPlayerInitiatives, addToTurnOrder, resolveQuest } from './combat/runtime.ts';
+import { rollPlayerInitiatives, addToTurnOrder, resolveQuest, sweepGameTimeExpiries } from './combat/runtime.ts';
 import { generateAndBroadcastEnemies } from './dungeon/runtime.ts';
 
 export async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
@@ -84,9 +84,13 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
       if (!hasFeatureProvider(config, 'dungeonGeneration')) { console.warn('[dungeon] no models configured — skipping dungeon generation'); return; }
       console.log(`[dungeon] generating: ${effect.name}`);
       io.to(ROOM).emit('dungeon:generating');
-      const recentChat = await readChatLog(cid);
+      const [recentChat, characters] = await Promise.all([readChatLog(cid), listCharacters(cid)]);
       const storyContext = recentChat.slice(-10).map(m => `[${m.senderName}]: ${m.text}`).join('\n');
-      const dungeon = await generateDungeon(effect.name, effect.dungeonType, getFeatureProvider(config, 'dungeonGeneration'), storyContext);
+      const partySize = characters.length || 4;
+      const partyLevel = characters.length
+        ? Math.round(characters.reduce((sum, c) => sum + (c.level ?? 1), 0) / characters.length)
+        : 1;
+      const dungeon = await generateDungeon(effect.name, effect.dungeonType, getFeatureProvider(config, 'dungeonGeneration'), storyContext, { partySize, partyLevel });
       dungeons.set(cid, dungeon);
       await saveDungeon(cid, dungeon);
       await saveDungeonAscii(cid, dungeon);
@@ -123,6 +127,7 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
           isPlayer: false,
           teamId: 'players',
           creature,
+          ownerId: effect.ally.ownerId,
         });
         playerTeam.addParticipant(p);
         encounter.expectedParticipantCount += 1;
@@ -159,6 +164,7 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
       manifest.updatedAt = new Date().toISOString();
       await writeManifest(cid, manifest);
       io.to(ROOM).emit('clock:update', { worldTimeSecs: manifest.worldTimeSecs });
+      sweepGameTimeExpiries(cid, manifest.worldTimeSecs);
     } else if (effect.type === 'nemesis_create') {
       const slug = toSlug(effect.name);
       const manifest = await readManifest(cid) ?? emptyManifest();

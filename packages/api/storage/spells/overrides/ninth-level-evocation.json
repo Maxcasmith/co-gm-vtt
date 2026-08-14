@@ -1,0 +1,42 @@
+{
+  "Meteor Swarm": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 40,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      }
+    ]
+  },
+  "Ravenous Void": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      },
+      {
+        "type": "condition",
+        "condition": "Restrained"
+      }
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "Symbol": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 60,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic"
+      },
+      {
+        "type": "condition",
+        "condition": "Frightened"
+      }
+    ]
+  }
+}

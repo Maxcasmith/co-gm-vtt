@@ -1,0 +1,243 @@
+{
+  "Arms of Hadar": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "emanation",
+      "size": 10,
+      "origin": "self"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d6",
+          "tiers": [
+            { "atLevel": 2, "value": "3d6" },
+            { "atLevel": 3, "value": "4d6" },
+            { "atLevel": 4, "value": "5d6" },
+            { "atLevel": 5, "value": "6d6" },
+            { "atLevel": 6, "value": "7d6" },
+            { "atLevel": 7, "value": "8d6" },
+            { "atLevel": 8, "value": "9d6" },
+            { "atLevel": 9, "value": "10d6" }
+          ]
+        }
+      }
+    ],
+    "hooks": [
+      {
+        "type": "reactionLock",
+        "duration": { "until": "startOfOwnerTurn" }
+      }
+    ]
+  },
+  "Ensnaring Strike": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": false
+    },
+    "hooks": [
+      {
+        "type": "recurringDamage",
+        "damageType": "Piercing",
+        "conditionName": "Restrained",
+        "recurringStage": "beforeTurn",
+        "gatedBySave": true,
+        "escapeSkillCheck": "Athletics",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d6",
+          "tiers": [
+            { "atLevel": 2, "value": "2d6" },
+            { "atLevel": 3, "value": "3d6" },
+            { "atLevel": 4, "value": "4d6" },
+            { "atLevel": 5, "value": "5d6" },
+            { "atLevel": 6, "value": "6d6" },
+            { "atLevel": 7, "value": "7d6" },
+            { "atLevel": 8, "value": "8d6" },
+            { "atLevel": 9, "value": "9d6" }
+          ]
+        },
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
+  },
+  "Entangle": {
+    "resolution": "save",
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    },
+    "difficultTerrain": { "multiplier": 2, "durationRounds": 10 },
+    "hazardVisual": { "style": "vines", "color": "#3a7d1e" },
+    "save": {
+      "ability": "str",
+      "halfOnSave": false
+    },
+    "hooks": [
+      {
+        "type": "recurringDamage",
+        "conditionName": "Restrained",
+        "escapeSkillCheck": "Athletics",
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
+  },
+  "Find Familiar": {
+    "resolution": "none",
+    "explorationCastable": true,
+    "todo": "The telepathic link is simplified to full token control (the caster can drag the familiar's token exactly like their own) rather than the RAW see/hear-through-it mechanic — good enough for map presence, not literal. Delivering touch spells through it is unimplemented (no such delivery path exists). Its chosen form is fixed to a generic Fey statline rather than letting the player pick Bat/Cat/Owl/etc — no form-picker UI exists.",
+    "grantsCompanion": {
+      "name": "Familiar",
+      "cr": 0,
+      "hp": 1,
+      "ac": 13,
+      "speed": 30,
+      "stats": { "str": 3, "dex": 16, "con": 8, "int": 3, "wis": 12, "cha": 6 },
+      "attacks": [],
+      "creatureType": "Fey"
+    }
+  },
+  "Fog Cloud": {
+    "resolution": "none",
+    "explorationCastable": true,
+    "todo": "Duration is capped at 600 rounds (1 hour) rather than tracked against real time; only matters if a single combat runs implausibly long.",
+    "area": {
+      "shape": "sphere",
+      "size": 20,
+      "origin": "point"
+    },
+    "obscuresArea": { "durationRounds": 600 },
+    "hazardVisual": { "style": "smudge", "color": "#f2f2f2" }
+  },
+  "Goodberry": {
+    "resolution": "none",
+    "explorationCastable": true,
+    "grantsItem": {
+      "name": "Goodberry",
+      "quantity": 10,
+      "description": "A magic berry. Eating it (Bonus Action) restores 1 HP and provides a day's nourishment.",
+      "effect": "Restores 1 HP and sustains you for one day.",
+      "actionCost": "bonusAction"
+    }
+  },
+  "Grease": {
+    "resolution": "save",
+    "todo": "The ongoing hazard (creatures entering the area later, or ending their turn there, should also save vs Prone) is unimplemented — only the initial on-cast save for creatures already standing in the area is modeled.",
+    "area": {
+      "shape": "cube",
+      "size": 10,
+      "origin": "point"
+    },
+    "difficultTerrain": { "multiplier": 2, "durationRounds": 10 },
+    "hazardVisual": { "style": "smudge", "color": "#5c4033" },
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Prone"
+      }
+    ]
+  },
+  "Hail of Thorns": {
+    "resolution": "save",
+    "splashRadiusFt": 5,
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Piercing",
+        "gatedBySave": true,
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d10",
+          "tiers": [
+            { "atLevel": 2, "value": "2d10" },
+            { "atLevel": 3, "value": "3d10" },
+            { "atLevel": 4, "value": "4d10" },
+            { "atLevel": 5, "value": "5d10" },
+            { "atLevel": 6, "value": "6d10" },
+            { "atLevel": 7, "value": "7d10" },
+            { "atLevel": 8, "value": "8d10" },
+            { "atLevel": 9, "value": "9d10" }
+          ]
+        }
+      }
+    ]
+  },
+  "Ice Knife": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "splashRadiusFt": 5,
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Piercing",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d10",
+          "tiers": []
+        }
+      }
+    ],
+    "onSave": [
+      {
+        "type": "damage",
+        "damageType": "Cold",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d6",
+          "tiers": [
+            { "atLevel": 2, "value": "3d6" },
+            { "atLevel": 3, "value": "4d6" },
+            { "atLevel": 4, "value": "5d6" },
+            { "atLevel": 5, "value": "6d6" },
+            { "atLevel": 6, "value": "7d6" },
+            { "atLevel": 7, "value": "8d6" },
+            { "atLevel": 8, "value": "9d6" },
+            { "atLevel": 9, "value": "10d6" }
+          ]
+        }
+      }
+    ]
+  },
+  "Tenser's Floating Disk": {
+    "resolution": "none",
+    "explorationCastable": true,
+    "todo": "500lb weight capacity (spell ends if overloaded) is unimplemented — the codebase has no item-weight field anywhere (Item/Weapon/Armor/Consumable), so there's nothing to sum against a limit. The disk itself does exist: appears at the caster's position, snaps to catch up if they range more than 20ft away, and fades if they outrun it by 100ft in one jump.",
+    "followingObject": { "name": "Floating Disk", "leashFt": 20 }
+  },
+  "Unseen Servant": {
+    "resolution": "none",
+    "explorationCastable": true,
+    "todo": "The caster gets full token control (drag it like their own) instead of literal command-based task-following — good enough to walk it around and roleplay the task, not a fetch/carry/light-fires simulation. The 60ft-leash spell-end check isn't enforced (no per-companion leash tracking, unlike Tenser's Floating Disk's dedicated followingObject).",
+    "grantsCompanion": {
+      "name": "Unseen Servant",
+      "cr": 0,
+      "hp": 1,
+      "ac": 10,
+      "speed": 15,
+      "stats": { "str": 2, "dex": 10, "con": 10, "int": 1, "wis": 10, "cha": 1 },
+      "attacks": [],
+      "creatureType": "Construct"
+    }
+  }
+}

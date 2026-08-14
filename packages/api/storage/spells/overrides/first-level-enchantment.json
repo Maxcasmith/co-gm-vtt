@@ -1,0 +1,203 @@
+{
+  "Animal Friendship": {
+    "resolution": "save",
+    "todo": "'Ends if you or an ally deals damage to it' only tracks the caster's own damage (see endsIfCasterDamages) — an ally damaging the charmed creature won't end the spell.",
+    "targetsMin": 1,
+    "targetsMax": 1,
+    "targetsScaleWithSlot": true,
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "hooks": [
+      {
+        "type": "recurringDamage",
+        "conditionName": "Charmed",
+        "endsIfCasterDamages": true,
+        "duration": { "until": "gameTime", "gameSecs": 86400 }
+      }
+    ]
+  },
+  "Bane": {
+    "resolution": "save",
+    "targetsMin": 1,
+    "targetsMax": 3,
+    "targetsScaleWithSlot": true,
+    "save": {
+      "ability": "cha",
+      "halfOnSave": false
+    },
+    "hooks": [
+      {
+        "type": "rollModifier",
+        "dieSize": 4,
+        "sign": -1,
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
+  },
+  "Bless": {
+    "resolution": "none",
+    "targetsMin": 1,
+    "targetsMax": 3,
+    "targetsScaleWithSlot": true,
+    "hooks": [
+      {
+        "type": "rollModifier",
+        "dieSize": 4,
+        "sign": 1,
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
+  },
+  "Charm Person": {
+    "resolution": "save",
+    "todo": "Advantage on the save if you or your allies are already fighting the target is unimplemented — no system reads combat-state-vs-caster into a save's roll mode.",
+    "targetsMin": 1,
+    "targetsMax": 1,
+    "targetsScaleWithSlot": true,
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "hooks": [
+      {
+        "type": "recurringDamage",
+        "conditionName": "Charmed",
+        "endsIfCasterDamages": true,
+        "duration": { "until": "gameTime", "gameSecs": 3600 }
+      }
+    ]
+  },
+  "Command": {
+    "resolution": "save",
+    "todo": "Grovel (Prone) and Halt (zero movement) are real. Halt's action-lock half (no action or Bonus Action on its next turn) isn't — no per-participant action-lock hook exists yet. Approach/Drop/Flee, and any free-text word, are narrative only: no AI-turn override for forced movement and no held-item tracking on creatures to force a drop, so the caster's choice is only announced in chat for the table to enforce by hand.",
+    "targetsMin": 1,
+    "targetsMax": 1,
+    "targetsScaleWithSlot": true,
+    "commandOptions": ["Approach", "Drop", "Flee", "Grovel", "Halt"],
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    }
+  },
+  "Compelled Duel": {
+    "resolution": "save",
+    "todo": "Both real effects are unimplemented: disadvantage on the target's attacks against anyone but the caster (a different shape than attackerDisadvantage, which gates by creature type, not by 'everyone except one specific creature') and the 30ft leash preventing it from willingly moving away (no movement-restriction/leash system exists — the closest, Tenser's Floating Disk's followingObject, follows a point, it doesn't cap someone else's own movement).",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    }
+  },
+  "Dissonant Whispers": {
+    "resolution": "save",
+    "todo": "The forced Reaction move (fleeing by the safest route) is unimplemented — no system compels a creature to spend its own reaction on forced movement.",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "3d6",
+          "tiers": [
+            { "atLevel": 2, "value": "4d6" },
+            { "atLevel": 3, "value": "5d6" },
+            { "atLevel": 4, "value": "6d6" },
+            { "atLevel": 5, "value": "7d6" },
+            { "atLevel": 6, "value": "8d6" },
+            { "atLevel": 7, "value": "9d6" },
+            { "atLevel": 8, "value": "10d6" },
+            { "atLevel": 9, "value": "11d6" }
+          ]
+        }
+      }
+    ]
+  },
+  "Heroism": {
+    "resolution": "none",
+    "targetsMin": 1,
+    "targetsMax": 1,
+    "targetsScaleWithSlot": true,
+    "hooks": [
+      {
+        "type": "conditionImmunity",
+        "immuneConditions": ["Frightened"],
+        "duration": { "until": "rounds", "rounds": 10 }
+      },
+      {
+        "type": "recurringDamage",
+        "tempHpScaling": {
+          "mode": "ability-mod",
+          "base": "1d1",
+          "tiers": []
+        },
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
+  },
+  "Hex": {
+    "autoHit": true,
+    "resolution": "none",
+    "todo": "Disadvantage on ability checks with the chosen ability is unimplemented — no system grants disadvantage tied to a specific ability score picked at cast time.",
+    "hooks": [
+      {
+        "type": "onHitBonusDamage",
+        "damageType": "Necrotic",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d6",
+          "tiers": []
+        },
+        "duration": { "until": "endOfCombat" }
+      }
+    ]
+  },
+  "Silvery Barbs": {
+    "resolution": "none",
+    "todo": "Unimplemented — needs a generic 'react to any d20 roll another creature just made' trigger (forcing a reroll-and-take-lower) plus an 'advantage on your next roll of any kind within 1 minute' grant that isn't attack-roll-specific like grantAdvantage. Neither exists; building either for this one spell alone isn't worth it yet."
+  },
+  "Sleep": {
+    "resolution": "save",
+    "todo": "Escalation to Unconscious on a second failed save is unimplemented — this only applies the first stage (Incapacitated, 2-round safety cap standing in for 'until the end of its next turn, then re-save'). Ending early if the target takes damage, someone spending an action to wake it, and the innate immunity for creatures that don't sleep/are immune to Exhaustion are also unimplemented.",
+    "area": {
+      "shape": "sphere",
+      "size": 5,
+      "origin": "point"
+    },
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "hooks": [
+      {
+        "type": "recurringDamage",
+        "conditionName": "Incapacitated",
+        "duration": { "until": "rounds", "rounds": 2 }
+      }
+    ]
+  },
+  "Tasha's Hideous Laughter": {
+    "resolution": "save",
+    "todo": "Only the end-of-turn re-save is modeled — the damage-triggered re-save (with advantage) is unimplemented, since RecurringDamageHook's saveToEnd only rerolls on its own turn-boundary stage, not off a damage event.",
+    "targetsMin": 1,
+    "targetsMax": 1,
+    "targetsScaleWithSlot": true,
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "hooks": [
+      {
+        "type": "recurringDamage",
+        "conditionNames": ["Prone", "Incapacitated"],
+        "saveToEnd": { "ability": "wis" },
+        "recurringStage": "afterTurn",
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
+  }
+}

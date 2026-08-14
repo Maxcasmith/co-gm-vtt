@@ -1,0 +1,56 @@
+{
+  "Control Water": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Bludgeoning"
+      }
+    ]
+  },
+  "Elemental Bane": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    }
+  },
+  "Fabricate": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 10,
+      "origin": "point"
+    }
+  },
+  "Guardian of Nature": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      }
+    ]
+  },
+  "Polymorph": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    }
+  },
+  "Stone Shape": {
+    "resolution": "none"
+  },
+  "Stoneskin": {
+    "resolution": "none"
+  }
+}

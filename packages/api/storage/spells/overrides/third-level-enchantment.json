@@ -1,0 +1,54 @@
+{
+  "Antagonize": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic"
+      }
+    ]
+  },
+  "Catnap": {
+    "resolution": "none"
+  },
+  "Enemies Abound": {
+    "resolution": "save",
+    "save": {
+      "ability": "int",
+      "halfOnSave": false
+    }
+  },
+  "Fast Friends": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Charmed"
+      }
+    ]
+  },
+  "Incite Greed": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Charmed"
+      }
+    ]
+  },
+  "Motivational Speech": {
+    "resolution": "none"
+  }
+}

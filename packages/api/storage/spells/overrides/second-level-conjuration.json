@@ -1,0 +1,133 @@
+{
+  "Air Bubble": {
+    "resolution": "none"
+  },
+  "Cloud of Daggers": {
+    "resolution": "auto",
+    "area": {
+      "shape": "cube",
+      "size": 5,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Slashing"
+      }
+    ]
+  },
+  "Deryan's Helpful Homunculi": {
+    "resolution": "none"
+  },
+  "Dust Devil": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 5,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Bludgeoning"
+      }
+    ]
+  },
+  "Find Steed": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Incapacitated"
+      }
+    ]
+  },
+  "Flaming Sphere": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      }
+    ]
+  },
+  "Healing Spirit": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 5,
+      "origin": "point"
+    }
+  },
+  "Homunculus Servant": {
+    "resolution": "none"
+  },
+  "Misty Step": {
+    "resolution": "none"
+  },
+  "Spray of Cards": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cone",
+      "size": 15,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      },
+      {
+        "type": "condition",
+        "condition": "Blinded"
+      }
+    ]
+  },
+  "Summon Beast": {
+    "resolution": "none"
+  },
+  "Vortex Warp": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    }
+  },
+  "Web": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      },
+      {
+        "type": "condition",
+        "condition": "Restrained"
+      }
+    ]
+  },
+  "Wristpocket": {
+    "resolution": "none"
+  }
+}

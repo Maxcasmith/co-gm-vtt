@@ -1,0 +1,24 @@
+{
+  "Weird": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 30,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic"
+      },
+      {
+        "type": "condition",
+        "condition": "Frightened"
+      }
+    ]
+  }
+}

@@ -49,6 +49,7 @@ export function AbilitiesTab({ character }: { character: Character }) {
     ...(BACKGROUND_SKILLS[character.background] ?? []),
     ...(character.skillProficiencies ?? []),
   ]);
+  const expertSkills = new Set<string>(character.expertiseSkills ?? []);
 
   return (
     <>
@@ -161,8 +162,10 @@ export function AbilitiesTab({ character }: { character: Character }) {
             const statKey =
               skill.stat.toLowerCase() as keyof Character["stats"];
             const proficient = proficientSkills.has(skill.name);
+            const expert = proficient && expertSkills.has(skill.name);
             const bonus =
-              modNum(character.stats[statKey]) + (proficient ? PROF : 0);
+              modNum(character.stats[statKey]) +
+              (expert ? PROF * 2 : proficient ? PROF : 0);
             return (
               <div
                 key={skill.name}
@@ -175,10 +178,10 @@ export function AbilitiesTab({ character }: { character: Character }) {
                     skill: skill.name,
                   })
                 }
-                title={`Roll ${skill.name} check`}
+                title={`Roll ${skill.name} check${expert ? " (Expertise)" : ""}`}
               >
                 <span
-                  className={`sheet-save-dot${proficient ? " sheet-save-dot--filled" : ""}`}
+                  className={`sheet-save-dot${expert ? " sheet-save-dot--expert" : proficient ? " sheet-save-dot--filled" : ""}`}
                 />
                 <span className="sheet-save-label">{skill.name}</span>
                 <span className="sheet-save-val sheet-save-stat">

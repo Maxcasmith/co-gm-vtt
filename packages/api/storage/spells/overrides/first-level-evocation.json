@@ -1,0 +1,561 @@
+{
+  "Burning Hands": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cone",
+      "size": 15,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "3d6",
+          "tiers": [
+            { "atLevel": 2, "value": "4d6" },
+            { "atLevel": 3, "value": "5d6" },
+            { "atLevel": 4, "value": "6d6" },
+            { "atLevel": 5, "value": "7d6" },
+            { "atLevel": 6, "value": "8d6" },
+            { "atLevel": 7, "value": "9d6" },
+            { "atLevel": 8, "value": "10d6" },
+            { "atLevel": 9, "value": "11d6" }
+          ]
+        }
+      }
+    ]
+  },
+  "Chaos Bolt": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Thunder",
+        "damageTypeOptions": ["Acid", "Cold", "Fire", "Force", "Lightning", "Poison", "Psychic", "Thunder"],
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d8+1d6",
+          "tiers": [
+            { "atLevel": 2, "value": "2d8+2d6" },
+            { "atLevel": 3, "value": "2d8+3d6" },
+            { "atLevel": 4, "value": "2d8+4d6" },
+            { "atLevel": 5, "value": "2d8+5d6" },
+            { "atLevel": 6, "value": "2d8+6d6" },
+            { "atLevel": 7, "value": "2d8+7d6" },
+            { "atLevel": 8, "value": "2d8+8d6" },
+            { "atLevel": 9, "value": "2d8+9d6" }
+          ]
+        }
+      }
+    ]
+  },
+  "Chromatic Orb": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Thunder",
+        "damageTypeOptions": ["Acid", "Cold", "Fire", "Lightning", "Poison", "Thunder"],
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "3d8",
+          "tiers": [
+            { "atLevel": 2, "value": "4d8" },
+            { "atLevel": 3, "value": "5d8" },
+            { "atLevel": 4, "value": "6d8" },
+            { "atLevel": 5, "value": "7d8" },
+            { "atLevel": 6, "value": "8d8" },
+            { "atLevel": 7, "value": "9d8" },
+            { "atLevel": 8, "value": "10d8" },
+            { "atLevel": 9, "value": "11d8" }
+          ]
+        }
+      }
+    ]
+  },
+  "Divine Smite": {
+    "resolution": "none",
+    "auraColor": "#ffe066",
+    "impactColor": "#ffe066",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d8",
+          "tiers": [
+            { "atLevel": 2, "value": "3d8" },
+            { "atLevel": 3, "value": "4d8" },
+            { "atLevel": 4, "value": "5d8" },
+            { "atLevel": 5, "value": "6d8" },
+            { "atLevel": 6, "value": "7d8" },
+            { "atLevel": 7, "value": "8d8" },
+            { "atLevel": 8, "value": "9d8" },
+            { "atLevel": 9, "value": "10d8" }
+          ]
+        }
+      },
+      {
+        "type": "damage",
+        "damageType": "Radiant",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d8",
+          "tiers": []
+        },
+        "appliesIf": {
+          "creatureType": [
+            "Fiend",
+            "Undead"
+          ]
+        }
+      }
+    ]
+  },
+  "Earth Tremor": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "sphere",
+      "size": 10,
+      "origin": "self"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Bludgeoning",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d6",
+          "tiers": [
+            { "atLevel": 2, "value": "2d6" },
+            { "atLevel": 3, "value": "3d6" },
+            { "atLevel": 4, "value": "4d6" },
+            { "atLevel": 5, "value": "5d6" },
+            { "atLevel": 6, "value": "6d6" },
+            { "atLevel": 7, "value": "7d6" },
+            { "atLevel": 8, "value": "8d6" },
+            { "atLevel": 9, "value": "9d6" }
+          ]
+        }
+      },
+      {
+        "type": "condition",
+        "condition": "Prone"
+      }
+    ]
+  },
+  "Faerie Fire": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "impactColor": "#d9a8ff",
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    },
+    "hooks": [
+      {
+        "type": "grantAdvantage",
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
+  },
+  "Frost Fingers": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cone",
+      "size": 15,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Cold",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d8",
+          "tiers": [
+            { "atLevel": 2, "value": "3d8" },
+            { "atLevel": 3, "value": "4d8" },
+            { "atLevel": 4, "value": "5d8" },
+            { "atLevel": 5, "value": "6d8" },
+            { "atLevel": 6, "value": "7d8" },
+            { "atLevel": 7, "value": "8d8" },
+            { "atLevel": 8, "value": "9d8" },
+            { "atLevel": 9, "value": "10d8" }
+          ]
+        }
+      }
+    ]
+  },
+  "Guiding Bolt": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "4d6",
+          "tiers": [
+            { "atLevel": 2, "value": "5d6" },
+            { "atLevel": 3, "value": "6d6" },
+            { "atLevel": 4, "value": "7d6" },
+            { "atLevel": 5, "value": "8d6" },
+            { "atLevel": 6, "value": "9d6" },
+            { "atLevel": 7, "value": "10d6" },
+            { "atLevel": 8, "value": "11d6" },
+            { "atLevel": 9, "value": "12d6" }
+          ]
+        }
+      }
+    ],
+    "hooks": [
+      {
+        "type": "grantAdvantage",
+        "consumeOnUse": true,
+        "duration": { "until": "rounds", "rounds": 2 }
+      }
+    ]
+  },
+  "Hellish Rebuke": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "reactionTrigger": {
+      "on": "takingDamage"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d10",
+          "tiers": [
+            { "atLevel": 2, "value": "3d10" },
+            { "atLevel": 3, "value": "4d10" },
+            { "atLevel": 4, "value": "5d10" },
+            { "atLevel": 5, "value": "6d10" },
+            { "atLevel": 6, "value": "7d10" },
+            { "atLevel": 7, "value": "8d10" },
+            { "atLevel": 8, "value": "9d10" },
+            { "atLevel": 9, "value": "10d10" }
+          ]
+        }
+      }
+    ]
+  },
+  "Jim's Magic Missile": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "targetsMin": 1,
+    "targetsMax": 3,
+    "targetsScaleWithSlot": true,
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d4",
+          "tiers": []
+        }
+      }
+    ]
+  },
+  "Magic Missile": {
+    "autoHit": true,
+    "resolution": "none",
+    "targetsMin": 1,
+    "targetsMax": 3,
+    "targetsScaleWithSlot": true,
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d4+1",
+          "tiers": []
+        }
+      }
+    ]
+  },
+  "Searing Smite": {
+    "resolution": "none",
+    "auraColor": "#ff8c1a",
+    "impactColor": "#ff8c1a",
+    "auraStyle": "fire",
+    "impactStyle": "fire",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d6",
+          "tiers": [
+            { "atLevel": 2, "value": "2d6" },
+            { "atLevel": 3, "value": "3d6" },
+            { "atLevel": 4, "value": "4d6" },
+            { "atLevel": 5, "value": "5d6" },
+            { "atLevel": 6, "value": "6d6" },
+            { "atLevel": 7, "value": "7d6" },
+            { "atLevel": 8, "value": "8d6" },
+            { "atLevel": 9, "value": "9d6" }
+          ]
+        }
+      }
+    ],
+    "hooks": [
+      {
+        "type": "recurringDamage",
+        "damageType": "Fire",
+        "conditionName": "Burning",
+        "saveToEnd": { "ability": "con" },
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d6",
+          "tiers": [
+            { "atLevel": 2, "value": "2d6" },
+            { "atLevel": 3, "value": "3d6" },
+            { "atLevel": 4, "value": "4d6" },
+            { "atLevel": 5, "value": "5d6" },
+            { "atLevel": 6, "value": "6d6" },
+            { "atLevel": 7, "value": "7d6" },
+            { "atLevel": 8, "value": "8d6" },
+            { "atLevel": 9, "value": "9d6" }
+          ]
+        },
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
+  },
+  "Spellfire Flare": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "targetsMin": 1,
+    "targetsMax": 1,
+    "targetsScaleWithSlot": true,
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d10",
+          "tiers": []
+        }
+      }
+    ]
+  },
+  "Tasha's Caustic Brew": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "impactColor": "#9fd63a",
+    "area": {
+      "shape": "line",
+      "size": 30,
+      "width": 5,
+      "origin": "self"
+    },
+    "hooks": [
+      {
+        "type": "recurringDamage",
+        "damageType": "Acid",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d4",
+          "tiers": [
+            {
+              "atLevel": 2,
+              "value": "4d4"
+            },
+            {
+              "atLevel": 3,
+              "value": "6d4"
+            },
+            {
+              "atLevel": 4,
+              "value": "8d4"
+            },
+            {
+              "atLevel": 5,
+              "value": "10d4"
+            },
+            {
+              "atLevel": 6,
+              "value": "12d4"
+            },
+            {
+              "atLevel": 7,
+              "value": "14d4"
+            },
+            {
+              "atLevel": 8,
+              "value": "16d4"
+            },
+            {
+              "atLevel": 9,
+              "value": "18d4"
+            }
+          ]
+        },
+        "duration": {
+          "until": "rounds",
+          "rounds": 10
+        }
+      }
+    ]
+  },
+  "Thunderous Smite": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": false
+    },
+    "auraColor": "#3b82ff",
+    "impactColor": "#3b82ff",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Thunder",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d6",
+          "tiers": [
+            { "atLevel": 2, "value": "3d6" },
+            { "atLevel": 3, "value": "4d6" },
+            { "atLevel": 4, "value": "5d6" },
+            { "atLevel": 5, "value": "6d6" },
+            { "atLevel": 6, "value": "7d6" },
+            { "atLevel": 7, "value": "8d6" },
+            { "atLevel": 8, "value": "9d6" },
+            { "atLevel": 9, "value": "10d6" }
+          ]
+        }
+      },
+      {
+        "type": "push",
+        "distance": 10,
+        "gatedBySave": true
+      },
+      {
+        "type": "condition",
+        "condition": "Prone",
+        "gatedBySave": true
+      }
+    ]
+  },
+  "Thunderwave": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 15,
+      "origin": "self"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Thunder",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d8",
+          "tiers": [
+            { "atLevel": 2, "value": "3d8" },
+            { "atLevel": 3, "value": "4d8" },
+            { "atLevel": 4, "value": "5d8" },
+            { "atLevel": 5, "value": "6d8" },
+            { "atLevel": 6, "value": "7d8" },
+            { "atLevel": 7, "value": "8d8" },
+            { "atLevel": 8, "value": "9d8" },
+            { "atLevel": 9, "value": "10d8" }
+          ]
+        }
+      },
+      {
+        "type": "push",
+        "distance": 10
+      }
+    ]
+  },
+  "Witch Bolt": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Lightning",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d12",
+          "tiers": [
+            {
+              "atLevel": 2,
+              "value": "3d12"
+            },
+            {
+              "atLevel": 3,
+              "value": "4d12"
+            },
+            {
+              "atLevel": 4,
+              "value": "5d12"
+            },
+            {
+              "atLevel": 5,
+              "value": "6d12"
+            },
+            {
+              "atLevel": 6,
+              "value": "7d12"
+            },
+            {
+              "atLevel": 7,
+              "value": "8d12"
+            },
+            {
+              "atLevel": 8,
+              "value": "9d12"
+            },
+            {
+              "atLevel": 9,
+              "value": "10d12"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

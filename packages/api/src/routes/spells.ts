@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { Spell, SpellCombatMeta } from 'shared';
@@ -55,15 +55,22 @@ function parseClasses(raw: string): string[] {
 }
 
 // Hand-authored/generated combat metadata, keyed by spell name, layered onto the
-// CSV import at load time so it survives a future re-export of Spells.csv.
+// CSV import at load time so it survives a future re-export of Spells.csv. Split
+// across one file per level+school (storage/spells/overrides/first-level-evocation.json,
+// ...) since the single monolithic file grew too large to navigate — merged back
+// into one lookup map here so the rest of the module doesn't care about the split.
 function loadCombatOverrides(): Record<string, SpellCombatMeta> {
-  const path = join(__dir, '../../storage/spells/spell-overrides.json');
+  const dir = join(__dir, '../../storage/spells/overrides');
+  const merged: Record<string, SpellCombatMeta> = {};
   try {
-    return JSON.parse(readFileSync(path, 'utf-8'));
+    for (const file of readdirSync(dir)) {
+      if (!file.endsWith('.json')) continue;
+      Object.assign(merged, JSON.parse(readFileSync(join(dir, file), 'utf-8')));
+    }
   } catch (err) {
     logError('routes/spells:loadCombatOverrides', err);
-    return {};
   }
+  return merged;
 }
 
 function loadSpells(): Spell[] {

@@ -1,0 +1,136 @@
+{
+  "Ashardalon's Stride": {
+    "resolution": "auto",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      }
+    ]
+  },
+  "Blink": {
+    "resolution": "none"
+  },
+  "Elemental Weapon": {
+    "resolution": "none"
+  },
+  "Erupting Earth": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Bludgeoning"
+      }
+    ]
+  },
+  "Flame Arrows": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      }
+    ]
+  },
+  "Fly": {
+    "resolution": "none"
+  },
+  "Gaseous Form": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Prone"
+      }
+    ]
+  },
+  "Haste": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Incapacitated"
+      }
+    ]
+  },
+  "Lightning Arrow": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Lightning"
+      }
+    ]
+  },
+  "Meld into Stone": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      },
+      {
+        "type": "condition",
+        "condition": "Prone"
+      }
+    ]
+  },
+  "Plant Growth": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 100,
+      "origin": "point"
+    }
+  },
+  "Slow": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cube",
+      "size": 40,
+      "origin": "point"
+    }
+  },
+  "Speak with Plants": {
+    "resolution": "none",
+    "area": {
+      "shape": "emanation",
+      "size": 30,
+      "origin": "self"
+    }
+  },
+  "Tiny Servant": {
+    "resolution": "none"
+  },
+  "Water Breathing": {
+    "resolution": "none"
+  },
+  "Water Walk": {
+    "resolution": "none"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "Aid": {
+    "resolution": "none",
+    "targetsMin": 1,
+    "targetsMax": 3
+  },
+  "Arcane Lock": {
+    "resolution": "none"
+  },
+  "Arcane Vigor": {
+    "resolution": "none"
+  },
+  "Elminster's Elusion": {
+    "resolution": "none"
+  },
+  "Lesser Restoration": {
+    "resolution": "none"
+  },
+  "Pass without Trace": {
+    "resolution": "none",
+    "area": {
+      "shape": "emanation",
+      "size": 30,
+      "origin": "self"
+    }
+  },
+  "Prayer of Healing": {
+    "resolution": "none"
+  },
+  "Protection from Poison": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Poisoned"
+      }
+    ]
+  },
+  "Warding Bond": {
+    "resolution": "none"
+  }
+}

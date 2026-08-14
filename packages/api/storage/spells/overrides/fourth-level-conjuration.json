@@ -1,0 +1,151 @@
+{
+  "Conjure Minor Elementals": {
+    "resolution": "none",
+    "area": {
+      "shape": "emanation",
+      "size": 15,
+      "origin": "self"
+    }
+  },
+  "Conjure Woodland Beings": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "emanation",
+      "size": 10,
+      "origin": "self"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      }
+    ]
+  },
+  "Dimension Door": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      }
+    ]
+  },
+  "Doomtide": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic"
+      }
+    ]
+  },
+  "Evard's Black Tentacles": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Bludgeoning"
+      },
+      {
+        "type": "condition",
+        "condition": "Restrained"
+      }
+    ]
+  },
+  "Find Greater Steed": {
+    "resolution": "none"
+  },
+  "Giant Insect": {
+    "resolution": "none"
+  },
+  "Grasping Vine": {
+    "resolution": "attack",
+    "attackType": "melee",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Bludgeoning"
+      },
+      {
+        "type": "condition",
+        "condition": "Grappled"
+      }
+    ]
+  },
+  "Guardian of Faith": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "20",
+          "tiers": []
+        }
+      }
+    ]
+  },
+  "Leomund's Secret Chest": {
+    "resolution": "none"
+  },
+  "Mordenkainen's Faithful Hound": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      }
+    ]
+  },
+  "Summon Aberration": {
+    "resolution": "none"
+  },
+  "Summon Construct": {
+    "resolution": "none"
+  },
+  "Summon Elemental": {
+    "resolution": "none"
+  },
+  "Summon Greater Demon": {
+    "resolution": "none"
+  },
+  "Watery Sphere": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Restrained"
+      }
+    ]
+  }
+}

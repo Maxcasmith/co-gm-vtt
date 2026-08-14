@@ -252,6 +252,13 @@
   overflow: hidden;
 }
 
+.sheet-spell-source {
+  color: #9c7ae0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 9px;
+}
+
 .sheet-inv-attack {
   font-size: 9px;
   font-family: monospace;

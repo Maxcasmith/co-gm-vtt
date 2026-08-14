@@ -1,0 +1,59 @@
+{
+  "Augury": {
+    "resolution": "none"
+  },
+  "Beast Sense": {
+    "resolution": "none"
+  },
+  "Borrowed Knowledge": {
+    "resolution": "none"
+  },
+  "Detect Thoughts": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    }
+  },
+  "Find Traps": {
+    "resolution": "none"
+  },
+  "Fortune's Favor": {
+    "resolution": "none"
+  },
+  "Locate Animals or Plants": {
+    "resolution": "none"
+  },
+  "Locate Object": {
+    "resolution": "none"
+  },
+  "Mind Spike": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Psychic"
+      },
+      {
+        "type": "condition",
+        "condition": "Invisible"
+      }
+    ]
+  },
+  "See Invisibility": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Invisible"
+      }
+    ]
+  },
+  "Warp Sense": {
+    "resolution": "none"
+  }
+}

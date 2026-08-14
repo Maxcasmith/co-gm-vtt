@@ -24,7 +24,7 @@ interface CharacterDraft {
   activeTab: 'info' | 'backstory' | 'spells' | 'shop' | 'finished';
   gold: number;
   inventory: InventoryItem[];
-  learnedSpells: string[];
+  learnedSpells: Record<string, string>; // spell name → source label (class name or feat name)
   backstory: string;
 }
 
@@ -53,7 +53,7 @@ const BLANK: Omit<CharacterDraft, 'id'> = {
   activeTab: 'info',
   gold: 200,
   inventory: [],
-  learnedSpells: [],
+  learnedSpells: {},
   backstory: '',
 };
 

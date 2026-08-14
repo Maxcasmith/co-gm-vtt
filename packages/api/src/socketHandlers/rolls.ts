@@ -21,7 +21,8 @@ export function registerRollHandlers(ctx: JoinContext): void {
         (char.skillProficiencies ?? []).includes(skill) ||
         (BG_SKILLS[char.background] ?? []).includes(skill)
       ) : false;
-      const modifier = base + (proficient ? 2 : 0);
+      const expert = proficient && Boolean(skill) && (char.expertiseSkills ?? []).includes(skill!);
+      const modifier = base + (expert ? 4 : proficient ? 2 : 0);
       const mode = rollModeFor(char, 'check', statKey);
       const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
       const total = roll + modifier;

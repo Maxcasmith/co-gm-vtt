@@ -1,0 +1,98 @@
+{
+  "Animate Objects": {
+    "resolution": "none"
+  },
+  "Awaken": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Charmed"
+      }
+    ]
+  },
+  "Control Winds": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cube",
+      "size": 100,
+      "origin": "point"
+    }
+  },
+  "Create Spelljamming Helm": {
+    "resolution": "none"
+  },
+  "Passwall": {
+    "resolution": "none"
+  },
+  "Skill Empowerment": {
+    "resolution": "none"
+  },
+  "Songal's Elemental Suffusion": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "emanation",
+      "size": 15,
+      "origin": "self"
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Prone"
+      }
+    ]
+  },
+  "Swift Quiver": {
+    "resolution": "none"
+  },
+  "Telekinesis": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Restrained"
+      }
+    ]
+  },
+  "Temporal Shunt": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    }
+  },
+  "Transmute Rock": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cube",
+      "size": 40,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Bludgeoning"
+      },
+      {
+        "type": "condition",
+        "condition": "Restrained"
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "Dancing Lights": {
+    "resolution": "none"
+  },
+  "Minor Illusion": {
+    "resolution": "none",
+    "area": {
+      "shape": "cube",
+      "size": 5,
+      "origin": "point"
+    }
+  }
+}

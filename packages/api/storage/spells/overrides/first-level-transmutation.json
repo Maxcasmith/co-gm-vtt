@@ -1,0 +1,174 @@
+{
+  "Catapult": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Bludgeoning",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "3d8",
+          "tiers": [
+            { "atLevel": 2, "value": "4d8" },
+            { "atLevel": 3, "value": "5d8" },
+            { "atLevel": 4, "value": "6d8" },
+            { "atLevel": 5, "value": "7d8" },
+            { "atLevel": 6, "value": "8d8" },
+            { "atLevel": 7, "value": "9d8" },
+            { "atLevel": 8, "value": "10d8" },
+            { "atLevel": 9, "value": "11d8" }
+          ]
+        }
+      }
+    ]
+  },
+  "Create or Destroy Water": {
+    "resolution": "none",
+    "explorationCastable": true,
+    "todo": "No mechanical effect on the area itself — extinguishing exposed flames (Create Water) and destroying fog (Destroy Water) are unimplemented, since there's no terrain-state system tracking 'this cell is on fire' or 'this cell is fogged' for a spell to clear. Casting only spends the slot and announces; the GM narrates the actual terrain change.",
+    "area": {
+      "shape": "cube",
+      "size": 30,
+      "origin": "point"
+    }
+  },
+  "Divine Favor": {
+    "resolution": "none",
+    "hooks": [
+      {
+        "type": "onHitBonusDamage",
+        "damageType": "Radiant",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d4",
+          "tiers": []
+        },
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
+  },
+  "Expeditious Retreat": {
+    "resolution": "none",
+    "hooks": [
+      {
+        "type": "actionUnlock",
+        "action": "dash-bonus",
+        "duration": { "until": "rounds", "rounds": 100 }
+      }
+    ]
+  },
+  "Feather Fall": {
+    "resolution": "none",
+    "targetsMin": 1,
+    "targetsMax": 5,
+    "hooks": [
+      {
+        "type": "damageResistance",
+        "resistanceMode": "immunity",
+        "spellName": "Falling",
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
+  },
+  "Jump": {
+    "resolution": "none",
+    "todo": "Modeled as a flat movement discount (spend 10ft, gain 30ft) via the Jump HUD button rather than a true leap — there's no gap/chasm terrain or vertical clearance to actually jump across or onto, so it can't check whether a jump is physically needed or possible, only grant the distance.",
+    "targetsMin": 1,
+    "targetsMax": 1,
+    "targetsScaleWithSlot": true,
+    "hooks": [
+      {
+        "type": "actionUnlock",
+        "action": "jump",
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
+  },
+  "Longstrider": {
+    "resolution": "none",
+    "hooks": [
+      {
+        "type": "speedModifier",
+        "bonusFt": 10,
+        "duration": { "until": "gameTime", "gameSecs": 3600 }
+      }
+    ]
+  },
+  "Magnify Gravity": {
+    "resolution": "save",
+    "todo": "The Strength-check-to-move-objects-in-the-area effect is unimplemented — there's no object-interaction system (no picking up/moving loose objects at all) to gate with a check.",
+    "area": {
+      "shape": "sphere",
+      "size": 10,
+      "origin": "point"
+    },
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d8",
+          "tiers": [
+            { "atLevel": 2, "value": "3d8" },
+            { "atLevel": 3, "value": "4d8" },
+            { "atLevel": 4, "value": "5d8" },
+            { "atLevel": 5, "value": "6d8" },
+            { "atLevel": 6, "value": "7d8" },
+            { "atLevel": 7, "value": "8d8" },
+            { "atLevel": 8, "value": "9d8" },
+            { "atLevel": 9, "value": "10d8" }
+          ]
+        }
+      }
+    ],
+    "hooks": [
+      {
+        "type": "speedModifier",
+        "multiplier": 0.5,
+        "duration": { "until": "rounds", "rounds": 2 }
+      }
+    ]
+  },
+  "Purify Food and Drink": {
+    "resolution": "none",
+    "explorationCastable": true,
+    "area": {
+      "shape": "sphere",
+      "size": 5,
+      "origin": "point"
+    }
+  },
+  "Zephyr Strike": {
+    "resolution": "none",
+    "todo": "Not provoking opportunity attacks is moot — no attack-of-opportunity system exists, so nothing provokes one regardless. The advantage grant and the bonus damage consume independently (one triggers on the attack roll, the other on a hit) — a miss on the empowered attack correctly burns the advantage+speed but leaves the bonus damage armed for whatever the next hit happens to be, instead of also being spent.",
+    "hooks": [
+      {
+        "type": "onHitBonusDamage",
+        "damageType": "Force",
+        "consumeOnUse": true,
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d8",
+          "tiers": []
+        },
+        "duration": { "until": "rounds", "rounds": 10 }
+      },
+      {
+        "type": "grantAdvantage",
+        "self": true,
+        "consumeOnUse": true,
+        "speedBonusOnUseFt": 30,
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
+  }
+}

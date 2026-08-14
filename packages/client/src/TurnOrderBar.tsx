@@ -12,9 +12,22 @@ export default function TurnOrderBar({ campaignId }: Props) {
   const [entries, setEntries]         = useState<TurnOrderEntry[]>([]);
   const [actorName, setActorName]     = useState<string | null>(null);
   const [newIds, setNewIds]           = useState<Set<string>>(new Set());
+  const [concentrating, setConcentrating] = useState<Record<string, string>>({});
 
   useEffect(() => on('vtt:combat:state', ({ active }) => {
-    if (!active) { setEntries([]); setActorName(null); setNewIds(new Set()); }
+    if (!active) { setEntries([]); setActorName(null); setNewIds(new Set()); setConcentrating({}); }
+  }), []);
+
+  useEffect(() => on('vtt:combat:concentration', ({ targetId, spellName }) => {
+    setConcentrating(prev => {
+      if (spellName === null) {
+        if (!(targetId in prev)) return prev;
+        const next = { ...prev };
+        delete next[targetId];
+        return next;
+      }
+      return { ...prev, [targetId]: spellName };
+    });
   }), []);
 
   useEffect(() => on('vtt:combat:initiative', ({ entry }) => {
@@ -46,6 +59,7 @@ export default function TurnOrderBar({ campaignId }: Props) {
         const portrait  = entry.isPlayer
           ? `${API}/api/campaigns/${campaignId}/party/${entry.id}/portrait`
           : null;
+        const concentratingOn = concentrating[entry.id];
 
         return (
           <div
@@ -58,6 +72,9 @@ export default function TurnOrderBar({ campaignId }: Props) {
                 : null
               }
               <span className="turn-order-initial">{entry.name[0]?.toUpperCase()}</span>
+              {concentratingOn && (
+                <span className="turn-order-concentration" title={`Concentrating: ${concentratingOn}`}>◈</span>
+              )}
             </div>
             <span className="turn-order-name">{entry.name.split(' ')[0]}</span>
             <span className="turn-order-init">{entry.initiative}</span>

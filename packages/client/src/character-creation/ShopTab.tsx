@@ -1,4 +1,5 @@
 import type { InventoryItem } from 'shared';
+import emptyFrameIcon from '../assets/icons/Icon-Frame-Blue.jpg';
 import { useCharacter } from './CharacterContext.tsx';
 import { SHOP_ITEMS } from './srd.ts';
 
@@ -56,6 +57,7 @@ export default function ShopTab() {
         <p className="shop-col-title">Shop</p>
         {SHOP_ITEMS.map(item => (
           <div key={item.id} className="shop-item">
+            <img className="shop-item-icon" src={item.iconPath || emptyFrameIcon} alt="" />
             <div className="shop-item-info">
               <p className="shop-item-name">{item.name}</p>
               <p className="shop-item-desc">{item.description}</p>

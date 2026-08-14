@@ -61,7 +61,8 @@ export default function CharacterSheet() {
     ...subspeciesFeatures,
     ...(originFeatDetail ? [originFeatDetail] : []),
   ];
-  const bgFeat = c.background ? BACKGROUND_FEAT[c.background] : undefined;
+  const bgFeatName = c.background ? BACKGROUND_FEAT[c.background] : undefined;
+  const bgFeat = bgFeatName ? ORIGIN_FEAT_DETAILS[bgFeatName] : undefined;
 
   const hasContent = classFeatures.length > 0 || speciesFeatures.length > 0 || bgFeat;
 

@@ -72,6 +72,22 @@
   display: none;
 }
 
+.turn-order-concentration {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  z-index: 2;
+  width: 14px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  font-size: 10px;
+  color: #0a0810;
+  background: var(--gold);
+  border-radius: 50%;
+  box-shadow: 0 0 4px rgba(212, 175, 55, 0.6);
+}
+
 .turn-order-name {
   font-size: 9px;
   font-family: 'Cinzel', serif;
@@ -277,6 +293,37 @@
   border: 1px solid #3d3650;
   border-radius: 999px;
   padding: 1px 7px;
+}
+
+.combat-dock-elevation {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: #a78bfa;
+  letter-spacing: 0.02em;
+  margin-left: 6px;
+  border: 1px solid #3d3650;
+  border-radius: 999px;
+  padding: 1px 4px 1px 7px;
+}
+
+.combat-dock-elevation button {
+  width: 16px;
+  height: 16px;
+  line-height: 1;
+  border-radius: 50%;
+  border: 1px solid #3d3650;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.combat-dock-elevation button:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .combat-pip[data-active="true"][data-resource="action"] {

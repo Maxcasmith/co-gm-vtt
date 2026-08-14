@@ -2,6 +2,7 @@
 // import cycle — same reasoning as combat-hooks.ts splitting off from spells.ts.
 export const CONDITIONS = [
   "Blinded",
+  "Burning",
   "Charmed",
   "Concentrating",
   "Deafened",

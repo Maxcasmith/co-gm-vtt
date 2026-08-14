@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Player, EnemyStatBlock, Dungeon, Character } from 'shared';
-import { parseRangeFeet, hasLineOfSight } from 'shared';
+import type { Player, EnemyStatBlock, Dungeon, Character, TurnOrderEntry } from 'shared';
+import { parseRangeFeet, hasLineOfSight, spellTargetCount, findPath } from 'shared';
 import { dispatch, on } from './events.ts';
 import type { TargetingStartPayload } from './events.ts';
 import { texturesFor, getImage, FLOOR_FALLBACK_COLOR } from './dungeonThemes.ts';
-import { CELL, TOKEN_R, DUNGEON_ENTITY_R, FLOAT_DUR, FLASH_DUR, SIGHT_RADIUS, DUNGEON_BG, MIN_ZOOM, MAX_ZOOM } from './canvas/constants.ts';
+import { CELL, TOKEN_R, DUNGEON_ENTITY_R, FLOAT_DUR, FLASH_DUR, IMPACT_DUR, SWING_DUR, SIGHT_RADIUS, DUNGEON_BG, MIN_ZOOM, MAX_ZOOM } from './canvas/constants.ts';
 import { bfsReachable, computeVisibilityPolygon } from './canvas/geometry.ts';
-import { inArea, resolveAoeOrigin, drawAoeShape } from './canvas/aoe.ts';
+import { inArea, resolveAoeOrigin, drawAoeShape, nearestRingCell } from './canvas/aoe.ts';
 import { attackBonusFor, hitChancePercent } from './canvas/combatMath.ts';
-import { drawToken, drawHitFlash, drawTargetRing, drawDeadMarker } from './canvas/drawToken.ts';
-import type { FloatEffect, FlashEffect } from './canvas/types.ts';
+import { drawToken, drawHitFlash, drawTargetRing, drawDeadMarker, drawTokenEffect } from './canvas/drawToken.ts';
+import { drawHazardCell } from './canvas/drawHazard.ts';
+import { drawSwing } from './canvas/drawSwing.ts';
+import type { FloatEffect, FlashEffect, TokenSpecialEffect, SwingEffect } from './canvas/types.ts';
 import './app.css';
 
 interface Props {
@@ -19,6 +21,10 @@ interface Props {
   connected: Player[];
   showBattleMap?: boolean;
   encounter?: EnemyStatBlock[] | null;
+  /** Party allies currently in the turn order (recruited NPCs, Find Familiar/Unseen Servant companions) — rendered as tokens; ownerId === characterId ones are draggable, same as the player's own. */
+  companions?: TurnOrderEntry[];
+  /** Height off the ground per token id (Feather Fall, falling damage) — badged above any token with a nonzero entry. */
+  elevations?: Record<string, number>;
   tokenUrls?: Record<string, string>;
   tokenPositions?: Record<string, { gx: number; gy: number }>;
   movementRemaining?: number;
@@ -30,7 +36,7 @@ interface Props {
   sessionActive?: boolean;
 }
 
-export default function Canvas({ player, characterId, character, connected, showBattleMap, encounter, tokenUrls, tokenPositions, movementRemaining = 0, deadCreatureIds, downPlayerNames, deadPlayerNames, dungeon, speed = 30, sessionActive = true }: Props) {
+export default function Canvas({ player, characterId, character, connected, showBattleMap, encounter, companions = [], elevations = {}, tokenUrls, tokenPositions, movementRemaining = 0, deadCreatureIds, downPlayerNames, deadPlayerNames, dungeon, speed = 30, sessionActive = true }: Props) {
   const ref            = useRef<HTMLCanvasElement>(null);
   const tokenImgCache  = useRef<Record<string, HTMLImageElement>>({});
   const [tokenCacheVer, setTokenCacheVer] = useState(0);
@@ -71,11 +77,13 @@ export default function Canvas({ player, characterId, character, connected, show
   const movementRef         = useRef(movementRemaining);
   const dungeonRef          = useRef(dungeon);
   const showBattleMapRef    = useRef(showBattleMap);
+  const connectedRef        = useRef(connected);
   useEffect(() => { playerRef.current = player; },               [player]);
   useEffect(() => { tokenPositionsRef.current = tokenPositions; }, [tokenPositions]);
   useEffect(() => { movementRef.current = movementRemaining; },   [movementRemaining]);
   useEffect(() => { dungeonRef.current = dungeon; },              [dungeon]);
   useEffect(() => { showBattleMapRef.current = showBattleMap; },  [showBattleMap]);
+  useEffect(() => { connectedRef.current = connected; },          [connected]);
 
   // Camera: on entering a dungeon, snap to max zoom centred on my own token.
   // Re-fires only when the dungeon changes, so it never fights manual pan/zoom.
@@ -104,6 +112,11 @@ export default function Canvas({ player, characterId, character, connected, show
   // Hit/miss visual effects
   const floatEffectsRef = useRef<FloatEffect[]>([]);
   const flashEffectsRef = useRef<FlashEffect[]>([]);
+  // Per-token special effects: 'aura' persists until explicitly cleared (combat:effect:aura:end),
+  // 'impact' expires after IMPACT_DUR like the other timed effects below.
+  const tokenEffectsRef = useRef<TokenSpecialEffect[]>([]);
+  // Weapon attack swing effects (attacker → target) — expire after SWING_DUR.
+  const swingEffectsRef = useRef<SwingEffect[]>([]);
   const [animTick, setAnimTick] = useState(0);
   const animRafRef = useRef<number | null>(null);
 
@@ -113,8 +126,10 @@ export default function Canvas({ player, characterId, character, connected, show
       const now = Date.now();
       floatEffectsRef.current = floatEffectsRef.current.filter(e => now - e.startTime < FLOAT_DUR);
       flashEffectsRef.current = flashEffectsRef.current.filter(e => now - e.startTime < FLASH_DUR);
+      tokenEffectsRef.current = tokenEffectsRef.current.filter(e => e.kind === 'aura' || now - e.startTime < IMPACT_DUR);
+      swingEffectsRef.current = swingEffectsRef.current.filter(e => now - e.startTime < SWING_DUR);
       setAnimTick(t => t + 1);
-      if (floatEffectsRef.current.length > 0 || flashEffectsRef.current.length > 0) {
+      if (floatEffectsRef.current.length > 0 || flashEffectsRef.current.length > 0 || tokenEffectsRef.current.length > 0 || swingEffectsRef.current.length > 0) {
         animRafRef.current = requestAnimationFrame(tick);
       } else {
         animRafRef.current = null;
@@ -181,6 +196,18 @@ export default function Canvas({ player, characterId, character, connected, show
 
   useEffect(() => on('vtt:combat:attack:result', result => {
     if (!result.hit) pushMissFloat(result.targetId, result.targetName);
+    // Swing effect plays on the swing itself, hit or miss — enemy attacks are excluded, only
+    // players (this one or an ally) get a visible slash/streak today.
+    if (connectedRef.current.includes(result.attackerName)) {
+      const from = resolveTokenPos(result.attackerName, result.attackerName);
+      const to = resolveTokenPos(result.targetId, result.targetName);
+      if (from && to) {
+        const dt = result.damageType?.toLowerCase();
+        const kind: SwingEffect['kind'] = dt === 'slashing' || dt === 'bludgeoning' || dt === 'piercing' ? dt : (result.isMelee ? 'slashing' : 'piercing');
+        swingEffectsRef.current.push({ kind, fromKey: from.tokenKey, toKey: to.tokenKey, startTime: Date.now() });
+        kickAnimLoop();
+      }
+    }
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => on('vtt:combat:spell:attack:result', result => {
@@ -191,6 +218,27 @@ export default function Canvas({ player, characterId, character, connected, show
     for (const outcome of result.outcomes) {
       if (outcome.damage == null) pushSaveOutcomeFloat(outcome.targetId, outcome.targetName, outcome.saved);
     }
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => on('vtt:combat:effect:aura:start', data => {
+    const resolved = resolveTokenPos(data.casterId, data.casterName);
+    if (!resolved) return;
+    tokenEffectsRef.current = tokenEffectsRef.current.filter(e => !(e.kind === 'aura' && e.tokenKey === resolved.tokenKey));
+    tokenEffectsRef.current.push({ kind: 'aura', tokenKey: resolved.tokenKey, color: data.color, style: data.style, startTime: Date.now() });
+    kickAnimLoop();
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => on('vtt:combat:effect:aura:end', data => {
+    const resolved = resolveTokenPos(data.casterId, data.casterName);
+    const key = resolved?.tokenKey ?? data.casterName;
+    tokenEffectsRef.current = tokenEffectsRef.current.filter(e => !(e.kind === 'aura' && e.tokenKey === key));
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => on('vtt:combat:effect:impact', data => {
+    const resolved = resolveTokenPos(data.targetId, data.targetName);
+    if (!resolved) return;
+    tokenEffectsRef.current.push({ kind: 'impact', tokenKey: resolved.tokenKey, color: data.color, style: data.style, startTime: Date.now() });
+    kickAnimLoop();
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drag state — refs keep closures fresh inside window listeners
@@ -209,6 +257,13 @@ export default function Canvas({ player, characterId, character, connected, show
   const [aoeTick, setAoeTick] = useState(0);
   // Hit-chance readout while hovering an enemy token during single-target attack targeting
   const [hoverHitChance, setHoverHitChance] = useState<{ percent: number; x: number; y: number } | null>(null);
+  // Discrete multi-target casts (Magic Missile's darts, Bless/Aid's "up to three creatures") —
+  // accumulates one id per click until spellTargetCount's max is reached, then fires.
+  const multiTargetsRef = useRef<string[]>([]);
+  const [multiTargetsPicked, setMultiTargetsPicked] = useState(0);
+  // Screen-space cursor position, tracked only while multi-targeting, so the "Targeting X/Y"
+  // label can follow the mouse instead of sitting fixed at the top of the screen.
+  const [multiTargetCursor, setMultiTargetCursor] = useState<{ x: number; y: number } | null>(null);
   // Nameplate reveal — set to the hovered token's key ("player name" or enemy id); null = no nameplate shown
   const [hoveredTokenKey, setHoveredTokenKey] = useState<string | null>(null);
 
@@ -244,11 +299,17 @@ export default function Canvas({ player, characterId, character, connected, show
     const u1 = on('vtt:targeting:start', payload => {
       targetingRef.current = payload;
       aoeMouseRef.current = null;
+      multiTargetsRef.current = [];
+      setMultiTargetsPicked(0);
+      setMultiTargetCursor(null);
       setTargeting(payload);
     });
     const u2 = on('vtt:targeting:cancel', () => {
       targetingRef.current = null;
       aoeMouseRef.current = null;
+      multiTargetsRef.current = [];
+      setMultiTargetsPicked(0);
+      setMultiTargetCursor(null);
       setTargeting(null);
       setHoverHitChance(null);
       if (ref.current) ref.current.style.cursor = 'default';
@@ -268,6 +329,9 @@ export default function Canvas({ player, characterId, character, connected, show
     const u5 = on('vtt:combat:spell:cast', () => {
       targetingRef.current = null;
       aoeMouseRef.current = null;
+      multiTargetsRef.current = [];
+      setMultiTargetsPicked(0);
+      setMultiTargetCursor(null);
       setTargeting(null);
       setHoverHitChance(null);
     });
@@ -330,8 +394,59 @@ export default function Canvas({ player, characterId, character, connected, show
           return;
         }
         if (oldPos) {
-          const dist = Math.max(Math.abs(gx - oldPos.gx), Math.abs(gy - oldPos.gy));
-          if (dist > 0) dispatch('vtt:movement:used', { ft: dist * 5 });
+          const cells = dungeonRef.current?.cells;
+          const path = cells ? findPath(cells, oldPos.gx, oldPos.gy, gx, gy) : null;
+
+          // Walled off (or off-grid) — no legal route at all, snap back rather than teleport through.
+          if (cells && !path) {
+            dispatch('vtt:token:move', { tokenId: drag.id, gx: oldPos.gx, gy: oldPos.gy });
+            dragRef.current = null;
+            if (ref.current) ref.current.style.cursor = 'default';
+            setDragTick(t => t + 1);
+            return;
+          }
+
+          // Walk cost is the real route length, not straight-line distance — and doubles as the
+          // budget clamp, so dragging past remaining movement just walks as far as it reaches.
+          // Difficult Terrain (Entangle/Grease) charges extra feet for any step landing on a
+          // hazard cell — costed per-step against the path findPath already chose, not factored
+          // into route selection itself (a cheaper detour around a hazard isn't considered).
+          const hazards = dungeonRef.current?.hazardCells;
+          const costOf = (cx: number, cy: number) => 5 * (hazards?.find(h => h.gx === cx && h.gy === cy)?.multiplier ?? 1);
+          let steps = 0;
+          let spentFt = 0;
+          if (path) {
+            for (const cell of path) {
+              const stepCost = costOf(cell.gx, cell.gy);
+              if (spentFt + stepCost > movementRef.current) break;
+              spentFt += stepCost;
+              steps++;
+            }
+          } else {
+            steps = Math.min(Math.max(Math.abs(gx - oldPos.gx), Math.abs(gy - oldPos.gy)), Math.floor(movementRef.current / 5));
+            spentFt = steps * 5;
+          }
+          const dest = path && steps > 0 ? path[steps - 1]! : oldPos;
+          if (spentFt > 0) dispatch('vtt:movement:used', { ft: spentFt });
+          dispatch('vtt:token:move', { tokenId: drag.id, gx: dest.gx, gy: dest.gy });
+          dragRef.current = null;
+          if (ref.current) ref.current.style.cursor = 'default';
+          setDragTick(t => t + 1);
+          return;
+        }
+      }
+
+      // Non-player-tracked token (GM-dragged monster/NPC) — still refuse dropping it somewhere
+      // no walkable route reaches from its current cell.
+      const cellsForDrop = dungeonRef.current?.cells;
+      if (cellsForDrop) {
+        const origin = tokenPositionsRef.current?.[drag.id];
+        const blocked = origin ? !findPath(cellsForDrop, origin.gx, origin.gy, gx, gy) : cellsForDrop[gy]?.[gx] !== 1;
+        if (blocked) {
+          dragRef.current = null;
+          if (ref.current) ref.current.style.cursor = 'default';
+          setDragTick(t => t + 1);
+          return;
         }
       }
 
@@ -466,6 +581,13 @@ export default function Canvas({ player, characterId, character, connected, show
           }
         }
 
+        // Lasting map hazards (Entangle's vines, Grease/Fog Cloud's smudge) — filled per cell,
+        // under entities/tokens so nothing painted on top of them gets visually buried.
+        for (const cell of dungeon.hazardCells ?? []) {
+          if (!cell.style) continue;
+          drawHazardCell(ctx, cell.gx, cell.gy, cell.gx * cellSz + panX, cell.gy * cellSz + panY, cellSz, cell.style, cell.color ?? '#888888');
+        }
+
         // Entity markers
         const entityR = DUNGEON_ENTITY_R * dungeonZoomRef.current;
         for (const entity of dungeon.entities) {
@@ -473,6 +595,13 @@ export default function Canvas({ player, characterId, character, connected, show
           if (entity.type === 'creature' && encounter) continue;
           const ex = entity.x * cellSz + cellSz / 2 + panX;
           const ey = entity.y * cellSz + cellSz / 2 + panY;
+          // Party-placed traps (Snare, ...) get their own pip + "X's Snare" hover nameplate,
+          // same treatment as a token — the party always sees where their own trap sits, unlike
+          // an AI-authored trap that stays a plain dot until Perception finds it.
+          if (entity.type === 'trap' && entity.placedBy) {
+            drawToken(ctx, ex, ey, '', `${entity.placedBy}'s ${entity.name}`, 'rgba(150,60,220,0.85)', entityR, hoveredTokenKey === entity.id, zoom, undefined, 'trap');
+            continue;
+          }
           ctx.beginPath();
           ctx.arc(ex, ey, entityR, 0, Math.PI * 2);
           ctx.fillStyle = entity.type === 'creature' ? 'rgba(192,57,43,0.8)' : 'rgba(212,172,13,0.8)';
@@ -497,30 +626,40 @@ export default function Canvas({ player, characterId, character, connected, show
         const drag = dragRef.current;
         const playerPos = tokenPositions[player];
 
-        // Movement range highlight — shown while dragging own token
+        // Movement range highlight — shown while dragging own token. Wall-aware (matches the
+        // findPath gate on drop) when a dungeon grid is loaded; plain square in arena combat
+        // with no grid to path against.
         if (drag?.id === player && playerPos && movementRemaining > 0) {
           const reach = Math.floor(movementRemaining / 5);
           ctx.fillStyle = 'rgba(255, 200, 50, 0.13)';
-          for (let dx = -reach; dx <= reach; dx++) {
-            for (let dy = -reach; dy <= reach; dy++) {
-              if (dx === 0 && dy === 0) continue;
-              const tx = playerPos.gx + dx;
-              const ty = playerPos.gy + dy;
-              if (tx < 0 || ty < 0) continue;
-              ctx.fillRect(tx * cellSz + panX, ty * cellSz + panY, cellSz, cellSz);
+          if (dungeon) {
+            const reachable = bfsReachable(dungeon.cells, playerPos.gx, playerPos.gy, reach);
+            for (const key of reachable) {
+              const [kx, ky] = key.split(',').map(Number) as [number, number];
+              if (kx === playerPos.gx && ky === playerPos.gy) continue;
+              ctx.fillRect(kx * cellSz + panX, ky * cellSz + panY, cellSz, cellSz);
             }
-          }
-          // Subtle border around the range edge
-          ctx.strokeStyle = 'rgba(255, 200, 50, 0.3)';
-          ctx.lineWidth = 1;
-          for (let dx = -reach; dx <= reach; dx++) {
-            for (let dy = -reach; dy <= reach; dy++) {
-              const tx = playerPos.gx + dx;
-              const ty = playerPos.gy + dy;
-              if (tx < 0 || ty < 0) continue;
-              const onEdge = Math.abs(dx) === reach || Math.abs(dy) === reach;
-              if (!onEdge) continue;
-              ctx.strokeRect(tx * cellSz + panX + 0.5, ty * cellSz + panY + 0.5, cellSz - 1, cellSz - 1);
+          } else {
+            for (let dx = -reach; dx <= reach; dx++) {
+              for (let dy = -reach; dy <= reach; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                const tx = playerPos.gx + dx;
+                const ty = playerPos.gy + dy;
+                if (tx < 0 || ty < 0) continue;
+                ctx.fillRect(tx * cellSz + panX, ty * cellSz + panY, cellSz, cellSz);
+              }
+            }
+            ctx.strokeStyle = 'rgba(255, 200, 50, 0.3)';
+            ctx.lineWidth = 1;
+            for (let dx = -reach; dx <= reach; dx++) {
+              for (let dy = -reach; dy <= reach; dy++) {
+                const tx = playerPos.gx + dx;
+                const ty = playerPos.gy + dy;
+                if (tx < 0 || ty < 0) continue;
+                const onEdge = Math.abs(dx) === reach || Math.abs(dy) === reach;
+                if (!onEdge) continue;
+                ctx.strokeRect(tx * cellSz + panX + 0.5, ty * cellSz + panY + 0.5, cellSz - 1, cellSz - 1);
+              }
             }
           }
         }
@@ -582,6 +721,12 @@ export default function Canvas({ player, characterId, character, connected, show
         let aoeOrigin: { originGx: number; originGy: number; dirGx: number; dirGy: number; isSelf: boolean } | null = null;
         if (targeting?.kind === 'spell' && spellArea && playerPos) {
           aoeOrigin = resolveAoeOrigin(spellArea, playerPos, aoeMouseRef.current, parseRangeFeet(targeting.spell.range));
+          // Trap placement picks one of the 8 ring cells around the player (see the matching
+          // nearestRingCell() at cast time below) rather than the raw continuous cursor position.
+          if (targeting.spell.combat?.placesTrap) {
+            const cell = nearestRingCell(playerPos, aoeMouseRef.current);
+            aoeOrigin = { ...aoeOrigin, originGx: cell.gx + 0.5, originGy: cell.gy + 0.5 };
+          }
         }
 
         // Ally tokens — fogged the same as enemies; own token is drawn separately after fog
@@ -601,13 +746,24 @@ export default function Canvas({ player, characterId, character, connected, show
             drawTargetRing(ctx, x, y, tokenR);
           }
 
+          // Ally in range of a non-attack point-target spell (Bless, Aid, ...) — same ring
+          // treatment as enemies get for weapon/attack-spell targeting.
+          if (!spellArea && targeting?.kind === 'spell' && targeting.spell.combat?.resolution !== 'attack' && playerPos) {
+            const range = parseRangeFeet(targeting.spell.range);
+            const dist = Math.max(Math.abs(pos.gx - playerPos.gx), Math.abs(pos.gy - playerPos.gy));
+            if (dist <= Math.floor(range / 5)) drawTargetRing(ctx, x, y, tokenR);
+          }
+
           if (isDead) ctx.filter = 'grayscale(1) opacity(0.25)';
           else if (isDown) ctx.filter = 'grayscale(1) opacity(0.55)';
-          drawToken(ctx, x, y, (name[0] ?? '?').toUpperCase(), name, '#5a9ff5', tokenR, hoveredTokenKey === name, img);
+          drawToken(ctx, x, y, (name[0] ?? '?').toUpperCase(), name, '#5a9ff5', tokenR, hoveredTokenKey === name, zoom, img);
           ctx.filter = 'none';
 
           // Hit flash overlay
           drawHitFlash(ctx, x, y, tokenR, flashEffectsRef.current.find(f => f.tokenKey === name));
+
+          // Aura / impact special effects (armed self-buff pulse, power-release burst)
+          tokenEffectsRef.current.filter(e => e.tokenKey === name).forEach(e => drawTokenEffect(ctx, x, y, tokenR, e));
 
           // Dead marker: a red × over the token
           if (isDead) drawDeadMarker(ctx, x, y, tokenR);
@@ -650,11 +806,27 @@ export default function Canvas({ player, characterId, character, connected, show
 
           const isDead = deadCreatureIds?.has(enemy.id);
           if (isDead) ctx.filter = 'grayscale(1) opacity(0.45)';
-          drawToken(ctx, x, y, (enemy.name[0] ?? '?').toUpperCase(), enemy.name, isDead ? '#555' : '#c0392b', tokenR, hoveredTokenKey === enemy.id);
+          drawToken(ctx, x, y, (enemy.name[0] ?? '?').toUpperCase(), enemy.name, isDead ? '#555' : '#c0392b', tokenR, hoveredTokenKey === enemy.id, zoom);
           if (isDead) ctx.filter = 'none';
 
           // Hit flash overlay
           drawHitFlash(ctx, x, y, tokenR, flashEffectsRef.current.find(f => f.tokenKey === enemy.id));
+
+          // Impact burst (enemies never carry an aura — only players arm self-buffs)
+          tokenEffectsRef.current.filter(e => e.tokenKey === enemy.id).forEach(e => drawTokenEffect(ctx, x, y, tokenR, e));
+        });
+
+        // Ally/companion tokens (recruited NPCs, Find Familiar/Unseen Servant) — green, distinct
+        // from enemies (red) and players (blue). ownerId === characterId ones are draggable, see
+        // handleMouseDown's companion check below.
+        companions.forEach(companion => {
+          const pos = tokenPositions[companion.id];
+          if (!pos) return;
+          const isDragged = drag?.id === companion.id;
+          const x = isDragged ? drag!.x : pos.gx * cellSz + cellSz / 2 + panX;
+          const y = isDragged ? drag!.y : pos.gy * cellSz + cellSz / 2 + panY;
+          drawToken(ctx, x, y, (companion.name[0] ?? '?').toUpperCase(), companion.name, '#2ecc71', tokenR, hoveredTokenKey === companion.id, zoom);
+          tokenEffectsRef.current.filter(e => e.tokenKey === companion.id).forEach(e => drawTokenEffect(ctx, x, y, tokenR, e));
         });
 
         // Fog-of-war: black over anything outside my own sight radius OR behind a wall from my
@@ -705,16 +877,39 @@ export default function Canvas({ player, characterId, character, connected, show
             drawTargetRing(ctx, x, y, tokenR);
           }
 
+          // Self as a valid target of a non-attack point-target spell (Bless, Aid, ...) — you're
+          // always in range of yourself, no distance check needed.
+          if (!spellArea && targeting?.kind === 'spell' && targeting.spell.combat?.resolution !== 'attack') {
+            drawTargetRing(ctx, x, y, tokenR);
+          }
+
           if (isDead) ctx.filter = 'grayscale(1) opacity(0.25)';
           else if (isDown) ctx.filter = 'grayscale(1) opacity(0.55)';
-          drawToken(ctx, x, y, (player[0] ?? '?').toUpperCase(), player, '#3a7bd5', tokenR, hoveredTokenKey === player, img);
+          drawToken(ctx, x, y, (player[0] ?? '?').toUpperCase(), player, '#3a7bd5', tokenR, hoveredTokenKey === player, zoom, img);
           ctx.filter = 'none';
 
           // Hit flash overlay
           drawHitFlash(ctx, x, y, tokenR, flashEffectsRef.current.find(f => f.tokenKey === player));
 
+          // Aura / impact special effects (armed self-buff pulse, power-release burst)
+          tokenEffectsRef.current.filter(e => e.tokenKey === player).forEach(e => drawTokenEffect(ctx, x, y, tokenR, e));
+
           // Dead marker: a red × over the token
           if (isDead) drawDeadMarker(ctx, x, y, tokenR);
+        }
+
+        // Elevation badges (Feather Fall, falling damage) — one small label per token currently
+        // off the ground, drawn above everything else so it's never buried under a token or fog.
+        for (const [tokenId, ft] of Object.entries(elevations)) {
+          if (!ft) continue;
+          const epos = tokenPositions[tokenId];
+          if (!epos) continue;
+          const ex = epos.gx * cellSz + cellSz / 2 + panX;
+          const ey = epos.gy * cellSz + panY - tokenR - 6;
+          ctx.font = `${Math.max(10, 11 * zoom)}px 'Crimson Pro', Georgia, serif`;
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#a78bfa';
+          ctx.fillText(`↑${ft}ft`, ex, ey);
         }
 
         // Floating hit/miss text — drawn above tokens, walls, and fog so the animation (which
@@ -743,6 +938,21 @@ export default function Canvas({ player, characterId, character, connected, show
           ctx.fillStyle = eff.isHeal ? '#32cd32' : eff.isHit ? '#ff4040' : '#ffffff';
           ctx.fillText(eff.text, 0, 0);
           ctx.restore();
+        }
+
+        // Weapon attack swings — attacker → target, gated on the attacker's cell like floats are
+        // gated on their origin cell.
+        for (const swing of swingEffectsRef.current) {
+          const fromPos = tokenPositions[swing.fromKey];
+          const toPos = tokenPositions[swing.toKey];
+          if (!fromPos || !toPos) continue;
+          if (dungeon && visibleCells && !visibleCells.has(`${fromPos.gx},${fromPos.gy}`)) continue;
+          drawSwing(
+            ctx,
+            fromPos.gx * cellSz + cellSz / 2 + panX, fromPos.gy * cellSz + cellSz / 2 + panY,
+            toPos.gx * cellSz + cellSz / 2 + panX, toPos.gy * cellSz + cellSz / 2 + panY,
+            swing.kind, swing.startTime,
+          );
         }
 
         // Drag line: origin → cursor with distance label at midpoint
@@ -799,10 +1009,35 @@ export default function Canvas({ player, characterId, character, connected, show
           ctx.fillText(`${hoverHitChance.percent}%`, hcX, hcY);
           ctx.restore();
         }
+
+        // Discrete multi-target progress — "Targeting 1/3" while clicking through Magic
+        // Missile's darts, Bless/Aid's allies, etc. Only shown once the spell needs more than
+        // one, and follows the cursor the same way the hit-chance readout does.
+        if (targeting?.kind === 'spell' && multiTargetCursor) {
+          const { max } = spellTargetCount(targeting.spell, targeting.slotLevel ?? targeting.spell.level, targeting.casterLevel);
+          if (max > 1) {
+            const mtRect = canvas.getBoundingClientRect();
+            const tx = multiTargetCursor.x - mtRect.left + 18;
+            const ty = multiTargetCursor.y - mtRect.top - 24;
+            ctx.save();
+            const label = `Targeting ${multiTargetsPicked}/${max}`;
+            ctx.font = 'bold 15px monospace';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            const tw = ctx.measureText(label).width;
+            ctx.fillStyle = 'rgba(14, 12, 20, 0.75)';
+            ctx.beginPath();
+            ctx.roundRect(tx - 6, ty - 12, tw + 12, 24, 6);
+            ctx.fill();
+            ctx.fillStyle = '#f0ebde';
+            ctx.fillText(label, tx, ty);
+            ctx.restore();
+          }
+        }
     } else {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
-  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick, aoeTick, visibleCells, visiblePolygon, hoverHitChance, hoveredTokenKey]);
+  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick, aoeTick, visibleCells, visiblePolygon, hoverHitChance, hoveredTokenKey, multiTargetsPicked, multiTargetCursor]);
 
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!showBattleMap) return;
@@ -833,6 +1068,27 @@ export default function Canvas({ player, characterId, character, connected, show
     const mx = rawMx - panX;
     const my = rawMy - panY;
 
+    // Trap placement (Snare) works in exploration mode too — explorationCastable spells skip
+    // the turn-gated targeting flow below entirely, since there's no turn to gate against. Cast
+    // mid-combat, this doesn't fire (exploring is false) and it falls through to the normal
+    // turn-gated placesTrap handling further down instead.
+    if (exploring && targetingRef.current?.kind === 'spell' && targetingRef.current.spell.combat?.placesTrap) {
+      const targetingNow = targetingRef.current;
+      const spell = targetingNow.spell;
+      const playerPos = tokenPositions[player];
+      if (playerPos) {
+        const ring = nearestRingCell(playerPos, aoeMouseRef.current);
+        dispatch('vtt:combat:spell:cast', {
+          casterName: player, casterId: targetingNow.casterId, spell,
+          slotLevel: targetingNow.slotLevel ?? spell.level, targetIds: [],
+          chosenDamageType: targetingNow.chosenDamageType,
+          originGx: ring.gx, originGy: ring.gy,
+        });
+      }
+      e.preventDefault();
+      return;
+    }
+
     if (!exploring) {
       // Block all interaction when it's not this player's turn
       if (!isMyTurnRef.current) return;
@@ -846,17 +1102,58 @@ export default function Canvas({ player, characterId, character, connected, show
           const area = targetingNow.spell.combat.area;
           const origin = resolveAoeOrigin(area, playerPos, aoeMouseRef.current, parseRangeFeet(targetingNow.spell.range));
           const targetIds: string[] = [];
-          for (const enemy of encounter!) {
-            const epos = tokenPositions[enemy.id];
-            if (epos && inArea(area, origin.originGx, origin.originGy, origin.dirGx, origin.dirGy, epos.gx + 0.5, epos.gy + 0.5, origin.isSelf)) targetIds.push(enemy.id);
+          // Placement spells (Snare) target the empty cell itself, not whoever's standing there —
+          // the trap resolves later, against whoever steps on it.
+          if (!targetingNow.spell.combat.placesTrap) {
+            for (const enemy of encounter!) {
+              const epos = tokenPositions[enemy.id];
+              if (epos && inArea(area, origin.originGx, origin.originGy, origin.dirGx, origin.dirGy, epos.gx + 0.5, epos.gy + 0.5, origin.isSelf)) targetIds.push(enemy.id);
+            }
+            for (const name of connected) {
+              const ppos = tokenPositions[name];
+              if (ppos && inArea(area, origin.originGx, origin.originGy, origin.dirGx, origin.dirGy, ppos.gx + 0.5, ppos.gy + 0.5, origin.isSelf)) targetIds.push(name);
+            }
           }
-          for (const name of connected) {
-            const ppos = tokenPositions[name];
-            if (ppos && inArea(area, origin.originGx, origin.originGy, origin.dirGx, origin.dirGy, ppos.gx + 0.5, ppos.gy + 0.5, origin.isSelf)) targetIds.push(name);
+          // Trap placement needs a discrete grid cell (matches every other DungeonEntity's
+          // integer x/y) picked from the 8-cell ring around the player, not resolveAoeOrigin's
+          // continuous point — see nearestRingCell for why (Touch range is too short for its
+          // corner-anchored clamp to reach evenly).
+          let trapCell = { originGx: origin.originGx, originGy: origin.originGy };
+          if (targetingNow.spell.combat.placesTrap) {
+            const ring = nearestRingCell(playerPos, aoeMouseRef.current);
+            trapCell = { originGx: ring.gx, originGy: ring.gy };
           }
-          dispatch('vtt:combat:spell:cast', { casterName: player, casterId: targetingNow.casterId, spell: targetingNow.spell, slotLevel: targetingNow.slotLevel ?? targetingNow.spell.level, targetIds });
+          dispatch('vtt:combat:spell:cast', { casterName: player, casterId: targetingNow.casterId, spell: targetingNow.spell, slotLevel: targetingNow.slotLevel ?? targetingNow.spell.level, targetIds, chosenDamageType: targetingNow.chosenDamageType, chosenCommand: targetingNow.chosenCommand, ...trapCell });
           e.preventDefault();
           return;
+        }
+
+        // Discrete multi-target casts (Magic Missile darts, Bless/Aid allies, Jim's Magic
+        // Missile's darts, Spellfire Flare's blasts) — accumulate one click per target until
+        // spellTargetCount's max is reached, then fire once with the whole batch; below max, stay
+        // in targeting mode for the next click. Shared by both the enemy and ally click loops below,
+        // and by both resolution shapes: attack-roll spells route to combat:spell:attack (one roll
+        // per accumulated target), everything else to combat:spell:cast — spellTargetCount defaults
+        // to {min:1,max:1} for ordinary single-target spells, so this fires on the very first click
+        // for them, same as before.
+        function tryCastOnTarget(targetId: string): boolean {
+          if (targetingNow.kind !== 'spell') return false;
+          const slotLevel = targetingNow.slotLevel ?? targetingNow.spell.level;
+          const { max } = spellTargetCount(targetingNow.spell, slotLevel, targetingNow.casterLevel);
+          multiTargetsRef.current = [...multiTargetsRef.current, targetId];
+          if (multiTargetsRef.current.length < max) {
+            setMultiTargetsPicked(multiTargetsRef.current.length);
+            return true;
+          }
+          const targetIds = multiTargetsRef.current;
+          multiTargetsRef.current = [];
+          setMultiTargetsPicked(0);
+          if (targetingNow.spell.combat?.resolution === 'attack') {
+            dispatch('vtt:combat:spell:attack', { casterName: player, casterId: targetingNow.casterId, targetIds, spell: targetingNow.spell, slotLevel, chosenDamageType: targetingNow.chosenDamageType });
+          } else {
+            dispatch('vtt:combat:spell:cast', { casterName: player, casterId: targetingNow.casterId, spell: targetingNow.spell, slotLevel, targetIds, chosenDamageType: targetingNow.chosenDamageType, chosenCommand: targetingNow.chosenCommand });
+          }
+          return true;
         }
 
         if (playerPos) {
@@ -872,13 +1169,29 @@ export default function Canvas({ player, characterId, character, connected, show
             if (Math.hypot(mx - ex, my - ey) <= TOKEN_R) {
               if (targetingNow.kind === 'weapon') {
                 dispatch('vtt:combat:attack', { attackerName: player, attackerId: characterId, targetId: enemy.id, targetName: enemy.name, weapon: targetingNow.weapon, ...(targetingNow.bonusSpell ? { bonusSpell: targetingNow.bonusSpell } : {}) });
-              } else if (targetingNow.spell.combat?.resolution === 'attack') {
-                dispatch('vtt:combat:spell:attack', { casterName: player, casterId: targetingNow.casterId, targetId: enemy.id, targetName: enemy.name, spell: targetingNow.spell, slotLevel: targetingNow.slotLevel ?? targetingNow.spell.level });
               } else {
-                dispatch('vtt:combat:spell:cast', { casterName: player, casterId: targetingNow.casterId, spell: targetingNow.spell, slotLevel: targetingNow.slotLevel ?? targetingNow.spell.level, targetIds: [enemy.id] });
+                tryCastOnTarget(enemy.id);
               }
               e.preventDefault();
               return;
+            }
+          }
+
+          // Buff/utility spells (Bless, Aid, ...) target party members, not enemies — including
+          // the caster's own token. Weapon attacks and attack-roll spells skip this: there's no
+          // legitimate reason to attack-roll a party member from a stray click.
+          if (targetingNow.kind === 'spell' && targetingNow.spell.combat?.resolution !== 'attack') {
+            for (const name of connected) {
+              const ppos = tokenPositions[name];
+              if (!ppos) continue;
+              if (Math.max(Math.abs(ppos.gx - playerPos.gx), Math.abs(ppos.gy - playerPos.gy)) > maxRangeCells) continue;
+              const px = ppos.gx * hdCellSz + hdCellSz / 2;
+              const py = ppos.gy * hdCellSz + hdCellSz / 2;
+              if (Math.hypot(mx - px, my - py) <= TOKEN_R) {
+                tryCastOnTarget(name);
+                e.preventDefault();
+                return;
+              }
             }
           }
         }
@@ -889,20 +1202,42 @@ export default function Canvas({ player, characterId, character, connected, show
       }
     }
 
-    // Drag mode: own token only
+    // Drag mode: own token, or an owned companion's (Find Familiar/Unseen Servant, recruited
+    // allies) — "the same control as their own token," per the design call on the telepathic
+    // link. Companions skip the reachable/movement-budget accounting entirely (onUp's fallthrough
+    // for any non-player token id already treats it as free wall-aware repositioning, same as a
+    // GM dragging an NPC — there's no tracked movement pool for a companion to spend against).
     const pos = tokenPositions[player];
-    if (!pos) return;
-    const cx = pos.gx * hdCellSz + hdCellSz / 2;
-    const cy = pos.gy * hdCellSz + hdCellSz / 2;
-    if (Math.hypot(mx - cx, my - cy) <= TOKEN_R) {
-      reachableRef.current = exploring && dungeon
-        ? bfsReachable(dungeon.cells, pos.gx, pos.gy, Math.max(1, Math.floor(speed / 5)))
-        : null;
-      // Store drag position in screen space (includes pan so drag line renders correctly)
-      dragRef.current = { id: player, x: cx + panX, y: cy + panY };
-      dragOffset.current = { x: rawMx - (cx + panX), y: rawMy - (cy + panY) };
-      e.currentTarget.style.cursor = 'grabbing';
-      e.preventDefault();
+    if (pos) {
+      const cx = pos.gx * hdCellSz + hdCellSz / 2;
+      const cy = pos.gy * hdCellSz + hdCellSz / 2;
+      if (Math.hypot(mx - cx, my - cy) <= TOKEN_R) {
+        reachableRef.current = exploring && dungeon
+          ? bfsReachable(dungeon.cells, pos.gx, pos.gy, Math.max(1, Math.floor(speed / 5)))
+          : null;
+        // Store drag position in screen space (includes pan so drag line renders correctly)
+        dragRef.current = { id: player, x: cx + panX, y: cy + panY };
+        dragOffset.current = { x: rawMx - (cx + panX), y: rawMy - (cy + panY) };
+        e.currentTarget.style.cursor = 'grabbing';
+        e.preventDefault();
+        return;
+      }
+    }
+
+    for (const companion of companions) {
+      if (companion.ownerId !== characterId) continue;
+      const cpos = tokenPositions[companion.id];
+      if (!cpos) continue;
+      const cx = cpos.gx * hdCellSz + hdCellSz / 2;
+      const cy = cpos.gy * hdCellSz + hdCellSz / 2;
+      if (Math.hypot(mx - cx, my - cy) <= TOKEN_R) {
+        reachableRef.current = null;
+        dragRef.current = { id: companion.id, x: cx + panX, y: cy + panY };
+        dragOffset.current = { x: rawMx - (cx + panX), y: rawMy - (cy + panY) };
+        e.currentTarget.style.cursor = 'grabbing';
+        e.preventDefault();
+        return;
+      }
     }
   }
 
@@ -926,8 +1261,10 @@ export default function Canvas({ player, characterId, character, connected, show
   function handleMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
     if (dragRef.current) return;
 
-    // Targeting mode cursor
-    if (targetingRef.current && showBattleMap && encounter && tokenPositions) {
+    // Targeting mode cursor — encounter is required for normal combat targeting, but trap
+    // placement (Snare) also targets during exploration, where there's no encounter at all.
+    const exploringMouse = !!dungeon && !encounter;
+    if (targetingRef.current && showBattleMap && (encounter || exploringMouse) && tokenPositions) {
       const targetingNow = targetingRef.current;
       const rect = e.currentTarget.getBoundingClientRect();
       const panX = dungeonPanRef.current.x;
@@ -936,6 +1273,11 @@ export default function Canvas({ player, characterId, character, connected, show
       const mx = e.clientX - rect.left - panX;
       const my = e.clientY - rect.top - panY;
       const playerPos = tokenPositions[player];
+
+      if (targetingNow.kind === 'spell') {
+        const { max } = spellTargetCount(targetingNow.spell, targetingNow.slotLevel ?? targetingNow.spell.level, targetingNow.casterLevel);
+        setMultiTargetCursor(max > 1 ? { x: e.clientX, y: e.clientY } : null);
+      }
 
       const spellArea = targetingNow.kind === 'spell' ? targetingNow.spell.combat?.area : undefined;
       if (spellArea && playerPos) {
@@ -950,7 +1292,7 @@ export default function Canvas({ player, characterId, character, connected, show
         const range = targetingNow.kind === 'weapon' ? targetingNow.weapon.range : parseRangeFeet(targetingNow.spell.range);
         const extendedRange = targetingNow.kind === 'weapon' ? targetingNow.weapon.extendedRange : undefined;
         const maxRangeCells = extendedRange ? Math.floor(extendedRange / 5) : Math.floor(range / 5);
-        for (const enemy of encounter) {
+        for (const enemy of encounter ?? []) {
           const epos = tokenPositions[enemy.id];
           if (!epos || Math.max(Math.abs(epos.gx - playerPos.gx), Math.abs(epos.gy - playerPos.gy)) > maxRangeCells) continue;
           const ex = epos.gx * mmCellSz + mmCellSz / 2;
@@ -1007,6 +1349,14 @@ export default function Canvas({ player, characterId, character, connected, show
         const tx = p.gx * grabCellSz + grabCellSz / 2;
         const ty = p.gy * grabCellSz + grabCellSz / 2;
         if (Math.hypot(mx - tx, my - ty) <= TOKEN_R) { hovered = enemy.id; break; }
+      }
+    }
+    if (!hovered && dungeon) {
+      for (const entity of dungeon.entities) {
+        if (entity.type !== 'trap' || !entity.placedBy) continue;
+        const tx = entity.x * grabCellSz + grabCellSz / 2;
+        const ty = entity.y * grabCellSz + grabCellSz / 2;
+        if (Math.hypot(mx - tx, my - ty) <= TOKEN_R) { hovered = entity.id; break; }
       }
     }
     if (hovered !== hoveredTokenKey) setHoveredTokenKey(hovered);

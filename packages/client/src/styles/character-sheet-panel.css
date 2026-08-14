@@ -649,6 +649,50 @@
   line-height: 1.5;
 }
 
+.sheet-spell-damage-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sheet-damage-type-btn {
+  --dmg-color: var(--accent, #a78bfa);
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--dmg-color);
+  border: 1px solid var(--dmg-color);
+}
+
+.sheet-command-custom-input {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  border: 1px dashed var(--accent, #a78bfa);
+  width: 110px;
+}
+
+.sheet-damage-type-btn--active {
+  background: var(--dmg-color);
+  color: var(--bg);
+}
+
+.sheet-damage-type-btn--acid      { --dmg-color: var(--dmg-acid); }
+.sheet-damage-type-btn--cold      { --dmg-color: var(--dmg-cold); }
+.sheet-damage-type-btn--fire      { --dmg-color: var(--dmg-fire); }
+.sheet-damage-type-btn--force     { --dmg-color: var(--dmg-force); }
+.sheet-damage-type-btn--lightning { --dmg-color: var(--dmg-lightning); }
+.sheet-damage-type-btn--poison    { --dmg-color: var(--dmg-poison); }
+.sheet-damage-type-btn--psychic   { --dmg-color: var(--dmg-psychic); }
+.sheet-damage-type-btn--thunder   { --dmg-color: var(--dmg-thunder); }
+
 .sheet-spell-cast-btn {
   display: flex;
   align-items: center;
@@ -809,6 +853,9 @@
 }
 
 .skill-item--active .skill-name { color: var(--gold); }
+.skill-item--expertise.skill-item--active { background: rgba(79, 209, 224, 0.08); }
+.skill-item--expertise.skill-item--active:hover { background: rgba(79, 209, 224, 0.14); }
+.skill-item--expertise.skill-item--active .skill-name { color: var(--cyan); }
 
 .skill-source {
   font-family: 'Cinzel', serif;
@@ -823,6 +870,12 @@
   color: var(--gold);
   background: rgba(212, 175, 55, 0.12);
   border: 1px solid rgba(212, 175, 55, 0.3);
+}
+
+.skill-source--expertise {
+  color: var(--cyan);
+  background: rgba(79, 209, 224, 0.12);
+  border: 1px solid rgba(79, 209, 224, 0.3);
 }
 
 .skill-source--other {

@@ -1,0 +1,140 @@
+{
+  "Cause Fear": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "hooks": [
+      {
+        "type": "recurringDamage",
+        "conditionName": "Frightened",
+        "saveToEnd": { "ability": "wis" },
+        "recurringStage": "afterTurn",
+        "duration": { "until": "rounds", "rounds": 10 },
+        "appliesIf": {
+          "creatureType": ["Aberration", "Beast", "Celestial", "Dragon", "Elemental", "Fey", "Fiend", "Giant", "Humanoid", "Monstrosity", "Ooze", "Plant"]
+        }
+      }
+    ]
+  },
+  "False Life": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "tempHp",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d4+4",
+          "tiers": [
+            { "atLevel": 2, "value": "2d4+9" },
+            { "atLevel": 3, "value": "2d4+14" },
+            { "atLevel": 4, "value": "2d4+19" },
+            { "atLevel": 5, "value": "2d4+24" },
+            { "atLevel": 6, "value": "2d4+29" },
+            { "atLevel": 7, "value": "2d4+34" },
+            { "atLevel": 8, "value": "2d4+39" },
+            { "atLevel": 9, "value": "2d4+44" }
+          ]
+        }
+      }
+    ]
+  },
+  "Inflict Wounds": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d10",
+          "tiers": [
+            { "atLevel": 2, "value": "3d10" },
+            { "atLevel": 3, "value": "4d10" },
+            { "atLevel": 4, "value": "5d10" },
+            { "atLevel": 5, "value": "6d10" },
+            { "atLevel": 6, "value": "7d10" },
+            { "atLevel": 7, "value": "8d10" },
+            { "atLevel": 8, "value": "9d10" },
+            { "atLevel": 9, "value": "10d10" }
+          ]
+        }
+      }
+    ]
+  },
+  "Ray of Sickness": {
+    "resolution": "attack",
+    "attackType": "ranged",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Poison",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "2d8",
+          "tiers": [
+            { "atLevel": 2, "value": "3d8" },
+            { "atLevel": 3, "value": "4d8" },
+            { "atLevel": 4, "value": "5d8" },
+            { "atLevel": 5, "value": "6d8" },
+            { "atLevel": 6, "value": "7d8" },
+            { "atLevel": 7, "value": "8d8" },
+            { "atLevel": 8, "value": "9d8" },
+            { "atLevel": 9, "value": "10d8" }
+          ]
+        }
+      }
+    ],
+    "hooks": [
+      {
+        "type": "recurringDamage",
+        "conditionName": "Poisoned",
+        "duration": { "until": "rounds", "rounds": 2 }
+      }
+    ]
+  },
+  "Wrathful Smite": {
+    "resolution": "save",
+    "save": {
+      "ability": "wis",
+      "halfOnSave": false
+    },
+    "auraColor": "#8b5cf6",
+    "impactColor": "#8b5cf6",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic",
+        "scaling": {
+          "mode": "spell-slot",
+          "base": "1d6",
+          "tiers": [
+            { "atLevel": 2, "value": "2d6" },
+            { "atLevel": 3, "value": "3d6" },
+            { "atLevel": 4, "value": "4d6" },
+            { "atLevel": 5, "value": "5d6" },
+            { "atLevel": 6, "value": "6d6" },
+            { "atLevel": 7, "value": "7d6" },
+            { "atLevel": 8, "value": "8d6" },
+            { "atLevel": 9, "value": "9d6" }
+          ]
+        }
+      }
+    ],
+    "hooks": [
+      {
+        "type": "recurringDamage",
+        "conditionName": "Frightened",
+        "saveToEnd": { "ability": "wis" },
+        "recurringStage": "afterTurn",
+        "gatedBySave": true,
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
+  }
+}

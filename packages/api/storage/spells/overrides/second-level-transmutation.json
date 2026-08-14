@@ -1,0 +1,173 @@
+{
+  "Alter Self": {
+    "resolution": "none"
+  },
+  "Barkskin": {
+    "resolution": "none"
+  },
+  "Blindness/Deafness": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "condition",
+        "condition": "Blinded"
+      },
+      {
+        "type": "condition",
+        "condition": "Deafened"
+      }
+    ]
+  },
+  "Cordon of Arrows": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Piercing"
+      }
+    ]
+  },
+  "Darkvision": {
+    "resolution": "none"
+  },
+  "Dragon's Breath": {
+    "resolution": "save",
+    "save": {
+      "ability": "dex",
+      "halfOnSave": true
+    },
+    "area": {
+      "shape": "cone",
+      "size": 15,
+      "origin": "point"
+    }
+  },
+  "Earthbind": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": false
+    }
+  },
+  "Enhance Ability": {
+    "resolution": "none"
+  },
+  "Enlarge/Reduce": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    }
+  },
+  "Heat Metal": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Fire"
+      }
+    ]
+  },
+  "Immovable Object": {
+    "resolution": "none"
+  },
+  "Kinetic Jaunt": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Force"
+      }
+    ]
+  },
+  "Knock": {
+    "resolution": "none"
+  },
+  "Levitate": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    }
+  },
+  "Magic Weapon": {
+    "resolution": "none"
+  },
+  "Maximilian's Earthen Grasp": {
+    "resolution": "save",
+    "save": {
+      "ability": "str",
+      "halfOnSave": true
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Bludgeoning"
+      },
+      {
+        "type": "condition",
+        "condition": "Restrained"
+      }
+    ]
+  },
+  "Pyrotechnics": {
+    "resolution": "save",
+    "save": {
+      "ability": "con",
+      "halfOnSave": false
+    },
+    "area": {
+      "shape": "cube",
+      "size": 5,
+      "origin": "point"
+    }
+  },
+  "Rope Trick": {
+    "resolution": "none"
+  },
+  "Shining Smite": {
+    "resolution": "none",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant"
+      },
+      {
+        "type": "condition",
+        "condition": "Invisible"
+      }
+    ]
+  },
+  "Skywrite": {
+    "resolution": "none"
+  },
+  "Spider Climb": {
+    "resolution": "none"
+  },
+  "Spike Growth": {
+    "resolution": "auto",
+    "area": {
+      "shape": "cube",
+      "size": 20,
+      "origin": "point"
+    },
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Piercing"
+      }
+    ]
+  }
+}
