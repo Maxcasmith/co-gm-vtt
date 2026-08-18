@@ -82,6 +82,17 @@ export interface Dungeon {
   theme?: DungeonStylePack;
   structureType?: DungeonStructureType;
   /**
+   * Live ambient light level, 0-1. 1 (default when omitted) = fully lit, no darkness overlay.
+   * 0 = pitch black. Independent of fog-of-war — dims cells the player can already see, doesn't
+   * change which cells are visible. Recomputed server-side (recomputeIllumination in
+   * combat/runtime.ts) as max(baseIllumination, every active illuminationSource hook's level) —
+   * a light spell brightens the whole dungeon rather than a local radius around its bearer, since
+   * there's no per-cell light-propagation model, only this one global knob.
+   */
+  illumination?: number;
+  /** The location's authored ambient light before any light spell/source — set once at generation, never overwritten. `illumination` is the live value derived from this. */
+  baseIllumination?: number;
+  /**
    * Temporary movement-cost overlay (Entangle/Grease's Difficult Terrain) — separate from `cells`
    * since it's a spell effect layered on top of the permanent map, not a change to the map
    * itself, and needs to expire and clear independently. `multiplier` (2 for standard Difficult
@@ -97,6 +108,22 @@ export interface Dungeon {
     style?: 'vines' | 'smudge' | undefined;
     color?: string | undefined;
   }[];
+  /**
+   * Static light sources (wall sconces, braziers) — fixed position, same radius/cutoff/wall-block
+   * rules as `lightSources` below. Not authored anywhere yet (no dungeon-gen or GM placement path) —
+   * populate by hand for now.
+   */
+  pointLights?: { gx: number; gy: number; rangeFt: number }[];
+  /**
+   * token key (character name, same as tokenPositions — NOT character id) → light radius (ft) for
+   * whoever's currently holding a lit item (a torch). Hard cutoff at rangeFt, walls block it (see
+   * Canvas.tsx's litCells), combined with `illumination` via max() and capped at 1 — no partial
+   * falloff, no per-source brightness level. Recomputed on equip/unequip (setLightSourceFor,
+   * combat/runtime.ts) and on dungeon (re)load (socketHandlers/connection.ts). Position isn't
+   * stored here — resolved client-side from the live token position, same as everything else that
+   * tracks a token.
+   */
+  lightSources?: Record<string, number>;
 }
 
 // Bresenham line-of-sight — a wall cell (anything but floor, `1`) anywhere between viewer and

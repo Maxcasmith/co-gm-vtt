@@ -187,7 +187,14 @@
   "Light": {
     "resolution": "none",
     "explorationCastable": true,
-    "todo": "No lighting/illumination system exists — the object doesn't actually shed light on the map (no darkness/light-radius mechanic at all, separate from the fog-of-war/LoS system). Casting only spends the slot and announces."
+    "todo": "Illumination is a single global 0-1 knob per dungeon, not per-cell — casting brightens the whole dungeon to fully lit for the duration rather than a real 20ft/40ft radius around the touched object.",
+    "hooks": [
+      {
+        "type": "illuminationSource",
+        "illuminationLevel": 1,
+        "duration": { "until": "gameTime", "gameSecs": 3600 }
+      }
+    ]
   },
   "Lightning Lure": {
     "resolution": "save",
@@ -349,7 +356,7 @@
   "Starry Wisp": {
     "resolution": "attack",
     "attackType": "ranged",
-    "todo": "Emitting Dim Light in a 10ft radius isn't modeled — no lighting system exists (same gap as Light).",
+    "todo": "Illumination is a single global 0-1 knob per dungeon, not per-cell — a hit brightens the whole dungeon to dim rather than a real 10ft radius around the target.",
     "onHit": [
       {
         "type": "damage",
@@ -379,6 +386,11 @@
         "type": "conditionImmunity",
         "immuneConditions": ["Invisible"],
         "duration": { "until": "rounds", "rounds": 2 }
+      },
+      {
+        "type": "illuminationSource",
+        "illuminationLevel": 0.5,
+        "duration": { "until": "startOfCasterNextTurn" }
       }
     ]
   },

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "recover-the-pharaoh-s-burial-mask-from-the-burial-chamber",
+    "name": "Recover the pharaoh's burial mask from the burial chamber",
+    "description": "Recover the pharaoh's burial mask from the burial chamber",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-17"
+  },
+  {
+    "id": "find-and-translate-the-funerary-scroll-hidden-by-the-tomb-scribes",
+    "name": "Find and translate the funerary scroll hidden by the tomb scribes",
+    "description": "Find and translate the funerary scroll hidden by the tomb scribes",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-17"
+  },
+  {
+    "id": "reach-the-surface-through-the-robbers-escape-shaft",
+    "name": "Reach the surface through the robbers' escape shaft",
+    "description": "Reach the surface through the robbers' escape shaft",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-17"
+  },
+  {
+    "id": "boss-95f6b9c3-55f3-4453-9ffa-a429598753a4",
+    "name": "Defeat Guardian of the Silence",
+    "description": "Defeat Guardian of the Silence.",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-17"
+  },
+  {
+    "id": "exit-dungeon",
+    "name": "Escape The Silence Beneath the Sands",
+    "description": "Find a way out of The Silence Beneath the Sands.",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-17"
+  }
+]

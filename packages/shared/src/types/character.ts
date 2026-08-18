@@ -143,6 +143,32 @@ export function hasOriginFeat(char: Pick<Character, 'background' | 'species' | '
     (char.species === 'Human' && char.speciesOriginFeat === featName);
 }
 
+/**
+ * Every passive perception-adjacent sense the canvas lighting pipeline needs to reason about —
+ * darkvision is just the one kind with real data today. Blindsight/truesight/devilsSight/
+ * tremorsense exist in the type so a future feature (monster stat blocks, invocation tracking,
+ * ...) can grant them without another refactor; nothing in SPECIES_SENSES populates them yet.
+ */
+export type SenseKind = "darkvision" | "blindsight" | "truesight" | "devilsSight" | "tremorsense";
+export interface Sense { kind: SenseKind; rangeFt: number }
+
+/** Species-granted senses (2024 PHB). Species not listed have none. Subspecies overrides (Drow's Superior Darkvision, 120ft) aren't tracked — Character has no subspecies field. Activated/limited-use senses (Dwarf's Stonecunning Tremorsense) stay character-sheet flavor text only, not modeled here — they're not passive/always-on like everything else in this table. */
+export const SPECIES_SENSES: Record<string, Sense[]> = {
+  Aasimar: [{ kind: "darkvision", rangeFt: 60 }],
+  Dragonborn: [{ kind: "darkvision", rangeFt: 60 }],
+  Dwarf: [{ kind: "darkvision", rangeFt: 120 }],
+  Elf: [{ kind: "darkvision", rangeFt: 60 }],
+  Gnome: [{ kind: "darkvision", rangeFt: 60 }],
+  "Half-Elf": [{ kind: "darkvision", rangeFt: 60 }],
+  "Half-Orc": [{ kind: "darkvision", rangeFt: 60 }],
+  Orc: [{ kind: "darkvision", rangeFt: 120 }],
+  Tiefling: [{ kind: "darkvision", rangeFt: 60 }],
+};
+
+export function getSenses(species: string): Sense[] {
+  return SPECIES_SENSES[species] ?? [];
+}
+
 export const CLASS_SPELLCASTING_ABILITY: Record<string, AbilityKey> = {
   Artificer: "int",
   Bard: "cha",
@@ -292,4 +318,11 @@ export function calcACBreakdown(character: Character): ACBreakdown {
 /** Compute a character's AC from their inventory armor, applying D&D 5e dex-mod rules per armor type. */
 export function calcAC(character: Character): number {
   return calcACBreakdown(character).total;
+}
+
+/** Light radius (ft) from whatever's equipped in either hand (a torch) — 0 if nothing's lit. Both hands checked and maxed rather than just one, in case a light item ever ends up off-hand. */
+export function characterLightRangeFt(character: Character): number {
+  const heldIds = [character.equipment?.mainHand, character.equipment?.offHand].filter((id): id is string => !!id);
+  const heldItems = heldIds.map(id => character.inventory?.find(i => i.id === id)).filter((i): i is NonNullable<typeof i> => !!i);
+  return heldItems.reduce((max, i) => Math.max(max, i.lightEmissionRangeFt ?? 0), 0);
 }

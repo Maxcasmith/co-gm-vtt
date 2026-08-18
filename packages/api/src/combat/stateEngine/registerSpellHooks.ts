@@ -1,5 +1,5 @@
 import type { HookSpec, CreatureType } from 'shared';
-import { effectApplies } from 'shared';
+import { effectApplies, resolveSpellDamageDice } from 'shared';
 import type { Hook } from './Hook.ts';
 import type { StateEngine } from './StateEngine.ts';
 import { AcModifierHook } from './hooks/AcModifierHook.ts';
@@ -20,7 +20,9 @@ import { RollModifierHook } from './hooks/RollModifierHook.ts';
 import { ConditionImmunityHook } from './hooks/ConditionImmunityHook.ts';
 import { IllusionTagHook } from './hooks/IllusionTagHook.ts';
 import { MovementDamageHook } from './hooks/MovementDamageHook.ts';
-import { applyCondition } from '../runtime.ts';
+import { IlluminationSourceHook } from './hooks/IlluminationSourceHook.ts';
+import { WeaponAttackOverrideHook } from './hooks/WeaponAttackOverrideHook.ts';
+import { applyCondition, recomputeIllumination } from '../runtime.ts';
 
 export interface SpellHookContext {
   /** Who the hook attaches to — the caster for 'self' specs, an affected target otherwise. */
@@ -39,6 +41,10 @@ export interface SpellHookContext {
   currentWorldTimeSecs?: number | undefined;
   /** recurringDamage's scaling/tempHpScaling, mode 'ability-mod' only — the caster's spellcasting ability modifier, frozen at cast time same as dc (Heroism's temp HP). */
   casterAbilityMod?: number | undefined;
+  /** damageResistance's damageTypeOptions only — the caster's cast-time pick (Resistance's chosen damage type), same client payload field EffectSpec.damageTypeOptions already reads. */
+  chosenDamageType?: string | undefined;
+  /** rollModifier's scopedToChosenSkill only — the caster's cast-time pick (Guidance's chosen skill), see SpellCombatMeta.skillOptions. */
+  chosenSkill?: string | undefined;
 }
 
 /** Instantiates the class a HookSpec names. Returns null for specs missing the data their type needs. */
@@ -98,9 +104,13 @@ function hookFromSpec(spec: HookSpec, source: string, ctx: SpellHookContext): Ho
         ...base, kind: spec.self ? (spec.disadvantage ? 'grantDisadvantageSelf' : 'grantAdvantageSelf') : base.kind,
         consumeOnUse: spec.consumeOnUse, self: spec.self, speedBonusOnUseFt: spec.speedBonusOnUseFt,
       });
-    case 'damageResistance':
-      if (!spec.resistanceMode || (!spec.damageType && !spec.spellName)) return null;
-      return new DamageResistanceHook({ ...base, damageType: spec.damageType, spellName: spec.spellName, mode: spec.resistanceMode });
+    case 'damageResistance': {
+      if (!spec.resistanceMode) return null;
+      const chosenType = spec.damageTypeOptions && ctx.chosenDamageType && spec.damageTypeOptions.includes(ctx.chosenDamageType) ? ctx.chosenDamageType : undefined;
+      const damageType = chosenType ?? spec.damageType;
+      if (!damageType && !spec.spellName) return null;
+      return new DamageResistanceHook({ ...base, damageType, spellName: spec.spellName, mode: spec.resistanceMode, reduceDieSize: spec.reduceDieSize });
+    }
     case 'acOverride':
       if (spec.baseValue === undefined) return null;
       return new AcOverrideHook({ ...base, baseValue: spec.baseValue, requiresUnarmored: spec.requiresUnarmored });
@@ -127,9 +137,18 @@ function hookFromSpec(spec: HookSpec, source: string, ctx: SpellHookContext): Ho
     case 'actionUnlock':
       if (!spec.action) return null;
       return new ActionUnlockHook({ ...base, action: spec.action });
-    case 'rollModifier':
+    case 'rollModifier': {
       if (!spec.dieSize || !spec.sign) return null;
-      return new RollModifierHook({ ...base, dieSize: spec.dieSize, sign: spec.sign });
+      // Blade Ward, Guidance, and Mind Sliver each register under their own narrower kind so
+      // they're only ever read at the roll they actually apply to (bladeWardPenalty; roll:check
+      // filtered by skill; rollSavingThrow only), never mistaken for a Bless/Bane-style
+      // every-attack-and-save modifier.
+      const kind = spec.appliesToAttacker ? 'rollModifierVsAttacker'
+        : spec.scopedToChosenSkill ? 'rollModifierCheck'
+        : spec.savesOnly ? 'rollModifierSaveOnly'
+        : base.kind;
+      return new RollModifierHook({ ...base, kind, dieSize: spec.dieSize, sign: spec.sign, skill: spec.scopedToChosenSkill ? ctx.chosenSkill : undefined });
+    }
     case 'conditionImmunity':
       if (!spec.immuneConditions?.length) return null;
       return new ConditionImmunityHook({ ...base, immuneConditions: spec.immuneConditions });
@@ -141,6 +160,14 @@ function hookFromSpec(spec: HookSpec, source: string, ctx: SpellHookContext): Ho
       return new MovementDamageHook({
         ...base, casterId: ctx.casterId, casterLevel: ctx.casterLevel, slotLevel: ctx.slotLevel,
         scaling: spec.scaling, damageType: spec.damageType, thresholdFt: spec.thresholdFt, consumeOnUse: spec.consumeOnUse,
+      });
+    case 'illuminationSource':
+      if (spec.illuminationLevel === undefined) return null;
+      return new IlluminationSourceHook({ ...base, level: spec.illuminationLevel });
+    case 'weaponAttackOverride':
+      return new WeaponAttackOverrideHook({
+        ...base,
+        damageDie: spec.scaling ? resolveSpellDamageDice(spec.scaling, ctx.casterLevel, ctx.slotLevel) : undefined,
       });
   }
 }
@@ -211,4 +238,9 @@ export async function registerSpellHooks(engine: StateEngine, specs: HookSpec[],
       }
     }
   }
+
+  // Light spells need their brightness reflected the instant they're cast, not on the next
+  // turn-start sweep — cheap no-op for every other spell (recomputeIllumination bails out fast
+  // when nothing changed).
+  if (specs.some(s => s.type === 'illuminationSource')) recomputeIllumination(engine.campaignId);
 }

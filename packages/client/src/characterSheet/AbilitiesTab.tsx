@@ -1,9 +1,17 @@
-import type { Character } from "shared";
-import { CLASS_WEAPON_PROFS, CLASS_ARMOR_TRAINING } from "shared";
+import type { Character, SenseKind } from "shared";
+import { CLASS_WEAPON_PROFS, CLASS_ARMOR_TRAINING, getSenses } from "shared";
 import { useState } from "react";
 import { dispatch } from "../events.ts";
 import { STAT_NAMES, CLASS_SAVING_THROWS, BACKGROUND_SKILLS, SKILLS } from "../character-creation/srd.ts";
 import { mod, modNum, profBonusForLevel } from "./helpers.tsx";
+
+const SENSE_LABEL: Record<SenseKind, string> = {
+  darkvision: "Darkvision",
+  blindsight: "Blindsight",
+  truesight: "Truesight",
+  devilsSight: "Devil's Sight",
+  tremorsense: "Tremorsense",
+};
 
 const STAT_KEYS: Array<keyof Character["stats"]> = [
   "str",
@@ -149,6 +157,16 @@ export function AbilitiesTab({ character }: { character: Character }) {
                 {(CLASS_ARMOR_TRAINING[character.class] ?? []).length > 0
                   ? (CLASS_ARMOR_TRAINING[character.class] ?? [])
                     .map((a) => a.charAt(0).toUpperCase() + a.slice(1))
+                    .join(", ")
+                  : "None"}
+              </span>
+            </div>
+            <div className="sheet-proficiency-row">
+              <span className="sheet-proficiency-label">Senses</span>
+              <span className="sheet-proficiency-value">
+                {getSenses(character.species).length > 0
+                  ? getSenses(character.species)
+                    .map((s) => `${SENSE_LABEL[s.kind]} ${s.rangeFt}ft`)
                     .join(", ")
                   : "None"}
               </span>

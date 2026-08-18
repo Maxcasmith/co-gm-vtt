@@ -1,0 +1,13 @@
+{
+  "slug": "the-silence-beneath-the-sands",
+  "name": "The Silence Beneath the Sands",
+  "sourceType": "dungeon-crawl",
+  "savedAt": "2026-08-17T18:44:26.914Z",
+  "hasDungeon": true,
+  "entityCount": {
+    "npc": 0,
+    "creature": 0,
+    "faction": 0,
+    "location": 0
+  }
+}

@@ -26,6 +26,26 @@ export const CREATURE_TYPES = [
 ] as const;
 export type CreatureType = (typeof CREATURE_TYPES)[number];
 
+// Combat-role templates (Infantry/Brute/etc) — drive the tactical AI's decision layer
+// (packages/api/src/combat/ai/) instead of every enemy running the same nearest-target/
+// random-attack loop. Optional: old saved encounters/nemeses predate this and fall back
+// to plain melee-only behavior, same convention as creatureType above.
+export const ENEMY_ROLES = [
+  "Infantry", "Brute", "Cavalry", "Artillery", "Conjurer", "Commander", "Healer", "Ranged",
+] as const;
+export type EnemyRole = (typeof ENEMY_ROLES)[number];
+
+// Non-melee action a creature's tactical AI can pick instead of a plain attacks[] swing.
+// Field shapes match the existing hook constructors that execute them directly
+// (RollModifierHook's dieSize/sign, AcModifierHook's value) rather than an abstract
+// "magnitude" — see stateEngine/hooks/RollModifierHook.ts and AcModifierHook.ts.
+export type EnemyAction =
+  | { id: string; kind: "aoe"; name: string; range: number; radius: number; damage: string; damageType?: string; saveAbility?: AbilityKey; saveDC?: number }
+  | { id: string; kind: "heal"; name: string; range: number; healFormula: string }
+  | { id: string; kind: "buff"; name: string; range: number; durationRounds: number; rollBonusDie?: number; acBonus?: number }
+  | { id: string; kind: "debuff"; name: string; range: number; durationRounds: number; saveAbility?: AbilityKey; saveDC?: number; rollPenaltyDie?: number; acPenalty?: number }
+  | { id: string; kind: "summon"; name: string; templateRole: EnemyRole; count: number; triggerRoundsUnchallenged: number };
+
 export interface EnemyStatBlock {
   id: string;
   name: string;
@@ -39,6 +59,8 @@ export interface EnemyStatBlock {
   level?: number;
   creatureType?: CreatureType;
   isBoss?: boolean;
+  role?: EnemyRole;
+  actions?: EnemyAction[];
   /** The player who controls this ally on the map (Find Familiar/Unseen Servant's summoner) — omitted for GM-recruited party allies, which stay GM-controlled. Same idea as "the telepathic link," simplified to full token control instead of a separate see/hear/command mechanic. */
   ownerId?: string;
   // Combat-scoped, like the rest of a creature's live state — not persisted beyond the fight

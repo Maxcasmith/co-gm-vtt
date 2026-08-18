@@ -27,6 +27,7 @@ export interface DungeonManifest {
   structureType: DungeonStructureType;
   theme: DungeonStylePack; // dungeon-wide art style pack — clamped to DUNGEON_STYLE_PACKS on parse
   goals: string[]; // short narrative objectives for this dungeon — may be empty, never forced
+  illumination: number; // 0-1 ambient light level for the whole location — clamped on parse
 }
 
 // Single generic words get no LLM call — falls back to a hand-authored generic layout
@@ -64,7 +65,7 @@ export async function fetchManifest(
   partyLevel = 1,
   onToken: (t: string) => void = () => {},
 ): Promise<DungeonManifest> {
-  if (isGeneric(name)) return { rooms: assignKeys(GENERIC_ROOMS), structureType: 'organic', theme: 'high_fantasy', goals: [] };
+  if (isGeneric(name)) return { rooms: assignKeys(GENERIC_ROOMS), structureType: 'organic', theme: 'high_fantasy', goals: [], illumination: 1 };
 
   const contextBlock = storyContext
     ? `\nRecent story context (what's actually happening — use this to decide what belongs in each room, not just the genre label):\n${storyContext}\n`
@@ -77,6 +78,7 @@ Return ONLY valid JSON, no markdown fences, no explanation:
 {
   "structureType": "building|organic",
   "theme": "string — a short lowercase keyword for this location's overall art style/setting, e.g. high_fantasy. Pick whatever actually fits the genre; if nothing fits, use high_fantasy.",
+  "illumination": "number 0-1 — this location's ambient light level. 1 = well lit throughout (daylight, torches/lamps everywhere), 0.5 = dim (dusk, sparse torchlight, moonlight), 0 = pitch black (unlit cave/crypt, no ambient light source). Judge from what the location actually is, not from genre alone.",
   "rooms": [
     {
       "name": "string",
@@ -144,9 +146,10 @@ Genre: ${dungeonType}`;
       };
     });
     const goals = Array.isArray(parsed.goals) ? parsed.goals.filter((g): g is string => typeof g === 'string' && g.trim().length > 0) : [];
-    return { rooms: assignKeys(rooms), structureType, theme, goals };
+    const illumination = typeof parsed.illumination === 'number' && Number.isFinite(parsed.illumination) ? Math.max(0, Math.min(1, parsed.illumination)) : 1;
+    return { rooms: assignKeys(rooms), structureType, theme, goals, illumination };
   } catch (err) {
     logError('dungeon/manifest:fetchManifest', err);
-    return { rooms: assignKeys(GENERIC_ROOMS), structureType: 'organic', theme: 'high_fantasy', goals: [] };
+    return { rooms: assignKeys(GENERIC_ROOMS), structureType: 'organic', theme: 'high_fantasy', goals: [], illumination: 1 };
   }
 }

@@ -1,8 +1,34 @@
 {
   "Guidance": {
-    "resolution": "none"
+    "resolution": "none",
+    "hooks": [
+      {
+        "type": "rollModifier",
+        "dieSize": 4,
+        "sign": 1,
+        "scopedToChosenSkill": true,
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ],
+    "skillOptions": ["Athletics", "Acrobatics", "Sleight of Hand", "Stealth", "Arcana", "History", "Investigation", "Nature", "Religion", "Animal Handling", "Insight", "Medicine", "Perception", "Survival", "Deception", "Intimidation", "Performance", "Persuasion"]
   },
   "True Strike": {
-    "resolution": "none"
+    "resolution": "none",
+    "todo": "Uses the caster's normal Strength/Dexterity weapon-attack math (bundled onto the weapon-hit pathway, same as Booming Blade) instead of swapping in their spellcasting ability modifier for the attack and damage rolls, per RAW — no mechanism exists to override which ability score a weapon attack uses. The scaling Radiant bonus (1d6/2d6/3d6 at 5/11/17) is accurate; it's 1d6 too high below level 5 for the same rollDice floor-to-1 reason as Booming Blade. The 'Radiant or the weapon's normal type' choice on the base damage isn't offered — only the bonus die is Radiant, the base weapon damage keeps its own type.",
+    "onHit": [
+      {
+        "type": "damage",
+        "damageType": "Radiant",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d1",
+          "tiers": [
+            { "atLevel": 5, "value": "1d6" },
+            { "atLevel": 11, "value": "2d6" },
+            { "atLevel": 17, "value": "3d6" }
+          ]
+        }
+      }
+    ]
   }
 }

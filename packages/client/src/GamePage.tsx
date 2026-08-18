@@ -166,6 +166,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     fetch(`${API}/api/campaigns/${character.campaignId}/party/${character.id}`)
       .then(r => r.json())
       .then((c: Character) => {
+        onCharacterUpdateRef.current(c);
         setEquipment(c.equipment);
         if (c.maxSpellSlots1) setPlayerSlotsState({ current: c.currentSpellSlots1 ?? c.maxSpellSlots1, max: c.maxSpellSlots1 });
       })
@@ -407,8 +408,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   useEffect(() => on('vtt:combat:spell:attack', ({ casterId, casterName, targetIds, spell, slotLevel, chosenDamageType }) => {
     socketRef.current?.emit('combat:spell:attack', { casterId, casterName, targetIds, spell, slotLevel, chosenDamageType });
   }), []);
-  useEffect(() => on('vtt:combat:spell:cast', ({ casterId, casterName, spell, slotLevel, targetIds, originGx, originGy }) => {
-    socketRef.current?.emit('combat:spell:cast', { casterId, casterName, spell, slotLevel, targetIds, ...(originGx !== undefined ? { originGx, originGy } : {}) });
+  useEffect(() => on('vtt:combat:spell:cast', ({ casterId, casterName, spell, slotLevel, targetIds, chosenDamageType, chosenCommand, chosenSkill, originGx, originGy }) => {
+    socketRef.current?.emit('combat:spell:cast', { casterId, casterName, spell, slotLevel, targetIds, chosenDamageType, chosenCommand, chosenSkill, ...(originGx !== undefined ? { originGx, originGy } : {}) });
   }), []);
   useEffect(() => on('vtt:equipment:update', payload => {
     socketRef.current?.emit('character:equipment:update', payload);
@@ -596,7 +597,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       />
       {currentRoomName && <div className="room-name-banner">{currentRoomName}</div>}
       <TurnOrderBar campaignId={character.campaignId} />
-      <PartyHud connected={connected} portraitUrls={portraitUrls} self={character.name} hp={partyHp} />
+      <PartyHud connected={connected} portraitUrls={portraitUrls} self={character.name} hp={partyHp} selfTempHp={playerHpState?.temp} />
       <CombatDock character={liveCharacter} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} activeBuffs={activeBuffs} elevationFt={elevations[character.id] ?? 0} />
       <EncounterLoadingOverlay />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} header={<span className="palette-clock">{formatWorldTime(worldTimeSecs)}</span>} />

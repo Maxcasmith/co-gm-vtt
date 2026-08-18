@@ -44,13 +44,19 @@ export function SpellsTab({
   const [damageType, setDamageType] = useState<string | undefined>(undefined);
   const [command, setCommand] = useState<string | undefined>(undefined);
   const [customCommand, setCustomCommand] = useState("");
+  const [skill, setSkill] = useState<string | undefined>(undefined);
 
   function damageTypeOptionsFor(spell: Spell): string[] | undefined {
-    return spell.combat?.onHit?.find((e) => e.damageTypeOptions?.length)?.damageTypeOptions;
+    return spell.combat?.onHit?.find((e) => e.damageTypeOptions?.length)?.damageTypeOptions
+      ?? spell.combat?.hooks?.find((h) => h.damageTypeOptions?.length)?.damageTypeOptions;
   }
 
   function commandOptionsFor(spell: Spell): string[] | undefined {
     return spell.combat?.commandOptions;
+  }
+
+  function skillOptionsFor(spell: Spell): string[] | undefined {
+    return spell.combat?.skillOptions;
   }
 
   // Magic Initiate can grant spells from a different class entirely, so the fetch has to cover
@@ -157,6 +163,7 @@ export function SpellsTab({
       actionType: cost,
       chosenDamageType: damageTypeOptionsFor(spell) ? damageType : undefined,
       chosenCommand: commandOptionsFor(spell) ? (customCommand.trim() || command) : undefined,
+      chosenSkill: skillOptionsFor(spell) ? skill : undefined,
       casterLevel: character.level,
     });
   }
@@ -167,6 +174,8 @@ export function SpellsTab({
     const commandOptions = selected ? commandOptionsFor(selected) : undefined;
     setCommand(commandOptions?.[0]);
     setCustomCommand("");
+    const skillOptions = selected ? skillOptionsFor(selected) : undefined;
+    setSkill(skillOptions?.[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.name]);
 
@@ -306,6 +315,19 @@ export function SpellsTab({
                 maxLength={20}
                 onChange={(e) => setCustomCommand(e.target.value.replace(/\s+/g, ""))}
               />
+            </div>
+          )}
+          {skillOptionsFor(selected) && (
+            <div className="sheet-spell-damage-types">
+              {skillOptionsFor(selected)!.map((s) => (
+                <button
+                  key={s}
+                  className={`sheet-damage-type-btn${skill === s ? " sheet-damage-type-btn--active" : ""}`}
+                  onClick={() => setSkill(s)}
+                >
+                  {s}
+                </button>
+              ))}
             </div>
           )}
           {(() => {

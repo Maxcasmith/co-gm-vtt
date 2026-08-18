@@ -73,7 +73,7 @@ export interface EffectSpec {
  * owner's next beforeTurn and disarms on that same turn's afterTurn regardless of whether it
  * fired, so `duration` is always 'endOfCombat' (self-managed, no generic expiry needed).
  */
-export type HookType = "acModifier" | "recurringDamage" | "onHitBonusDamage" | "grantAdvantage" | "damageResistance" | "acOverride" | "retaliateDamage" | "attackerDisadvantage" | "sanctuaryWard" | "speedModifier" | "linkedActionEconomy" | "reactionLock" | "actionUnlock" | "rollModifier" | "conditionImmunity" | "illusionTag" | "movementDamage";
+export type HookType = "acModifier" | "recurringDamage" | "onHitBonusDamage" | "grantAdvantage" | "damageResistance" | "acOverride" | "retaliateDamage" | "attackerDisadvantage" | "sanctuaryWard" | "speedModifier" | "linkedActionEconomy" | "reactionLock" | "actionUnlock" | "rollModifier" | "conditionImmunity" | "illusionTag" | "movementDamage" | "illuminationSource" | "weaponAttackOverride";
 
 /**
  * A hook declared by a spell, instantiated into a live Hook class by the engine's factory
@@ -91,10 +91,14 @@ export interface HookSpec {
   /** Higher runs first. Modifiers should outrank reaction offers so an offer sees the final value. */
   priority?: number;
   value?: number; // acModifier: the AC bonus
-  scaling?: Scaling; // recurringDamage/onHitBonusDamage: dice, upcast-aware
+  scaling?: Scaling; // recurringDamage/onHitBonusDamage: dice, upcast-aware; weaponAttackOverride: Shillelagh's level-scaled replacement die (resolved once at cast time into WeaponAttackOverrideHook.damageDie)
   damageType?: string; // recurringDamage/onHitBonusDamage/damageResistance: Fire, Acid, Force, ...
-  /** damageResistance only — which way the multiplier goes. */
-  resistanceMode?: "resistance" | "vulnerability" | "immunity";
+  /** damageResistance only — which way the multiplier goes. reduceFlat subtracts a flat `1d{reduceDieSize}` instead of multiplying (the Resistance cantrip). */
+  resistanceMode?: "resistance" | "vulnerability" | "immunity" | "reduceFlat";
+  /** damageResistance only, resistanceMode 'reduceFlat' — the die subtracted from incoming damage, rerolled fresh each hit (Resistance's 1d4). */
+  reduceDieSize?: number;
+  /** damageResistance only — caster picks one at cast time (Resistance's 11-type choice) instead of a fixed damageType; resolved against SpellHookContext.chosenDamageType same idiom as EffectSpec.damageTypeOptions. */
+  damageTypeOptions?: string[];
   /** damageResistance only — gate by the damage's source spell instead of its type (Shield's "no damage from Magic Missile"). Takes priority over damageType when both would be set. */
   spellName?: string;
   /** acOverride only — the flat part of the replacement formula (13 for Mage Armor); + Dex mod is added live. */
@@ -139,10 +143,16 @@ export interface HookSpec {
   speedBonusOnUseFt?: number;
   /** actionUnlock only — which HUD action this makes available this turn (Expeditious Retreat's 'dash-bonus', Jump's 'jump') — see ACTION_UNLOCKS in CombatDock.tsx for what each one costs/grants. */
   action?: string;
-  /** rollModifier only — the die added to (Bless) or subtracted from (Bane) every attack roll/save, rerolled fresh each time. 4 for both spells' 1d4. */
+  /** rollModifier only — the die added to (Bless) or subtracted from (Bane/Blade Ward) every attack roll/save, rerolled fresh each time. 4 for Bless/Bane's 1d4. */
   dieSize?: number;
-  /** rollModifier only — 1 to add (Bless), -1 to subtract (Bane). */
+  /** rollModifier only — 1 to add (Bless), -1 to subtract (Bane, Blade Ward). */
   sign?: 1 | -1;
+  /** rollModifier only — false/omitted (Bless/Bane) modifies the owner's OWN attack rolls and saves. true (Blade Ward) flips it: modifies the roll of whoever ATTACKS the owner instead — registers under kind 'rollModifierVsAttacker' so it's queried at the attacker's roll (see bladeWardPenalty, combat/runtime.ts) rather than getHooksOwnedBy(attackerId, 'rollModifier'). */
+  appliesToAttacker?: boolean;
+  /** rollModifier only — scopes the modifier to ability checks using one chosen skill (Guidance) instead of attack rolls/saves. Registers under kind 'rollModifierCheck', with the hook's `skill` set from SpellHookContext.chosenSkill (the caster's cast-time pick, see SpellCombatMeta.skillOptions) — queried by roll:check (socketHandlers/rolls.ts), not the attack/save sites. */
+  scopedToChosenSkill?: boolean;
+  /** rollModifier only — narrows it to saving throws only (Mind Sliver's "-1d4 from the next saving throw"), not attack rolls too. Registers under kind 'rollModifierSaveOnly', queried by rollSavingThrow alongside the plain 'rollModifier' kind Bless/Bane use — never by the attack-roll sites. */
+  savesOnly?: boolean;
   /** conditionImmunity only — condition(s) this hook's owner can't be given while it's registered (Heroism's Frightened immunity) — checked by applyCondition (runtime.ts), which silently no-ops instead of applying a listed condition. */
   immuneConditions?: Condition[];
   /** illusionTag only — label for what's being concealed (Disguise Self's "Disguised"), shown back to whoever successfully investigates it. The DC itself is always the caster's own spell save DC (ctx.dc), not authored here. */
@@ -151,6 +161,8 @@ export interface HookSpec {
   thresholdFt?: number;
   /** reactionLock only — narrows the block to Opportunity Attacks specifically (Shocking Grasp) instead of every reaction (Arms of Hadar's full block). */
   opportunityOnly?: boolean;
+  /** illuminationSource only — ambient light level (0-1) this owner is emitting while the hook is registered (Light's bright light ~1, Starry Wisp's Dim Light ~0.5). Global illumination has no per-cell radius; the dungeon's live `illumination` becomes max(baseIllumination, every active source's level) — see recomputeIllumination in combat/runtime.ts. */
+  illuminationLevel?: number;
   /**
    * Same meaning and shape as EffectSpec.appliesIf — gates the whole spec (hook AND any
    * conditionName it applies) to targets of a matching creature type, checked once against
@@ -282,10 +294,29 @@ export interface SpellCombatMeta {
   obscuresArea?: { durationRounds: number };
   /** Buttons offered at cast time for a "choose one of these named options" spell (Command's Approach/Drop/Flee/Grovel/Halt) — same idea as an EffectSpec's damageTypeOptions, just spell-wide instead of per-effect since Command's options aren't all damage. Picked value arrives as chosenCommand; a free-text one-word entry is always available alongside these too (see SpellsTab.tsx). */
   commandOptions?: string[];
+  /** Cast-time skill picker (Guidance's "choose a skill") — same shape as commandOptions/damageTypeOptions, just for a rollModifier hook's scopedToChosenSkill. Picked value arrives as chosenSkill and is threaded into SpellHookContext. */
+  skillOptions?: string[];
   /** How difficultTerrain/obscuresArea's cells are drawn on the map (Entangle's vines, Grease/Fog Cloud's smudge) — see Dungeon.hazardCells.style. */
   hazardVisual?: { style: "vines" | "smudge"; color: string };
   /** Drops a stationary, purely cosmetic DungeonEntity (type 'object', no followsId) at the targeted cell on cast (Silent Image) — a labeled marker only, no illusion-detection/movement mechanics behind it. */
   placesIllusion?: boolean;
+  /**
+   * Overrides actionCostFromCastingTime(spell.castingTime) for the engine's action-economy gate.
+   * For a spell whose RAW text splits into two differently-costed steps that this engine resolves
+   * as one immediate cast (Produce Flame: a Bonus Action to conjure the flame, then a separate
+   * Action each time you actually attack with it) — the resolved cast needs costing at the more
+   * expensive step, not the cheaper one castingTime alone would suggest.
+   */
+  actionCostOverride?: "action" | "bonusAction" | "reaction";
+  /**
+   * Replaces `onHit` entirely (not stacked on top of it) when the target is below its max HP at
+   * resolution time — Toll the Dead's 1d12 instead of 1d8. A target-condition swap of the whole
+   * damage set rather than a stacking bonus, so it can't reuse EffectSpec.appliesIf (which sums
+   * every matching effect together instead of picking one).
+   */
+  onHitIfTargetMissingHp?: EffectSpec[];
+  /** Spare the Dying — sets the target's death saves to Stable directly instead of dealing damage or granting a hook. Player-only; a no-op against a creature target (see stabilizeParticipant, combat/runtime.ts). */
+  stabilizesTarget?: boolean;
 }
 
 export interface Spell {
@@ -342,7 +373,9 @@ export function parseRangeFeet(range: string): number {
  * Resolves a Scaling to the dice formula to roll. Cantrip mode picks the highest tier
  * the caster's character level qualifies for; spell-slot mode picks the highest tier
  * the slot it was cast at qualifies for (i.e. upcasting); ability-mod ignores level/slot
- * entirely and returns the caster's spellcasting modifier as a flat "1d1+N" formula.
+ * entirely and returns `base` with the caster's spellcasting modifier appended (Heroism's flat
+ * "1d1+N" temp HP; Magic Stone's "1d6+N" damage — base carries whatever dice belong before the
+ * modifier, not hardcoded to a flat value).
  */
 export function resolveSpellDamageDice(
   scaling: Scaling | undefined,
@@ -353,7 +386,7 @@ export function resolveSpellDamageDice(
   if (!scaling) return undefined;
   if (scaling.mode === "ability-mod") {
     const mod = casterAbilityMod ?? 0;
-    return `1d1${mod >= 0 ? "+" : ""}${mod}`;
+    return `${scaling.base}${mod >= 0 ? "+" : ""}${mod}`;
   }
   const level = scaling.mode === "cantrip" || scaling.mode === "cantrip-plus-ability-mod" ? casterLevel : slotLevel;
   let value = scaling.base;

@@ -6,9 +6,10 @@ interface Props {
   portraitUrls: Record<string, string>;
   self: Player;
   hp: Record<string, { current: number; max: number }>;
+  selfTempHp?: number;
 }
 
-export default function PartyHud({ connected, portraitUrls, self, hp }: Props) {
+export default function PartyHud({ connected, portraitUrls, self, hp, selfTempHp }: Props) {
   if (!connected.length) return null;
 
   const ordered = [...connected].sort((a, b) => (a === self ? -1 : b === self ? 1 : 0));
@@ -17,6 +18,7 @@ export default function PartyHud({ connected, portraitUrls, self, hp }: Props) {
     <div className="party-hud">
       {ordered.map(name => {
         const stats = hp[name];
+        const tempHp = name === self ? selfTempHp : undefined;
         return (
           <div
             key={name}
@@ -27,6 +29,7 @@ export default function PartyHud({ connected, portraitUrls, self, hp }: Props) {
               {portraitUrls[name]
                 ? <img src={portraitUrls[name]} alt={name} onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
                 : null}
+              {!!tempHp && tempHp > 0 && <span className="party-hud-temp-hp">+{tempHp}</span>}
             </div>
             {stats && stats.max > 0 && (
               <progress className="party-hud-hp" value={Math.max(0, Math.min(stats.current, stats.max))} max={stats.max} />

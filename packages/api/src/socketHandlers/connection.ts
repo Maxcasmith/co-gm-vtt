@@ -1,3 +1,4 @@
+import { characterLightRangeFt } from 'shared';
 import { readChatLog, readQuests, readManifest, listCharacters, loadDungeon, loadEncounter } from '../storage.ts';
 import { toClientDungeon } from '../dungeon/index.ts';
 import { io, ROOM, connected, playerSocketIds, campaignPlayers, sessionState, combatState, dungeons, tokenPositions, microDungeons, encounters, enemiesReady, withLivePositions } from '../state.ts';
@@ -42,6 +43,15 @@ export function registerJoin(ctx: JoinContext): void {
     if (dungeon) {
       if (dungeon.arena) microDungeons.add(campaignId);
       if (!tokenPositions.has(campaignId) && dungeon.positions) tokenPositions.set(campaignId, dungeon.positions);
+      // Rebuild lightSources from scratch on (re)connect — the in-memory dungeon may be freshly
+      // loaded from disk (server restart) with no idea who's currently holding a lit torch.
+      const chars = await listCharacters(campaignId);
+      const lightSources: Record<string, number> = {};
+      for (const c of chars) {
+        const range = characterLightRangeFt(c);
+        if (range > 0) lightSources[c.name] = range;
+      }
+      dungeon.lightSources = lightSources;
       socket.emit('dungeon:loaded', toClientDungeon(withLivePositions(campaignId, dungeon)));
       Object.entries(tokenPositions.get(campaignId) ?? {}).forEach(([tokenId, pos]) => socket.emit('token:moved', { tokenId, ...pos }));
     }

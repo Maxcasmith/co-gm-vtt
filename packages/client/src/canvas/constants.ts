@@ -8,5 +8,7 @@ export const IMPACT_DUR = 450; // ms for the one-shot burst when an armed buff's
 export const SWING_DUR = 250;  // ms for a weapon attack's slash/streak effect
 export const SIGHT_RADIUS = 20; // square (Chebyshev) fog-of-war radius, in cells — mirrors PLAYER_SIGHT_RADIUS server-side
 export const DUNGEON_BG = '#0e0c14';
+export const FOG_OF_WAR_COLOR = '#020201';
+export const DARKVISION_THRESHOLD = 0.5; // illumination at/below this counts as "dark" — darkvision only activates here, not in merely dim light
 export const MIN_ZOOM = 0.5;
 export const MAX_ZOOM = 2.0;

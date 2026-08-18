@@ -1,6 +1,7 @@
 {
   "Create Bonfire": {
     "resolution": "save",
+    "todo": "The bonfire is a one-shot save on cast only (whoever's standing there right now) — RAW's persistent hazard that re-triggers the save when a creature moves into it or ends its turn there isn't modeled (no damaging-terrain-hazard system exists yet, only movement-cost hazardCells and the owner-scoped MovementDamageHook). Concentration is tracked (so it still ends on the caster losing focus) but the bonfire itself does nothing after the initial cast.",
     "save": {
       "ability": "dex",
       "halfOnSave": false
@@ -13,12 +14,14 @@
     "onHit": [
       {
         "type": "damage",
-        "damageType": "Fire"
+        "damageType": "Fire",
+        "scaling": { "mode": "cantrip", "base": "1d8", "tiers": [] }
       }
     ]
   },
   "Infestation": {
     "resolution": "save",
+    "todo": "The 'moves 5ft in a random d4-rolled direction on a failed save' clause isn't modeled — push/pull effects only move a target toward/away from the caster, there's no random-direction forced-movement primitive. Damage lands correctly; the shove doesn't happen.",
     "save": {
       "ability": "con",
       "halfOnSave": false
@@ -26,16 +29,20 @@
     "onHit": [
       {
         "type": "damage",
-        "damageType": "Poison"
+        "damageType": "Poison",
+        "scaling": { "mode": "cantrip", "base": "1d6", "tiers": [] }
       }
     ]
   },
   "Mage Hand": {
-    "resolution": "none"
+    "resolution": "none",
+    "explorationCastable": true
   },
   "Produce Flame": {
     "resolution": "attack",
     "attackType": "ranged",
+    "actionCostOverride": "action",
+    "todo": "2024 PHB split this into a Bonus Action to conjure the flame (which then sheds Bright/Dim Light for the 10-minute duration) and a separate Action any time later to hurl it as this ranged spell attack. Only the attack half is modeled — actionCostOverride corrects the attack's cost to a full Action, but the flame can't be conjured (or shed light) without also immediately attacking with it, and there's no standalone light-source step like Light/Starry Wisp got.",
     "onHit": [
       {
         "type": "damage",
@@ -67,10 +74,16 @@
       "ability": "dex",
       "halfOnSave": false
     },
+    "area": {
+      "shape": "emanation",
+      "size": 5,
+      "origin": "self"
+    },
     "onHit": [
       {
         "type": "damage",
-        "damageType": "Force"
+        "damageType": "Force",
+        "scaling": { "mode": "cantrip", "base": "1d6", "tiers": [] }
       }
     ]
   }

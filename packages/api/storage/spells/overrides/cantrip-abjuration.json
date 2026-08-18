@@ -1,8 +1,28 @@
 {
   "Blade Ward": {
-    "resolution": "none"
+    "resolution": "none",
+    "hooks": [
+      {
+        "type": "rollModifier",
+        "dieSize": 4,
+        "sign": -1,
+        "appliesToAttacker": true,
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
   },
   "Resistance": {
-    "resolution": "none"
+    "resolution": "none",
+    "todo": "The 'once per turn' cap on the reduction isn't enforced — DamageResistanceHook has no round/turn marker to gate on (see its own doc comment), so two separate hits of the chosen type in the same turn both get reduced instead of just the first.",
+    "hooks": [
+      {
+        "type": "damageResistance",
+        "resistanceMode": "reduceFlat",
+        "reduceDieSize": 4,
+        "damageType": "Fire",
+        "damageTypeOptions": ["Acid", "Bludgeoning", "Cold", "Fire", "Lightning", "Necrotic", "Piercing", "Poison", "Radiant", "Slashing", "Thunder"],
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
   }
 }

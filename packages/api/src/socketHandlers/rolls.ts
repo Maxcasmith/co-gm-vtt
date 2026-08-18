@@ -1,12 +1,13 @@
 import type { CharacterStats } from 'shared';
 import { statMod } from 'shared';
 import { getCharacter, appendChatLog } from '../storage.ts';
-import { io, ROOM, STAT_FULL, BG_SKILLS, SAVE_PROFS } from '../state.ts';
-import { D20Roll } from '../combat/dice.ts';
+import { io, ROOM, STAT_FULL, BG_SKILLS, SAVE_PROFS, getStateEngine } from '../state.ts';
+import { D20Roll, rollDice } from '../combat/dice.ts';
 import { rollModeFor } from '../combat/conditions/rollModeFor.ts';
 import { checkDungeonHiddenReveal } from '../dungeon/runtime.ts';
 import { dispatchDMResponse } from '../session.ts';
 import type { JoinContext } from './context.ts';
+import type { RollModifierHook } from '../combat/stateEngine/hooks/RollModifierHook.ts';
 
 export function registerRollHandlers(ctx: JoinContext): void {
   const { socket } = ctx;
@@ -22,7 +23,12 @@ export function registerRollHandlers(ctx: JoinContext): void {
         (BG_SKILLS[char.background] ?? []).includes(skill)
       ) : false;
       const expert = proficient && Boolean(skill) && (char.expertiseSkills ?? []).includes(skill!);
-      const modifier = base + (expert ? 4 : proficient ? 2 : 0);
+      // Guidance — rerolled fresh against every check, not fixed at cast time (see RollModifierHook).
+      const skillMods = skill
+        ? (getStateEngine(campaignId).getHooksOwnedBy(characterId, 'rollModifierCheck') as RollModifierHook[]).filter(h => h.skill === skill)
+        : [];
+      const skillBonus = skillMods.reduce((sum, h) => sum + h.sign * rollDice(`1d${h.dieSize}`), 0);
+      const modifier = base + (expert ? 4 : proficient ? 2 : 0) + skillBonus;
       const mode = rollModeFor(char, 'check', statKey);
       const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
       const total = roll + modifier;

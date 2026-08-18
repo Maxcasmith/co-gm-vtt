@@ -1,17 +1,21 @@
 {
   "Encode Thoughts": {
-    "resolution": "none"
+    "resolution": "none",
+    "explorationCastable": true
   },
   "Friends": {
     "resolution": "save",
+    "todo": "The auto-success clauses (target isn't a Humanoid, you're currently fighting it, or you've cast this on it in the past 24h) aren't checked — every target just rolls the save. Ends early on the caster damaging the target (endsIfCasterDamages), but not RAW's broader 'target takes any damage, or caster attacks/damages/forces a save on anyone' triggers.",
     "save": {
       "ability": "wis",
       "halfOnSave": false
     },
-    "onHit": [
+    "hooks": [
       {
-        "type": "condition",
-        "condition": "Charmed"
+        "type": "recurringDamage",
+        "conditionName": "Charmed",
+        "endsIfCasterDamages": true,
+        "duration": { "until": "rounds", "rounds": 10 }
       }
     ]
   },
@@ -44,6 +48,15 @@
           ]
         }
       }
+    ],
+    "hooks": [
+      {
+        "type": "rollModifier",
+        "dieSize": 4,
+        "sign": -1,
+        "savesOnly": true,
+        "duration": { "until": "rounds", "rounds": 2 }
+      }
     ]
   },
   "Vicious Mockery": {
@@ -74,6 +87,15 @@
             }
           ]
         }
+      }
+    ],
+    "hooks": [
+      {
+        "type": "grantAdvantage",
+        "self": true,
+        "disadvantage": true,
+        "consumeOnUse": true,
+        "duration": { "until": "rounds", "rounds": 2 }
       }
     ]
   }

@@ -1,6 +1,7 @@
 {
   "Control Flames": {
     "resolution": "none",
+    "explorationCastable": true,
     "area": {
       "shape": "cube",
       "size": 5,
@@ -9,6 +10,7 @@
   },
   "Druidcraft": {
     "resolution": "none",
+    "explorationCastable": true,
     "area": {
       "shape": "cube",
       "size": 5,
@@ -17,6 +19,7 @@
   },
   "Elementalism": {
     "resolution": "none",
+    "explorationCastable": true,
     "area": {
       "shape": "cube",
       "size": 5,
@@ -25,20 +28,28 @@
   },
   "Gust": {
     "resolution": "save",
+    "todo": "Only the creature-push option is modeled. The alternative options (blast a light unattended object 10ft, or a harmless sensory effect) aren't — no object-targeting or pure-narrative branch exists for this spell.",
     "save": {
       "ability": "str",
       "halfOnSave": false
-    }
+    },
+    "onHit": [
+      {
+        "type": "push",
+        "distance": 5
+      }
+    ]
   },
   "Magic Stone": {
     "resolution": "attack",
     "attackType": "ranged",
+    "todo": "Only the caster throwing the stone themselves is modeled — RAW's 'hand it to someone else, who attacks with your spellcasting modifier instead of their own' hand-off isn't, since this engine's attack-cast path assumes the caster is the one making the roll.",
     "onHit": [
       {
         "type": "damage",
         "damageType": "Bludgeoning",
         "scaling": {
-          "mode": "spell-slot",
+          "mode": "ability-mod",
           "base": "1d6",
           "tiers": []
         }
@@ -46,13 +57,16 @@
     ]
   },
   "Mending": {
-    "resolution": "none"
+    "resolution": "none",
+    "explorationCastable": true
   },
   "Message": {
-    "resolution": "none"
+    "resolution": "none",
+    "explorationCastable": true
   },
   "Mold Earth": {
     "resolution": "none",
+    "explorationCastable": true,
     "area": {
       "shape": "cube",
       "size": 5,
@@ -60,7 +74,8 @@
     }
   },
   "Prestidigitation": {
-    "resolution": "none"
+    "resolution": "none",
+    "explorationCastable": true
   },
   "Primal Savagery": {
     "resolution": "attack",
@@ -68,12 +83,22 @@
     "onHit": [
       {
         "type": "damage",
-        "damageType": "Acid"
+        "damageType": "Acid",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d10",
+          "tiers": [
+            { "atLevel": 5, "value": "2d10" },
+            { "atLevel": 11, "value": "3d10" },
+            { "atLevel": 17, "value": "4d10" }
+          ]
+        }
       }
     ]
   },
   "Shape Water": {
     "resolution": "none",
+    "explorationCastable": true,
     "area": {
       "shape": "cube",
       "size": 5,
@@ -81,14 +106,32 @@
     }
   },
   "Shillelagh": {
-    "resolution": "none"
+    "resolution": "none",
+    "todo": "Doesn't validate the equipped weapon is actually a Club/Quarterstaff, and doesn't offer the Force-or-weapon's-normal-type damage choice (always keeps the weapon's own type) — see WeaponAttackOverrideHook's own doc.",
+    "hooks": [
+      {
+        "type": "weaponAttackOverride",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d8",
+          "tiers": [
+            { "atLevel": 5, "value": "1d10" },
+            { "atLevel": 11, "value": "1d12" },
+            { "atLevel": 17, "value": "2d6" }
+          ]
+        },
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
   },
   "Thaumaturgy": {
-    "resolution": "none"
+    "resolution": "none",
+    "explorationCastable": true
   },
   "Thorn Whip": {
     "resolution": "attack",
     "attackType": "melee",
+    "todo": "The pull is unconditional on hit — RAW only allows it against a Large or smaller target, which isn't checked (EffectSpec.appliesIf only gates by creatureType, not size, and no Size field exists on Creature/EnemyStatBlock to check against).",
     "onHit": [
       {
         "type": "damage",
@@ -111,6 +154,10 @@
             }
           ]
         }
+      },
+      {
+        "type": "pull",
+        "distance": 10
       }
     ]
   }

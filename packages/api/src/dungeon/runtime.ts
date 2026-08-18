@@ -1,5 +1,5 @@
 import type { DungeonEntity, EnemyStatBlock } from 'shared';
-import { hasLineOfSight, statMod } from 'shared';
+import { hasLineOfSight } from 'shared';
 import { randomUUID } from 'crypto';
 import { saveDungeon, saveEncounter, getConfig, readChatLog, listCharacters, readNemeses, readManifest, appendChatLog } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
@@ -10,7 +10,6 @@ import { Encounter, Team, Participant } from '../domain/encounter.ts';
 import { Creature } from '../domain/creature.ts';
 import { logError, logDebug } from '../logger.ts';
 import { io, ROOM, combatState, encounters, tokenPositions, dungeons, microDungeons, withLivePositions, PLAYER_SIGHT_RADIUS, ENEMY_AGGRO_RADIUS, enemiesReady, combatStartedAt } from '../state.ts';
-import { D20Roll } from '../combat/dice.ts';
 import { addToTurnOrder, rollPlayerInitiatives, rollEnemyInitiatives, checkTrapAt } from '../combat/runtime.ts';
 
 // Runs on every player token move while a dungeon is loaded: reveals creatures within sight,
@@ -220,28 +219,9 @@ export function joinReinforcements(cid: string, triggerEntities: DungeonEntity[]
   const encounter = encounters.get(cid);
   if (!encounter) { logDebug('joinReinforcements BLOCKED — no live encounter'); return; }
 
-  let enemyTeam = encounter.teams.find(t => t.name === 'Enemies');
-  if (!enemyTeam) {
-    enemyTeam = new Team('enemies', 'Enemies');
-    encounter.addTeam(enemyTeam);
-  }
-
   const joined = triggerEntities.filter((e): e is DungeonEntity & { statBlock: EnemyStatBlock } => !!e.statBlock);
-  const entries = joined.map(e => {
-    const creature = Creature.from({ ...e.statBlock, id: e.id });
-    const p = new Participant({
-      id: creature.id,
-      name: creature.name,
-      initiative: new D20Roll().roll() + statMod(creature.stats.dex),
-      isPlayer: false,
-      teamId: 'enemies',
-      creature,
-    });
-    enemyTeam!.addParticipant(p);
-    return p;
-  });
+  const entries = joined.map(e => encounter.spawnEnemy({ ...e.statBlock, id: e.id }));
 
-  encounter.expectedParticipantCount += entries.length;
   addToTurnOrder(cid, entries);
 
   io.to(ROOM).emit('encounter:ready', encounter.enemies.filter(p => p.creature).map(p => p.creature!.toStatBlock()));

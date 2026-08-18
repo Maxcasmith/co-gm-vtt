@@ -349,6 +349,7 @@ export interface ShopItem {
   quantityPerPurchase?: number;
   ammoSlug?: string;
   usableBySlug?: string;
+  lightEmissionRangeFt?: number;
 }
 
 export const SHOP_ITEMS: ShopItem[] = [
@@ -364,6 +365,7 @@ export const SHOP_ITEMS: ShopItem[] = [
   { id: 'chain-mail',        name: 'Chain Mail',          cost: 75, description: 'AC 16. Heavy armor.',                                                                  type: 'armor', armorType: 'heavy',  acBonus: 16, isShield: false, slot: 'body', iconPath: chainMailIcon },
   { id: 'dagger',            name: 'Dagger',              cost:  2, description: '1d4 piercing. Finesse, light, thrown (20/60 ft).', type: 'weapon', damage: '1d4', damageType: 'piercing', attackBonus: 0, range: 5, extendedRange: 60, properties: ['finesse', 'light', 'thrown', 'simple'], isFinesse: true },
   { id: 'warhammer',         name: 'Warhammer',           cost: 15, description: '1d8 bludgeoning. Versatile (1d10).',               type: 'weapon', damage: '1d8', damageType: 'bludgeoning', attackBonus: 0, range: 5, properties: ['versatile', 'martial'] },
+  { id: 'torch',             name: 'Torch',               cost:  1, description: '1d4 bludgeoning. Light, simple. Sheds light in a 20-foot radius while held.', type: 'weapon', damage: '1d4', damageType: 'bludgeoning', attackBonus: 0, range: 5, properties: ['light', 'simple'], lightEmissionRangeFt: 20 },
 ];
 
 export const ORIGIN_FEAT_DETAILS: Record<string, BackgroundFeat> = {

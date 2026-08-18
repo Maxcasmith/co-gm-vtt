@@ -2,6 +2,7 @@
   "Chill Touch": {
     "resolution": "attack",
     "attackType": "melee",
+    "todo": "The target can't regain HP until the end of your next turn — unimplemented, no beforeHeal-style hook stage exists to block healing (only damage has a beforeDamage/afterDamage chain). Damage itself is accurate.",
     "onHit": [
       {
         "type": "damage",
@@ -64,15 +65,30 @@
     "onHit": [
       {
         "type": "damage",
-        "damageType": "Necrotic"
+        "damageType": "Necrotic",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d4",
+          "tiers": [
+            { "atLevel": 5, "value": "2d4" },
+            { "atLevel": 11, "value": "3d4" },
+            { "atLevel": 17, "value": "4d4" }
+          ]
+        }
+      },
+      {
+        "type": "condition",
+        "condition": "Prone"
       }
     ]
   },
   "Spare the Dying": {
-    "resolution": "none"
+    "resolution": "none",
+    "stabilizesTarget": true
   },
   "Toll the Dead": {
     "resolution": "save",
+    "todo": "Only reachable when combat is active — a target's currentHp/maxHp are read straight off its live Participant, which doesn't exist outside an encounter (matches every other participant-scoped mechanic here, not a new gap).",
     "save": {
       "ability": "wis",
       "halfOnSave": false
@@ -80,7 +96,31 @@
     "onHit": [
       {
         "type": "damage",
-        "damageType": "Necrotic"
+        "damageType": "Necrotic",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d8",
+          "tiers": [
+            { "atLevel": 5, "value": "2d8" },
+            { "atLevel": 11, "value": "3d8" },
+            { "atLevel": 17, "value": "4d8" }
+          ]
+        }
+      }
+    ],
+    "onHitIfTargetMissingHp": [
+      {
+        "type": "damage",
+        "damageType": "Necrotic",
+        "scaling": {
+          "mode": "cantrip",
+          "base": "1d12",
+          "tiers": [
+            { "atLevel": 5, "value": "2d12" },
+            { "atLevel": 11, "value": "3d12" },
+            { "atLevel": 17, "value": "4d12" }
+          ]
+        }
       }
     ]
   }

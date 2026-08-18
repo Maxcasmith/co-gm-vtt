@@ -1,9 +1,21 @@
 {
   "Dancing Lights": {
-    "resolution": "none"
+    "resolution": "none",
+    "autoHit": true,
+    "explorationCastable": true,
+    "todo": "Only the ambient Dim Light contribution is modeled (illumination is one global dungeon-wide knob, not four movable per-point lights) — the Bonus Action to reposition the lights, the 20ft-of-each-other tether, and the humanlike-shape option aren't implemented. Cast mid-combat still requires clicking a target within range to satisfy the normal targeting flow even though the hook lands on the caster (autoHit), not on whatever gets clicked; cast during exploration skips that entirely.",
+    "hooks": [
+      {
+        "type": "illuminationSource",
+        "illuminationLevel": 0.5,
+        "duration": { "until": "rounds", "rounds": 10 }
+      }
+    ]
   },
   "Minor Illusion": {
     "resolution": "none",
+    "placesIllusion": true,
+    "todo": "Only static placement is modeled (a labeled marker at the cast point), same as Silent Image — no sound-only variant (always drops a visual marker even when the RAW cast is just a sound), and the Investigation-check-reveals-it mechanic isn't wired up (IllusionTagHook is participant-scoped, not entity-scoped, so it can't attach to a placed map object — same blocker Silent Image's todo already documents).",
     "area": {
       "shape": "cube",
       "size": 5,

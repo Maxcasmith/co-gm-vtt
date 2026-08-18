@@ -147,6 +147,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   if (!combatActive) return null;
 
   const isDown = (playerCurrentHp ?? Infinity) <= 0;
+  const isFlying = character.conditions?.some(c => c.name === 'Flying') ?? false;
   const baseSpeed = character.speed ?? 30;
   const actionsDisabled = !isMyTurn || isDown;
 
@@ -257,11 +258,11 @@ export default function CombatDock({ character, combatActive, movementRemaining,
           />
         ))}
         <span className="combat-dock-speed">{movementRemaining}ft</span>
-        {(elevationFt > 0 || combatActive) && (
+        {elevationFt > 0 && (
           <span className="combat-dock-elevation" title="Height off the ground">
-            <button type="button" onClick={() => handleElevationChange(-10)} disabled={elevationFt <= 0}>-</button>
+            {isFlying && <button type="button" onClick={() => handleElevationChange(-10)} disabled={elevationFt <= 0}>-</button>}
             {elevationFt}ft ↑
-            <button type="button" onClick={() => handleElevationChange(10)}>+</button>
+            {isFlying && <button type="button" onClick={() => handleElevationChange(10)}>+</button>}
           </span>
         )}
       </div>

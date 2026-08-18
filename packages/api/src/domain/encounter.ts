@@ -1,6 +1,7 @@
-import type { TurnOrderEntry, ActionResource } from 'shared';
-import { setTempHp } from 'shared';
+import type { TurnOrderEntry, ActionResource, EnemyStatBlock } from 'shared';
+import { setTempHp, statMod } from 'shared';
 import { Creature } from './creature.ts';
+import { D20Roll } from '../combat/dice.ts';
 
 // ── Turn ──────────────────────────────────────────────────────────────────────
 
@@ -248,6 +249,34 @@ export class Encounter {
 
   addTeam(team: Team): void {
     this.teams.push(team);
+  }
+
+  /**
+   * Adds a fresh creature to this fight, creating the "Enemies" team on first use. Rolls
+   * initiative immediately (D20 + DEX mod) since every caller here is joining a fight already in
+   * progress (dungeon proximity reinforcements, the Conjurer summon action) rather than the
+   * enemies rolled at combat start. Bumps expectedParticipantCount so tryBeginCombat's readiness
+   * gate still accounts for them. Previously this same six-line block was duplicated at every
+   * call site in dungeon/runtime.ts — one copy here instead.
+   */
+  spawnEnemy(statBlock: EnemyStatBlock): Participant {
+    let enemyTeam = this.teams.find(t => t.name === 'Enemies');
+    if (!enemyTeam) {
+      enemyTeam = new Team('enemies', 'Enemies');
+      this.addTeam(enemyTeam);
+    }
+    const creature = Creature.from(statBlock);
+    const participant = new Participant({
+      id: creature.id,
+      name: creature.name,
+      initiative: new D20Roll().roll() + statMod(creature.stats.dex),
+      isPlayer: false,
+      teamId: 'enemies',
+      creature,
+    });
+    enemyTeam.addParticipant(participant);
+    this.expectedParticipantCount += 1;
+    return participant;
   }
 
   // ── Participant lookup ──────────────────────────────────────────────────────

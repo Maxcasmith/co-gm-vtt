@@ -267,6 +267,8 @@ export interface ClientToServerEvents {
     chosenDamageType?: string;
     /** Caster's pick when the spell declares commandOptions (Command's Approach/Drop/Flee/Grovel/Halt), or a free-text one-word entry. */
     chosenCommand?: string;
+    /** Caster's pick when the spell declares skillOptions (Guidance's chosen skill). */
+    chosenSkill?: string;
     /** placesTrap spells only — the grid cell the caster targeted. */
     originGx?: number;
     originGy?: number;

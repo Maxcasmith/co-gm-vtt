@@ -6,15 +6,16 @@ import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateCombatFlavour, generateSpellSaveFlavour } from '../session-processor/imagePrompts.ts';
 import { Participant } from '../domain/encounter.ts';
 import { logError, logDebug } from '../logger.ts';
-import { io, ROOM, combatState, encounters, tokenPositions, dungeons, playerSocketIds, pendingWeaponBonuses, connected, getStateEngine, withLivePositions } from '../state.ts';
+import { io, ROOM, combatState, encounters, tokenPositions, dungeons, playerSocketIds, pendingWeaponBonuses, connected, getStateEngine, withLivePositions, STAT_FULL } from '../state.ts';
 import { toClientDungeon } from '../dungeon/index.ts';
 import { registerSpellHooks } from '../combat/stateEngine/registerSpellHooks.ts';
 import { RecurringDamageHook } from '../combat/stateEngine/hooks/RecurringDamageHook.ts';
 import type { RollModifierHook } from '../combat/stateEngine/hooks/RollModifierHook.ts';
+import type { WeaponAttackOverrideHook } from '../combat/stateEngine/hooks/WeaponAttackOverrideHook.ts';
 import { resolveReaction } from '../combat/stateEngine/reactionPrompt.ts';
 import { D20Roll, rollDice, fmtMod, rollApplicableDamage, rollApplicableHeal, rollChainableDamage } from '../combat/dice.ts';
 import { rollModeFor, attackModeAgainstTarget } from '../combat/conditions/rollModeFor.ts';
-import { applyDamageToCreature, applyDamageToPlayer, applyHealingToPlayer, applyHealingToCreature, grantTempHpToPlayer, advanceTurn, trySpendSpellSlot, tryBeginCombat, emitResources, applyCondition, clearCondition, startConcentrating, isConcentratingOn, rollSavingThrow, checkTrapAt, canMove, breakSanctuaryOn, getWorldTimeSecs, applyElevationChange, investigateIllusion, checkMovementTriggers } from '../combat/runtime.ts';
+import { applyDamageToCreature, applyDamageToPlayer, applyHealingToPlayer, applyHealingToCreature, grantTempHpToPlayer, advanceTurn, trySpendSpellSlot, tryBeginCombat, emitResources, applyCondition, clearCondition, startConcentrating, isConcentratingOn, rollSavingThrow, checkTrapAt, canMove, breakSanctuaryOn, getWorldTimeSecs, applyElevationChange, investigateIllusion, checkMovementTriggers, bladeWardPenalty, stabilizeParticipant } from '../combat/runtime.ts';
 import { checkDungeonProximity } from '../dungeon/runtime.ts';
 import { applyEffects } from '../effects.ts';
 import type { JoinContext } from './context.ts';
@@ -542,19 +543,23 @@ export function registerCombatHandlers(ctx: JoinContext): void {
 
       await breakSanctuaryOn(cid, attackerId);
 
+      // Shillelagh — swaps Str/Dex for the caster's spellcasting ability modifier on this attack
+      // and (if the spell's scaling die was resolved into the hook) the weapon's own damage die.
+      const weaponOverride = getStateEngine(cid).getHooksOwnedBy(attackerId, 'weaponAttackOverride')[0] as WeaponAttackOverrideHook | undefined;
       const strMod = statMod(char.stats.str);
       const dexMod = statMod(char.stats.dex);
       const isMelee = weapon.range <= 10; // covers reach weapons (e.g. Whip, range 10) — next tier up is bows at 80+
       const useDex = !isMelee || (weapon.isFinesse && dexMod > strMod);
-      const statBonus = useDex ? dexMod : strMod;
-      const statName = useDex ? 'Dexterity' : 'Strength';
+      const spellAbilityKey = CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int';
+      const statBonus = weaponOverride ? statMod(char.stats[spellAbilityKey]) : (useDex ? dexMod : strMod);
+      const statName = weaponOverride ? (STAT_FULL[spellAbilityKey.toUpperCase()] ?? spellAbilityKey) : (useDex ? 'Dexterity' : 'Strength');
       const charProf = char.proficiencyBonus ?? 2;
       const classWeaponProfs = CLASS_WEAPON_PROFS[char.class] ?? [];
       const isProficient = weapon.properties?.some(p => classWeaponProfs.includes(p as 'simple' | 'martial'));
       const weaponBonus = (weapon.attackBonus ?? 0) + (isProficient ? charProf : 0);
       // Bless/Bane — rerolled fresh against every attack, not fixed at cast time (see RollModifierHook).
       const rollMods = getStateEngine(cid).getHooksOwnedBy(attackerId, 'rollModifier') as RollModifierHook[];
-      const attackBonus = statBonus + weaponBonus + rollMods.reduce((sum, h) => sum + h.sign * rollDice(`1d${h.dieSize}`), 0);
+      const attackBonus = statBonus + weaponBonus + rollMods.reduce((sum, h) => sum + h.sign * rollDice(`1d${h.dieSize}`), 0) + bladeWardPenalty(cid, targetId);
 
       const positions = tokenPositions.get(cid) ?? {};
       const attackerPos = positions[attackerName];
@@ -596,10 +601,11 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       let damageRoll: number | undefined;
       let bonus: { spellName: string; damageType: string | undefined; total: number } | undefined;
       if (hit) {
+        const damageFormula = weaponOverride?.damageDie ?? weapon.damage;
         // Savage Attacker: roll the weapon's damage dice twice and keep the higher total.
         damageRoll = hasOriginFeat(char, 'Savage Attacker')
-          ? Math.max(rollDice(weapon.damage), rollDice(weapon.damage))
-          : rollDice(weapon.damage);
+          ? Math.max(rollDice(damageFormula), rollDice(damageFormula))
+          : rollDice(damageFormula);
         damage = damageRoll + statBonus;
 
         // Divine-Smite-style bonus damage, evaluated against this actual target so appliesIf
@@ -836,7 +842,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       // original cast already). Reaction-cast spells are never initiated from here — they are
       // offered mid-resolution by ReactionOfferHook, which spends the reaction itself.
       const free = await isConcentratingOn(cid, casterId, spell.name);
-      const castCost = free ? 'bonusAction' : actionCostFromCastingTime(spell.castingTime);
+      const castCost = free ? 'bonusAction' : (spell.combat?.actionCostOverride ?? actionCostFromCastingTime(spell.castingTime));
       if (castCost && castCost !== 'reaction' && !trySpendAction(cid, casterId, castCost)) return;
 
       if (!free && !(await trySpendSpellSlot(cid, casterId, char, slotLevel))) {
@@ -849,8 +855,10 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const abilityMod = statMod(char.stats[spellAbility]);
       const charProf = char.proficiencyBonus ?? 2;
       // Bless/Bane — rerolled fresh against every attack, not fixed at cast time (see RollModifierHook).
+      // Caster-side, so the same for every target in a chain (Chaos Bolt/Chromatic Orb); Blade
+      // Ward is target-side instead and gets added per-target below, inside the loop.
       const rollMods = getStateEngine(cid).getHooksOwnedBy(casterId, 'rollModifier') as RollModifierHook[];
-      const attackBonus = abilityMod + charProf + rollMods.reduce((sum, h) => sum + h.sign * rollDice(`1d${h.dieSize}`), 0);
+      const baseAttackBonus = abilityMod + charProf + rollMods.reduce((sum, h) => sum + h.sign * rollDice(`1d${h.dieSize}`), 0);
       const dc = 8 + charProf + abilityMod;
 
       const engine = getStateEngine(cid);
@@ -880,6 +888,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         const creature = encounter.findCreature(targetId);
         if (!creature || creature.isDead()) continue;
         attackIndex++;
+        const attackBonus = baseAttackBonus + bladeWardPenalty(cid, targetId);
 
         // Redirecting an already-sustained spell (Witch Bolt) auto-hits, no roll — only the
         // initial slotted cast is a real attack roll that can miss.
@@ -925,7 +934,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
 
         const rolledDamage = chainable && primaryEffect
           ? rollChainableDamage(primaryEffect, char.level ?? 1, slotLevel, { deriveTypeFromRoll: spell.name === 'Chaos Bolt', chosenDamageType })
-          : rollApplicableDamage(spell.combat?.onHit, creature.creatureType, char.level ?? 1, slotLevel, chosenDamageType);
+          : rollApplicableDamage(spell.combat?.onHit, creature.creatureType, char.level ?? 1, slotLevel, chosenDamageType, abilityMod);
 
         let damage: number | undefined;
         let damageRoll: number | undefined;
@@ -952,6 +961,30 @@ export function registerCombatHandlers(ctx: JoinContext): void {
             ownerId: targetId, casterId, casterLevel: char.level ?? 1, slotLevel,
             currentRound: encounter.currentRound?.number ?? 1,
           });
+
+          // Thorn Whip's pull — same forced-movement pathway Tavern Brawler's shove uses above,
+          // generalized to any onHit push/pull effect on an attack-resolution spell.
+          const forcedMove = (spell.combat?.onHit ?? []).find(e => e.type === 'push' || e.type === 'pull');
+          if (forcedMove?.distance) {
+            const positions2 = tokenPositions.get(cid) ?? {};
+            const casterPos2 = positions2[casterName] ?? positions2[casterId];
+            const targetPos2 = positions2[targetId];
+            if (casterPos2 && targetPos2) {
+              const dungeon2 = dungeons.get(cid);
+              const occupied2 = new Set(
+                Object.entries(positions2).filter(([id]) => id !== targetId).map(([, p]) => `${p.gx},${p.gy}`),
+              );
+              const moved2 = resolveForcedMovement(
+                dungeon2?.cells, occupied2, targetPos2.gx, targetPos2.gy, casterPos2.gx, casterPos2.gy,
+                forcedMove.distance, forcedMove.type === 'pull' ? 'pull' : 'push',
+              );
+              if (moved2.gx !== targetPos2.gx || moved2.gy !== targetPos2.gy) {
+                positions2[targetId] = moved2;
+                tokenPositions.set(cid, positions2);
+                io.to(ROOM).emit('token:moved', { tokenId: targetId, gx: moved2.gx, gy: moved2.gy });
+              }
+            }
+          }
         }
 
         // Ice Knife's shape: "hit or miss, the shard explodes" — a save-based AoE burst runs
@@ -1020,7 +1053,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
 
   // Save-based spell (single-target or AoE) — computes the DC once, then rolls each
   // affected target's save mechanically and applies damage/conditions behind the curtain.
-  socket.on('combat:spell:cast', ({ casterId, casterName, spell, slotLevel, targetIds, chosenDamageType, chosenCommand, originGx, originGy }) => {
+  socket.on('combat:spell:cast', ({ casterId, casterName, spell, slotLevel, targetIds, chosenDamageType, chosenCommand, chosenSkill, originGx, originGy }) => {
     void (async () => {
       const cid = campaignId;
 
@@ -1090,7 +1123,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const char = await getCharacter(cid, casterId);
       if (!char) return;
 
-      const castCost = actionCostFromCastingTime(spell.castingTime);
+      const castCost = spell.combat?.actionCostOverride ?? actionCostFromCastingTime(spell.castingTime);
       if (castCost && castCost !== 'reaction' && !trySpendAction(cid, casterId, castCost)) return;
 
       // Redirecting an already-sustained spell (Hunter's Mark, Witch Bolt) is free — no slot, per RAW.
@@ -1234,6 +1267,8 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           const participant = encounter.findParticipant(targetId);
           if (!participant || participant.isDead()) continue;
 
+          if (combat?.stabilizesTarget) await stabilizeParticipant(cid, participant);
+
           if (combat?.hooks?.length) {
             await registerSpellHooks(engine, spell.combat?.hooks ?? [], spell.name, {
               ownerId: hookOwnerIsCaster ? casterId : targetId,
@@ -1243,6 +1278,8 @@ export function registerCombatHandlers(ctx: JoinContext): void {
               dc,
               currentWorldTimeSecs,
               casterAbilityMod: healAbilityMod,
+              chosenDamageType,
+              chosenSkill,
             });
           }
 
@@ -1402,7 +1439,12 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         }
 
         let damage: number | undefined;
-        const rolledDamage = rollApplicableDamage(effectiveOnHit, targetType, char.level ?? 1, slotLevel);
+        // Toll the Dead's bigger die against a target already missing HP — a target-condition
+        // swap of the whole onHit set rather than a stacking bonus, so it needs its own field
+        // instead of reusing appliesIf (which sums every matching effect together).
+        const woundedOnHit = combat?.onHitIfTargetMissingHp?.length && participant.currentHp < participant.maxHp
+          ? combat.onHitIfTargetMissingHp : effectiveOnHit;
+        const rolledDamage = rollApplicableDamage(woundedOnHit, targetType, char.level ?? 1, slotLevel);
         if (rolledDamage && (!saved || halfOnSave) && pullDamageGateOk) {
           const dmgCtx = await engine.trigger('beforeDamage', {
             sourceId: casterId, targetId, targetName: participant.name,

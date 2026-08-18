@@ -39,13 +39,13 @@ export interface EncounterReadyPayload { enemies: EnemyStatBlock[] }
 export interface CombatStatePayload { active: boolean }
 export type TargetingStartPayload =
   | { kind: 'weapon'; weapon: Weapon; actionType: 'action' | 'bonusAction' | 'reaction'; bonusSpell?: Spell }
-  | { kind: 'spell'; spell: Spell; casterId: string; actionType: 'action' | 'bonusAction' | 'reaction'; slotLevel?: number; chosenDamageType?: string; chosenCommand?: string; casterLevel?: number };
+  | { kind: 'spell'; spell: Spell; casterId: string; actionType: 'action' | 'bonusAction' | 'reaction'; slotLevel?: number; chosenDamageType?: string; chosenCommand?: string; chosenSkill?: string; casterLevel?: number };
 export type TargetingCancelPayload = Record<string, never>;
 export interface CombatAttackPayload { attackerName: string; attackerId: string; targetId: string; targetName: string; weapon: Weapon; bonusSpell?: Spell }
 export interface CombatAttackResultPayload extends AttackResult {}
 export interface CombatSpellAttackPayload { casterName: string; casterId: string; targetIds: string[]; spell: Spell; slotLevel: number; chosenDamageType?: string }
 export interface CombatSpellAttackResultPayload extends SpellAttackResult {}
-export interface CombatSpellCastPayload { casterName: string; casterId: string; spell: Spell; slotLevel: number; targetIds: string[]; chosenDamageType?: string; chosenCommand?: string; originGx?: number; originGy?: number }
+export interface CombatSpellCastPayload { casterName: string; casterId: string; spell: Spell; slotLevel: number; targetIds: string[]; chosenDamageType?: string; chosenCommand?: string; chosenSkill?: string; originGx?: number; originGy?: number }
 export interface CombatSpellSaveResultPayload extends SpellSaveResult {}
 export interface CombatEffectAuraStartPayload { casterId: string; casterName: string; color: string; style?: 'fire' | undefined }
 export interface CombatEffectAuraEndPayload { casterId: string; casterName: string }

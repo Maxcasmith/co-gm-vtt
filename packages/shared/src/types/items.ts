@@ -9,6 +9,8 @@ export class Item {
   quantity: number;
   type?: string;
   iconPath?: string;
+  /** Radius (ft) this item lights up while equipped — a torch. Hard cutoff, no falloff; see Dungeon.lightSources. */
+  lightEmissionRangeFt?: number;
 
   constructor(props: {
     id: string;
@@ -17,6 +19,7 @@ export class Item {
     quantity: number;
     type?: string;
     iconPath?: string;
+    lightEmissionRangeFt?: number;
   }) {
     this.id = props.id;
     this.name = props.name;
@@ -24,6 +27,7 @@ export class Item {
     this.quantity = props.quantity;
     this.type = props.type;
     this.iconPath = props.iconPath;
+    this.lightEmissionRangeFt = props.lightEmissionRangeFt;
   }
 }
 

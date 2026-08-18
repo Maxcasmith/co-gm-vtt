@@ -1,0 +1,10 @@
+{
+  "id": "2a197b69-97da-4959-9196-09f016ecca3c",
+  "name": "The Silence Beneath the Sands",
+  "campaignDir": "the-silence-beneath-the-sands",
+  "type": "dungeon-crawl",
+  "concept": {
+    "name": "Pyramid",
+    "description": "Pyramid, Egypt, pharaoh's tomb"
+  }
+}

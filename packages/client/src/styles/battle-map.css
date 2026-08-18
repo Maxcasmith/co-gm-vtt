@@ -17,9 +17,8 @@
 
 .room-name-banner {
   position: fixed;
-  top: 16px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 16px;
+  left: 16px;
   z-index: 150;
   pointer-events: none;
   color: #fff;

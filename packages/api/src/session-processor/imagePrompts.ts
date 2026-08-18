@@ -1,10 +1,17 @@
-import { calcAC, CREATURE_TYPES } from 'shared';
-import type { ChatPayload, Character, EnemyStatBlock, CreatureType, AttackResult, SpellAttackResult, SpellSaveResult, WorldState, NemesisRecord } from 'shared';
+import { calcAC, CREATURE_TYPES, ENEMY_ROLES } from 'shared';
+import type { ChatPayload, Character, EnemyStatBlock, CreatureType, EnemyRole, AttackResult, SpellAttackResult, SpellSaveResult, WorldState, NemesisRecord } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { logError } from '../logger.ts';
+import { renderRoleTemplatesForPrompt } from '../combat/ai/roleTemplates.ts';
 
 function normalizeCreatureType(t: unknown): CreatureType {
   return CREATURE_TYPES.includes(t as CreatureType) ? (t as CreatureType) : 'Humanoid';
+}
+
+// Unlike creatureType, an unrecognized/missing role stays undefined rather than defaulting —
+// Creature/planGenerator already treat "no role" as plain melee-only (today's pre-role behavior).
+function normalizeRole(r: unknown): EnemyRole | undefined {
+  return ENEMY_ROLES.includes(r as EnemyRole) ? (r as EnemyRole) : undefined;
 }
 
 const FALLBACK_ENEMY: EnemyStatBlock = {
@@ -12,6 +19,7 @@ const FALLBACK_ENEMY: EnemyStatBlock = {
   stats: { str: 11, dex: 12, con: 12, int: 10, wis: 10, cha: 10 },
   attacks: [{ name: 'Scimitar', bonus: 3, damage: '1d6+1' }],
   creatureType: 'Humanoid',
+  role: 'Infantry',
 };
 
 export async function generateEncounterEnemies(
@@ -47,12 +55,17 @@ export async function generateEncounterEnemies(
       "speed": 30,
       "stats": { "str": 11, "dex": 12, "con": 12, "int": 10, "wis": 10, "cha": 10 },
       "attacks": [{ "name": "Attack", "bonus": 3, "damage": "1d6+1" }],
-      "creatureType": "one of: ${CREATURE_TYPES.join('|')}"
+      "creatureType": "one of: ${CREATURE_TYPES.join('|')}",
+      "role": "one of: ${ENEMY_ROLES.join('|')}",
+      "actions": "optional — only for roles whose kit needs more than attacks[], see role reference below"
     }
   ]
 }
 ${nemesisBlock}${combatantBlock}
 Rules: 1-3 enemies, MEDIUM difficulty scaled to the party's ACTUAL current state below — real level, AC, and current HP, not an assumed standard 4-person party. A party of one gets a correspondingly lighter encounter than a party of four; a party already down HP from a prior fight gets a lighter encounter than a party at full HP. Use official 5e monster stat blocks as reference for the base numbers, then adjust to fit the party size and state given.${combatants.length ? '' : ' Base the enemies on whoever/whatever is described as hostile in the recent transcript below — do not introduce a creature type unconnected to what has already been narrated.'}
+
+Every enemy needs a role — pick whichever fits what's actually being narrated, and vary roles across a multi-enemy group rather than giving them all the same one:
+${renderRoleTemplatesForPrompt()}
 
 Return ONLY valid JSON, no markdown fences, no explanation.`;
 
@@ -62,7 +75,11 @@ Return ONLY valid JSON, no markdown fences, no explanation.`;
     const parsed = JSON.parse(cleaned) as { enemies?: EnemyStatBlock[] };
     const enemies = parsed.enemies ?? [];
     return enemies.length
-      ? enemies.map((e, i) => ({ ...e, id: e.id || `enemy-${i + 1}`, creatureType: normalizeCreatureType(e.creatureType) }))
+      ? enemies.map((e, i) => {
+        const { role: rawRole, ...rest } = e;
+        const role = normalizeRole(rawRole);
+        return { ...rest, id: e.id || `enemy-${i + 1}`, creatureType: normalizeCreatureType(e.creatureType), ...(role !== undefined ? { role } : {}) };
+      })
       : [FALLBACK_ENEMY];
   } catch (err) {
     logError('session-processor/imagePrompts:generateEncounterEnemies', err);

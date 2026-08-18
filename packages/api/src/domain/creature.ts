@@ -1,4 +1,4 @@
-import type { EnemyStatBlock, CharacterStats, CreatureType, ActiveCondition } from 'shared';
+import type { EnemyStatBlock, CharacterStats, CreatureType, ActiveCondition, EnemyRole, EnemyAction } from 'shared';
 
 export class Creature {
   id: string;
@@ -16,6 +16,13 @@ export class Creature {
   damageResistances: string[];
   damageVulnerabilities: string[];
   damageImmunities: string[];
+  // Tactical-AI role + non-melee actions — see combat/ai/. Old saved encounters/nemeses predate
+  // these and fall back to plain melee-only behavior (role undefined), same convention creatureType
+  // already used before it was ubiquitous.
+  role: EnemyRole | undefined;
+  actions: EnemyAction[];
+  /** Combat round this creature last took damage — Conjurer's summon action reads (currentRound - lastDamagedRound) to decide it's "unchallenged." Set at combat start and on every hit, see applyDamageToCreature. */
+  lastDamagedRound: number;
 
   constructor(data: EnemyStatBlock) {
     this.id = data.id;
@@ -34,6 +41,9 @@ export class Creature {
     this.damageResistances = data.damageResistances ?? [];
     this.damageVulnerabilities = data.damageVulnerabilities ?? [];
     this.damageImmunities = data.damageImmunities ?? [];
+    this.role = data.role;
+    this.actions = data.actions ?? [];
+    this.lastDamagedRound = 0;
   }
 
   static from(data: EnemyStatBlock): Creature {
@@ -72,6 +82,8 @@ export class Creature {
       damageResistances: this.damageResistances,
       damageVulnerabilities: this.damageVulnerabilities,
       damageImmunities: this.damageImmunities,
+      ...(this.role !== undefined ? { role: this.role } : {}),
+      actions: this.actions,
     };
   }
 }

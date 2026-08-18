@@ -7,6 +7,7 @@ export const CONDITIONS = [
   "Concentrating",
   "Deafened",
   "Exhaustion",
+  "Flying",
   "Frightened",
   "Grappled",
   "Incapacitated",

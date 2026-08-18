@@ -34,6 +34,8 @@ export async function generateDungeon(
     goals: manifest.goals,
     theme: manifest.theme,
     structureType: manifest.structureType,
+    illumination: manifest.illumination,
+    baseIllumination: manifest.illumination,
   };
 }
 
@@ -70,7 +72,7 @@ export function buildDungeonQuests(dungeon: Dungeon, existingQuests: Quest[]): Q
 // Combat-arena dungeon: one bare room sized for the encounter, no LLM calls — who spawns is
 // already decided (the stat blocks), this only needs geometry to drop them into.
 export function generateEncounterDungeon(statBlocks: EnemyStatBlock[]): Dungeon {
-  const { cells, rooms } = generateGrid({ rooms: [{ name: 'Battle', size: 'large' }], structureType: 'organic', theme: 'high_fantasy', goals: [] });
+  const { cells, rooms } = generateGrid({ rooms: [{ name: 'Battle', size: 'large' }], structureType: 'organic', theme: 'high_fantasy', goals: [], illumination: 1 });
   const room = rooms[0]!;
   const entities = placeEncounterEntities(room, statBlocks);
 
@@ -84,6 +86,8 @@ export function generateEncounterDungeon(statBlocks: EnemyStatBlock[]): Dungeon 
     entities,
     theme: 'high_fantasy',
     structureType: 'organic',
+    illumination: 1,
+    baseIllumination: 1,
   };
 }
 

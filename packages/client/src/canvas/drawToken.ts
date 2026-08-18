@@ -245,6 +245,24 @@ export function drawTokenEffect(ctx: CanvasRenderingContext2D, x: number, y: num
   }
 }
 
+/** Small gold diamond badge on a token's edge — marks whoever is concentrating on a spell. */
+export function drawConcentrationBadge(ctx: CanvasRenderingContext2D, x: number, y: number, tokenR: number) {
+  const bx = x + tokenR * 0.72, by = y - tokenR * 0.72;
+  const r = Math.max(4, tokenR * 0.22);
+  ctx.save();
+  ctx.shadowColor = '#d4af37';
+  ctx.shadowBlur = 6;
+  ctx.beginPath();
+  ctx.moveTo(bx, by - r); ctx.lineTo(bx + r, by); ctx.lineTo(bx, by + r); ctx.lineTo(bx - r, by);
+  ctx.closePath();
+  ctx.fillStyle = '#d4af37';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(10,8,16,0.85)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+}
+
 /** Red × over a dead token. */
 export function drawDeadMarker(ctx: CanvasRenderingContext2D, x: number, y: number, tokenR: number) {
   const r = tokenR * 0.45;

@@ -1,7 +1,8 @@
-import { isWeapon, isArmor, CLASS_WEAPON_PROFS, CLASS_ARMOR_TRAINING } from 'shared';
+import { isWeapon, isArmor, CLASS_WEAPON_PROFS, CLASS_ARMOR_TRAINING, characterLightRangeFt } from 'shared';
 import { getCharacter, updateCharacter } from '../storage.ts';
 import { io, ROOM, playerSocketIds, encounters } from '../state.ts';
 import { rollDice, calcMaxHp } from '../combat/dice.ts';
+import { setLightSourceFor } from '../combat/runtime.ts';
 import type { JoinContext } from './context.ts';
 
 export function registerInventoryHandlers(ctx: JoinContext): void {
@@ -19,8 +20,8 @@ export function registerInventoryHandlers(ctx: JoinContext): void {
         const item = char.inventory?.find(i => i.id === itemId);
         if (!item) return;
         const validForSlot =
-          slot === 'mainHand' ? isWeapon(item) :
-          slot === 'offHand'  ? isWeapon(item) || (isArmor(item) && item.isShield) :
+          slot === 'mainHand' ? isWeapon(item) || !!item.lightEmissionRangeFt :
+          slot === 'offHand'  ? isWeapon(item) || (isArmor(item) && item.isShield) || !!item.lightEmissionRangeFt :
           isArmor(item) && item.slot === slot;
         if (!validForSlot) return;
 
@@ -52,13 +53,12 @@ export function registerInventoryHandlers(ctx: JoinContext): void {
         if (otherItem && isWeapon(otherItem) && otherItem.twoHanded) updates[otherHand] = undefined;
       }
 
-      await updateCharacter(campaignId, characterId, c => ({
-        ...c,
-        equipment: Object.fromEntries(Object.entries({ ...c.equipment, ...updates }).filter(([, v]) => v !== undefined)),
-      }));
+      const finalEquipment = Object.fromEntries(Object.entries({ ...char.equipment, ...updates }).filter(([, v]) => v !== undefined));
+      await updateCharacter(campaignId, characterId, c => ({ ...c, equipment: finalEquipment }));
       for (const [s, id] of Object.entries(updates)) {
         io.to(ROOM).emit('character:equipment:update', { characterId, slot: s as typeof slot, itemId: id ?? null });
       }
+      setLightSourceFor(campaignId, char.name, characterLightRangeFt({ ...char, equipment: finalEquipment }));
     })();
   });
 
