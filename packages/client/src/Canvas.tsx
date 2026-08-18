@@ -13,6 +13,10 @@ import { useCanvasPointerControls } from './canvas/useCanvasPointerControls.ts';
 import { drawScene } from './canvas/drawScene.ts';
 import './app.css';
 
+// enemy.portraitSrc is a server-relative path ("/api/creatures/..."); client and API are
+// different origins (same reasoning as dungeonThemes.ts's identical constant).
+const API = `http://${window.location.hostname}:3001`;
+
 interface Props {
   player: Player;
   characterId: string;
@@ -38,6 +42,9 @@ interface Props {
 export default function Canvas({ player, characterId, character, connected, showBattleMap, encounter, companions = [], elevations = {}, tokenUrls, tokenPositions, movementRemaining = 0, deadCreatureIds, downPlayerNames, deadPlayerNames, dungeon, speed = 30, sessionActive = true }: Props) {
   const ref            = useRef<HTMLCanvasElement>(null);
   const tokenImgCache  = useRef<Record<string, HTMLImageElement>>({});
+  // Keyed by portraitSrc URL (not enemy id/name) — multiple entities of the same creature share
+  // one src, so they naturally share one cached image too.
+  const enemyImgCache  = useRef<Record<string, HTMLImageElement>>({});
   const [tokenCacheVer, setTokenCacheVer] = useState(0);
 
   // Per-cell floor texture variant, picked once and cached so it doesn't re-randomize (flicker)
@@ -103,6 +110,19 @@ export default function Canvas({ player, characterId, character, connected, show
       img.src = url;
     });
   }, [tokenUrls]);
+
+  useEffect(() => {
+    const urls = [...new Set((encounter ?? []).map(e => e.portraitSrc).filter((u): u is string => !!u))];
+    let pending = urls.length;
+    if (pending === 0) return;
+    urls.forEach(url => {
+      if (enemyImgCache.current[url]) { pending--; return; }
+      const img = new Image();
+      img.onload = () => { enemyImgCache.current[url] = img; pending--; if (pending === 0) setTokenCacheVer(v => v + 1); };
+      img.onerror = () => { pending--; }; // no portrait yet (fire-and-forget hasn't finished) — drawToken's img-less branch covers this
+      img.src = `${API}${url}`;
+    });
+  }, [encounter]);
 
   // Subscribe to targeting events (registered once)
   useEffect(() => {
@@ -179,7 +199,7 @@ export default function Canvas({ player, characterId, character, connected, show
       companions, visiblePolygon, litCells, senses, elevations, visibleCells,
       hoverHitChance, multiTargetCursor, multiTargetsPicked,
       floorVariantRef, dungeonZoomRef, dungeonPanRef, dragRef, reachableRef, aoeMouseRef,
-      tokenImgCache, flashEffectsRef, tokenEffectsRef, floatEffectsRef, swingEffectsRef,
+      tokenImgCache, enemyImgCache, flashEffectsRef, tokenEffectsRef, floatEffectsRef, swingEffectsRef,
     });
   }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick, aoeTick, visibleCells, visiblePolygon, senses, hoverHitChance, hoveredTokenKey, multiTargetsPicked, multiTargetCursor, concentrating]);
 

@@ -55,6 +55,8 @@ export const STORY_PROVIDERS: { id: StoryProvider; label: string; models: { id: 
 
 const IMAGE_MODELS: { id: ImageModel; label: string }[] = [
   { id: 'gpt-image-1', label: 'GPT Image 1' },
+  { id: 'gpt-image-1.5', label: 'GPT Image 1.5' },
+  { id: 'gpt-image-2', label: 'GPT Image 2' },
   { id: 'dall-e-3', label: 'DALL·E 3' },
   { id: 'dall-e-2', label: 'DALL·E 2' },
 ];
@@ -82,7 +84,7 @@ const OPENAI_VOICES = [
 const DEFAULT_CONFIG: AppConfig = {
   workflows: [],
   apiKeys: { openai: '', anthropic: '', deepseek: '', kimi: '' },
-  image: { model: 'gpt-image-1', generateMaps: true, generateWorldMap: false },
+  image: { model: 'gpt-image-1', generateWorldMap: false, generateTilesets: false },
   narration: { model: 'none', voice: 'onyx' },
 };
 
@@ -222,23 +224,6 @@ export default function SettingsSidebar({ open, onClose }: Props) {
             <h3 className="settings-section-title">Image Generation</h3>
             <div className="settings-toggle-row">
               <div className="settings-toggle-text">
-                <span className="settings-toggle-label">Generate on the fly battle maps</span>
-                <span className="settings-toggle-desc">
-                  {config.image.generateMaps
-                    ? 'A new battle map is generated using AI when combat starts, based on the current scene. Will increase combat load times'
-                    : 'A random pre-generated map from this campaign is used instead. Falls back to a blank grid if none exist. Maps can be tagged in future to better match scenes.'}
-                </span>
-              </div>
-              <button
-                className={`settings-toggle ${config.image.generateMaps ? 'settings-toggle--on' : ''}`}
-                onClick={() => setConfig(c => ({ ...c, image: { ...c.image, generateMaps: !c.image.generateMaps } }))}
-                aria-pressed={config.image.generateMaps}
-              >
-                <span className="settings-toggle-thumb" />
-              </button>
-            </div>
-            <div className="settings-toggle-row">
-              <div className="settings-toggle-text">
                 <span className="settings-toggle-label">Generate world map for campaigns</span>
                 <span className="settings-toggle-desc">
                   {config.image.generateWorldMap
@@ -250,6 +235,23 @@ export default function SettingsSidebar({ open, onClose }: Props) {
                 className={`settings-toggle ${config.image.generateWorldMap ? 'settings-toggle--on' : ''}`}
                 onClick={() => setConfig(c => ({ ...c, image: { ...c.image, generateWorldMap: !c.image.generateWorldMap } }))}
                 aria-pressed={config.image.generateWorldMap}
+              >
+                <span className="settings-toggle-thumb" />
+              </button>
+            </div>
+            <div className="settings-toggle-row">
+              <div className="settings-toggle-text">
+                <span className="settings-toggle-label">Generate custom tilesets for dungeon themes</span>
+                <span className="settings-toggle-desc">
+                  {config.image.generateTilesets
+                    ? 'When a dungeon’s theme has no matching tileset, one is generated with AI before the dungeon loads.'
+                    : 'Dungeons with no matching tileset fall back to the default look instead of generating one.'}
+                </span>
+              </div>
+              <button
+                className={`settings-toggle ${config.image.generateTilesets ? 'settings-toggle--on' : ''}`}
+                onClick={() => setConfig(c => ({ ...c, image: { ...c.image, generateTilesets: !c.image.generateTilesets } }))}
+                aria-pressed={config.image.generateTilesets}
               >
                 <span className="settings-toggle-thumb" />
               </button>

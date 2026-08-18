@@ -10428,7 +10428,8 @@
             "damage": "1d4+1"
           }
         ],
-        "creatureType": "Undead"
+        "creatureType": "Undead",
+        "portraitSrc": "/api/creatures/crawling-claw/portrait_01.jpg"
       }
     },
     {
@@ -10478,7 +10479,8 @@
             "damage": "1d6-1"
           }
         ],
-        "creatureType": "Beast"
+        "creatureType": "Beast",
+        "portraitSrc": "/api/creatures/giant-fire-beetle/portrait_01.jpg"
       }
     },
     {
@@ -10528,7 +10530,8 @@
             "damage": "1d6+2"
           }
         ],
-        "creatureType": "Undead"
+        "creatureType": "Undead",
+        "portraitSrc": "/api/creatures/skeleton/portrait_01.jpg"
       }
     },
     {
@@ -10587,7 +10590,8 @@
             "damage": "1d6+2"
           }
         ],
-        "creatureType": "Undead"
+        "creatureType": "Undead",
+        "portraitSrc": "/api/creatures/skeleton/portrait_01.jpg"
       }
     },
     {
@@ -10628,7 +10632,8 @@
             "damage": "1d4+1"
           }
         ],
-        "creatureType": "Undead"
+        "creatureType": "Undead",
+        "portraitSrc": "/api/creatures/risen-tomb-priest/portrait_01.jpg"
       }
     },
     {
@@ -10669,7 +10674,8 @@
             "damage": "1d4+4 plus 3d6 poison (DC 11 Con half)"
           }
         ],
-        "creatureType": "Beast"
+        "creatureType": "Beast",
+        "portraitSrc": "/api/creatures/giant-poisonous-snake/portrait_01.jpg"
       }
     },
     {
@@ -10725,7 +10731,8 @@
           }
         ],
         "creatureType": "Construct",
-        "isBoss": true
+        "isBoss": true,
+        "portraitSrc": "/api/creatures/guardian-of-the-silence/portrait_01.jpg"
       }
     },
     {
@@ -10766,7 +10773,8 @@
             "damage": "1d4+2"
           }
         ],
-        "creatureType": "Beast"
+        "creatureType": "Beast",
+        "portraitSrc": "/api/creatures/giant-rat/portrait_01.jpg"
       }
     },
     {

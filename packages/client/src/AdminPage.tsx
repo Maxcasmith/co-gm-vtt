@@ -157,7 +157,10 @@ export default function AdminPage() {
             <span className="home-title-flourish" aria-hidden="true" />
           </h1>
         </div>
-        <button className="btn-secondary admin-header-link admin-header-link--right" onClick={() => setSettingsOpen(true)}>Settings</button>
+        <div className="admin-header-link admin-header-link--right admin-header-link-group">
+          <a className="btn-secondary" href="/admin/tiles">Tilesets</a>
+          <button className="btn-secondary" onClick={() => setSettingsOpen(true)}>Settings</button>
+        </div>
       </div>
 
       <div className="admin-modules-header">

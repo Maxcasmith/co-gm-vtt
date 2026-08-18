@@ -1,5 +1,5 @@
 export type StoryProvider = "claude" | "openai" | "deepseek" | "kimi";
-export type ImageModel = "gpt-image-1" | "dall-e-3" | "dall-e-2";
+export type ImageModel = "gpt-image-1" | "gpt-image-1.5" | "gpt-image-2" | "dall-e-3" | "dall-e-2";
 
 export type ReasoningEffort = "low" | "medium" | "high" | "maximum";
 
@@ -27,8 +27,8 @@ export interface AiWorkflow {
 
 export interface ImageConfig {
   model: ImageModel;
-  generateMaps: boolean;
   generateWorldMap: boolean;
+  generateTilesets: boolean;
 }
 
 export type NarrationModel = "none" | "browser" | "tts-1" | "tts-1-hd";

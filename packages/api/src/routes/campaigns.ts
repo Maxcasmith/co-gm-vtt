@@ -157,6 +157,7 @@ campaignsRouter.post('/generate', async (req, res) => {
         title, 'dungeon-crawl', getFeatureProvider(config, 'dungeonGeneration'), tags.join(', '),
         { width: 100, height: 100, roomRange: [14, 20], partySize },
         token => send({ type: 'token', text: token }),
+        config,
       );
       await saveDungeon(slug, dungeon);
       await saveDungeonAscii(slug, dungeon);

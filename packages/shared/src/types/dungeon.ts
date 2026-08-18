@@ -2,11 +2,32 @@ import type { EnemyStatBlock } from "./combat.ts";
 import type { EffectSpec } from "./spells.ts";
 import type { AbilityKey } from "./character.ts";
 
-export const DUNGEON_MATERIALS = ["grass", "wood", "stone"] as const;
+export const DUNGEON_MATERIALS = ["dirt", "grass", "wood", "stone", "brick", "iron", "sand", "water"] as const;
 export type DungeonMaterial = (typeof DUNGEON_MATERIALS)[number];
 
+// Extended 16-material set for the tileset generator's optional 4x4-grid atlas mode — additive to
+// DUNGEON_MATERIALS above, not a replacement. Not used for room material assignment (DungeonRoom.material
+// stays scoped to DUNGEON_MATERIALS/DungeonMaterial); this is purely for the tile-image pipeline's
+// second, opt-in atlas layout (see api/dungeon/tilesets.ts's generateExtendedTileset). Atlas row order:
+// row 0-1 are the original 8 (unchanged), row 2-3 are the 8 new ones.
+export const EXTENDED_TILE_MATERIALS = [
+  ...DUNGEON_MATERIALS,
+  "ice", "lava", "moss", "mud", "marble", "gravel", "ash", "snow",
+] as const;
+export type ExtendedTileMaterial = (typeof EXTENDED_TILE_MATERIALS)[number];
+
+// The 3 curated, built-in packs — not an exhaustive list. DungeonStylePack is a free-form
+// theme keyword (e.g. "gothic_horror"); anything outside this list is checked/generated
+// on demand by the tileset pipeline (see api/dungeon/tilesets.ts).
 export const DUNGEON_STYLE_PACKS = ["high_fantasy", "medieval", "dark"] as const;
-export type DungeonStylePack = (typeof DUNGEON_STYLE_PACKS)[number];
+export type DungeonStylePack = string;
+
+// Filesystem/URL-safe key for a theme keyword — shared by the tileset generator (write path),
+// the tileset static route (read path), and the client's runtime texture registry (lookup key),
+// so all three agree on the same slug for the same theme.
+export function slugifyTheme(theme: string): string {
+  return theme.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
 
 export type DungeonStructureType = "building" | "organic";
 

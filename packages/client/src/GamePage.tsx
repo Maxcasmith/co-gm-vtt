@@ -22,6 +22,7 @@ import DefeatScreen from './DefeatScreen.tsx';
 import ReactionPrompt from './ReactionPrompt.tsx';
 import { dispatch, on } from './events.ts';
 import { initNarration, narrate } from './narration.ts';
+import { loadRuntimeTilesets } from './dungeonThemes.ts';
 import './app.css';
 
 const API = `http://${window.location.hostname}:3001`;
@@ -140,6 +141,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => { loadRuntimeTilesets(); }, []);
 
   useEffect(() => {
     const derivedMax = (HIT_DICE[character.class] ?? 8) + Math.floor((character.stats.con - 10) / 2);
@@ -349,7 +352,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('combat:reaction:close', data => dispatch('vtt:combat:reaction:close', data));
     socket.on('combat:log', data => dispatch('vtt:combat:log', { kind: 'text', ...data }));
     socket.on('dungeon:generating', () => setDungeonGenerating(true));
-    socket.on('dungeon:loaded', dungeon => { setDungeonGenerating(false); setDungeon(dungeon); dispatch('vtt:dungeon:loaded', dungeon); });
+    socket.on('dungeon:loaded', dungeon => { setDungeonGenerating(false); setDungeon(dungeon); dispatch('vtt:dungeon:loaded', dungeon); loadRuntimeTilesets(); });
     socket.on('dungeon:cleared', () => setDungeon(null));
     socket.on('quest:update', ({ quests: q, act: a }) => { setQuests(q); setAct(a); });
     socket.on('clock:update', ({ worldTimeSecs: t }) => { setWorldTimeSecs(t); });

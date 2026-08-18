@@ -1,5 +1,5 @@
 import type { EnemyStatBlock, DungeonMaterial, DungeonStylePack, DungeonStructureType, CreatureType } from 'shared';
-import { DUNGEON_MATERIALS, DUNGEON_STYLE_PACKS, CREATURE_TYPES } from 'shared';
+import { DUNGEON_MATERIALS, CREATURE_TYPES } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { logError } from '../logger.ts';
 
@@ -25,7 +25,7 @@ export interface ManifestRoom {
 export interface DungeonManifest {
   rooms: ManifestRoom[];
   structureType: DungeonStructureType;
-  theme: DungeonStylePack; // dungeon-wide art style pack — clamped to DUNGEON_STYLE_PACKS on parse
+  theme: DungeonStylePack; // dungeon-wide art style/theme keyword — free-form, lowercased/trimmed on parse
   goals: string[]; // short narrative objectives for this dungeon — may be empty, never forced
   illumination: number; // 0-1 ambient light level for the whole location — clamped on parse
 }
@@ -43,11 +43,11 @@ function normalizeCreatureType(t: unknown): CreatureType {
 
 const GENERIC_ROOMS: ManifestRoom[] = [
   { name: 'Entrance', size: 'medium', role: 'entrance', material: 'wood' },
-  { name: 'Guard Room', size: 'small', material: 'wood', creatures: [{ id: 'guard-1', name: 'Guard', cr: 0.25, hp: 11, ac: 12, speed: 30, stats: { str: 13, dex: 12, con: 12, int: 10, wis: 10, cha: 10 }, attacks: [{ name: 'Spear', bonus: 3, damage: '1d6+1' }], creatureType: 'Humanoid' }] },
+  { name: 'Guard Room', size: 'small', material: 'wood', creatures: [{ id: 'guard-1', name: 'Guard', cr: 0.25, hp: 11, ac: 12, speed: 30, stats: { str: 13, dex: 12, con: 12, int: 10, wis: 10, cha: 10 }, attacks: [{ name: 'Spear', bonus: 3, damage: '1d6+1' }], creatureType: 'Humanoid', appearance: 'A weary human guard in scuffed leather armor, iron spear in hand, a plain steel cap pulled low.' }] },
   { name: 'Storage Room', size: 'small', material: 'wood', loot: [{ name: 'Supplies', hideDC: 8 }] },
   { name: 'Junction', size: 'small', material: 'wood' },
   { name: 'Vault', size: 'medium', material: 'wood', traps: [{ name: 'Trapped Chest', hideDC: 15 }], loot: [{ name: 'Treasure Chest', hideDC: 12 }] },
-  { name: 'Inner Chamber', size: 'large', material: 'wood', creatures: [{ id: 'boss-1', name: 'Boss', cr: 1, hp: 27, ac: 14, speed: 30, stats: { str: 15, dex: 13, con: 14, int: 10, wis: 11, cha: 12 }, attacks: [{ name: 'Greatsword', bonus: 5, damage: '2d6+3' }], creatureType: 'Humanoid', isBoss: true }], role: 'exit' },
+  { name: 'Inner Chamber', size: 'large', material: 'wood', creatures: [{ id: 'boss-1', name: 'Boss', cr: 1, hp: 27, ac: 14, speed: 30, stats: { str: 15, dex: 13, con: 14, int: 10, wis: 11, cha: 12 }, attacks: [{ name: 'Greatsword', bonus: 5, damage: '2d6+3' }], creatureType: 'Humanoid', isBoss: true, appearance: 'A towering armored warlord, a notched greatsword resting on one shoulder, a battle-scarred face set in a cold glare.' }], role: 'exit' },
 ];
 
 // A-Z, deterministic — up to 26 rooms, well past the largest room range we ask for (20).
@@ -97,7 +97,8 @@ Return ONLY valid JSON, no markdown fences, no explanation:
         "speed": 30,
         "stats": { "str": 11, "dex": 12, "con": 12, "int": 10, "wis": 10, "cha": 10 },
         "attacks": [{ "name": "string", "bonus": 3, "damage": "1d6+1" }],
-        "creatureType": "one of: ${CREATURE_TYPES.join('|')}"
+        "creatureType": "one of: ${CREATURE_TYPES.join('|')}",
+        "appearance": "string — 1-2 sentence physical description (build, coloring, notable features, worn/carried gear). No narrative framing, just what it looks like — this feeds an image generator, not the read-aloud text."
       }],
       "traps": [{ "name": "string — trap description", "hideDC": 14 }],
       "loot": [{ "name": "string — item or treasure", "hideDC": 8 }]
@@ -127,7 +128,7 @@ Genre: ${dungeonType}`;
     const parsed = JSON.parse(cleaned) as Partial<DungeonManifest>;
     const structureType: DungeonStructureType = parsed.structureType === 'building' ? 'building' : 'organic';
     const rawTheme = typeof parsed.theme === 'string' ? parsed.theme.trim().toLowerCase() : '';
-    const theme: DungeonStylePack = DUNGEON_STYLE_PACKS.includes(rawTheme as DungeonStylePack) ? (rawTheme as DungeonStylePack) : 'high_fantasy';
+    const theme: DungeonStylePack = rawTheme || 'high_fantasy';
     let bossSeen = false;
     const rooms: ManifestRoom[] = (parsed.rooms?.length ? parsed.rooms : GENERIC_ROOMS).map(r => {
       const { material, creatures, ...rest } = r;

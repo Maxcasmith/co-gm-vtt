@@ -3,8 +3,10 @@ import type { Request, Response } from 'express';
 import { rm, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { CAMPAIGNS_DIR, getWorldMeta, listCampaigns } from '../storage.ts';
+import { slugifyTheme } from 'shared';
+import { CAMPAIGNS_DIR, TILESETS_DIR, getConfig, getWorldMeta, listCampaigns } from '../storage.ts';
 import { saveCampaignAsAdventure, SAVED_ADVENTURES_DIR } from '../adventures/storage.ts';
+import { generateExtendedTileset } from '../dungeon/tilesets.ts';
 import { logError } from '../logger.ts';
 
 function slugify(name: string): string {
@@ -26,7 +28,7 @@ export const adminRouter = Router();
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'admin';
 
-function requireAdmin(req: Request, res: Response): boolean {
+export function requireAdmin(req: Request, res: Response): boolean {
   if (req.headers['x-admin-password'] !== ADMIN_PASSWORD) {
     res.status(401).json({ error: 'Unauthorized' });
     return false;
@@ -95,6 +97,58 @@ adminRouter.delete('/campaigns/:id/sessions', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     logError('routes/admin:deleteSessions', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// SSE, mirrors campaigns.ts's generate stream — `data: {type: 'progress'|'complete'|'error', ...}`
+// lines, one per generateExtendedTileset step. Title becomes the folder/matching slug, theme is
+// the prompt text — see dungeon/tilesets.ts for why those are separate fields here. Always the
+// 16-tile 4x4 pipeline — the old 8-tile/2:1 mode-selection is retired, see tilesets.ts.
+adminRouter.post('/tilesets/generate', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const { title, theme } = req.body as { title?: string; theme?: string };
+  if (!title?.trim() || !theme?.trim()) {
+    res.status(400).json({ error: 'title and theme are required' });
+    return;
+  }
+
+  const config = await getConfig();
+  const apiKey = config.apiKeys.openai;
+  if (!apiKey) {
+    res.status(400).json({ error: 'No OpenAI API key configured' });
+    return;
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  function send(data: object) { res.write(`data: ${JSON.stringify(data)}\n\n`); }
+
+  try {
+    await generateExtendedTileset(title, theme, apiKey, config.image.model, message => send({ type: 'progress', message }));
+    send({ type: 'complete' });
+  } catch (err) {
+    logError('routes/admin:generateTileset', err);
+    send({ type: 'error', message: err instanceof Error ? err.message : 'Generation failed' });
+  } finally {
+    res.end();
+  }
+});
+
+adminRouter.delete('/tilesets/:theme', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const theme = req.params['theme']!;
+  if (slugifyTheme(theme) !== theme) {
+    res.status(400).json({ error: 'Invalid theme' });
+    return;
+  }
+  const dir = path.join(TILESETS_DIR, theme);
+  try {
+    if (existsSync(dir)) await rm(dir, { recursive: true });
+    res.json({ ok: true });
+  } catch (err) {
+    logError('routes/admin:deleteTileset', err);
     res.status(500).json({ ok: false, error: String(err) });
   }
 });

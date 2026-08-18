@@ -149,13 +149,50 @@ export async function describeImage(base64image: string, apiKey: string): Promis
 }
 
 export async function generateBattleMap(prompt: string, apiKey: string, model: string): Promise<Buffer> {
-  const isGptImage = model === 'gpt-image-1';
+  const isGptImage = model.startsWith('gpt-image-');
   const size = isGptImage ? '1536x1024' : '1792x1024';
 
   const res = await fetch(`${API_BASE}/images/generations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({ model, prompt, n: 1, size }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
+    throw new Error(err.error?.message ?? res.statusText);
+  }
+  const data = await res.json() as { data: { url?: string; b64_json?: string; b64?: string }[] };
+  const item = data.data[0];
+  if (!item) throw new Error('No image returned');
+  if (item.b64)      return Buffer.from(item.b64, 'base64');
+  if (item.b64_json) return Buffer.from(item.b64_json, 'base64');
+  if (item.url)      return Buffer.from(await (await fetch(item.url)).arrayBuffer());
+  throw new Error('No image data in response');
+}
+
+// Widest/cheapest exact-2:1 size each model actually supports. dall-e-2 has no widescreen option
+// at all, so its atlas comes back squarer/more-cropped than the prompt asks for — computeTileRects
+// works off whatever width actually comes back, so that's a quality tradeoff, not a correctness one.
+//
+// gpt-image-1/1.5 are locked to a fixed size enum (1024x1024/1024x1536/1536x1024/auto — confirmed
+// live, 2048x1024 400s with "Invalid size"), none of which is exact 2:1 — 1536x1024 is the closest.
+// gpt-image-2 takes arbitrary WIDTHxHEIGHT (both divisible by 16, aspect ratio 1:3-3:1, total
+// pixels 655,360-8,294,400) — 1152x576 is the smallest exact-2:1 size clearing that pixel floor,
+// landing in the cheapest ~1K pricing tier with no squash needed downstream.
+function atlasSizeFor(model: string): string {
+  if (model === 'gpt-image-2') return '1152x576';
+  if (model.startsWith('gpt-image-')) return '1536x1024';
+  if (model === 'dall-e-3') return '1792x1024';
+  return '1024x1024';
+}
+
+// size override: the extended (4x4/16) pipeline always wants '1024x1024' — the one size confirmed
+// valid across every model here — so it skips atlasSizeFor's per-model 2:1-ish picks entirely.
+export async function generateTilesetAtlas(prompt: string, apiKey: string, model: string, size?: string): Promise<Buffer> {
+  const res = await fetch(`${API_BASE}/images/generations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, prompt, n: 1, size: size ?? atlasSizeFor(model) }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };

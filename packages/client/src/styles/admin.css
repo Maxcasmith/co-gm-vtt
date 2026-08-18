@@ -68,6 +68,7 @@
 .admin-header-link { flex-shrink: 0; }
 .admin-header-link--left { position: absolute; left: 0; top: 0; }
 .admin-header-link--right { position: absolute; right: 0; top: 0; }
+.admin-header-link-group { display: flex; align-items: center; gap: 8px; }
 
 .admin-header-titles {
   display: flex;
@@ -234,5 +235,108 @@
   padding: 20px 16px;
   text-align: center;
   font-style: italic;
+}
+
+.tiles-accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tiles-accordion-item {
+  background: linear-gradient(155deg, var(--surface) 0%, var(--bg) 130%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.tiles-accordion-header {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 6px 8px 6px 16px;
+}
+
+.tiles-accordion-toggle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.tiles-accordion-header:hover { background: var(--surface-hover); }
+
+.tiles-accordion-caret {
+  color: var(--gold);
+  font-size: 11px;
+  width: 10px;
+}
+
+.tiles-accordion-name { flex: 1; text-transform: uppercase; }
+
+.tiles-accordion-delete { align-self: center; }
+
+.tiles-accordion-body {
+  padding: 4px 16px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.tile-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.tile-img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.tile-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tile-source {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tile-source-img {
+  max-width: 100%;
+  width: 480px;
+  height: auto;
+  object-fit: contain;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
 }
 

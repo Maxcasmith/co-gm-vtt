@@ -323,6 +323,266 @@ Return ONLY valid JSON, no markdown fences, no explanation.`;
   }
 }
 
+export function buildTilesetPrompt(theme: string): string {
+  return `Generate a **2D top-down seamless texture atlas** for a dungeon crawler.
+
+# THEME
+
+**${theme}**
+
+The theme must strongly influence the overall visual style, atmosphere, colour palette, condition, detailing, and interpretation of every material.
+
+The textures should clearly feel as though they belong to the specified theme.
+
+Different themes should produce **visually distinct results**, not simply recoloured versions of the same textures.
+
+# OUTPUT
+
+Create a single texture atlas:
+
+* **4 columns**
+* **2 rows**
+* **8 textures**
+* Each texture is **1:1 square**
+* Every texture occupies exactly the same amount of space
+* Complete atlas aspect ratio: **2:1**
+* Target atlas size: **2048 × 1024**
+* Target texture size: **512 × 512**
+
+No gaps or padding between textures.
+
+# MATERIALS
+
+Top row:
+
+**Dirt | Grass | Wood | Stone**
+
+Bottom row:
+
+**Brick | Iron | Sand | Water**
+
+Each material must be immediately recognizable while being visually interpreted through **${theme}**.
+
+# TEXTURE REQUIREMENTS
+
+Every texture must be a **flat, top-down material surface** designed for use as a repeating game texture.
+
+Each individual texture must be **seamlessly tileable on both axes**.
+
+The left edge must naturally continue into the right edge.
+
+The top edge must naturally continue into the bottom edge.
+
+Treat each texture as a sample of a larger continuous surface, **not as an individual physical tile or panel**.
+
+There must be:
+
+* NO borders
+* NO bevels
+* NO frames
+* NO outlines
+* NO gaps
+* NO padding
+* NO edge shadows
+* NO edge highlights
+* NO vignette
+* NO visible square boundaries
+* NO perspective
+* NO directional scene lighting
+
+Use consistent, neutral, diffuse top-down lighting.
+
+# COMPOSITION
+
+\`DIRT | GRASS | WOOD | STONE\`
+
+\`BRICK | IRON | SAND | WATER\`
+
+The materials should touch directly with no separators.
+
+# PRIORITIES
+
+1. Strong **${theme}** identity
+2. Seamless repetition
+3. Square 1:1 individual textures
+4. Clearly distinguishable materials
+5. Cohesive art direction
+6. No borders, bevels or edge shading`;
+}
+
+// 4x4/16-material variant of buildTilesetPrompt above — separate prompt, separate atlas shape
+// (square instead of 2:1), additive alongside the original 8-material one, not a replacement.
+export function buildExtendedTilesetPrompt(theme: string): string {
+  return `Generate a **2D top-down seamless texture atlas** for a dungeon crawler.
+
+# THEME
+
+**${theme}**
+
+The theme must strongly influence the overall visual style, atmosphere, colour palette, condition, detailing, and interpretation of every material.
+
+The textures should clearly feel as though they belong to the specified theme.
+
+Different themes should produce **visually distinct results**, not simply recoloured versions of the same textures.
+
+# OUTPUT
+
+Create a single texture atlas:
+
+* **4 columns**
+* **4 rows**
+* **16 textures**
+* Each texture is **1:1 square**
+* Every texture occupies exactly the same amount of space
+* Complete atlas aspect ratio: **1:1**
+* Target atlas size: **1024 × 1024**
+* Target texture size: **256 × 256**
+
+No gaps or padding between textures.
+
+# MATERIALS
+
+Row 1:
+
+**Dirt | Grass | Wood | Stone**
+
+Row 2:
+
+**Brick | Iron | Sand | Water**
+
+Row 3:
+
+**Ice | Lava | Moss | Mud**
+
+Row 4:
+
+**Marble | Gravel | Ash | Snow**
+
+Each material must be immediately recognizable while being visually interpreted through **${theme}**.
+
+# TEXTURE REQUIREMENTS
+
+Every texture must be a **flat, top-down material surface** designed for use as a repeating game texture.
+
+Each individual texture must be **seamlessly tileable on both axes**.
+
+The left edge must naturally continue into the right edge.
+
+The top edge must naturally continue into the bottom edge.
+
+Treat each texture as a sample of a larger continuous surface, **not as an individual physical tile or panel**.
+
+There must be:
+
+* NO borders
+* NO bevels
+* NO frames
+* NO outlines
+* NO gaps
+* NO padding
+* NO edge shadows
+* NO edge highlights
+* NO vignette
+* NO visible square boundaries
+* NO perspective
+* NO directional scene lighting
+
+Use consistent, neutral, diffuse top-down lighting.
+
+# COMPOSITION
+
+\`DIRT | GRASS | WOOD | STONE\`
+
+\`BRICK | IRON | SAND | WATER\`
+
+\`ICE | LAVA | MOSS | MUD\`
+
+\`MARBLE | GRAVEL | ASH | SNOW\`
+
+The materials should touch directly with no separators.
+
+# PRIORITIES
+
+1. Strong **${theme}** identity
+2. Seamless repetition
+3. Square 1:1 individual textures
+4. Clearly distinguishable materials
+5. Cohesive art direction
+6. No borders, bevels or edge shading`;
+}
+
+export interface CreaturePortraitEntry {
+  name: string;
+  appearance: string;
+  isBoss?: boolean;
+}
+
+// Always exactly 16 slots (4x4) — entries beyond the caller's list are padded with a blank black
+// filler cell so the grid/crop math stays fixed regardless of how many creatures a given batch
+// actually has (see dungeon/creaturePortraits.ts, which never sends more than 16).
+export function buildCreaturePortraitPrompt(entries: CreaturePortraitEntry[]): string {
+  const real = entries.slice(0, 16);
+  const lines = real.map((e, i) => {
+    const bossNote = e.isBoss ? ' (boss — render largest/most imposing of the set)' : '';
+    return `${i + 1}. **${e.name}**${bossNote} — ${e.appearance}`;
+  });
+  if (real.length < 16) {
+    const from = real.length + 1;
+    const rangeLabel = from === 16 ? '16' : `${from}-16`;
+    lines.push(`${rangeLabel}. Blank black square — this portrait is just blank and black. The purpose of this portrait is to keep the crop grid of the others consistent`);
+  }
+
+  return `Generate a **2D character portrait atlas** for a dungeon crawler's enemy tokens.
+
+# OUTPUT
+
+Create a single portrait atlas:
+
+* **4 columns**
+* **4 rows**
+* **16 portraits**
+* Each portrait is **1:1 square**
+* Every portrait occupies exactly the same amount of space
+* Complete atlas aspect ratio: **1:1**
+* Atlas size: **1024 × 1024**
+* Individual portrait size: **256 × 256**
+
+No gaps or padding between portraits.
+
+# BACKGROUND
+
+Every single portrait must sit on the exact same **flat, solid, saturated red background** (no gradient, no texture, no vignette, no shadow falloff) — identical red value in all 16 cells, edge to edge, so each portrait can be cleanly key-cropped later.
+
+# CREATURES (in order — left to right, top row, then each row down)
+
+${lines.join('\n\n')}
+
+# PORTRAIT REQUIREMENTS
+
+Each portrait is a **bust/head-and-shoulders framing**, front-facing or three-quarter view, centered in its cell.
+
+No environment, no scenery, no props beyond what's held/worn by the creature itself.
+
+Consistent lighting direction and art style across all 16 — same rendering technique, same level of detail, same color saturation — so they read as one cohesive set, not 16 unrelated images.
+
+There must be:
+
+* NO borders
+* NO frames
+* NO outlines around the cells
+* NO gaps or padding between cells
+* NO text or labels
+* NO numbering
+
+# PRIORITIES
+
+1. Instantly readable creature silhouette/identity at small size
+2. Exact same flat red background in every cell
+3. Consistent art style and lighting across all 16 portraits
+4. Correct left-to-right, top-to-bottom order as listed above
+5. No borders, frames, or background variation`;
+}
+
 export function buildWorldMapPrompt(worldMd: string, locationsSummary: string, tags: string[]): string {
   const tagLine = tags.length ? tags.join(', ') : 'dark fantasy';
   return `Create a FANTASY WORLD MAP in the style of classic RPG cartography. This map must be scoped exclusively to the world described below — no generic fantasy tropes that contradict the setting. Every visual choice (palette, terrain, iconography, atmosphere) must reflect the specific tone and themes of this campaign.

@@ -72,6 +72,10 @@ export interface EnemyStatBlock {
   damageResistances?: string[];
   damageVulnerabilities?: string[];
   damageImmunities?: string[];
+  /** 1-2 sentence physical description — dungeon-generated creatures only for now (manifest.ts). Feeds the fire-and-forget portrait pipeline (api/dungeon/creaturePortraits.ts) as the AI prompt's visual reference. */
+  appearance?: string;
+  /** Deterministic path (slugify(name)-keyed, global across dungeons/campaigns) to this creature's generated token portrait — set synchronously at dungeon-gen time regardless of whether the file exists yet; the client falls back to the plain colored-token look if it 404s. */
+  portraitSrc?: string;
 }
 
 export interface TurnOrderEntry {

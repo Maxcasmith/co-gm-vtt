@@ -23,6 +23,8 @@ export class Creature {
   actions: EnemyAction[];
   /** Combat round this creature last took damage — Conjurer's summon action reads (currentRound - lastDamagedRound) to decide it's "unchallenged." Set at combat start and on every hit, see applyDamageToCreature. */
   lastDamagedRound: number;
+  appearance: string | undefined;
+  portraitSrc: string | undefined;
 
   constructor(data: EnemyStatBlock) {
     this.id = data.id;
@@ -44,6 +46,8 @@ export class Creature {
     this.role = data.role;
     this.actions = data.actions ?? [];
     this.lastDamagedRound = 0;
+    this.appearance = data.appearance;
+    this.portraitSrc = data.portraitSrc;
   }
 
   static from(data: EnemyStatBlock): Creature {
@@ -84,6 +88,8 @@ export class Creature {
       damageImmunities: this.damageImmunities,
       ...(this.role !== undefined ? { role: this.role } : {}),
       actions: this.actions,
+      ...(this.appearance !== undefined ? { appearance: this.appearance } : {}),
+      ...(this.portraitSrc !== undefined ? { portraitSrc: this.portraitSrc } : {}),
     };
   }
 }

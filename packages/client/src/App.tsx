@@ -2,10 +2,12 @@ import HomePage from './HomePage.tsx';
 import GamePage from './GamePage.tsx';
 import PlayerCreatePage from './PlayerCreatePage.tsx';
 import AdminPage from './AdminPage.tsx';
+import AdminTilesPage from './AdminTilesPage.tsx';
 
 export default function App() {
   const parts = window.location.pathname.split('/').filter(Boolean);
 
+  if (parts[0] === 'admin' && parts[1] === 'tiles') return <AdminTilesPage />;
   if (parts[0] === 'admin') return <AdminPage />;
 
   // /{campaignId}/player/create

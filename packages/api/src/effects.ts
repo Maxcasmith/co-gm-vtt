@@ -90,7 +90,7 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
       const partyLevel = characters.length
         ? Math.round(characters.reduce((sum, c) => sum + (c.level ?? 1), 0) / characters.length)
         : 1;
-      const dungeon = await generateDungeon(effect.name, effect.dungeonType, getFeatureProvider(config, 'dungeonGeneration'), storyContext, { partySize, partyLevel });
+      const dungeon = await generateDungeon(effect.name, effect.dungeonType, getFeatureProvider(config, 'dungeonGeneration'), storyContext, { partySize, partyLevel }, undefined, config);
       dungeons.set(cid, dungeon);
       await saveDungeon(cid, dungeon);
       await saveDungeonAscii(cid, dungeon);

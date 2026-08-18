@@ -1,10 +1,12 @@
 import { randomUUID } from 'crypto';
-import type { Dungeon, DungeonEntity, DungeonRoom, EnemyStatBlock, Quest } from 'shared';
+import type { AppConfig, Dungeon, DungeonEntity, DungeonRoom, EnemyStatBlock, Quest } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { fetchManifest } from './manifest.ts';
 import { generateGrid } from './generator.ts';
 import { generateBuildingLayout } from './buildingLayout.ts';
 import { placeEntities, placeEncounterEntities } from './placer.ts';
+import { ensureTilesetSupport } from './tilesets.ts';
+import { assignPortraitSrcs, generateCreaturePortraits } from './creaturePortraits.ts';
 
 export async function generateDungeon(
   name: string,
@@ -13,6 +15,7 @@ export async function generateDungeon(
   storyContext = '',
   opts?: { width?: number; height?: number; roomRange?: [number, number]; partySize?: number; partyLevel?: number },
   onToken: (t: string) => void = () => {},
+  config?: AppConfig,
 ): Promise<Dungeon> {
   const manifest = await fetchManifest(name, dungeonType, adapter, storyContext, opts?.roomRange, opts?.partySize, opts?.partyLevel, onToken);
   // Man-made structures get a deterministic floor-plan layout driven by the manifest's adjacency
@@ -22,8 +25,13 @@ export async function generateDungeon(
     ? generateBuildingLayout(manifest, opts)
     : generateGrid(manifest, opts);
   const entities = placeEntities(rooms, manifest, cells);
+  // Synchronous/deterministic — every creature entity gets a portraitSrc before this function
+  // returns, regardless of whether the file exists yet (see creaturePortraits.ts).
+  assignPortraitSrcs(entities);
 
-  return {
+  if (config) await ensureTilesetSupport(manifest.theme, config);
+
+  const dungeon: Dungeon = {
     id: randomUUID(),
     name,
     width: opts?.width ?? 50,
@@ -37,6 +45,12 @@ export async function generateDungeon(
     illumination: manifest.illumination,
     baseIllumination: manifest.illumination,
   };
+
+  // Fire and forget — unawaited on purpose, must never hold up dungeon generation. Runs in the
+  // background; errors are caught and logged inside generateCreaturePortraits itself.
+  if (config) void generateCreaturePortraits(dungeon, config);
+
+  return dungeon;
 }
 
 // Quests a freshly-generated dungeon should seed, merged into whatever quests already exist for

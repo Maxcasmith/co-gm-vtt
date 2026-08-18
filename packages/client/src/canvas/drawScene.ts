@@ -42,6 +42,7 @@ export interface DrawSceneParams {
   reachableRef: RefObject<Set<string> | null>;
   aoeMouseRef: RefObject<{ gx: number; gy: number } | null>;
   tokenImgCache: RefObject<Record<string, HTMLImageElement>>;
+  enemyImgCache: RefObject<Record<string, HTMLImageElement>>;
   flashEffectsRef: RefObject<FlashEffect[]>;
   tokenEffectsRef: RefObject<TokenSpecialEffect[]>;
   floatEffectsRef: RefObject<FloatEffect[]>;
@@ -67,7 +68,7 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
     companions, visiblePolygon, litCells, senses, elevations, visibleCells,
     hoverHitChance, multiTargetCursor, multiTargetsPicked,
     floorVariantRef, dungeonZoomRef, dungeonPanRef, dragRef, reachableRef, aoeMouseRef,
-    tokenImgCache, flashEffectsRef, tokenEffectsRef, floatEffectsRef, swingEffectsRef,
+    tokenImgCache, enemyImgCache, flashEffectsRef, tokenEffectsRef, floatEffectsRef, swingEffectsRef,
   } = p;
 
   if (showBattleMap) {
@@ -358,7 +359,11 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           const isDead = deadCreatureIds?.has(enemy.id);
           const lightFilter = tokenLightFilter(pos.gx, pos.gy, litCells, senses, lighting);
           ctx.filter = isDead ? `grayscale(1) opacity(0.45)` : lightFilter || 'none';
-          drawToken(ctx, x, y, (enemy.name[0] ?? '?').toUpperCase(), enemy.name, isDead ? '#555' : '#c0392b', tokenR, hoveredTokenKey === enemy.id, zoom);
+          // enemy.portraitSrc missing or not yet loaded (fire-and-forget generation still running,
+          // or never ran) -> img is undefined -> drawToken's existing img-less branch (colored
+          // circle + initial) covers it, same fallback it's always had.
+          const portraitImg = enemy.portraitSrc ? enemyImgCache.current?.[enemy.portraitSrc] : undefined;
+          drawToken(ctx, x, y, (enemy.name[0] ?? '?').toUpperCase(), enemy.name, isDead ? '#555' : '#c0392b', tokenR, hoveredTokenKey === enemy.id, zoom, portraitImg);
           ctx.filter = 'none';
 
           if (!inSight(pos.gx, pos.gy)) return;

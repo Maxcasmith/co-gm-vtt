@@ -13,6 +13,8 @@ const CONFIG_PATH = path.join(STORAGE_DIR, 'config.json');
 
 export const CAMPAIGNS_DIR = path.join(STORAGE_DIR, 'campaigns');
 export const PREMADE_DIR   = path.join(STORAGE_DIR, 'premade');
+export const TILESETS_DIR  = path.join(STORAGE_DIR, 'tilesets');
+export const CREATURES_DIR = path.join(STORAGE_DIR, 'creatures');
 
 const NARRATIVE_FEATURES: AppConfig['workflows'][number]['features'] = [
   'campaignConcepts', 'dungeonPremise', 'backstoryGeneration', 'backstoryCheck', 'worldLoreSync',
@@ -30,7 +32,7 @@ const DEFAULT_CONFIG: AppConfig = {
     { id: 'default-combat', name: 'Combat & World', enabled: true, models: [{ provider: 'openai', model: 'gpt-4o-mini' }], features: WORLD_AND_COMBAT_FEATURES },
   ],
   apiKeys:  { openai: '', anthropic: '', deepseek: '', kimi: '' },
-  image:    { model: 'gpt-image-1', generateMaps: true, generateWorldMap: false },
+  image:    { model: 'gpt-image-1', generateWorldMap: false, generateTilesets: false },
   narration: { model: 'none', voice: 'onyx' },
 };
 
