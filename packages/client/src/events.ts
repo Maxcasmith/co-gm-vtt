@@ -228,6 +228,7 @@ export interface VTTEventMap {
   'vtt:combat:log':             CombatLogPayload;
   'vtt:dungeon:loaded':         Dungeon;
   'vtt:viewport:changed':       ViewportChangedPayload;
+  'vtt:dev:redraw':             Record<string, never>;
 }
 
 // ── Core API ──────────────────────────────────────────────────────────────────

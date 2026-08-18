@@ -19,8 +19,6 @@ function drawSlashing(ctx: CanvasRenderingContext2D, fromX: number, fromY: numbe
   const px = -Math.sin(angle), py = Math.cos(angle); // perpendicular unit vector
   ctx.save();
   ctx.globalAlpha = fade;
-  ctx.shadowColor = '#7a1414';
-  ctx.shadowBlur = 10;
   ctx.beginPath();
   ctx.moveTo(x0, y0);
   ctx.quadraticCurveTo(midX + px * bulge, midY + py * bulge, x1, y1);
@@ -45,8 +43,6 @@ function drawBludgeoning(ctx: CanvasRenderingContext2D, fromX: number, fromY: nu
   const r = 15 * grow;
   ctx.save();
   ctx.globalAlpha = fade;
-  ctx.shadowColor = '#2a1c12';
-  ctx.shadowBlur = 8;
   ctx.fillStyle = '#a9825f';
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -78,8 +74,6 @@ function drawPiercing(ctx: CanvasRenderingContext2D, fromX: number, fromY: numbe
   const fade = 1 - Math.max(t - 0.5, 0) / 0.5;
   ctx.save();
   ctx.globalAlpha = fade;
-  ctx.shadowColor = '#e8e8f0';
-  ctx.shadowBlur = 6;
   ctx.fillStyle = '#eef0f5';
   ctx.beginPath();
   ctx.moveTo(tipX, tipY);

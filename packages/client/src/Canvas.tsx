@@ -10,7 +10,8 @@ import { attackBonusFor, hitChancePercent } from './canvas/combatMath.ts';
 import { useVision } from './canvas/useVision.ts';
 import { useCombatEffects } from './canvas/useCombatEffects.ts';
 import { useCanvasPointerControls } from './canvas/useCanvasPointerControls.ts';
-import { drawScene } from './canvas/drawScene.ts';
+import { drawScene, type DrawSceneParams } from './canvas/drawScene.ts';
+import type { GroundCache } from './canvas/groundCache.ts';
 import './app.css';
 
 // enemy.portraitSrc is a server-relative path ("/api/creatures/..."); client and API are
@@ -50,6 +51,8 @@ export default function Canvas({ player, characterId, character, connected, show
   // Per-cell floor texture variant, picked once and cached so it doesn't re-randomize (flicker)
   // every animation frame. Cleared when a different dungeon loads.
   const floorVariantRef = useRef<{ dungeonId: string | null; picks: Map<string, number> }>({ dungeonId: null, picks: new Map() });
+  // Baked static-ground bitmap — see groundCache.ts.
+  const groundCacheRef = useRef<GroundCache | null>(null);
 
   const { visibleCells, litCells, senses, visiblePolygon } = useVision(dungeon, tokenPositions, player, character);
 
@@ -70,6 +73,10 @@ export default function Canvas({ player, characterId, character, connected, show
   const {
     dungeonPanRef, dungeonZoomRef, isPanningRef, panStartRef, dragRef, dragOffset, reachableRef, dragTick, sizeTick,
   } = useCanvasPointerControls(ref, player, tokenPositions, dungeon, playerRef, tokenPositionsRef, movementRef, dungeonRef, showBattleMapRef);
+
+  // Wall-aware combat move-reach highlight — computed once when the player's own token drag
+  // starts (movementRemaining doesn't change mid-drag), not re-walked by drawScene every redraw.
+  const combatReachableRef = useRef<Set<string> | null>(null);
 
   const {
     floatEffectsRef, flashEffectsRef, tokenEffectsRef, swingEffectsRef, concentrating, animTick,
@@ -112,7 +119,13 @@ export default function Canvas({ player, characterId, character, connected, show
   }, [tokenUrls]);
 
   useEffect(() => {
-    const urls = [...new Set((encounter ?? []).map(e => e.portraitSrc).filter((u): u is string => !!u))];
+    // Same cache/keying for both sources — an exploration-mode creature marker (dungeon.entities)
+    // and its combat token (encounter) share the same portraitSrc URL, so whichever loads first
+    // covers both.
+    const explorationUrls = (dungeon?.entities ?? [])
+      .filter(e => e.type === 'creature')
+      .map(e => e.statBlock?.portraitSrc);
+    const urls = [...new Set([...(encounter ?? []).map(e => e.portraitSrc), ...explorationUrls].filter((u): u is string => !!u))];
     let pending = urls.length;
     if (pending === 0) return;
     urls.forEach(url => {
@@ -122,7 +135,7 @@ export default function Canvas({ player, characterId, character, connected, show
       img.onerror = () => { pending--; }; // no portrait yet (fire-and-forget hasn't finished) — drawToken's img-less branch covers this
       img.src = `${API}${url}`;
     });
-  }, [encounter]);
+  }, [encounter, dungeon?.entities]);
 
   // Subscribe to targeting events (registered once)
   useEffect(() => {
@@ -168,6 +181,19 @@ export default function Canvas({ player, characterId, character, connected, show
     return () => { u1(); u2(); u3(); u4(); u5(); };
   }, []);
 
+  // One-off redraw outside the normal state-driven draw effect below — for dev toggles (perf
+  // overlay, DevModal's lighting switch) that flip a module-level flag rather than React state,
+  // so nothing in the draw effect's dependency array would otherwise pick the change up.
+  function forceRedraw() {
+    const c = ref.current;
+    const params = latestDrawParamsRef.current;
+    const cx = c?.getContext('2d');
+    if (c && cx && params) drawScene(c, cx, params);
+  }
+
+  // DevModal (lighting + perf overlay toggles) forces a redraw after flipping a module-level flag.
+  useEffect(() => on('vtt:dev:redraw', forceRedraw), []);
+
   // Esc cancels active targeting (registered once) — the only window-level listener that isn't a
   // camera/drag concern, so it stays here rather than in useCanvasPointerControls.
   useEffect(() => {
@@ -183,7 +209,15 @@ export default function Canvas({ player, characterId, character, connected, show
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Draw
+  // Draw — coalesced to at most one actual drawScene() per animation frame. Combat bursts fire
+  // several independent state changes in quick succession (attack result, damage dealt, HP
+  // update, concentration...), each its own React commit; without this, each one triggers its own
+  // full redraw on top of the animTick RAF loop already running, so attempted draws pile up faster
+  // than the browser can flush them — that's what shows up as a *dropped* draws/s number despite
+  // (or because of) more draws being attempted, not fewer. Only the latest params matter each
+  // frame, so every skipped intermediate call is free to discard.
+  const drawRafPendingRef = useRef(false);
+  const latestDrawParamsRef = useRef<DrawSceneParams | null>(null);
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
@@ -193,13 +227,24 @@ export default function Canvas({ player, characterId, character, connected, show
     if (canvas.width !== canvas.offsetWidth)  canvas.width  = canvas.offsetWidth;
     if (canvas.height !== canvas.offsetHeight) canvas.height = canvas.offsetHeight;
 
-    drawScene(canvas, ctx, {
+    latestDrawParamsRef.current = {
       showBattleMap, dungeon, encounter, hoveredTokenKey, tokenPositions, player, movementRemaining,
       targeting, connected, deadPlayerNames, downPlayerNames, concentrating, deadCreatureIds,
       companions, visiblePolygon, litCells, senses, elevations, visibleCells,
       hoverHitChance, multiTargetCursor, multiTargetsPicked,
-      floorVariantRef, dungeonZoomRef, dungeonPanRef, dragRef, reachableRef, aoeMouseRef,
+      floorVariantRef, dungeonZoomRef, dungeonPanRef, dragRef, reachableRef, combatReachableRef, groundCacheRef, aoeMouseRef,
       tokenImgCache, enemyImgCache, flashEffectsRef, tokenEffectsRef, floatEffectsRef, swingEffectsRef,
+    };
+
+    if (drawRafPendingRef.current) return;
+    drawRafPendingRef.current = true;
+    requestAnimationFrame(() => {
+      drawRafPendingRef.current = false;
+      const c = ref.current;
+      const params = latestDrawParamsRef.current;
+      if (!c || !params) return;
+      const cx = c.getContext('2d');
+      if (cx) drawScene(c, cx, params);
     });
   }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick, aoeTick, visibleCells, visiblePolygon, senses, hoverHitChance, hoveredTokenKey, multiTargetsPicked, multiTargetCursor, concentrating]);
 
@@ -378,6 +423,9 @@ export default function Canvas({ player, characterId, character, connected, show
       if (Math.hypot(mx - cx, my - cy) <= TOKEN_R) {
         reachableRef.current = exploring && dungeon
           ? bfsReachable(dungeon.cells, pos.gx, pos.gy, Math.max(1, Math.floor(speed / 5)))
+          : null;
+        combatReachableRef.current = !exploring && dungeon && movementRemaining > 0
+          ? bfsReachable(dungeon.cells, pos.gx, pos.gy, Math.floor(movementRemaining / 5))
           : null;
         // Store drag position in screen space (includes pan so drag line renders correctly)
         dragRef.current = { id: player, x: cx + panX, y: cy + panY };

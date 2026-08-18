@@ -71,11 +71,22 @@ export function useCanvasPointerControls(
 
   // Window-level drag move + drop + pan + zoom (registered once)
   useEffect(() => {
+    // Native mousemove can fire far faster than the display refresh rate; coalesce every event
+    // between frames into a single redraw tick per rAF instead of one full drawScene per event.
+    let redrawRafId: number | null = null;
+    function scheduleRedraw() {
+      if (redrawRafId !== null) return;
+      redrawRafId = requestAnimationFrame(() => {
+        redrawRafId = null;
+        setDragTick(t => t + 1);
+      });
+    }
+
     function onMove(e: MouseEvent) {
       if (isPanningRef.current) {
         const { mx, my, px, py } = panStartRef.current;
         dungeonPanRef.current = { x: px + (e.clientX - mx), y: py + (e.clientY - my) };
-        setDragTick(t => t + 1);
+        scheduleRedraw();
         dispatch('vtt:viewport:changed', { ...dungeonPanRef.current, zoom: dungeonZoomRef.current });
         return;
       }
@@ -84,7 +95,7 @@ export function useCanvasPointerControls(
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
       dragRef.current = { ...drag, x: e.clientX - rect.left - dragOffset.current.x, y: e.clientY - rect.top - dragOffset.current.y };
-      setDragTick(t => t + 1);
+      scheduleRedraw();
     }
 
     function onUp() {
@@ -203,7 +214,7 @@ export function useCanvasPointerControls(
         y: my - (my - py) * (newZoom / oldZoom),
       };
       dungeonZoomRef.current = newZoom;
-      setDragTick(t => t + 1);
+      scheduleRedraw();
       dispatch('vtt:viewport:changed', { x: dungeonPanRef.current.x, y: dungeonPanRef.current.y, zoom: newZoom });
     }
 
@@ -215,6 +226,7 @@ export function useCanvasPointerControls(
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
       if (canvasEl) canvasEl.removeEventListener('wheel', onWheel);
+      if (redrawRafId !== null) cancelAnimationFrame(redrawRafId);
     };
   }, []);
 

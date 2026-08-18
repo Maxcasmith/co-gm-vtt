@@ -1,5 +1,5 @@
 import { TOKEN_R, FLASH_DUR, BUFF_PULSE_PERIOD, IMPACT_DUR } from './constants.ts';
-import type { FlashEffect, TokenSpecialEffect } from './types.ts';
+import type { FlashEffect, TokenSpecialEffect, TokenDim } from './types.ts';
 
 /** Jagged-tooth ring with a crossed trigger plate — reads as a snare/trap at a glance. White outline only. */
 function drawTrapIcon(ctx: CanvasRenderingContext2D, x: number, y: number, r: number) {
@@ -23,6 +23,35 @@ function drawTrapIcon(ctx: CanvasRenderingContext2D, x: number, y: number, r: nu
   ctx.stroke();
 }
 
+/**
+ * Applies a TokenDim's grayscale/brightness to whatever's already painted at (x,y,tokenR) — a
+ * clipped 'saturation'-composite gray wash or a clipped black-alpha wash, in place of `ctx.filter`
+ * (CSS filter strings are a known trigger for Chromium/Skia dropping the whole 2D canvas out of
+ * GPU-accelerated rendering, not just the filtered call — see types.ts's TokenDim doc). Only
+ * covers the token's own circle, not text drawn outside it (e.g. the hover nameplate below), which
+ * is a deliberate difference from the old ctx.filter behavior: nameplates now always stay readable
+ * instead of graying out with a dead/dim token.
+ */
+function applyTokenDim(ctx: CanvasRenderingContext2D, x: number, y: number, tokenR: number, dim: TokenDim): void {
+  if (!dim.grayscale && dim.brightness === undefined) return;
+  // Slightly wider than tokenR so the ring stroke's outer edge (drawn just before this, half its
+  // 2px lineWidth outside tokenR) is covered too, matching the old ctx.filter's "affects
+  // everything drawn while active" behavior.
+  const r = tokenR + 1.5;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.clip();
+  if (dim.grayscale) {
+    ctx.globalCompositeOperation = 'saturation';
+    ctx.fillStyle = 'rgb(128,128,128)';
+  } else {
+    ctx.fillStyle = `rgba(0, 0, 0, ${1 - (dim.brightness ?? 1)})`;
+  }
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  ctx.restore();
+}
+
 export function drawToken(
   ctx: CanvasRenderingContext2D,
   x: number, y: number,
@@ -33,7 +62,11 @@ export function drawToken(
   zoom: number,
   img?: HTMLImageElement,
   icon?: 'trap',
+  dim?: TokenDim,
 ) {
+  ctx.save();
+  if (dim?.opacity !== undefined) ctx.globalAlpha = dim.opacity;
+
   if (img) {
     ctx.save();
     ctx.beginPath();
@@ -56,15 +89,22 @@ export function drawToken(
       ctx.fillText(label, x, y);
     }
   }
+
   ctx.beginPath();
   ctx.arc(x, y, tokenR, 0, Math.PI * 2);
   ctx.strokeStyle = 'rgba(255,255,255,0.8)';
   ctx.lineWidth = 2;
   ctx.stroke();
+
+  if (dim) applyTokenDim(ctx, x, y, tokenR, dim);
+  ctx.restore();
+
   if (hovered) {
     // Sized off zoom, not tokenR/TOKEN_R — a trap's marker circle (DUNGEON_ENTITY_R) is smaller
     // than a player token's (TOKEN_R), but its hover nameplate should read at the exact same
     // pixel size as hovering a player token at the same zoom, not scaled down with the circle.
+    // Drawn after the outer restore — nameplates always render at full brightness/opacity, never
+    // dimmed with the token (see applyTokenDim's doc).
     ctx.fillStyle = '#fff';
     ctx.font = `${Math.round(11 * zoom)}px monospace`;
     ctx.textAlign = 'center';
@@ -117,8 +157,6 @@ function drawAura(ctx: CanvasRenderingContext2D, x: number, y: number, tokenR: n
   const elapsed = Date.now() - startTime;
   ctx.save();
   ctx.lineWidth = 2.5;
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 10;
   for (let i = 0; i < AURA_RING_COUNT; i++) {
     const phase = ((elapsed + (i * BUFF_PULSE_PERIOD) / AURA_RING_COUNT) % BUFF_PULSE_PERIOD) / BUFF_PULSE_PERIOD;
     const rotation = elapsed / 900 + i * Math.PI;
@@ -136,9 +174,6 @@ function drawImpact(ctx: CanvasRenderingContext2D, x: number, y: number, tokenR:
   const t = Math.min((Date.now() - startTime) / IMPACT_DUR, 1);
   const fade = 1 - t;
   ctx.save();
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 18;
-
   ctx.globalAlpha = fade * 0.9;
   const flashR = tokenR * (0.4 + t * 0.6);
   const grad = ctx.createRadialGradient(x, y, 0, x, y, flashR);
@@ -193,8 +228,6 @@ function drawFlameLick(ctx: CanvasRenderingContext2D, bx: number, by: number, an
 function drawFireAura(ctx: CanvasRenderingContext2D, x: number, y: number, tokenR: number, startTime: number) {
   const elapsed = Date.now() - startTime;
   ctx.save();
-  ctx.shadowColor = '#ff6a00';
-  ctx.shadowBlur = 12;
   ctx.globalAlpha = 0.9;
   for (let i = 0; i < FLAME_COUNT; i++) {
     const ang = (i / FLAME_COUNT) * Math.PI * 2;
@@ -210,8 +243,6 @@ function drawFireAura(ctx: CanvasRenderingContext2D, x: number, y: number, token
 function drawFireImpact(ctx: CanvasRenderingContext2D, x: number, y: number, tokenR: number, startTime: number) {
   const t = Math.min((Date.now() - startTime) / IMPACT_DUR, 1);
   ctx.save();
-  ctx.shadowColor = '#ff5500';
-  ctx.shadowBlur = 20;
   ctx.globalAlpha = 1 - t;
 
   const coreR = tokenR * (0.5 + t * 0.5);
@@ -250,8 +281,6 @@ export function drawConcentrationBadge(ctx: CanvasRenderingContext2D, x: number,
   const bx = x + tokenR * 0.72, by = y - tokenR * 0.72;
   const r = Math.max(4, tokenR * 0.22);
   ctx.save();
-  ctx.shadowColor = '#d4af37';
-  ctx.shadowBlur = 6;
   ctx.beginPath();
   ctx.moveTo(bx, by - r); ctx.lineTo(bx + r, by); ctx.lineTo(bx, by + r); ctx.lineTo(bx - r, by);
   ctx.closePath();

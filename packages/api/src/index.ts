@@ -7,6 +7,7 @@ import { adminRouter } from './routes/admin.ts';
 import { spellsRouter } from './routes/spells.ts';
 import { tilesetsRouter } from './routes/tilesets.ts';
 import { creaturesRouter } from './routes/creatures.ts';
+import { debugPerfRouter } from './routes/debugPerf.ts';
 import { app, httpServer } from './state.ts';
 import { registerSocketHandlers } from './socketHandlers/index.ts';
 
@@ -19,6 +20,7 @@ app.use('/api/adventures', adventuresRouter);
 app.use('/api/spells', spellsRouter);
 app.use('/api/tilesets', tilesetsRouter);
 app.use('/api/creatures', creaturesRouter);
+app.use('/api/debug/perf-log', debugPerfRouter);
 
 registerSocketHandlers();
 

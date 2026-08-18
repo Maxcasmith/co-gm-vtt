@@ -4,6 +4,8 @@ import type { Character, Player, EnemyStatBlock, TokenPosition, Dungeon, Quest, 
 import { HIT_DICE } from './character-creation/srd.ts';
 import Canvas from './Canvas.tsx';
 import EncounterLoadingOverlay from './EncounterLoadingOverlay.tsx';
+import DungeonLoadingOverlay from './DungeonLoadingOverlay.tsx';
+import { useDungeonReady } from './canvas/useDungeonReady.ts';
 import CommandPalette from './CommandPalette.tsx';
 import CharacterSheetOverlay from './CharacterSheetOverlay.tsx';
 import JournalOverlay from './JournalOverlay.tsx';
@@ -12,6 +14,7 @@ import CombatLogOverlay from './CombatLogOverlay.tsx';
 import ChatWidget from './ChatWidget.tsx';
 import QuickChat from './QuickChat.tsx';
 import ShortcutsOverlay from './ShortcutsOverlay.tsx';
+import DevModal from './DevModal.tsx';
 import RestModal from './RestModal.tsx';
 import BattleMapBackground from './BattleMapBackground.tsx';
 import CombatDock from './CombatDock.tsx';
@@ -57,6 +60,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [combatLogOpen, setCombatLogOpen] = useState(false);
   const [quickChatOpen, setQuickChatOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [devModalOpen, setDevModalOpen] = useState(false);
   const [sessionActive, setSessionActive] = useState(false);
   const [combatActive, setCombatActive] = useState(false);
   const [encounter, setEncounter] = useState<EnemyStatBlock[] | null>(null);
@@ -93,6 +97,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [worldMapUrl, setWorldMapUrl] = useState<string | undefined>(undefined);
   const [dungeon, setDungeon] = useState<Dungeon | null>(null);
   const [dungeonGenerating, setDungeonGenerating] = useState(false);
+  const dungeonReady = useDungeonReady(dungeon ?? undefined, dungeonGenerating);
   const [questLogOpen, setQuestLogOpen] = useState(false);
   const [quests, setQuests] = useState<Quest[]>([]);
   const [act, setAct] = useState(1);
@@ -505,6 +510,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       } else if (e.key === 'j' && now - lastSpaceRef.current < DOUBLE_TAP_MS) {
         lastSpaceRef.current = 0;
         setJournalOpen(o => !o);
+      } else if (e.key === 'D' && e.shiftKey) {
+        setDevModalOpen(o => !o);
       }
     }
     window.addEventListener('keydown', onKey);
@@ -603,6 +610,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       <PartyHud connected={connected} portraitUrls={portraitUrls} self={character.name} hp={partyHp} selfTempHp={playerHpState?.temp} />
       <CombatDock character={liveCharacter} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} activeBuffs={activeBuffs} elevationFt={elevations[character.id] ?? 0} />
       <EncounterLoadingOverlay />
+      <DungeonLoadingOverlay visible={!!dungeon && !dungeonReady} generating={dungeonGenerating} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} header={<span className="palette-clock">{formatWorldTime(worldTimeSecs)}</span>} />
       <CharacterSheetOverlay
         character={liveCharacter}
@@ -613,6 +621,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       <JournalOverlay open={journalOpen} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} />
       <QuestLog open={questLogOpen} onClose={() => setQuestLogOpen(false)} quests={quests} act={act} />
       <CombatLogOverlay open={combatLogOpen} onClose={() => setCombatLogOpen(false)} />
+      <DevModal open={devModalOpen} onClose={() => setDevModalOpen(false)} />
       {!journalOpen && <ChatWidget />}
       <QuickChat open={quickChatOpen} onClose={() => setQuickChatOpen(false)} senderName={character.name} sessionActive={sessionActive} disabled={combatActive && !isMyTurn} />
       {victory && <VictoryScreen data={victory} onDismiss={() => setVictory(null)} />}
@@ -622,11 +631,6 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       <RestModal character={character} />
       <BattleMapBackground worldMapUrl={worldMapUrl} />
       <div className="item-notifications">
-        {dungeonGenerating && (
-          <div className="item-notification">
-            <span className="item-notification-label">Generating dungeon…</span>
-          </div>
-        )}
         {itemNotifications.map(n => (
           <div key={n.id} className="item-notification">
             <span className="item-notification-label">Item received</span>

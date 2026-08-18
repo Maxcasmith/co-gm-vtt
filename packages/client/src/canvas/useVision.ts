@@ -39,6 +39,14 @@ export function useVision(
   // hasLineOfSight walk fog uses), 5ft/cell Chebyshev distance (same convention as
   // nearbyParticipantIds server-side). Every source is full-bright inside its radius — no
   // per-source level, no falloff — combined with `illumination` via max() when rendered.
+  //
+  // Dep key below is only the light-carrying tokens' own positions, not the whole tokenPositions
+  // object — that object gets a new identity on every token move (any player/enemy/companion
+  // step), which would otherwise re-walk every source's wall-raycast radius on unrelated moves.
+  const lightSourceTokenIds = dungeon?.lightSources ? Object.keys(dungeon.lightSources) : null;
+  const lightCarrierPosKey = lightSourceTokenIds?.length
+    ? lightSourceTokenIds.map(id => { const p = tokenPositions?.[id]; return p ? `${id}:${p.gx},${p.gy}` : id; }).join('|')
+    : null;
   const litCells = useMemo(() => {
     if (!dungeon) return null;
     const sources: { gx: number; gy: number; rangeFt: number }[] = [
@@ -62,7 +70,7 @@ export function useVision(
     }
     return set;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dungeon, tokenPositions]);
+  }, [dungeon, lightCarrierPosKey]);
 
   // Senses — one wall-blocked radius per sense the character's species grants (darkvision today;
   // blindsight/truesight/devilsSight/tremorsense once something actually grants them — see

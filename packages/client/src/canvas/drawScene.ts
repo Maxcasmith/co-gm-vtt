@@ -2,15 +2,86 @@ import type { RefObject } from 'react';
 import type { Dungeon, EnemyStatBlock, Player, TurnOrderEntry } from 'shared';
 import { parseRangeFeet, spellTargetCount } from 'shared';
 import type { TargetingStartPayload } from '../events.ts';
-import { texturesFor, getImage, FLOOR_FALLBACK_COLOR } from '../dungeonThemes.ts';
+import { getTextureLoadVersion } from '../dungeonThemes.ts';
 import { CELL, TOKEN_R, DUNGEON_ENTITY_R, FLOAT_DUR, DUNGEON_BG, FOG_OF_WAR_COLOR } from './constants.ts';
-import { bfsReachable } from './geometry.ts';
 import { inArea, resolveAoeOrigin, drawAoeShape, nearestRingCell } from './aoe.ts';
 import { drawToken, drawHitFlash, drawTargetRing, drawDeadMarker, drawTokenEffect, drawConcentrationBadge } from './drawToken.ts';
 import { drawHazardCell } from './drawHazard.ts';
 import { drawSwing } from './drawSwing.ts';
 import { computeLighting, applyGroundLighting, tokenLightFilter } from './lighting.ts';
-import type { FloatEffect, FlashEffect, TokenSpecialEffect, SwingEffect, SenseCells } from './types.ts';
+import { buildGroundCache, type GroundCache } from './groundCache.ts';
+import type { FloatEffect, FlashEffect, TokenSpecialEffect, SwingEffect, SenseCells, TokenDim } from './types.ts';
+
+// ponytail: debug-only perf overlay — draws aren't on a continuous rAF loop here (they fire per
+// state change, see Canvas.tsx's draw effect deps), so "FPS" is draws/sec over a trailing 1s
+// window, which is exactly what tells you whether redraws are keeping up with input. Toggle from
+// DevModal (Shift+D).
+let showPerfOverlay = true;
+export function togglePerfOverlay(): void {
+  showPerfOverlay = !showPerfOverlay;
+}
+export function isPerfOverlayEnabled(): boolean {
+  return showPerfOverlay;
+}
+const perfState = { frameTimes: [] as number[], lastDrawMs: 0, lastSections: [] as [string, number][] };
+
+// ponytail: debug-only — auto-reports lag-spike frames (well above the ~16.7ms/frame budget, i.e.
+// attack-grade) to the local API's storage/logs, so the section breakdown can be reviewed directly
+// instead of relying on someone copy-pasting console output. Throttled so a sustained bad stretch
+// doesn't flood the log. Delete this + the debugPerfRouter/logDebug call site once diagnosed.
+const PERF_LOG_API = `http://${window.location.hostname}:3001`;
+const PERF_LOG_THRESHOLD_MS = 30;
+const PERF_LOG_MIN_INTERVAL_MS = 500;
+let lastPerfLogAt = 0;
+
+function maybeReportPerfSpike(durationMs: number, sections: [string, number][], drawsPerSec: number, meta: Record<string, number | string>): void {
+  if (durationMs < PERF_LOG_THRESHOLD_MS) return;
+  const now = Date.now();
+  if (now - lastPerfLogAt < PERF_LOG_MIN_INTERVAL_MS) return;
+  lastPerfLogAt = now;
+  fetch(`${PERF_LOG_API}/api/debug/perf-log`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      totalMs: Math.round(durationMs * 10) / 10,
+      drawsPerSec,
+      sections: Object.fromEntries(sections.map(([label, ms]) => [label, Math.round(ms * 10) / 10])),
+      meta,
+    }),
+  }).catch(() => {});
+}
+
+function recordFrame(durationMs: number, sections: [string, number][], meta: Record<string, number | string>): void {
+  const now = performance.now();
+  perfState.frameTimes.push(now);
+  const cutoff = now - 1000;
+  while (perfState.frameTimes.length && perfState.frameTimes[0]! < cutoff) perfState.frameTimes.shift();
+  perfState.lastDrawMs = durationMs;
+  perfState.lastSections = sections;
+  maybeReportPerfSpike(durationMs, sections, perfState.frameTimes.length, meta);
+}
+
+function drawPerfOverlay(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement): void {
+  const fps = perfState.frameTimes.length;
+  const lines = [
+    `${fps} draws/s  ${perfState.lastDrawMs.toFixed(1)}ms`,
+    ...perfState.lastSections.map(([label, ms]) => `  ${label}: ${ms.toFixed(1)}ms`),
+  ];
+  ctx.save();
+  ctx.font = 'bold 13px monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  const w = Math.max(...lines.map(l => ctx.measureText(l).width));
+  const x = canvas.width - w - 18;
+  const lineH = 16;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(x - 6, 6, w + 12, lines.length * lineH + 4);
+  lines.forEach((line, i) => {
+    ctx.fillStyle = i === 0 ? (perfState.lastDrawMs > 16.7 ? '#ff5555' : '#55ff55') : '#cccccc';
+    ctx.fillText(line, x, 10 + i * lineH);
+  });
+  ctx.restore();
+}
 
 export interface DrawSceneParams {
   showBattleMap?: boolean;
@@ -40,6 +111,10 @@ export interface DrawSceneParams {
   dungeonPanRef: RefObject<{ x: number; y: number }>;
   dragRef: RefObject<{ id: string; x: number; y: number } | null>;
   reachableRef: RefObject<Set<string> | null>;
+  /** Wall-aware combat move-reach set, computed once at drag-start (see Canvas.tsx's handleMouseDown) rather than re-walked here every redraw. */
+  combatReachableRef: RefObject<Set<string> | null>;
+  /** Baked static-ground bitmap (floor/textures/grid/entrance overlay), rebuilt only when the dungeon or a texture load changes — see groundCache.ts. */
+  groundCacheRef: RefObject<GroundCache | null>;
   aoeMouseRef: RefObject<{ gx: number; gy: number } | null>;
   tokenImgCache: RefObject<Record<string, HTMLImageElement>>;
   enemyImgCache: RefObject<Record<string, HTMLImageElement>>;
@@ -62,12 +137,22 @@ export interface DrawSceneParams {
  * obscured by an effect or a token drawn later in the same frame.
  */
 export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, p: DrawSceneParams): void {
+  const __drawStart = showPerfOverlay ? performance.now() : 0;
+  let __mark = __drawStart;
+  const __sections: [string, number][] = [];
+  function mark(label: string): void {
+    if (!showPerfOverlay) return;
+    const now = performance.now();
+    __sections.push([label, now - __mark]);
+    __mark = now;
+  }
+  const __meta: Record<string, number | string> = {};
   const {
     showBattleMap, dungeon, encounter, hoveredTokenKey, tokenPositions, player, movementRemaining,
     targeting, connected, deadPlayerNames, downPlayerNames, concentrating, deadCreatureIds,
     companions, visiblePolygon, litCells, senses, elevations, visibleCells,
     hoverHitChance, multiTargetCursor, multiTargetsPicked,
-    floorVariantRef, dungeonZoomRef, dungeonPanRef, dragRef, reachableRef, aoeMouseRef,
+    floorVariantRef, dungeonZoomRef, dungeonPanRef, dragRef, reachableRef, combatReachableRef, groundCacheRef, aoeMouseRef,
     tokenImgCache, enemyImgCache, flashEffectsRef, tokenEffectsRef, floatEffectsRef, swingEffectsRef,
   } = p;
 
@@ -82,68 +167,59 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
       const lighting = computeLighting(dungeon, senses);
 
       if (dungeon) {
-        // Dungeon grid: wall background, then floor cells, then entity markers
+        // Dungeon grid: wall background, then baked floor layer, then entity markers
         ctx.fillStyle = DUNGEON_BG;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        mark('clear+bg');
 
-        // Base floor fallback (covers corridors + any cell not owned by a room, and shows through
-        // until a room's texture finishes decoding), then per-room floor tiles drawn over their
-        // own cells — irregular room shapes mean the bounding box can include cells that aren't
-        // actually walkable, so this stays cell-checked.
-        ctx.fillStyle = FLOOR_FALLBACK_COLOR;
-        for (let row = 0; row < dungeon.height; row++) {
-          for (let col = 0; col < dungeon.width; col++) {
-            if (dungeon.cells[row]?.[col] === 1) {
-              ctx.fillRect(col * cellSz + panX, row * cellSz + panY, cellSz, cellSz);
-            }
-          }
-        }
+        // Floor fallback + per-room textures + grid lines + entrance/exit overlay are static per
+        // dungeon (only the room-material assignment and cell layout matter, both fixed once a
+        // dungeon loads) — baked once into an offscreen bitmap instead of redrawing every cell
+        // with its own canvas call on every frame. Rebuilt only on a new dungeon or once a texture
+        // that was still decoding at bake time finishes loading (see groundCache.ts).
         if (floorVariantRef.current.dungeonId !== dungeon.id) {
           floorVariantRef.current = { dungeonId: dungeon.id, picks: new Map() };
         }
         const variantPicks = floorVariantRef.current.picks;
-        for (const room of dungeon.rooms) {
-          const variants = texturesFor(dungeon.theme, room.material, dungeon.structureType);
-          if (!variants.length) continue;
-          for (let row = room.y; row < room.y + room.height; row++) {
-            for (let col = room.x; col < room.x + room.width; col++) {
-              if (dungeon.cells[row]?.[col] !== 1) continue;
-              const key = `${row},${col}`;
-              let variantIdx = variantPicks.get(key);
-              if (variantIdx === undefined || variantIdx >= variants.length) {
-                variantIdx = Math.floor(Math.random() * variants.length);
-                variantPicks.set(key, variantIdx);
-              }
-              const img = getImage(variants[variantIdx]!);
-              if (img.complete) {
-                ctx.drawImage(img, col * cellSz + panX, row * cellSz + panY, cellSz, cellSz);
-              }
-            }
-          }
+        const textureVersion = getTextureLoadVersion();
+        let ground = groundCacheRef.current;
+        if (!ground || ground.dungeonId !== dungeon.id || ground.textureVersion !== textureVersion) {
+          ground = buildGroundCache(dungeon, variantPicks, textureVersion);
+          groundCacheRef.current = ground;
+          mark('ground-cache-REBUILD');
+        } else {
+          mark('ground-cache-check');
         }
-
-        // Subtle grid lines on floor only
-        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-        ctx.lineWidth = 0.5;
-        for (let row = 0; row < dungeon.height; row++) {
-          for (let col = 0; col < dungeon.width; col++) {
-            if (dungeon.cells[row]?.[col] === 1) {
-              ctx.strokeRect(col * cellSz + panX + 0.5, row * cellSz + panY + 0.5, cellSz - 1, cellSz - 1);
-            }
-          }
+        // Crop both source and destination to the actually-visible viewport, intersected with the
+        // dungeon bounds — requesting a drawImage scaled across the *full* dungeon extent (up to
+        // 12800x12800px destination at max zoom for a 100-wide map) measured as costing roughly
+        // proportional to the requested area, not the on-screen portion — the canvas's own
+        // clipping to its bounds did not make an oversized scaled blit cheap in practice, contrary
+        // to the naive assumption that off-canvas pixels are free. Cropping first keeps the cost
+        // proportional to what's actually visible instead.
+        const visX0 = Math.max(0, Math.floor(-panX / cellSz));
+        const visY0 = Math.max(0, Math.floor(-panY / cellSz));
+        const visX1 = Math.min(dungeon.width, Math.ceil((canvas.width - panX) / cellSz));
+        const visY1 = Math.min(dungeon.height, Math.ceil((canvas.height - panY) / cellSz));
+        if (visX1 > visX0 && visY1 > visY0) {
+          const sx = visX0 * CELL, sy = visY0 * CELL;
+          const sw = (visX1 - visX0) * CELL, sh = (visY1 - visY0) * CELL;
+          const dx = visX0 * cellSz + panX, dy = visY0 * cellSz + panY;
+          const dw = (visX1 - visX0) * cellSz, dh = (visY1 - visY0) * cellSz;
+          ctx.drawImage(ground.canvas, sx, sy, sw, sh, dx, dy, dw, dh);
         }
-
-        // Entrance/exit room overlays — per-cell, not a blanket rect: irregular room shapes mean
-        // a room's bounding box can include wall cells that aren't actually part of the room.
-        for (const room of dungeon.rooms) {
-          if (!room.role) continue;
-          ctx.fillStyle = room.role === 'entrance' ? 'rgba(60,200,90,0.18)' : 'rgba(220,170,30,0.18)';
-          for (let row = room.y; row < room.y + room.height; row++) {
-            for (let col = room.x; col < room.x + room.width; col++) {
-              if (dungeon.cells[row]?.[col] === 1) ctx.fillRect(col * cellSz + panX, row * cellSz + panY, cellSz, cellSz);
-            }
-          }
-        }
+        mark('ground-drawImage');
+        __meta.dungeonId = dungeon.id;
+        __meta.theme = dungeon.theme ?? '';
+        __meta.structureType = dungeon.structureType ?? '';
+        __meta.illum = dungeon.illumination ?? 1;
+        __meta.zoom = zoom;
+        __meta.canvasW = canvas.width;
+        __meta.canvasH = canvas.height;
+        __meta.dungeonWxH = `${dungeon.width}x${dungeon.height}`;
+        __meta.groundCanvasWxH = `${ground.canvas.width}x${ground.canvas.height}`;
+        __meta.cropCellsWxH = `${visX1 - visX0}x${visY1 - visY0}`;
+        __meta.cropPxWxH = `${(visX1 - visX0) * cellSz}x${(visY1 - visY0) * cellSz}`;
 
         // Lasting map hazards (Entangle's vines, Grease/Fog Cloud's smudge) — filled per cell,
         // under entities/tokens so nothing painted on top of them gets visually buried.
@@ -151,6 +227,7 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           if (!cell.style) continue;
           drawHazardCell(ctx, cell.gx, cell.gy, cell.gx * cellSz + panX, cell.gy * cellSz + panY, cellSz, cell.style, cell.color ?? '#888888');
         }
+        mark('hazards');
 
         // Entity markers
         const entityR = DUNGEON_ENTITY_R * dungeonZoomRef.current;
@@ -166,9 +243,17 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
             drawToken(ctx, ex, ey, '', `${entity.placedBy}'s ${entity.name}`, 'rgba(150,60,220,0.85)', entityR, hoveredTokenKey === entity.id, zoom, undefined, 'trap');
             continue;
           }
+          if (entity.type === 'creature') {
+            const portraitSrc = entity.statBlock?.portraitSrc;
+            const portraitImg = portraitSrc ? enemyImgCache.current?.[portraitSrc] : undefined;
+            // Full combat-token size (tokenR), not the smaller entityR other map markers use —
+            // a creature should read at its normal battle size while exploring, not as a pip.
+            drawToken(ctx, ex, ey, (entity.name[0] ?? '?').toUpperCase(), entity.name, 'rgba(192,57,43,0.8)', tokenR, hoveredTokenKey === entity.id, zoom, portraitImg);
+            continue;
+          }
           ctx.beginPath();
           ctx.arc(ex, ey, entityR, 0, Math.PI * 2);
-          ctx.fillStyle = entity.type === 'creature' ? 'rgba(192,57,43,0.8)' : 'rgba(212,172,13,0.8)';
+          ctx.fillStyle = 'rgba(212,172,13,0.8)';
           ctx.fill();
           ctx.strokeStyle = 'rgba(255,255,255,0.5)';
           ctx.lineWidth = 1;
@@ -190,7 +275,9 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
       // of it, so the movement/targeting highlights and every token drawn afterward get their own
       // treatment (constant color for highlights, per-token dimming for tokens — see
       // tokenLightFilter below) rather than inheriting a second darkening pass from this one.
+      mark('entities');
       if (dungeon) applyGroundLighting(ctx, dungeon, cellSz, panX, panY, litCells, senses, lighting);
+      mark('lighting');
 
       if ((encounter || dungeon) && tokenPositions) {
         const drag = dragRef.current;
@@ -203,8 +290,8 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           const reach = Math.floor(movementRemaining / 5);
           ctx.fillStyle = 'rgba(255, 200, 50, 0.13)';
           if (dungeon) {
-            const reachable = bfsReachable(dungeon.cells, playerPos.gx, playerPos.gy, reach);
-            for (const key of reachable) {
+            const reachable = combatReachableRef.current;
+            for (const key of reachable ?? []) {
               const [kx, ky] = key.split(',').map(Number) as [number, number];
               if (kx === playerPos.gx && ky === playerPos.gy) continue;
               ctx.fillRect(kx * cellSz + panX, ky * cellSz + panY, cellSz, cellSz);
@@ -323,10 +410,8 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           const isDead = deadPlayerNames?.has(name) ?? false;
           const isDown = !isDead && (downPlayerNames?.has(name) ?? false);
 
-          const lightFilter = tokenLightFilter(pos.gx, pos.gy, litCells, senses, lighting);
-          ctx.filter = isDead ? 'grayscale(1) opacity(0.25)' : isDown ? 'grayscale(1) opacity(0.55)' : lightFilter || 'none';
-          drawToken(ctx, x, y, (name[0] ?? '?').toUpperCase(), name, '#5a9ff5', tokenR, hoveredTokenKey === name, zoom, img);
-          ctx.filter = 'none';
+          const dim: TokenDim = isDead ? { grayscale: true, opacity: 0.25 } : isDown ? { grayscale: true, opacity: 0.55 } : tokenLightFilter(pos.gx, pos.gy, litCells, senses, lighting);
+          drawToken(ctx, x, y, (name[0] ?? '?').toUpperCase(), name, '#5a9ff5', tokenR, hoveredTokenKey === name, zoom, img, undefined, dim);
 
           if (!inSight(pos.gx, pos.gy)) return;
           effectDraws.push(() => {
@@ -357,14 +442,12 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           const y = isDragged ? drag!.y : pos.gy * cellSz + cellSz / 2 + panY;
 
           const isDead = deadCreatureIds?.has(enemy.id);
-          const lightFilter = tokenLightFilter(pos.gx, pos.gy, litCells, senses, lighting);
-          ctx.filter = isDead ? `grayscale(1) opacity(0.45)` : lightFilter || 'none';
+          const dim: TokenDim = isDead ? { grayscale: true, opacity: 0.45 } : tokenLightFilter(pos.gx, pos.gy, litCells, senses, lighting);
           // enemy.portraitSrc missing or not yet loaded (fire-and-forget generation still running,
           // or never ran) -> img is undefined -> drawToken's existing img-less branch (colored
           // circle + initial) covers it, same fallback it's always had.
           const portraitImg = enemy.portraitSrc ? enemyImgCache.current?.[enemy.portraitSrc] : undefined;
-          drawToken(ctx, x, y, (enemy.name[0] ?? '?').toUpperCase(), enemy.name, isDead ? '#555' : '#c0392b', tokenR, hoveredTokenKey === enemy.id, zoom, portraitImg);
-          ctx.filter = 'none';
+          drawToken(ctx, x, y, (enemy.name[0] ?? '?').toUpperCase(), enemy.name, isDead ? '#555' : '#c0392b', tokenR, hoveredTokenKey === enemy.id, zoom, portraitImg, undefined, dim);
 
           if (!inSight(pos.gx, pos.gy)) return;
           effectDraws.push(() => {
@@ -411,9 +494,8 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           const x = isDragged ? drag!.x : pos.gx * cellSz + cellSz / 2 + panX;
           const y = isDragged ? drag!.y : pos.gy * cellSz + cellSz / 2 + panY;
 
-          ctx.filter = tokenLightFilter(pos.gx, pos.gy, litCells, senses, lighting) || 'none';
-          drawToken(ctx, x, y, (companion.name[0] ?? '?').toUpperCase(), companion.name, '#2ecc71', tokenR, hoveredTokenKey === companion.id, zoom);
-          ctx.filter = 'none';
+          const dim = tokenLightFilter(pos.gx, pos.gy, litCells, senses, lighting);
+          drawToken(ctx, x, y, (companion.name[0] ?? '?').toUpperCase(), companion.name, '#2ecc71', tokenR, hoveredTokenKey === companion.id, zoom, undefined, undefined, dim);
 
           if (!inSight(pos.gx, pos.gy)) return;
           effectDraws.push(() => {
@@ -465,10 +547,8 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
             ctx.stroke();
           }
 
-          if (isDead) ctx.filter = 'grayscale(1) opacity(0.25)';
-          else if (isDown) ctx.filter = 'grayscale(1) opacity(0.55)';
-          drawToken(ctx, x, y, (player[0] ?? '?').toUpperCase(), player, '#3a7bd5', tokenR, hoveredTokenKey === player, zoom, img);
-          ctx.filter = 'none';
+          const dim: TokenDim | undefined = isDead ? { grayscale: true, opacity: 0.25 } : isDown ? { grayscale: true, opacity: 0.55 } : undefined;
+          drawToken(ctx, x, y, (player[0] ?? '?').toUpperCase(), player, '#3a7bd5', tokenR, hoveredTokenKey === player, zoom, img, undefined, dim);
 
           effectDraws.push(() => {
             // Caught in own AoE template — same red ring as enemies/allies, so friendly fire is visible before confirming
@@ -487,6 +567,8 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           });
         }
 
+        mark('tokens');
+
         // Effects layer — every token's ring/flash/aura/impact/dead-marker/concentration-badge,
         // now painted as one pass above every token's sprite (see effectDraws above), followed by
         // weapon swings. Both sit above tokens/ground/fog but below the text layer next.
@@ -504,12 +586,12 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
             swing.kind, swing.startTime,
           );
         }
+        mark('effects');
 
         // Text layer — always topmost, painted last so no token, effect, or fog drawn above ever
-        // buries it, and always full brightness/color: explicitly reset here (every earlier
-        // ctx.filter set above already resets itself, but this makes "text ignores
-        // lighting/darkvision" an invariant of the layer boundary, not an accident of ordering).
-        ctx.filter = 'none';
+        // buries it, and always full brightness/color: every token's dimming above is applied via
+        // drawToken's own clipped overlay (see drawToken.ts), never ctx.filter, so there's nothing
+        // for text drawn from here on to inherit.
 
         // Elevation badges (Feather Fall, falling damage) — one small label per token currently
         // off the ground.
@@ -544,13 +626,17 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           ctx.font = `bold ${Math.round(21 * zoom)}px monospace`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.shadowColor = 'rgba(0,0,0,0.95)';
-          ctx.shadowBlur = 7;
+          // Dark stroke behind the fill reads against any background, same purpose shadowBlur
+          // served — but shadowBlur (like ctx.filter) is a known trigger for Chromium/Skia
+          // dropping the whole 2D canvas out of GPU-accelerated rendering, and this fires once per
+          // float, every float, so it's worth avoiding here specifically.
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+          ctx.strokeText(eff.text, 0, 0);
           ctx.fillStyle = eff.isHeal ? '#32cd32' : eff.isHit ? '#ff4040' : '#ffffff';
           ctx.fillText(eff.text, 0, 0);
           ctx.restore();
         }
-
         // Drag line: origin → cursor with distance label at midpoint
         if (drag?.id === player && playerPos) {
           const ox = playerPos.gx * cellSz + cellSz / 2 + panX;
@@ -599,8 +685,9 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           ctx.font = 'bold 15px monospace';
           ctx.textAlign = 'left';
           ctx.textBaseline = 'middle';
-          ctx.shadowColor = 'rgba(0,0,0,0.9)';
-          ctx.shadowBlur = 4;
+          ctx.lineWidth = 2.5;
+          ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+          ctx.strokeText(`${hoverHitChance.percent}%`, hcX, hcY);
           ctx.fillStyle = '#ffffff';
           ctx.fillText(`${hoverHitChance.percent}%`, hcX, hcY);
           ctx.restore();
@@ -632,5 +719,11 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
         }
   } else {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+  mark('text');
+
+  if (showPerfOverlay) {
+    recordFrame(performance.now() - __drawStart, __sections, __meta);
+    drawPerfOverlay(ctx, canvas);
   }
 }
