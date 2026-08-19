@@ -1,18 +1,21 @@
 import { useEffect, useState } from 'react';
 import GenerateTilesetModal from './GenerateTilesetModal.tsx';
+import BestiaryTab from './BestiaryTab.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
 
 type TilesetManifest = Record<string, Record<string, string[]>>;
+type ResourceTab = 'tiles' | 'bestiary';
 
 function titleCase(s: string): string {
   return s.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-export default function AdminTilesPage() {
+export default function AdminResourcesPage() {
   const [password, setPassword] = useState('');
   const [authed, setAuthed]     = useState(false);
   const [error, setError]       = useState('');
+  const [tab, setTab]           = useState<ResourceTab>('tiles');
   const [manifest, setManifest] = useState<TilesetManifest>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [generateOpen, setGenerateOpen] = useState(false);
@@ -100,12 +103,20 @@ export default function AdminTilesPage() {
             <span className="home-eyebrow">Dungeon Master&apos;s Study</span>
             <h1 className="admin-title">
               <span className="home-title-flourish" aria-hidden="true" />
-              Tilesets
+              Resources
               <span className="home-title-flourish" aria-hidden="true" />
             </h1>
           </div>
         </div>
 
+        <div className="sheet-tabs admin-resource-tabs">
+          <button className={`sheet-tab${tab === 'tiles' ? ' sheet-tab--active' : ''}`} onClick={() => setTab('tiles')}>Tiles</button>
+          <button className={`sheet-tab${tab === 'bestiary' ? ' sheet-tab--active' : ''}`} onClick={() => setTab('bestiary')}>Bestiary</button>
+        </div>
+
+        {tab === 'bestiary' && <BestiaryTab />}
+
+        {tab === 'tiles' && <>
         <div className="admin-modules-header">
           <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">🧱</span>Dungeon Tilesets</h2>
           <button className="btn-primary" onClick={() => setGenerateOpen(true)}>+ Generate Tileset</button>
@@ -173,6 +184,7 @@ export default function AdminTilesPage() {
             );
           })}
         </div>
+        </>}
       </div>
 
       <GenerateTilesetModal

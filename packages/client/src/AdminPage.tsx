@@ -158,7 +158,7 @@ export default function AdminPage() {
           </h1>
         </div>
         <div className="admin-header-link admin-header-link--right admin-header-link-group">
-          <a className="btn-secondary" href="/admin/tiles">Tilesets</a>
+          <a className="btn-secondary" href="/admin/resources">Resources</a>
           <button className="btn-secondary" onClick={() => setSettingsOpen(true)}>Settings</button>
         </div>
       </div>

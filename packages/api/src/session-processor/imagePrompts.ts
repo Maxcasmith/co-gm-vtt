@@ -1,5 +1,5 @@
 import { calcAC, CREATURE_TYPES, ENEMY_ROLES } from 'shared';
-import type { ChatPayload, Character, EnemyStatBlock, CreatureType, EnemyRole, AttackResult, SpellAttackResult, SpellSaveResult, WorldState, NemesisRecord } from 'shared';
+import type { ChatPayload, Character, EnemyStatBlock, CreatureType, EnemyRole, AttackResult, SpellAttackResult, SpellSaveResult, WorldState, NemesisRecord, DungeonMaterialSpec } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { logError } from '../logger.ts';
 import { renderRoleTemplatesForPrompt } from '../combat/ai/roleTemplates.ts';
@@ -323,107 +323,25 @@ Return ONLY valid JSON, no markdown fences, no explanation.`;
   }
 }
 
-export function buildTilesetPrompt(theme: string): string {
+// materials must already be padded to exactly 16 entries (see dungeon/tilesets.ts's padMaterials)
+// — a real DungeonMaterialSpec per used slot, plus a repeated one (marked `variantOf`) for any
+// slot beyond the real count, cycling round-robin through the real materials so the crop grid
+// stays a fixed 4x4 regardless of how many distinct materials this dungeon's rooms actually asked
+// for, while every slot still renders as a genuine (if variant) texture instead of dead space.
+export function buildDynamicTilesetPrompt(theme: string, materials: (DungeonMaterialSpec & { variantOf?: number })[]): string {
+  const lines = materials.map((m, i) => m.variantOf
+    ? `${i + 1}. **${m.key}** — a variant of #${m.variantOf}: the same material, must merge and tile seamlessly with it, but with a bit of extra visual variety (different crack/wear/stain pattern, slight tonal shift) so it doesn't read as an exact duplicate. ${m.description}`
+    : `${i + 1}. **${m.key}** — ${m.description}`);
+
   return `Generate a **2D top-down seamless texture atlas** for a dungeon crawler.
 
 # THEME
 
 **${theme}**
 
-The theme must strongly influence the overall visual style, atmosphere, colour palette, condition, detailing, and interpretation of every material.
+The theme must strongly influence colour palette, material condition (wear, grime, damage), detailing, and interpretation of every material — but NEVER lighting. Do not render mood, atmosphere, or ambience as darkening, shadow, or vignette anywhere in the texture. A "${theme}" surface must still be lit completely flat and neutral — the theme lives entirely in what the material looks like, never in how it's lit.
 
-The textures should clearly feel as though they belong to the specified theme.
-
-Different themes should produce **visually distinct results**, not simply recoloured versions of the same textures.
-
-# OUTPUT
-
-Create a single texture atlas:
-
-* **4 columns**
-* **2 rows**
-* **8 textures**
-* Each texture is **1:1 square**
-* Every texture occupies exactly the same amount of space
-* Complete atlas aspect ratio: **2:1**
-* Target atlas size: **2048 × 1024**
-* Target texture size: **512 × 512**
-
-No gaps or padding between textures.
-
-# MATERIALS
-
-Top row:
-
-**Dirt | Grass | Wood | Stone**
-
-Bottom row:
-
-**Brick | Iron | Sand | Water**
-
-Each material must be immediately recognizable while being visually interpreted through **${theme}**.
-
-# TEXTURE REQUIREMENTS
-
-Every texture must be a **flat, top-down material surface** designed for use as a repeating game texture.
-
-Each individual texture must be **seamlessly tileable on both axes**.
-
-The left edge must naturally continue into the right edge.
-
-The top edge must naturally continue into the bottom edge.
-
-Treat each texture as a sample of a larger continuous surface, **not as an individual physical tile or panel**.
-
-There must be:
-
-* NO borders
-* NO bevels
-* NO frames
-* NO outlines
-* NO gaps
-* NO padding
-* NO edge shadows
-* NO edge highlights
-* NO vignette
-* NO visible square boundaries
-* NO perspective
-* NO directional scene lighting
-
-Use consistent, neutral, diffuse top-down lighting.
-
-# COMPOSITION
-
-\`DIRT | GRASS | WOOD | STONE\`
-
-\`BRICK | IRON | SAND | WATER\`
-
-The materials should touch directly with no separators.
-
-# PRIORITIES
-
-1. Strong **${theme}** identity
-2. Seamless repetition
-3. Square 1:1 individual textures
-4. Clearly distinguishable materials
-5. Cohesive art direction
-6. No borders, bevels or edge shading`;
-}
-
-// 4x4/16-material variant of buildTilesetPrompt above — separate prompt, separate atlas shape
-// (square instead of 2:1), additive alongside the original 8-material one, not a replacement.
-export function buildExtendedTilesetPrompt(theme: string): string {
-  return `Generate a **2D top-down seamless texture atlas** for a dungeon crawler.
-
-# THEME
-
-**${theme}**
-
-The theme must strongly influence the overall visual style, atmosphere, colour palette, condition, detailing, and interpretation of every material.
-
-The textures should clearly feel as though they belong to the specified theme.
-
-Different themes should produce **visually distinct results**, not simply recoloured versions of the same textures.
+The textures should clearly feel as though they belong to the specified theme through colour and material detail alone.
 
 # OUTPUT
 
@@ -440,25 +358,11 @@ Create a single texture atlas:
 
 No gaps or padding between textures.
 
-# MATERIALS
+# MATERIALS (in order — left to right, top row, then each row down)
 
-Row 1:
+${lines.join('\n\n')}
 
-**Dirt | Grass | Wood | Stone**
-
-Row 2:
-
-**Brick | Iron | Sand | Water**
-
-Row 3:
-
-**Ice | Lava | Moss | Mud**
-
-Row 4:
-
-**Marble | Gravel | Ash | Snow**
-
-Each material must be immediately recognizable while being visually interpreted through **${theme}**.
+Each material must be immediately recognizable while being visually interpreted through **${theme}**. A variant slot must still clearly read as the same material as the one it's a variant of.
 
 # TEXTURE REQUIREMENTS
 
@@ -470,7 +374,9 @@ The left edge must naturally continue into the right edge.
 
 The top edge must naturally continue into the bottom edge.
 
-Treat each texture as a sample of a larger continuous surface, **not as an individual physical tile or panel**.
+Treat each texture as a sample of a larger continuous surface, **not as an individual physical tile or panel** — even a plank/board/brick material must have its planks/boards/bricks running continuously through the edges of the cell into whatever's next to it, not one complete plank/board/brick centered in its own cell with a shadow around it.
+
+Brightness must be perfectly even across the ENTIRE texture, corner to corner — the center and the edges/corners of every texture must be the exact same brightness. This is the single most important rule: even a faint darkening toward the edges (a vignette, ambient occlusion, or a drop shadow implying a separate panel) will make the atlas look like a grid of distinct tiles instead of one continuous surface once cropped and repeated — which defeats the entire purpose of this atlas.
 
 There must be:
 
@@ -483,32 +389,25 @@ There must be:
 * NO edge shadows
 * NO edge highlights
 * NO vignette
+* NO ambient occlusion darkening the edges or corners of a texture
 * NO visible square boundaries
 * NO perspective
 * NO directional scene lighting
+* NO text or labels
 
-Use consistent, neutral, diffuse top-down lighting.
+Use consistent, neutral, diffuse, shadowless top-down lighting, identical in brightness everywhere in the image.
 
-# COMPOSITION
-
-\`DIRT | GRASS | WOOD | STONE\`
-
-\`BRICK | IRON | SAND | WATER\`
-
-\`ICE | LAVA | MOSS | MUD\`
-
-\`MARBLE | GRAVEL | ASH | SNOW\`
-
-The materials should touch directly with no separators.
+The materials should touch directly with no separators, in the exact order listed above.
 
 # PRIORITIES
 
-1. Strong **${theme}** identity
+1. Perfectly even brightness corner-to-corner — no vignette, no edge/corner darkening, no per-tile shadow
 2. Seamless repetition
-3. Square 1:1 individual textures
-4. Clearly distinguishable materials
-5. Cohesive art direction
-6. No borders, bevels or edge shading`;
+3. Strong **${theme}** identity (through colour/material only, never lighting)
+4. Correct left-to-right, top-to-bottom order as listed above
+5. Square 1:1 individual textures
+6. Clearly distinguishable materials
+7. Cohesive art direction`;
 }
 
 export interface CreaturePortraitEntry {
@@ -579,6 +478,84 @@ There must be:
 1. Instantly readable creature silhouette/identity at small size
 2. Exact same flat red background in every cell
 3. Consistent art style and lighting across all 16 portraits
+4. Correct left-to-right, top-to-bottom order as listed above
+5. No borders, frames, or background variation`;
+}
+
+export interface PropSpriteEntry {
+  name: string;
+  description: string;
+}
+
+// Always exactly 36 slots (6x6) — the grid the prop atlas pipeline uses (see dungeon/props.ts),
+// padded with a blank filler cell so crop math stays fixed regardless of batch size, same pattern
+// as buildCreaturePortraitPrompt. `transparent` selects a real alpha-channel background (gpt-image
+// family, via the provider's `background: 'transparent'` param) vs. a flat magenta chroma-key
+// background that dungeon/props.ts strips out afterward (dall-e models, which have no real
+// transparency option).
+export function buildPropSpritePrompt(entries: PropSpriteEntry[], transparent: boolean): string {
+  const real = entries.slice(0, 36);
+  const lines = real.map((e, i) => `${i + 1}. **${e.name}** — ${e.description}`);
+  if (real.length < 36) {
+    const from = real.length + 1;
+    const rangeLabel = from === 36 ? '36' : `${from}-36`;
+    lines.push(`${rangeLabel}. Blank ${transparent ? 'transparent' : 'magenta'} square — this sprite is just blank. The purpose of this sprite is to keep the crop grid of the others consistent.`);
+  }
+
+  const backgroundSection = transparent
+    ? `# BACKGROUND
+
+Every single sprite must have a **fully transparent background** (real alpha channel, not a solid color) — no ground plane, no shadow cast onto anything, no scenery. Just the isolated object floating on transparency, identical treatment in all 36 cells.`
+    : `# BACKGROUND
+
+Every single sprite must sit on the exact same **flat, solid, saturated magenta background** (hex approximately #FF00FF, no gradient, no texture, no vignette, no shadow falloff onto the background) — identical magenta value in all 36 cells, edge to edge, so each sprite can be cleanly chroma-keyed out later. The object itself must never contain this exact magenta color anywhere in its own materials/design.`;
+
+  return `Generate a **2D object/prop sprite atlas** for a dungeon crawler's map furniture and decor.
+
+# OUTPUT
+
+Create a single sprite atlas:
+
+* **6 columns**
+* **6 rows**
+* **36 sprites**
+* Each sprite is **1:1 square**
+* Every sprite occupies exactly the same amount of space
+* Complete atlas aspect ratio: **1:1**
+* Atlas size: **2048 × 2048**
+* Individual sprite size: **~341 × 341**
+
+No gaps or padding between sprites.
+
+${backgroundSection}
+
+# PROPS (in order — left to right, top row, then each row down)
+
+${lines.join('\n\n')}
+
+# SPRITE REQUIREMENTS
+
+Each sprite is the **complete object**, viewed from a three-quarter top-down angle matching a tabletop VTT token (the same angle a miniature would be viewed from on a table), centered and filling most of its cell with a small margin.
+
+No environment, no other objects, no characters — just the one named object per cell.
+
+Consistent lighting direction and art style across all 36 — same rendering technique, same level of detail, same color saturation — so they read as one cohesive set, not 36 unrelated images.
+
+There must be:
+
+* NO borders
+* NO frames
+* NO outlines around the cells
+* NO gaps or padding between cells
+* NO text or labels
+* NO numbering
+* NO cast shadow beyond a small contact shadow directly under the object (skip shadow entirely on transparent-background sprites)
+
+# PRIORITIES
+
+1. Instantly readable object silhouette/identity at small size
+2. ${transparent ? 'Fully transparent background in every cell' : 'Exact same flat magenta background in every cell'}
+3. Consistent art style and lighting across all 36 sprites
 4. Correct left-to-right, top-to-bottom order as listed above
 5. No borders, frames, or background variation`;
 }

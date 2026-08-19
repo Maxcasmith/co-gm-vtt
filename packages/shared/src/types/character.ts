@@ -82,6 +82,11 @@ export interface Character {
   // `| undefined` (not bare `?:`) so functional updaters like `c => ({ ...c, conditions })`
   // can assign a variable that's sometimes undefined under exactOptionalPropertyTypes.
   conditions?: ActiveCondition[] | undefined;
+  // Lifetime combat tallies — accumulated in-memory per encounter (runtime.ts combatScores)
+  // and flushed onto the character sheet once, in endCombat.
+  enemiesKilled?: number;
+  damageDealt?: number;
+  damageReceived?: number;
 }
 
 /**

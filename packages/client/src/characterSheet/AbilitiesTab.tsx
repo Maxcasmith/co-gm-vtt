@@ -163,12 +163,16 @@ export function AbilitiesTab({ character }: { character: Character }) {
             </div>
             <div className="sheet-proficiency-row">
               <span className="sheet-proficiency-label">Senses</span>
-              <span className="sheet-proficiency-value">
-                {getSenses(character.species).length > 0
-                  ? getSenses(character.species)
-                    .map((s) => `${SENSE_LABEL[s.kind]} ${s.rangeFt}ft`)
-                    .join(", ")
-                  : "None"}
+              <span className="sheet-proficiency-value sheet-proficiency-value--list">
+                {[
+                  ...getSenses(character.species).map(
+                    (s) => `${SENSE_LABEL[s.kind]} ${s.rangeFt}ft`,
+                  ),
+                  `Passive Perception ${8 + PROF + modNum(character.stats.wis)}`,
+                  `Passive Insight ${8 + PROF + modNum(character.stats.wis)}`,
+                ].map((line) => (
+                  <span key={line}>{line}</span>
+                ))}
               </span>
             </div>
           </div>

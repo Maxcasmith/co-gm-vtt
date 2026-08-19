@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import type { DungeonMaterialSpec } from 'shared';
 
 interface Props {
   open: boolean;
@@ -8,6 +9,7 @@ interface Props {
 }
 
 const API = `http://${window.location.hostname}:3001`;
+const MAX_MATERIALS = 16;
 
 type Step = 'form' | 'generating';
 
@@ -17,6 +19,7 @@ export default function GenerateTilesetModal({ open, password, onClose, onGenera
   const [step, setStep] = useState<Step>('form');
   const [title, setTitle] = useState('');
   const [theme, setTheme] = useState('');
+  const [materials, setMaterials] = useState<DungeonMaterialSpec[]>([{ key: '', description: '' }]);
   const [progressLines, setProgressLines] = useState<string[]>([]);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
@@ -25,10 +28,25 @@ export default function GenerateTilesetModal({ open, password, onClose, onGenera
     setStep('form');
     setTitle('');
     setTheme('');
+    setMaterials([{ key: '', description: '' }]);
     setProgressLines([]);
     setDone(false);
     setError('');
   }
+
+  function updateMaterial(i: number, field: keyof DungeonMaterialSpec, value: string) {
+    setMaterials(m => m.map((row, idx) => idx === i ? { ...row, [field]: value } : row));
+  }
+
+  function addMaterial() {
+    setMaterials(m => m.length >= MAX_MATERIALS ? m : [...m, { key: '', description: '' }]);
+  }
+
+  function removeMaterial(i: number) {
+    setMaterials(m => m.length <= 1 ? m : m.filter((_, idx) => idx !== i));
+  }
+
+  const validMaterials = materials.filter(m => m.key.trim() && m.description.trim());
 
   function handleClose() {
     reset();
@@ -36,7 +54,7 @@ export default function GenerateTilesetModal({ open, password, onClose, onGenera
   }
 
   async function generate() {
-    if (!title.trim() || !theme.trim()) return;
+    if (!title.trim() || !theme.trim() || !validMaterials.length) return;
     setStep('generating');
     setProgressLines([]);
     setDone(false);
@@ -46,7 +64,7 @@ export default function GenerateTilesetModal({ open, password, onClose, onGenera
       const res = await fetch(`${API}/api/admin/tilesets/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
-        body: JSON.stringify({ title, theme }),
+        body: JSON.stringify({ title, theme, materials: validMaterials }),
       });
 
       if (!res.ok) {
@@ -103,7 +121,7 @@ export default function GenerateTilesetModal({ open, password, onClose, onGenera
           <>
             <div className="modal-header">
               <h2 className="modal-title">Generate Tileset</h2>
-              <p className="modal-hint">Generates a 16-material, 4x4 texture atlas (1024x1024) and cuts it into 64x64 tiles for this theme.</p>
+              <p className="modal-hint">Generates a 4x4 texture atlas (1024x1024) from the materials below and crops it into individual tiles for this theme.</p>
             </div>
             <label className="modal-label">
               Title
@@ -124,9 +142,30 @@ export default function GenerateTilesetModal({ open, password, onClose, onGenera
                 placeholder="e.g. Gothic horror cathedral, candlelight, decayed stone"
               />
             </label>
+
+            <div className="modal-label">Materials (up to {MAX_MATERIALS} — unused slots render as blank black squares)</div>
+            {materials.map((m, i) => (
+              <div key={i} className="material-row">
+                <input
+                  className="modal-input material-row-key"
+                  value={m.key}
+                  onChange={e => updateMaterial(i, 'key', e.target.value)}
+                  placeholder="key, e.g. wood"
+                />
+                <input
+                  className="modal-input material-row-description"
+                  value={m.description}
+                  onChange={e => updateMaterial(i, 'description', e.target.value)}
+                  placeholder="texture description, e.g. weathered oak planks, dark stain"
+                />
+                <button className="btn-secondary material-row-remove" onClick={() => removeMaterial(i)} disabled={materials.length <= 1} aria-label="Remove material">×</button>
+              </div>
+            ))}
+            <button className="btn-secondary" onClick={addMaterial} disabled={materials.length >= MAX_MATERIALS}>+ Add material</button>
+
             <div className="modal-actions">
               <button className="btn-secondary" onClick={handleClose}>Cancel</button>
-              <button className="btn-primary" onClick={() => void generate()} disabled={!title.trim() || !theme.trim()}>
+              <button className="btn-primary" onClick={() => void generate()} disabled={!title.trim() || !theme.trim() || !validMaterials.length}>
                 Generate
               </button>
             </div>

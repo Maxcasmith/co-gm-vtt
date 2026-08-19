@@ -1,5 +1,5 @@
 import { slugifyTheme } from 'shared';
-import type { Dungeon, DungeonMaterial, DungeonStructureType } from 'shared';
+import type { Dungeon, DungeonStructureType } from 'shared';
 
 // Client and API are different origins (see every other file's identical constant, e.g.
 // GamePage.tsx) — a bare "/api/..." path resolves against the client's own origin and 404s,
@@ -42,7 +42,7 @@ export async function loadRuntimeTilesets(): Promise<void> {
 // "ancient-egypt-three" the server generated the folder/manifest key as.
 export function texturesFor(
   pack: string | undefined,
-  material: DungeonMaterial | string | undefined,
+  material: string | undefined,
   _structureType: DungeonStructureType | undefined,
 ): string[] {
   const packKey = pack ? slugifyTheme(pack) : undefined;
@@ -60,7 +60,7 @@ export function texturesFor(
 export function dungeonTexturesReady(dungeon: Dungeon): boolean {
   let ready = true;
   for (const room of dungeon.rooms) {
-    const variants = texturesFor(dungeon.theme, room.material, dungeon.structureType);
+    const variants = texturesFor(dungeon.tilesetSlug ?? dungeon.theme, room.material, dungeon.structureType);
     for (const url of variants) {
       if (!getImage(url).complete) ready = false;
     }

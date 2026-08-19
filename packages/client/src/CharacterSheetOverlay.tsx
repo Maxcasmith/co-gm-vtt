@@ -8,8 +8,9 @@ import { AbilitiesTab } from "./characterSheet/AbilitiesTab.tsx";
 import { FeaturesTab } from "./characterSheet/FeaturesTab.tsx";
 import { InventoryTab } from "./characterSheet/InventoryTab.tsx";
 import { SpellsTab } from "./characterSheet/SpellsTab.tsx";
+import { ScoresTab } from "./characterSheet/ScoresTab.tsx";
 
-type SheetTab = "abilities" | "features" | "inventory" | "spells";
+type SheetTab = "abilities" | "features" | "inventory" | "spells" | "scores";
 
 interface Props {
   character: Character;
@@ -21,10 +22,12 @@ interface Props {
   sessionActive: boolean;
 }
 
-const BASE_TABS: { id: SheetTab; label: string }[] = [
+const TAB_ORDER: { id: SheetTab; label: string }[] = [
   { id: "abilities", label: "Abilities" },
-  { id: "features", label: "Features" },
   { id: "inventory", label: "Inventory" },
+  { id: "spells", label: "Spells" },
+  { id: "features", label: "Features" },
+  { id: "scores", label: "Scores" },
 ];
 
 // XP required to reach each level (index = level, so index 1 = 300 XP to reach level 2)
@@ -45,9 +48,7 @@ export default function CharacterSheetOverlay({
   const [visible, setVisible] = useState(false);
   const [tab, setTab] = useState<SheetTab>("abilities");
   const hasSpells = (character.spells?.length ?? 0) > 0;
-  const TABS = hasSpells
-    ? [...BASE_TABS, { id: "spells" as SheetTab, label: "Spells" }]
-    : BASE_TABS;
+  const TABS = TAB_ORDER.filter((t) => t.id !== "spells" || hasSpells);
   const [combatActive, setCombatActive] = useState(false);
   const [isMyTurn, setIsMyTurn] = useState(false);
   const [actionAvailable, setActionAvailable] = useState(true);
@@ -305,6 +306,7 @@ export default function CharacterSheetOverlay({
           {tab === "inventory" && (
             <InventoryTab character={character} sessionActive={sessionActive} />
           )}
+          {tab === "scores" && <ScoresTab character={character} />}
           {tab === "spells" && (
             <SpellsTab
               character={character}

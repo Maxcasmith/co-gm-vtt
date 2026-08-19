@@ -171,7 +171,7 @@ export async function generateBattleMap(prompt: string, apiKey: string, model: s
 }
 
 // Widest/cheapest exact-2:1 size each model actually supports. dall-e-2 has no widescreen option
-// at all, so its atlas comes back squarer/more-cropped than the prompt asks for — computeTileRects
+// at all, so its atlas comes back squarer/more-cropped than the prompt asks for — computeGridRects
 // works off whatever width actually comes back, so that's a quality tradeoff, not a correctness one.
 //
 // gpt-image-1/1.5 are locked to a fixed size enum (1024x1024/1024x1536/1536x1024/auto — confirmed
@@ -188,11 +188,15 @@ function atlasSizeFor(model: string): string {
 
 // size override: the extended (4x4/16) pipeline always wants '1024x1024' — the one size confirmed
 // valid across every model here — so it skips atlasSizeFor's per-model 2:1-ish picks entirely.
-export async function generateTilesetAtlas(prompt: string, apiKey: string, model: string, size?: string): Promise<Buffer> {
+//
+// background: only meaningful for the gpt-image family (real alpha-channel output) — dall-e models
+// don't support the param, so callers must only pass it when the model actually supports it (see
+// dungeon/props.ts, the only caller that needs real transparency).
+export async function generateTilesetAtlas(prompt: string, apiKey: string, model: string, size?: string, background?: 'transparent'): Promise<Buffer> {
   const res = await fetch(`${API_BASE}/images/generations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model, prompt, n: 1, size: size ?? atlasSizeFor(model) }),
+    body: JSON.stringify({ model, prompt, n: 1, size: size ?? atlasSizeFor(model), ...(background ? { background } : {}) }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };

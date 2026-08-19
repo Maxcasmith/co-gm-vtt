@@ -1,0 +1,10 @@
+{
+  "id": "317d81e0-565c-44a7-adfe-6e618cd9ecad",
+  "name": "The Cathedral of the Black Benediction",
+  "campaignDir": "the-cathedral-of-the-black-benediction",
+  "type": "dungeon-crawl",
+  "concept": {
+    "name": "Gothic Horror",
+    "description": "Gothic Horror, Set in a large church, supernatural, dark, atmospheric"
+  }
+}

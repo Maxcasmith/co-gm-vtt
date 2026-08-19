@@ -1,0 +1,3 @@
+# The Cathedral of the Black Benediction
+
+At dusk, the party is hired by desperate townsfolk to enter the sealed cathedral that has loomed silent since its bells began tolling by themselves for the dead. They are to recover a missing reliquary said to contain the ashes of a saint, believed to be the only thing keeping the restless dead from spilling into the streets. The air around the church is cold and wet with incense, the stained-glass saints seem to watch from above, and every prayer whispered at its doors comes back in another voice. Whatever waits inside feels less like a haunting than a judgment that has been gathering strength for generations.

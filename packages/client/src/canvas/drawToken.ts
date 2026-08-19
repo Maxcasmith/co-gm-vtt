@@ -33,7 +33,7 @@ function drawTrapIcon(ctx: CanvasRenderingContext2D, x: number, y: number, r: nu
  * instead of graying out with a dead/dim token.
  */
 function applyTokenDim(ctx: CanvasRenderingContext2D, x: number, y: number, tokenR: number, dim: TokenDim): void {
-  if (!dim.grayscale && dim.brightness === undefined) return;
+  if (!dim.grayscale && !dim.redHue && dim.brightness === undefined) return;
   // Slightly wider than tokenR so the ring stroke's outer edge (drawn just before this, half its
   // 2px lineWidth outside tokenR) is covered too, matching the old ctx.filter's "affects
   // everything drawn while active" behavior.
@@ -45,6 +45,9 @@ function applyTokenDim(ctx: CanvasRenderingContext2D, x: number, y: number, toke
   if (dim.grayscale) {
     ctx.globalCompositeOperation = 'saturation';
     ctx.fillStyle = 'rgb(128,128,128)';
+  } else if (dim.redHue) {
+    ctx.globalCompositeOperation = 'hue';
+    ctx.fillStyle = '#ff2222';
   } else {
     ctx.fillStyle = `rgba(0, 0, 0, ${1 - (dim.brightness ?? 1)})`;
   }
@@ -289,6 +292,16 @@ export function drawConcentrationBadge(ctx: CanvasRenderingContext2D, x: number,
   ctx.strokeStyle = 'rgba(10,8,16,0.85)';
   ctx.lineWidth = 1.5;
   ctx.stroke();
+  ctx.restore();
+}
+
+/** Skull over a dead creature's token — drawn after drawToken() so it stays full-opacity over the dimmed/red-hued corpse beneath. */
+export function drawDeadSkull(ctx: CanvasRenderingContext2D, x: number, y: number, tokenR: number) {
+  ctx.save();
+  ctx.font = `${Math.round(tokenR * 1.1)}px serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('💀', x, y);
   ctx.restore();
 }
 

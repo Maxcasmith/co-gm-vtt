@@ -2,19 +2,21 @@ import type { EnemyStatBlock } from "./combat.ts";
 import type { EffectSpec } from "./spells.ts";
 import type { AbilityKey } from "./character.ts";
 
-export const DUNGEON_MATERIALS = ["dirt", "grass", "wood", "stone", "brick", "iron", "sand", "water"] as const;
-export type DungeonMaterial = (typeof DUNGEON_MATERIALS)[number];
+// A room's floor material is a free-text key + texture description the manifest LLM proposes per
+// room (see api/dungeon/manifest.ts's collectDungeonMaterials) — not a fixed enum. This is the
+// shared shape passed through the tileset-generation pipeline (api/dungeon/tilesets.ts).
+export interface DungeonMaterialSpec {
+  key: string;
+  description: string;
+}
 
-// Extended 16-material set for the tileset generator's optional 4x4-grid atlas mode — additive to
-// DUNGEON_MATERIALS above, not a replacement. Not used for room material assignment (DungeonRoom.material
-// stays scoped to DUNGEON_MATERIALS/DungeonMaterial); this is purely for the tile-image pipeline's
-// second, opt-in atlas layout (see api/dungeon/tilesets.ts's generateExtendedTileset). Atlas row order:
-// row 0-1 are the original 8 (unchanged), row 2-3 are the 8 new ones.
-export const EXTENDED_TILE_MATERIALS = [
-  ...DUNGEON_MATERIALS,
-  "ice", "lava", "moss", "mud", "marble", "gravel", "ash", "snow",
-] as const;
-export type ExtendedTileMaterial = (typeof EXTENDED_TILE_MATERIALS)[number];
+// A dungeon-wide deduped prop (furniture/decor) type — up to 32 per dungeon, mirrors
+// DungeonMaterialSpec's role for floor textures. See api/dungeon/manifest.ts's
+// collectDungeonProps and api/dungeon/props.ts's sprite-atlas pipeline.
+export interface PropSpec {
+  key: string;
+  description: string;
+}
 
 // The 3 curated, built-in packs — not an exhaustive list. DungeonStylePack is a free-form
 // theme keyword (e.g. "gothic_horror"); anything outside this list is checked/generated
@@ -39,7 +41,7 @@ export interface DungeonRoom {
   width: number;
   height: number;
   role?: "entrance" | "exit";
-  material?: DungeonMaterial;
+  material?: string;
   isHallway?: boolean;
   connectsTo?: string[];
   description?: string;
@@ -87,6 +89,11 @@ export interface DungeonEntity {
   followsId?: string;
   /** type === 'object' with followsId only — how far the followed participant can roam before it snaps to catch up. */
   leashFt?: number;
+  /** type === 'object' decorative props only (no followsId) — server-relative path to the generated sprite, same pattern as statBlock.portraitSrc. Unset while generation is still pending. */
+  spriteSrc?: string;
+  /** type === 'object' decorative props only — footprint in grid cells, anchored at (x,y) as the top-left corner (same convention as DungeonRoom). Omitted = 1x1. */
+  width?: number;
+  height?: number;
 }
 
 export interface Dungeon {
@@ -101,6 +108,8 @@ export interface Dungeon {
   arena?: boolean;
   goals?: string[];
   theme?: DungeonStylePack;
+  /** Resolved folder key the client should fetch floor textures from — theme-slug, or theme-slug--<materials-hash> once a dynamic tileset has been generated for this dungeon's actual material set. Falls back to `theme` for dungeons predating this field. */
+  tilesetSlug?: string;
   structureType?: DungeonStructureType;
   /**
    * Live ambient light level, 0-1. 1 (default when omitted) = fully lit, no darkness overlay.

@@ -5,18 +5,18 @@ import type { TargetingStartPayload } from '../events.ts';
 import { getTextureLoadVersion } from '../dungeonThemes.ts';
 import { CELL, TOKEN_R, DUNGEON_ENTITY_R, FLOAT_DUR, DUNGEON_BG, FOG_OF_WAR_COLOR } from './constants.ts';
 import { inArea, resolveAoeOrigin, drawAoeShape, nearestRingCell } from './aoe.ts';
-import { drawToken, drawHitFlash, drawTargetRing, drawDeadMarker, drawTokenEffect, drawConcentrationBadge } from './drawToken.ts';
+import { drawToken, drawHitFlash, drawTargetRing, drawDeadMarker, drawDeadSkull, drawTokenEffect, drawConcentrationBadge } from './drawToken.ts';
 import { drawHazardCell } from './drawHazard.ts';
 import { drawSwing } from './drawSwing.ts';
 import { computeLighting, applyGroundLighting, tokenLightFilter } from './lighting.ts';
 import { buildGroundCache, type GroundCache } from './groundCache.ts';
-import type { FloatEffect, FlashEffect, TokenSpecialEffect, SwingEffect, SenseCells, TokenDim } from './types.ts';
+import type { FloatEffect, FlashEffect, TokenSpecialEffect, SwingEffect, SenseCells, TokenDim, LightSourceCells } from './types.ts';
 
 // ponytail: debug-only perf overlay — draws aren't on a continuous rAF loop here (they fire per
 // state change, see Canvas.tsx's draw effect deps), so "FPS" is draws/sec over a trailing 1s
 // window, which is exactly what tells you whether redraws are keeping up with input. Toggle from
 // DevModal (Shift+D).
-let showPerfOverlay = true;
+let showPerfOverlay = false;
 export function togglePerfOverlay(): void {
   showPerfOverlay = !showPerfOverlay;
 }
@@ -100,6 +100,7 @@ export interface DrawSceneParams {
   companions: TurnOrderEntry[];
   visiblePolygon: { x: number; y: number }[] | null;
   litCells: Set<string> | null;
+  lightSources: LightSourceCells[] | null;
   senses: SenseCells | null;
   elevations: Record<string, number>;
   visibleCells: Set<string> | null;
@@ -113,11 +114,13 @@ export interface DrawSceneParams {
   reachableRef: RefObject<Set<string> | null>;
   /** Wall-aware combat move-reach set, computed once at drag-start (see Canvas.tsx's handleMouseDown) rather than re-walked here every redraw. */
   combatReachableRef: RefObject<Set<string> | null>;
-  /** Baked static-ground bitmap (floor/textures/grid/entrance overlay), rebuilt only when the dungeon or a texture load changes — see groundCache.ts. */
+  /** Baked static-ground bitmap (floor/textures/grid), rebuilt only when the dungeon or a texture load changes — see groundCache.ts. */
   groundCacheRef: RefObject<GroundCache | null>;
   aoeMouseRef: RefObject<{ gx: number; gy: number } | null>;
   tokenImgCache: RefObject<Record<string, HTMLImageElement>>;
   enemyImgCache: RefObject<Record<string, HTMLImageElement>>;
+  /** Keyed by spriteSrc URL — decorative prop entities (dungeon.entities, type 'object'), same keying convention as enemyImgCache. */
+  propImgCache: RefObject<Record<string, HTMLImageElement>>;
   flashEffectsRef: RefObject<FlashEffect[]>;
   tokenEffectsRef: RefObject<TokenSpecialEffect[]>;
   floatEffectsRef: RefObject<FloatEffect[]>;
@@ -150,10 +153,10 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
   const {
     showBattleMap, dungeon, encounter, hoveredTokenKey, tokenPositions, player, movementRemaining,
     targeting, connected, deadPlayerNames, downPlayerNames, concentrating, deadCreatureIds,
-    companions, visiblePolygon, litCells, senses, elevations, visibleCells,
+    companions, visiblePolygon, litCells, lightSources, senses, elevations, visibleCells,
     hoverHitChance, multiTargetCursor, multiTargetsPicked,
     floorVariantRef, dungeonZoomRef, dungeonPanRef, dragRef, reachableRef, combatReachableRef, groundCacheRef, aoeMouseRef,
-    tokenImgCache, enemyImgCache, flashEffectsRef, tokenEffectsRef, floatEffectsRef, swingEffectsRef,
+    tokenImgCache, enemyImgCache, propImgCache, flashEffectsRef, tokenEffectsRef, floatEffectsRef, swingEffectsRef,
   } = p;
 
   if (showBattleMap) {
@@ -172,7 +175,7 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         mark('clear+bg');
 
-        // Floor fallback + per-room textures + grid lines + entrance/exit overlay are static per
+        // Floor fallback + per-room textures + grid lines are static per
         // dungeon (only the room-material assignment and cell layout matter, both fixed once a
         // dungeon loads) — baked once into an offscreen bitmap instead of redrawing every cell
         // with its own canvas call on every frame. Rebuilt only on a new dungeon or once a texture
@@ -251,6 +254,19 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
             drawToken(ctx, ex, ey, (entity.name[0] ?? '?').toUpperCase(), entity.name, 'rgba(192,57,43,0.8)', tokenR, hoveredTokenKey === entity.id, zoom, portraitImg);
             continue;
           }
+          // Decorative props (not Tenser's Floating Disk, which also uses type 'object' but always
+          // sets followsId and has no sprite) — drawn at their authored footprint, anchored at their
+          // top-left cell, same convention DungeonRoom uses. Falls back to the plain dot below while
+          // the sprite is still generating (spriteSrc set but not yet in cache) or entirely absent.
+          if (entity.type === 'object' && !entity.followsId) {
+            const propImg = entity.spriteSrc ? propImgCache.current?.[entity.spriteSrc] : undefined;
+            if (propImg) {
+              const w = (entity.width ?? 1) * cellSz;
+              const h = (entity.height ?? 1) * cellSz;
+              ctx.drawImage(propImg, entity.x * cellSz + panX, entity.y * cellSz + panY, w, h);
+              continue;
+            }
+          }
           ctx.beginPath();
           ctx.arc(ex, ey, entityR, 0, Math.PI * 2);
           ctx.fillStyle = 'rgba(212,172,13,0.8)';
@@ -276,7 +292,7 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
       // treatment (constant color for highlights, per-token dimming for tokens — see
       // tokenLightFilter below) rather than inheriting a second darkening pass from this one.
       mark('entities');
-      if (dungeon) applyGroundLighting(ctx, dungeon, cellSz, panX, panY, litCells, senses, lighting);
+      if (dungeon) applyGroundLighting(ctx, dungeon, cellSz, panX, panY, litCells, lightSources, senses, lighting);
       mark('lighting');
 
       if ((encounter || dungeon) && tokenPositions) {
@@ -442,12 +458,13 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           const y = isDragged ? drag!.y : pos.gy * cellSz + cellSz / 2 + panY;
 
           const isDead = deadCreatureIds?.has(enemy.id);
-          const dim: TokenDim = isDead ? { grayscale: true, opacity: 0.45 } : tokenLightFilter(pos.gx, pos.gy, litCells, senses, lighting);
+          const dim: TokenDim = isDead ? { redHue: true, opacity: 0.45 } : tokenLightFilter(pos.gx, pos.gy, litCells, senses, lighting);
           // enemy.portraitSrc missing or not yet loaded (fire-and-forget generation still running,
           // or never ran) -> img is undefined -> drawToken's existing img-less branch (colored
           // circle + initial) covers it, same fallback it's always had.
           const portraitImg = enemy.portraitSrc ? enemyImgCache.current?.[enemy.portraitSrc] : undefined;
           drawToken(ctx, x, y, (enemy.name[0] ?? '?').toUpperCase(), enemy.name, isDead ? '#555' : '#c0392b', tokenR, hoveredTokenKey === enemy.id, zoom, portraitImg, undefined, dim);
+          if (isDead) drawDeadSkull(ctx, x, y, tokenR);
 
           if (!inSight(pos.gx, pos.gy)) return;
           effectDraws.push(() => {

@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import type { AppConfig, Dungeon, DungeonEntity, DungeonRoom, EnemyStatBlock, Quest } from 'shared';
+import { slugifyTheme } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { fetchManifest } from './manifest.ts';
 import { generateGrid } from './generator.ts';
@@ -7,6 +8,7 @@ import { generateBuildingLayout } from './buildingLayout.ts';
 import { placeEntities, placeEncounterEntities } from './placer.ts';
 import { ensureTilesetSupport } from './tilesets.ts';
 import { assignPortraitSrcs, generateCreaturePortraits } from './creaturePortraits.ts';
+import { assignPropSpriteSrcs, generatePropSprites } from './props.ts';
 
 export async function generateDungeon(
   name: string,
@@ -28,8 +30,21 @@ export async function generateDungeon(
   // Synchronous/deterministic — every creature entity gets a portraitSrc before this function
   // returns, regardless of whether the file exists yet (see creaturePortraits.ts).
   assignPortraitSrcs(entities);
+  // Same contract for decorative prop entities' spriteSrc — see props.ts.
+  assignPropSpriteSrcs(entities);
 
-  if (config) await ensureTilesetSupport(manifest.theme, config);
+  // Creatures never gate dungeon return — fired first, resolves in the background regardless of
+  // how long tilesets/props take (errors caught/logged inside generateCreaturePortraits itself).
+  if (config) void generateCreaturePortraits(entities, config);
+
+  // Tilesets and props both must exist before the dungeon ships (the client draws them
+  // synchronously — no background-fill/retry pattern like creature portraits get), so the dungeon
+  // is paused behind these two. Fired together via Promise.all rather than sequentially, so their
+  // atlas requests overlap instead of queueing one behind the other.
+  const [tilesetSlug] = await Promise.all([
+    config ? ensureTilesetSupport(manifest.theme, manifest.materials, config) : Promise.resolve(slugifyTheme(manifest.theme)),
+    config ? generatePropSprites(manifest.props, config) : Promise.resolve(),
+  ]);
 
   const dungeon: Dungeon = {
     id: randomUUID(),
@@ -41,14 +56,11 @@ export async function generateDungeon(
     entities,
     goals: manifest.goals,
     theme: manifest.theme,
+    tilesetSlug,
     structureType: manifest.structureType,
     illumination: manifest.illumination,
     baseIllumination: manifest.illumination,
   };
-
-  // Fire and forget — unawaited on purpose, must never hold up dungeon generation. Runs in the
-  // background; errors are caught and logged inside generateCreaturePortraits itself.
-  if (config) void generateCreaturePortraits(dungeon, config);
 
   return dungeon;
 }
@@ -86,7 +98,7 @@ export function buildDungeonQuests(dungeon: Dungeon, existingQuests: Quest[]): Q
 // Combat-arena dungeon: one bare room sized for the encounter, no LLM calls — who spawns is
 // already decided (the stat blocks), this only needs geometry to drop them into.
 export function generateEncounterDungeon(statBlocks: EnemyStatBlock[]): Dungeon {
-  const { cells, rooms } = generateGrid({ rooms: [{ name: 'Battle', size: 'large' }], structureType: 'organic', theme: 'high_fantasy', goals: [], illumination: 1 });
+  const { cells, rooms } = generateGrid({ rooms: [{ name: 'Battle', size: 'large' }], structureType: 'organic', theme: 'high_fantasy', goals: [], illumination: 1, materials: [], props: [] });
   const room = rooms[0]!;
   const entities = placeEncounterEntities(room, statBlocks);
 

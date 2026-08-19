@@ -1,0 +1,42 @@
+[
+  {
+    "id": "recover-the-stolen-silver-reliquary-from-the-crypt",
+    "name": "Recover the stolen silver reliquary from the crypt",
+    "description": "Recover the stolen silver reliquary from the crypt",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-18"
+  },
+  {
+    "id": "end-the-black-benediction-corrupting-the-main-altar",
+    "name": "End the black benediction corrupting the main altar",
+    "description": "End the black benediction corrupting the main altar",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-18"
+  },
+  {
+    "id": "find-the-bishop-s-sealed-confession-in-the-records-room",
+    "name": "Find the bishop's sealed confession in the records room",
+    "description": "Find the bishop's sealed confession in the records room",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-18"
+  },
+  {
+    "id": "boss-4845edf1-2c7f-4060-b52f-ac66febe9373",
+    "name": "Defeat Father Malrec, Black Acolyte",
+    "description": "Defeat Father Malrec, Black Acolyte.",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-18"
+  },
+  {
+    "id": "exit-dungeon",
+    "name": "Escape The Cathedral of the Black Benediction",
+    "description": "Find a way out of The Cathedral of the Black Benediction.",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-18"
+  }
+]

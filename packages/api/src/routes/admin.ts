@@ -4,6 +4,7 @@ import { rm, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { slugifyTheme } from 'shared';
+import type { DungeonMaterialSpec } from 'shared';
 import { CAMPAIGNS_DIR, TILESETS_DIR, getConfig, getWorldMeta, listCampaigns } from '../storage.ts';
 import { saveCampaignAsAdventure, SAVED_ADVENTURES_DIR } from '../adventures/storage.ts';
 import { generateExtendedTileset } from '../dungeon/tilesets.ts';
@@ -107,9 +108,12 @@ adminRouter.delete('/campaigns/:id/sessions', async (req, res) => {
 // 16-tile 4x4 pipeline — the old 8-tile/2:1 mode-selection is retired, see tilesets.ts.
 adminRouter.post('/tilesets/generate', async (req, res) => {
   if (!requireAdmin(req, res)) return;
-  const { title, theme } = req.body as { title?: string; theme?: string };
-  if (!title?.trim() || !theme?.trim()) {
-    res.status(400).json({ error: 'title and theme are required' });
+  const { title, theme, materials: rawMaterials } = req.body as { title?: string; theme?: string; materials?: DungeonMaterialSpec[] };
+  const materials = (Array.isArray(rawMaterials) ? rawMaterials : [])
+    .filter((m): m is DungeonMaterialSpec => !!m?.key?.trim() && !!m?.description?.trim())
+    .slice(0, 16);
+  if (!title?.trim() || !theme?.trim() || !materials.length) {
+    res.status(400).json({ error: 'title, theme, and at least one material (key + description) are required' });
     return;
   }
 
@@ -126,10 +130,10 @@ adminRouter.post('/tilesets/generate', async (req, res) => {
   function send(data: object) { res.write(`data: ${JSON.stringify(data)}\n\n`); }
 
   try {
-    await generateExtendedTileset(title, theme, apiKey, config.image.model, message => send({ type: 'progress', message }));
+    await generateExtendedTileset(title, theme, materials, apiKey, config.image.model, message => send({ type: 'progress', message }));
     send({ type: 'complete' });
   } catch (err) {
-    logError('routes/admin:generateTileset', err);
+    logError('routes/admin:generateExtendedTileset', err);
     send({ type: 'error', message: err instanceof Error ? err.message : 'Generation failed' });
   } finally {
     res.end();

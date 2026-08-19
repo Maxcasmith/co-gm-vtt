@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
 import type { Character, Dungeon } from 'shared';
 import { hasLineOfSight, getSenses } from 'shared';
-import { SIGHT_RADIUS } from './constants.ts';
+import { SIGHT_RADIUS, LIGHT_PENUMBRA_FT } from './constants.ts';
 import { computeVisibilityPolygon } from './geometry.ts';
-import type { SenseCells } from './types.ts';
+import type { SenseCells, LightSourceCells } from './types.ts';
 
 /**
  * Everything that decides what the local player can currently see: fog-of-war (own-eyes sight
@@ -47,28 +47,41 @@ export function useVision(
   const lightCarrierPosKey = lightSourceTokenIds?.length
     ? lightSourceTokenIds.map(id => { const p = tokenPositions?.[id]; return p ? `${id}:${p.gx},${p.gy}` : id; }).join('|')
     : null;
-  const litCells = useMemo(() => {
-    if (!dungeon) return null;
+  // litCells stays the merged flat set every existing consumer (tokenLightFilter, the ground
+  // overlay's hard exclude) wants; lightSources keeps each source's own cells alongside its
+  // position/radius so the ground overlay's vignette pass (lighting.ts) can feather each torch's
+  // falloff around its own center instead of the merged blob's.
+  const { litCells, lightSources } = useMemo(() => {
+    if (!dungeon) return { litCells: null, lightSources: null };
     const sources: { gx: number; gy: number; rangeFt: number }[] = [
       ...(dungeon.pointLights ?? []),
       ...Object.entries(dungeon.lightSources ?? {})
         .map(([tokenId, rangeFt]) => { const pos = tokenPositions?.[tokenId]; return pos ? { gx: pos.gx, gy: pos.gy, rangeFt } : null; })
         .filter((s): s is { gx: number; gy: number; rangeFt: number } => s !== null),
     ];
-    if (!sources.length) return null;
-    const set = new Set<string>();
+    if (!sources.length) return { litCells: null, lightSources: null };
+    const merged = new Set<string>();
+    const perSource: LightSourceCells[] = [];
     for (const src of sources) {
       const radiusCells = Math.floor(src.rangeFt / 5);
-      for (let dy = -radiusCells; dy <= radiusCells; dy++) {
-        for (let dx = -radiusCells; dx <= radiusCells; dx++) {
-          if (Math.max(Math.abs(dx), Math.abs(dy)) * 5 > src.rangeFt) continue;
+      const glowRangeFt = src.rangeFt + LIGHT_PENUMBRA_FT;
+      const glowRadiusCells = Math.floor(glowRangeFt / 5);
+      const cells = new Set<string>();
+      const glowCells = new Set<string>();
+      for (let dy = -glowRadiusCells; dy <= glowRadiusCells; dy++) {
+        for (let dx = -glowRadiusCells; dx <= glowRadiusCells; dx++) {
+          const distFt = Math.max(Math.abs(dx), Math.abs(dy)) * 5;
+          if (distFt > glowRangeFt) continue;
           const tx = src.gx + dx, ty = src.gy + dy;
           if (tx < 0 || ty < 0 || tx >= dungeon.width || ty >= dungeon.height) continue;
-          if (hasLineOfSight(dungeon.cells, src.gx, src.gy, tx, ty)) set.add(`${tx},${ty}`);
+          if (!hasLineOfSight(dungeon.cells, src.gx, src.gy, tx, ty)) continue;
+          glowCells.add(`${tx},${ty}`);
+          if (distFt <= src.rangeFt) { cells.add(`${tx},${ty}`); merged.add(`${tx},${ty}`); }
         }
       }
+      perSource.push({ gx: src.gx, gy: src.gy, radiusCells, cells, glowCells, glowRadiusCells });
     }
-    return set;
+    return { litCells: merged, lightSources: perSource };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dungeon, lightCarrierPosKey]);
 
@@ -110,5 +123,5 @@ export function useVision(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dungeon, myPos?.gx, myPos?.gy]);
 
-  return { visibleCells, litCells, senses, visiblePolygon };
+  return { visibleCells, litCells, lightSources, senses, visiblePolygon };
 }

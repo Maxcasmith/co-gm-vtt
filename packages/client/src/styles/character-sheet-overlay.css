@@ -319,6 +319,12 @@
   color: var(--text);
 }
 
+.sheet-proficiency-value--list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .sheet-death-saves {
   margin-top: 20px;
   display: flex;
@@ -374,6 +380,15 @@ button.sheet-save-row {
 .sheet-feature:last-child { margin-bottom: 0; }
 .sheet-feature-name { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
 .sheet-feature-desc { font-size: 12px; color: var(--text-muted); line-height: 1.55; }
+
+.sheet-score-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 4px;
+}
+.sheet-score-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.sheet-score-value { font-size: 13px; color: var(--text-muted); }
 
 /* Inventory placeholder */
 .sheet-empty {

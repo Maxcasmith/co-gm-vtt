@@ -229,6 +229,10 @@
   color: var(--gold);
 }
 
+.admin-resource-tabs {
+  margin-bottom: 20px;
+}
+
 .admin-empty {
   color: var(--text-muted);
   font-size: 13px;
@@ -318,6 +322,36 @@
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+.material-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.material-row-key {
+  flex: 0 0 120px;
+}
+
+.material-row-description {
+  flex: 1;
+}
+
+.material-row-remove {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+}
+
+.tile-img--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-family: 'Cinzel', serif;
+  font-size: 22px;
 }
 
 .tile-source {

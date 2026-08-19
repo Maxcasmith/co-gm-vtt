@@ -50,6 +50,9 @@ export const campaignPlayers = new Map<string, string[]>();
 export const playerSocketIds = new Map<string, string>(); // charId → socketId (for private events)
 export const enemiesReady   = new Map<string, boolean>();  // true once rollEnemyInitiatives has fired
 export const combatStartedAt = new Map<string, number>();  // timestamp when combat_init fired, for nemesis transcript slicing
+// cid → charId → running kill/damage tally for the current encounter, flushed onto the
+// character sheet once in endCombat (see bumpScore/runtime.ts) rather than persisted per-hit.
+export const combatScores = new Map<string, Map<string, { enemiesKilled: number; damageDealt: number; damageReceived: number }>>();
 export const dungeons = new Map<string, Dungeon>(); // in-memory mirror of saveDungeon/loadDungeon, mutated on reveal
 // cid → casterId → self-buff spell (e.g. Divine Smite) queued to trigger on that caster's next
 // weapon hit. Effects are stored unresolved (not pre-rolled) so appliesIf (e.g. vs Fiend/Undead)

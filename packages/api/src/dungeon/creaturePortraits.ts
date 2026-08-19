@@ -2,7 +2,7 @@ import { existsSync } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
-import type { AppConfig, Dungeon, DungeonEntity } from 'shared';
+import type { AppConfig, DungeonEntity } from 'shared';
 import { slugifyTheme } from 'shared';
 import { CREATURES_DIR } from '../storage.ts';
 import { generateTilesetAtlas } from '../providers/openai.ts';
@@ -25,6 +25,15 @@ function portraitUrl(slug: string): string {
 
 function hasPortrait(slug: string): boolean {
   return existsSync(path.join(CREATURES_DIR, slug, 'portrait_01.jpg'));
+}
+
+// Sidecar next to the portrait — the bestiary manifest reads storage/creatures/<slug>/stats.json
+// the same way tilesets.ts reads directory names, so a creature only needs to appear here once.
+async function writeStatsIfMissing(slug: string, name: string, cr: number, creatureType: string | undefined): Promise<void> {
+  const statsPath = path.join(CREATURES_DIR, slug, 'stats.json');
+  if (existsSync(statsPath)) return;
+  await mkdir(path.join(CREATURES_DIR, slug), { recursive: true });
+  await writeFile(statsPath, JSON.stringify({ name, cr, creatureType }, null, 2), 'utf-8');
 }
 
 // Synchronous, deterministic — sets every creature entity's portraitSrc to where its portrait
@@ -52,25 +61,30 @@ interface PendingPortrait {
   isBoss: boolean | undefined;
 }
 
-// Fire-and-forget — called unawaited from generateDungeon(), never blocks dungeon generation.
-// Dedupes by creature name (global across every dungeon/campaign — a "Skeleton" generated once
-// is reused everywhere, same reuse philosophy as tilesets.ts), skips anything already on disk,
-// batches whatever's left into groups of 16, and reuses the exact atlas-request/resize/crop shape
+// Fire-and-forget — called unawaited from generateDungeon(), never blocks dungeon generation
+// (unlike tilesets/props, which the dungeon now waits on — see dungeon/index.ts). Takes the raw
+// entity list rather than a built Dungeon so it can fire before the Dungeon record exists, letting
+// its atlas request overlap with the tileset/prop ones instead of queueing behind them. Dedupes by
+// creature name (global across every dungeon/campaign — a "Skeleton" generated once is reused
+// everywhere, same reuse philosophy as tilesets.ts), skips anything already on disk, batches
+// whatever's left into groups of 16, and reuses the exact atlas-request/resize/crop shape
 // tilesets.ts uses for tile textures (generateTilesetAtlas, computeGridRects).
-export async function generateCreaturePortraits(dungeon: Dungeon, config: AppConfig): Promise<void> {
-  const apiKey = config.apiKeys.openai;
-  if (!apiKey) return;
-
+export async function generateCreaturePortraits(entities: DungeonEntity[], config: AppConfig): Promise<void> {
+  const statsWrites: Promise<void>[] = [];
   const seen = new Set<string>();
   const needed: PendingPortrait[] = [];
-  for (const entity of dungeon.entities) {
-    if (entity.type !== 'creature' || !entity.statBlock?.appearance) continue;
+  for (const entity of entities) {
+    if (entity.type !== 'creature' || !entity.statBlock) continue;
     const slug = portraitSlug(entity.statBlock.name);
-    if (seen.has(slug) || hasPortrait(slug)) continue;
+    statsWrites.push(writeStatsIfMissing(slug, entity.statBlock.name, entity.statBlock.cr, entity.statBlock.creatureType));
+    if (!entity.statBlock.appearance || seen.has(slug) || hasPortrait(slug)) continue;
     seen.add(slug);
     needed.push({ slug, name: entity.statBlock.name, appearance: entity.statBlock.appearance, isBoss: entity.statBlock.isBoss });
   }
-  if (!needed.length) return;
+  await Promise.all(statsWrites);
+
+  const apiKey = config.apiKeys.openai;
+  if (!apiKey || !needed.length) return;
 
   for (const batch of chunk(needed, BATCH_SIZE)) {
     try {

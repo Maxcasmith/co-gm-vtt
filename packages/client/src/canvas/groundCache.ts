@@ -35,7 +35,7 @@ export function buildGroundCache(dungeon: Dungeon, variantPicks: Map<string, num
   }
 
   for (const room of dungeon.rooms) {
-    const variants = texturesFor(dungeon.theme, room.material, dungeon.structureType);
+    const variants = texturesFor(dungeon.tilesetSlug ?? dungeon.theme, room.material, dungeon.structureType);
     if (!variants.length) continue;
     for (let row = room.y; row < room.y + room.height; row++) {
       for (let col = room.x; col < room.x + room.width; col++) {
@@ -60,16 +60,6 @@ export function buildGroundCache(dungeon: Dungeon, variantPicks: Map<string, num
     for (let col = 0; col < dungeon.width; col++) {
       if (dungeon.cells[row]?.[col] === 1) {
         ctx.strokeRect(col * CELL + 0.5, row * CELL + 0.5, CELL - 1, CELL - 1);
-      }
-    }
-  }
-
-  for (const room of dungeon.rooms) {
-    if (!room.role) continue;
-    ctx.fillStyle = room.role === 'entrance' ? 'rgba(60,200,90,0.18)' : 'rgba(220,170,30,0.18)';
-    for (let row = room.y; row < room.y + room.height; row++) {
-      for (let col = room.x; col < room.x + room.width; col++) {
-        if (dungeon.cells[row]?.[col] === 1) ctx.fillRect(col * CELL, row * CELL, CELL, CELL);
       }
     }
   }

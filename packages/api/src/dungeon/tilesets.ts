@@ -1,53 +1,25 @@
 import { existsSync } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
+import { createHash } from 'crypto';
 import path from 'path';
 import sharp from 'sharp';
-import type { AppConfig, DungeonMaterial, ExtendedTileMaterial } from 'shared';
-import { DUNGEON_MATERIALS, EXTENDED_TILE_MATERIALS, DUNGEON_STYLE_PACKS, slugifyTheme } from 'shared';
+import type { AppConfig, DungeonMaterialSpec } from 'shared';
+import { DUNGEON_STYLE_PACKS, slugifyTheme } from 'shared';
 import { TILESETS_DIR } from '../storage.ts';
 import { generateTilesetAtlas } from '../providers/openai.ts';
-import { buildTilesetPrompt, buildExtendedTilesetPrompt } from '../session-processor/imagePrompts.ts';
+import { buildDynamicTilesetPrompt } from '../session-processor/imagePrompts.ts';
 import { logError } from '../logger.ts';
 
-export interface TileRect {
-  material: DungeonMaterial;
+export interface GridRect {
+  material: string;
   left: number;
   top: number;
   width: number;
   height: number;
 }
 
-export interface TileRectResult {
-  rects: TileRect[];
-  warning?: string;
-}
-
-export interface ExtendedTileRect {
-  material: ExtendedTileMaterial;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
-export interface ExtendedTileRectResult {
-  rects: ExtendedTileRect[];
-  warning?: string;
-}
-
-// Generic despite the "material" field name (kept as-is rather than renamed across every existing
-// call site) — reused as-is by api/dungeon/creaturePortraits.ts, where each M is a creature slug
-// rather than a tile material.
-export interface GridRect<M extends string> {
-  material: M;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
-export interface GridRectResult<M extends string> {
-  rects: GridRect<M>[];
+export interface GridRectResult {
+  rects: GridRect[];
   warning?: string;
 }
 
@@ -56,7 +28,7 @@ export interface GridRectResult<M extends string> {
 // doesn't reliably return the requested size, and tiles must stay square), so height is derived
 // and clamped against whatever's actually left rather than assumed — a defensive path for when
 // the atlas isn't exactly `cols:rows`. `materials` must already be in atlas row-major order.
-export function computeGridRects<M extends string>(width: number, height: number, cols: number, rows: number, materials: readonly M[]): GridRectResult<M> {
+export function computeGridRects(width: number, height: number, cols: number, rows: number, materials: readonly string[]): GridRectResult {
   const tileSize = Math.round(width / cols);
   const warning = height !== tileSize * rows
     ? `atlas is ${width}x${height}, expected height ${tileSize * rows} (tileSize ${tileSize} x${rows}) — cropping against actual size`
@@ -76,25 +48,22 @@ export function computeGridRects<M extends string>(width: number, height: number
   return warning ? { rects, warning } : { rects };
 }
 
-// ARCHIVED — supports generateTileset above, same backup status. DUNGEON_MATERIALS is already in
-// atlas order: row 0 = dirt/grass/wood/stone, row 1 = brick/iron/sand/water.
-export function computeTileRects(width: number, height: number): TileRectResult {
-  return computeGridRects(width, height, 4, 2, DUNGEON_MATERIALS);
-}
-
-// The sole active crop path — everything (admin-triggered and automatic in-game generation) goes
-// through this now. EXTENDED_TILE_MATERIALS is already in atlas order: rows 0-1 are the original
-// 8, rows 2-3 are the 8 new ones (ice/lava/moss/mud/marble/gravel/ash/snow).
-export function computeExtendedTileRects(width: number, height: number): ExtendedTileRectResult {
-  return computeGridRects(width, height, 4, 4, EXTENDED_TILE_MATERIALS);
-}
-
+// Curated packs only — an existing generated tileset for a non-curated theme is now addressed by
+// theme+materials hash (see ensureTilesetSupport), not by bare theme slug alone.
 export function hasTilesetSupport(theme: string): boolean {
   const slug = slugifyTheme(theme);
   // DUNGEON_STYLE_PACKS entries (e.g. "high_fantasy") aren't pre-slugified themselves, so compare
   // slug-to-slug — a raw includes() would miss "high_fantasy" against its own slug "high-fantasy".
-  if ((DUNGEON_STYLE_PACKS as readonly string[]).some(pack => slugifyTheme(pack) === slug)) return true;
-  return existsSync(path.join(TILESETS_DIR, slug));
+  return (DUNGEON_STYLE_PACKS as readonly string[]).some(pack => slugifyTheme(pack) === slug);
+}
+
+// Order-sensitive (not sorted) — the same material set in a different room-discovery order hashes
+// differently and misses the cache. Acceptable: it only costs a redundant regeneration, never a
+// correctness issue, and sorting would fight the "materials must stay in atlas row-major order"
+// invariant computeGridRects relies on.
+function hashMaterials(materials: DungeonMaterialSpec[]): string {
+  const input = materials.map(m => `${m.key}:${m.description}`).join('|');
+  return createHash('sha1').update(input).digest('hex').slice(0, 10);
 }
 
 // "1 hour 2 minutes 5 seconds" / "34 seconds" — no fractional seconds, no zero-value units
@@ -112,7 +81,7 @@ function formatElapsed(ms: number): string {
   return parts.join(' ');
 }
 
-interface PipelineOpts<M extends string> {
+interface PipelineOpts {
   title: string;
   theme: string;
   apiKey: string;
@@ -123,16 +92,15 @@ interface PipelineOpts<M extends string> {
   resizeHeight: number;
   cols: number;
   rows: number;
-  materials: readonly M[];
-  sourceFolder: string; // 'source' for the standard 8-tile set, 'source_extended' for the 16-tile set — keeps them from colliding in the same theme dir
+  materials: readonly string[];
+  sourceFolder: string; // 'source_extended' — kept distinct from the plain tile folders in the same theme dir
   onProgress: ((message: string) => void) | undefined;
 }
 
-// Shared by generateTileset and generateExtendedTileset below — same 5 steps (prompt, request,
-// save source, resize to a fixed deterministic size, crop), differing only in prompt/material
-// grid/atlas request size. Every step is console.log'd (so it shows up in server logs regardless
+// The single tileset pipeline — prompt, request atlas, save source, resize to a fixed
+// deterministic size, crop. Every step is console.log'd (so it shows up in server logs regardless
 // of caller) and, if onProgress is given, forwarded for live UI feedback too.
-async function runTilesetPipeline<M extends string>(opts: PipelineOpts<M>): Promise<void> {
+async function runTilesetPipeline(opts: PipelineOpts): Promise<void> {
   const slug = slugifyTheme(opts.title);
   const startedAt = Date.now();
   function report(message: string) {
@@ -172,67 +140,82 @@ async function runTilesetPipeline<M extends string>(opts: PipelineOpts<M>): Prom
   if (warning) report(`Warning: ${warning}`);
   report(`Cropping into ${rects.length} tiles (tile size ${Math.round(width / opts.cols)}px)…`);
 
+  // Padded slots repeat a real material key (see padMaterials) rather than a blank sentinel, so
+  // every rect is a real tile to persist — just under the same folder as its original, incrementing
+  // the filename suffix per repeat. Counts build up in atlas row-major order since the increment
+  // happens synchronously before each iteration's own await, so concurrent writes never race it.
+  const counts = new Map<string, number>();
   await Promise.all(rects.map(async rect => {
     if (rect.width <= 0 || rect.height <= 0) return;
     const dir = path.join(TILESETS_DIR, slug, rect.material);
     await mkdir(dir, { recursive: true });
+    const n = (counts.get(rect.material) ?? 0) + 1;
+    counts.set(rect.material, n);
     const tile = await sharp(atlas).extract({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }).jpeg({ quality: 90 }).toBuffer();
-    await writeFile(path.join(dir, `${rect.material}_01.jpg`), tile);
+    await writeFile(path.join(dir, `${rect.material}_${String(n).padStart(2, '0')}.jpg`), tile);
   }));
   report(`Wrote tiles to storage/tilesets/${slug}/`);
   report(`Generated tileset in ${formatElapsed(Date.now() - startedAt)}.`);
 }
 
-// ARCHIVED — the original 8-material/2:1 pipeline. No longer called anywhere active (the whole
-// app now uses generateExtendedTileset below, uniformly, regardless of model) — kept in place
-// as a backup of the 2:1 prompt/crop approach in case it's revisited, not wired into any route
-// or ensureTilesetSupport. buildTilesetPrompt, computeTileRects, TileRect/TileRectResult below
-// are this backup's supporting pieces, same status.
-//
-// title becomes the folder/matching key (slugified); theme is the text substituted into the
-// prompt — decoupled so a curated, richer prompt can still be found by a short dungeon-theme
-// keyword.
-export async function generateTileset(title: string, theme: string, apiKey: string, model: string, onProgress?: (message: string) => void): Promise<void> {
-  await runTilesetPipeline({
-    title, theme, apiKey, model,
-    prompt: buildTilesetPrompt(theme),
-    atlasSize: undefined,
-    resizeWidth: 256, resizeHeight: 128,
-    cols: 4, rows: 2,
-    materials: DUNGEON_MATERIALS,
-    sourceFolder: 'source',
-    onProgress,
-  });
+// A padded slot beyond the real material count re-uses an earlier material (cycling round-robin)
+// rather than a blank sentinel — buildDynamicTilesetPrompt asks the model for a seamlessly
+// compatible variant of the original, and the pipeline writes it as `<key>_02.jpg`, `_03.jpg`, etc
+// in that material's own folder. Keeps the crop grid a fixed 4x4 while turning otherwise-wasted
+// slots into extra variety instead of throwaway black squares.
+export interface PaddedMaterial extends DungeonMaterialSpec {
+  variantOf?: number; // 1-based slot number of the original this is a variant of, if padded
+}
+function padMaterials(materials: DungeonMaterialSpec[]): PaddedMaterial[] {
+  if (materials.length >= 16) return materials.slice(0, 16);
+  const padded: PaddedMaterial[] = materials.map(m => ({ ...m }));
+  for (let i = padded.length; i < 16; i++) {
+    const originalIndex = i % materials.length;
+    padded.push({ ...materials[originalIndex]!, variantOf: originalIndex + 1 });
+  }
+  return padded;
 }
 
-// 16-material, 4x4-grid, 1:1 — the only tileset pipeline in active use (see generateTileset above
-// for the archived 2:1 predecessor). Always requests a literal 1024x1024 atlas — the one size
-// confirmed valid across every model this app supports — so there's no per-model size branching
-// needed here at all.
-export async function generateExtendedTileset(title: string, theme: string, apiKey: string, model: string, onProgress?: (message: string) => void): Promise<void> {
+// 4x4-grid, 1:1, materials driven by whatever this dungeon's rooms actually asked for (see
+// dungeon/manifest.ts's collectDungeonMaterials). Always requests a literal 1024x1024 atlas — the
+// one size confirmed valid across every model this app supports — so there's no per-model size
+// branching needed here at all. `title` is the already-resolved folder key (see
+// ensureTilesetSupport) — slugifyTheme is idempotent on it so no special-casing is needed.
+export async function generateExtendedTileset(title: string, theme: string, materials: DungeonMaterialSpec[], apiKey: string, model: string, onProgress?: (message: string) => void): Promise<void> {
+  const padded = padMaterials(materials);
   await runTilesetPipeline({
     title, theme, apiKey, model,
-    prompt: buildExtendedTilesetPrompt(theme),
+    prompt: buildDynamicTilesetPrompt(theme, padded),
     atlasSize: '1024x1024',
     resizeWidth: 512, resizeHeight: 512,
     cols: 4, rows: 4,
-    materials: EXTENDED_TILE_MATERIALS,
+    materials: padded.map(m => m.key),
     sourceFolder: 'source_extended',
     onProgress,
   });
 }
 
-// Called from generateDungeon() once a manifest's theme is known. Never throws — a failed or
-// skipped generation just means the dungeon renders with the client's existing default-pack
-// fallback (dungeonThemes.ts), same as today's behaviour for an unrecognised theme.
-export async function ensureTilesetSupport(theme: string, config: AppConfig): Promise<void> {
-  if (hasTilesetSupport(theme)) return;
-  if (!config.image.generateTilesets) return;
+// Called from generateDungeon() once a manifest's theme and materials are known. Never throws —
+// a failed or skipped generation just means the dungeon renders with the client's existing
+// default-pack fallback (dungeonThemes.ts), same as today's behaviour for an unrecognised theme.
+// Returns the folder key the caller should stamp onto Dungeon.tilesetSlug — a bare theme slug for
+// curated packs or a skip/failure, or theme-slug--<materials-hash> once a matching (possibly
+// freshly generated) dynamic tileset exists on disk.
+export async function ensureTilesetSupport(theme: string, materials: DungeonMaterialSpec[], config: AppConfig): Promise<string> {
+  const slug = slugifyTheme(theme);
+  if (hasTilesetSupport(theme)) return slug;
+  if (!materials.length) return slug;
+
+  const tilesetSlug = `${slug}--${hashMaterials(materials)}`;
+  if (existsSync(path.join(TILESETS_DIR, tilesetSlug))) return tilesetSlug;
+  if (!config.image.generateTilesets) return slug;
   const apiKey = config.apiKeys.openai;
-  if (!apiKey) return;
+  if (!apiKey) return slug;
   try {
-    await generateExtendedTileset(theme, theme, apiKey, config.image.model);
+    await generateExtendedTileset(tilesetSlug, theme, materials, apiKey, config.image.model);
+    return tilesetSlug;
   } catch (err) {
     logError('dungeon/tilesets:ensureTilesetSupport', err);
+    return slug;
   }
 }

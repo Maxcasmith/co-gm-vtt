@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react';
-import type { TurnOrderEntry } from 'shared';
+import type { TurnOrderEntry, EnemyStatBlock } from 'shared';
 import { on } from './events.ts';
 
 const API = `http://${window.location.hostname}:3001`;
 
 interface Props {
   campaignId: string;
+  encounter: EnemyStatBlock[] | null;
+  deadCreatureIds: Set<string>;
 }
 
-export default function TurnOrderBar({ campaignId }: Props) {
+export default function TurnOrderBar({ campaignId, encounter, deadCreatureIds }: Props) {
   const [entries, setEntries]         = useState<TurnOrderEntry[]>([]);
   const [actorName, setActorName]     = useState<string | null>(null);
   const [newIds, setNewIds]           = useState<Set<string>>(new Set());
@@ -56,15 +58,17 @@ export default function TurnOrderBar({ campaignId }: Props) {
       {entries.map(entry => {
         const isCurrent = entry.name === actorName;
         const isNew     = newIds.has(entry.id);
+        const creaturePortraitSrc = entry.isPlayer ? undefined : encounter?.find(e => e.id === entry.id)?.portraitSrc;
         const portrait  = entry.isPlayer
           ? `${API}/api/campaigns/${campaignId}/party/${entry.id}/portrait`
-          : null;
+          : creaturePortraitSrc ? `${API}${creaturePortraitSrc}` : null;
         const concentratingOn = concentrating[entry.id];
+        const isDead = deadCreatureIds.has(entry.id);
 
         return (
           <div
             key={entry.id}
-            className={`turn-order-card${isCurrent ? ' turn-order-card--active' : ''}${isNew ? ' turn-order-card--enter' : ''}`}
+            className={`turn-order-card${isCurrent ? ' turn-order-card--active' : ''}${isNew ? ' turn-order-card--enter' : ''}${isDead ? ' turn-order-card--dead' : ''}`}
           >
             <div className="turn-order-avatar">
               {portrait
@@ -72,6 +76,7 @@ export default function TurnOrderBar({ campaignId }: Props) {
                 : null
               }
               <span className="turn-order-initial">{entry.name[0]?.toUpperCase()}</span>
+              {isDead && <span className="turn-order-skull">💀</span>}
               {concentratingOn && (
                 <span className="turn-order-concentration" title={`Concentrating: ${concentratingOn}`}>◈</span>
               )}

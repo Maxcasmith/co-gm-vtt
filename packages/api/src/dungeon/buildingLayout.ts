@@ -241,7 +241,7 @@ export function generateBuildingLayout(manifest: DungeonManifest, opts?: { width
       ...(manifestRoom.material ? { material: manifestRoom.material } : {}),
       ...(manifestRoom.isHallway ? { isHallway: true } : {}),
       ...(connections.length ? { connectsTo: connections } : {}),
-      ...(manifestRoom.description ? { description: manifestRoom.description } : {}),
+      ...(manifestRoom.description && manifestRoom.role !== 'entrance' ? { description: manifestRoom.description } : {}),
     });
   });
 

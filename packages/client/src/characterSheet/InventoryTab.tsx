@@ -290,33 +290,21 @@ export function InventoryTab({
                 onDrop={handleEquipDrop}
               />
             </div>
-            <div className="sheet-equipment-figure-wrap">
-              <div className="sheet-equipment-figure">
-                <svg viewBox="0 0 200 400" className="sheet-equipment-svg">
-                  <circle cx="100" cy="40" r="30" />
-                  <line x1="100" y1="70" x2="100" y2="220" />
-                  <line x1="100" y1="100" x2="40" y2="180" />
-                  <line x1="100" y1="100" x2="160" y2="180" />
-                  <line x1="100" y1="220" x2="55" y2="360" />
-                  <line x1="100" y1="220" x2="145" y2="360" />
-                </svg>
-                <EquipSlot
-                  name="offHand"
-                  title="Off Hand"
-                  className="sheet-equip-slot--hand-left"
-                  iconPath={iconForSlot("offHand")}
-                  dragItem={dragItem}
-                  onDrop={handleEquipDrop}
-                />
-                <EquipSlot
-                  name="mainHand"
-                  title="Main Hand"
-                  className="sheet-equip-slot--hand-right"
-                  iconPath={iconForSlot("mainHand")}
-                  dragItem={dragItem}
-                  onDrop={handleEquipDrop}
-                />
-              </div>
+            <div className="sheet-equipment-list">
+              <EquipSlot
+                name="mainHand"
+                label="Main Hand"
+                iconPath={iconForSlot("mainHand")}
+                dragItem={dragItem}
+                onDrop={handleEquipDrop}
+              />
+              <EquipSlot
+                name="offHand"
+                label="Off Hand"
+                iconPath={iconForSlot("offHand")}
+                dragItem={dragItem}
+                onDrop={handleEquipDrop}
+              />
             </div>
           </div>
         </div>

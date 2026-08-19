@@ -606,7 +606,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         sessionActive={sessionActive}
       />
       {currentRoomName && <div className="room-name-banner">{currentRoomName}</div>}
-      <TurnOrderBar campaignId={character.campaignId} />
+      <TurnOrderBar campaignId={character.campaignId} encounter={encounter} deadCreatureIds={deadCreatureIds} />
       <PartyHud connected={connected} portraitUrls={portraitUrls} self={character.name} hp={partyHp} selfTempHp={playerHpState?.temp} />
       <CombatDock character={liveCharacter} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} activeBuffs={activeBuffs} elevationFt={elevations[character.id] ?? 0} />
       <EncounterLoadingOverlay />

@@ -15,6 +15,7 @@ export const CAMPAIGNS_DIR = path.join(STORAGE_DIR, 'campaigns');
 export const PREMADE_DIR   = path.join(STORAGE_DIR, 'premade');
 export const TILESETS_DIR  = path.join(STORAGE_DIR, 'tilesets');
 export const CREATURES_DIR = path.join(STORAGE_DIR, 'creatures');
+export const PROPS_DIR      = path.join(STORAGE_DIR, 'props');
 
 const NARRATIVE_FEATURES: AppConfig['workflows'][number]['features'] = [
   'campaignConcepts', 'dungeonPremise', 'backstoryGeneration', 'backstoryCheck', 'worldLoreSync',

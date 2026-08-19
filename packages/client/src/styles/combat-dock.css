@@ -41,6 +41,30 @@
   box-shadow: 0 0 12px rgba(212, 175, 55, 0.25);
 }
 
+.turn-order-card--dead {
+  opacity: 0.5;
+}
+
+.turn-order-card--dead .turn-order-avatar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: #ff2222;
+  mix-blend-mode: hue;
+}
+
+.turn-order-skull {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  filter: none;
+}
+
 .turn-order-avatar {
   position: relative;
   width: 36px;

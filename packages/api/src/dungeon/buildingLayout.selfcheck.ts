@@ -23,7 +23,7 @@ function schoolManifest(): DungeonManifest {
     // dangling reference — must be dropped without crashing
     { name: 'Rooftop', size: 'small', connectsTo: ['Nonexistent Room'] },
   ];
-  return { rooms, structureType: 'building', theme: 'medieval', goals: [], illumination: 1 };
+  return { rooms, structureType: 'building', theme: 'medieval', goals: [], illumination: 1, materials: [], props: [] };
 }
 
 function overlaps(a: { x: number; y: number; width: number; height: number }, b: typeof a): boolean {

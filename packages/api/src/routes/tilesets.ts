@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { existsSync } from 'fs';
 import { readdir } from 'fs/promises';
 import path from 'path';
-import { EXTENDED_TILE_MATERIALS, slugifyTheme } from 'shared';
+import { slugifyTheme } from 'shared';
 import { TILESETS_DIR } from '../storage.ts';
 
 export const tilesetsRouter = Router();
@@ -37,7 +37,7 @@ tilesetsRouter.get('/manifest', async (_req, res) => {
 
 tilesetsRouter.get('/:theme/:material/:file', (req, res) => {
   const { theme, material, file } = req.params as { theme: string; material: string; file: string };
-  const isKnownFolder = material === 'source' || material === 'source_extended' || (EXTENDED_TILE_MATERIALS as readonly string[]).includes(material);
+  const isKnownFolder = material === 'source' || material === 'source_extended' || isSafeSlug(material);
   if (!isSafeSlug(theme) || !isKnownFolder || path.basename(file) !== file) {
     res.status(404).json({ error: 'Tile not found' });
     return;

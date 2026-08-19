@@ -96,6 +96,26 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
         entities.push({ id: randomUUID(), type: 'trap', x: cell.x, y: cell.y, name: trapHint.name, discovered: false, hideDC: trapHint.hideDC });
       }
     }
+
+    // Decorative props — unlike creatures/loot/traps above, every entry gets placed (not just [0]),
+    // and always visible (discovered: true) — furniture isn't something a Perception check reveals.
+    // Anchor comes from the manifest's relX/relY (clamped so the full footprint stays in-room), then
+    // findFreeCell nudges it off any wall/occupied cell the same way loot/traps get nudged.
+    // ponytail: footprint (width/height) is cosmetic only — collision tracking still uses just the
+    // single anchor cell, same as every other entity type here. Upgrade to real multi-cell occupancy
+    // if props ever need to mechanically block movement.
+    for (const prop of hints?.props ?? []) {
+      const size = prop.size === 'large' ? 3 : prop.size === 'small' ? 1 : 2;
+      const rawX = room.x + Math.round(prop.relX * (room.width - 1));
+      const rawY = room.y + Math.round(prop.relY * (room.height - 1));
+      const anchorX = Math.max(room.x, Math.min(rawX, room.x + room.width - size));
+      const anchorY = Math.max(room.y, Math.min(rawY, room.y + room.height - size));
+      const cell = findFreeCell(room, anchorX, anchorY, occupied, cells);
+      if (cell) {
+        occupied.add(key(cell.x, cell.y));
+        entities.push({ id: randomUUID(), type: 'object', x: cell.x, y: cell.y, width: size, height: size, name: prop.name, discovered: true });
+      }
+    }
   }
 
   return entities;

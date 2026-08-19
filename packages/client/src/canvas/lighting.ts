@@ -1,6 +1,6 @@
 import type { Dungeon, SenseKind } from 'shared';
 import { CELL, DARKVISION_THRESHOLD } from './constants.ts';
-import type { SenseCells, TokenDim } from './types.ts';
+import type { SenseCells, TokenDim, LightSourceCells } from './types.ts';
 
 // Senses that only tell you "something's there," not what it looks like — 5e still blocks them by
 // total cover (walls), and they don't grant real color vision, so they render exactly like
@@ -83,6 +83,50 @@ interface LightingPathCache {
    */
   darkHolesPath: Path2D | null;
   satPath: Path2D | null;
+  /** Per-torch vignette clip (grid-local, same convention as darkHolesPath) — see buildSourceVignettes. */
+  sourceVignettes: SourceVignette[] | null;
+}
+
+interface SourceVignette {
+  /** Grid-local center (CELL-px units) for the radial gradient. */
+  cx: number;
+  cy: number;
+  /** Where the erase gradient stops holding full-strength and starts easing toward 0 — the hard mechanical cutoff. */
+  holdRadius: number;
+  /** Where the erase gradient reaches 0 (no lightening at all) — the cosmetic glow edge, past the hard cutoff. */
+  glowRadius: number;
+  /** Union of this source's own wall-blocked cells out to glowRadius, grid-local — clips the erase so it can't bleed through a wall the hard-cutoff radius already respects. */
+  clip: Path2D;
+  /** Per-source phase so torches in the same room don't flicker in lockstep. */
+  seed: number;
+}
+
+// A soft, irregular multiplier around 1 — two out-of-phase sine waves rather than one, so the
+// pulse doesn't read as a metronome. Small amplitude: this feathers a torch's already-correct
+// hard-cutoff radius, it isn't meant to be a visible pulsing circle.
+function flickerScale(seed: number, now: number): number {
+  return 1 + 0.05 * Math.sin(now / 220 + seed) + 0.025 * Math.sin(now / 97 + seed * 2.3);
+}
+
+function buildSourceVignettes(lightSources: LightSourceCells[] | null): SourceVignette[] | null {
+  if (!lightSources?.length) return null;
+  const out: SourceVignette[] = [];
+  for (const src of lightSources) {
+    const clip = new Path2D();
+    for (const key of src.glowCells) {
+      const [gx, gy] = key.split(',').map(Number) as [number, number];
+      clip.rect(gx * CELL, gy * CELL, CELL, CELL);
+    }
+    out.push({
+      cx: (src.gx + 0.5) * CELL,
+      cy: (src.gy + 0.5) * CELL,
+      holdRadius: src.radiusCells * CELL,
+      glowRadius: src.glowRadiusCells * CELL,
+      clip,
+      seed: src.gx * 13 + src.gy * 7,
+    });
+  }
+  return out;
 }
 
 // litCells/senses are already memoized upstream (useVision.ts) — new references only when the
@@ -94,12 +138,17 @@ interface LightingPathCache {
 // instead of once per state change; see the draw effect there.)
 let cache: LightingPathCache | null = null;
 
-function buildCache(dungeon: Dungeon, litCells: Set<string> | null, senses: SenseCells | null, illum: number, trueSightActive: boolean, lowLightActive: boolean): LightingPathCache {
+function buildCache(dungeon: Dungeon, litCells: Set<string> | null, lightSources: LightSourceCells[] | null, senses: SenseCells | null, illum: number, trueSightActive: boolean, lowLightActive: boolean): LightingPathCache {
   let darkFullRect = false;
   let darkHolesPath: Path2D | null = null;
+  const sourceVignettes = illum < 1 ? buildSourceVignettes(lightSources) : null;
   if (illum < 1) {
     const excluded = new Set<string>();
-    if (litCells) for (const key of litCells) excluded.add(key);
+    // Holed out to each source's glowCells, not just its hard-cutoff cells (litCells) — the
+    // vignette pass below needs this ring left unpainted so it can shade it in itself with a
+    // proper falloff rather than fighting flat-black already sitting there. litCells is a subset
+    // of this per source, so it doesn't need its own pass.
+    if (lightSources) for (const src of lightSources) for (const key of src.glowCells) excluded.add(key);
     if (trueSightActive) collectCells(excluded, senses, TRUE_SIGHT_KINDS);
     if (lowLightActive) collectCells(excluded, senses, LOW_LIGHT_KINDS);
 
@@ -134,7 +183,7 @@ function buildCache(dungeon: Dungeon, litCells: Set<string> | null, senses: Sens
     if (any) satPath = path;
   }
 
-  return { litCells, senses, illum, trueSightActive, lowLightActive, darkFullRect, darkHolesPath, satPath };
+  return { litCells, senses, illum, trueSightActive, lowLightActive, darkFullRect, darkHolesPath, satPath, sourceVignettes };
 }
 
 /**
@@ -149,13 +198,13 @@ export function applyGroundLighting(
   ctx: CanvasRenderingContext2D,
   dungeon: Dungeon,
   cellSz: number, panX: number, panY: number,
-  litCells: Set<string> | null, senses: SenseCells | null,
+  litCells: Set<string> | null, lightSources: LightSourceCells[] | null, senses: SenseCells | null,
   state: LightingState,
 ): void {
   const { illum, trueSightActive, lowLightActive } = state;
 
   if (!cache || cache.litCells !== litCells || cache.senses !== senses || cache.illum !== illum || cache.trueSightActive !== trueSightActive || cache.lowLightActive !== lowLightActive) {
-    cache = buildCache(dungeon, litCells, senses, illum, trueSightActive, lowLightActive);
+    cache = buildCache(dungeon, litCells, lightSources, senses, illum, trueSightActive, lowLightActive);
   }
   const zoom = cellSz / CELL;
 
@@ -187,6 +236,43 @@ export function applyGroundLighting(
       ctx.fill(path, 'evenodd');
     }
     ctx.restore();
+  }
+
+  // Vignette: the flat rect above was holed out to each source's full glowCells (see buildCache),
+  // so this ring is currently unpainted, not pre-blackened — this pass shades it in itself with a
+  // proper falloff instead of stamping flat black over already-lit tiles. Fully transparent (no
+  // darkening at all) out to the hard mechanical cutoff, then eases up to (1-illum) — matching the
+  // surrounding darkness exactly — at the cosmetic glow edge past it. Reads as the light itself
+  // spilling a little further and thinning out, not a black smudge painted over the tiles around
+  // it.
+  //
+  // The gradient's own geometry (fillRect + radius) stays pinned to the static glowRadius that
+  // matches the hole cut in buildCache — never animated. Shrinking that geometry with flicker
+  // used to uncover a strip of glowCells the flat rect had already permanently excluded, which
+  // had nothing painted over it that frame and so flashed straight to full brightness. Flicker
+  // instead just slides where the transparent→dark transition sits *within* that fixed radius.
+  if (cache.sourceVignettes && hasViewport) {
+    const now = Date.now();
+    for (const v of cache.sourceVignettes) {
+      ctx.save();
+      ctx.translate(panX, panY);
+      ctx.scale(zoom, zoom);
+      ctx.clip(v.clip);
+      // clip is a union of whole cell squares out to glowRadius (Chebyshev cell distance), so its
+      // outer edge cells reach glowRadius + half a cell past center, not glowRadius itself — the
+      // gradient/fillRect need that same margin or that outer half-tile ring is clipped-in but
+      // never painted, leaving it fully bright.
+      const outer = v.glowRadius + CELL / 2;
+      const scale = flickerScale(v.seed, now);
+      const holdFrac = Math.min(1, (v.holdRadius * scale) / outer);
+      const gradient = ctx.createRadialGradient(v.cx, v.cy, 0, v.cx, v.cy, outer);
+      gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      gradient.addColorStop(holdFrac, 'rgba(0, 0, 0, 0)');
+      gradient.addColorStop(1, `rgba(0, 0, 0, ${1 - illum})`);
+      ctx.fillStyle = gradient;
+      ctx.fillRect(v.cx - outer, v.cy - outer, outer * 2, outer * 2);
+      ctx.restore();
+    }
   }
 
   if (cache.satPath && hasViewport) {

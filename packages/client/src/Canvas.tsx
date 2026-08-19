@@ -46,6 +46,8 @@ export default function Canvas({ player, characterId, character, connected, show
   // Keyed by portraitSrc URL (not enemy id/name) — multiple entities of the same creature share
   // one src, so they naturally share one cached image too.
   const enemyImgCache  = useRef<Record<string, HTMLImageElement>>({});
+  // Keyed by spriteSrc URL, same reuse-by-shared-URL convention as enemyImgCache.
+  const propImgCache   = useRef<Record<string, HTMLImageElement>>({});
   const [tokenCacheVer, setTokenCacheVer] = useState(0);
 
   // Per-cell floor texture variant, picked once and cached so it doesn't re-randomize (flicker)
@@ -54,7 +56,7 @@ export default function Canvas({ player, characterId, character, connected, show
   // Baked static-ground bitmap — see groundCache.ts.
   const groundCacheRef = useRef<GroundCache | null>(null);
 
-  const { visibleCells, litCells, senses, visiblePolygon } = useVision(dungeon, tokenPositions, player, character);
+  const { visibleCells, litCells, lightSources, senses, visiblePolygon } = useVision(dungeon, tokenPositions, player, character);
 
   // Refs to give window-level handlers (empty deps) access to latest prop values
   const playerRef           = useRef(player);
@@ -137,6 +139,21 @@ export default function Canvas({ player, characterId, character, connected, show
     });
   }, [encounter, dungeon?.entities]);
 
+  useEffect(() => {
+    // Decorative props only — Tenser's Floating Disk also uses type 'object' but always sets
+    // followsId and never has a spriteSrc, so it's naturally excluded by the filter below.
+    const urls = [...new Set((dungeon?.entities ?? []).map(e => e.spriteSrc).filter((u): u is string => !!u))];
+    let pending = urls.length;
+    if (pending === 0) return;
+    urls.forEach(url => {
+      if (propImgCache.current[url]) { pending--; return; }
+      const img = new Image();
+      img.onload = () => { propImgCache.current[url] = img; pending--; if (pending === 0) setTokenCacheVer(v => v + 1); };
+      img.onerror = () => { pending--; }; // no sprite yet (fire-and-forget hasn't finished) — drawScene's img-less fallback covers this
+      img.src = `${API}${url}`;
+    });
+  }, [dungeon?.entities]);
+
   // Subscribe to targeting events (registered once)
   useEffect(() => {
     const u1 = on('vtt:targeting:start', payload => {
@@ -194,6 +211,16 @@ export default function Canvas({ player, characterId, character, connected, show
   // DevModal (lighting + perf overlay toggles) forces a redraw after flipping a module-level flag.
   useEffect(() => on('vtt:dev:redraw', forceRedraw), []);
 
+  // Torch flicker — the vignette gradient itself is static per draw, so without a periodic nudge
+  // it'd only redraw (and thus only re-sample the flicker curve) when something else changes the
+  // scene. 8/s is plenty for a "breathing" pulse and far cheaper than riding the 60fps combat-effect
+  // rAF loop (useCombatEffects' animTick) just for this.
+  useEffect(() => {
+    if (!lightSources?.length) return;
+    const id = setInterval(forceRedraw, 120);
+    return () => clearInterval(id);
+  }, [lightSources]);
+
   // Esc cancels active targeting (registered once) — the only window-level listener that isn't a
   // camera/drag concern, so it stays here rather than in useCanvasPointerControls.
   useEffect(() => {
@@ -230,10 +257,10 @@ export default function Canvas({ player, characterId, character, connected, show
     latestDrawParamsRef.current = {
       showBattleMap, dungeon, encounter, hoveredTokenKey, tokenPositions, player, movementRemaining,
       targeting, connected, deadPlayerNames, downPlayerNames, concentrating, deadCreatureIds,
-      companions, visiblePolygon, litCells, senses, elevations, visibleCells,
+      companions, visiblePolygon, litCells, lightSources, senses, elevations, visibleCells,
       hoverHitChance, multiTargetCursor, multiTargetsPicked,
       floorVariantRef, dungeonZoomRef, dungeonPanRef, dragRef, reachableRef, combatReachableRef, groundCacheRef, aoeMouseRef,
-      tokenImgCache, enemyImgCache, flashEffectsRef, tokenEffectsRef, floatEffectsRef, swingEffectsRef,
+      tokenImgCache, enemyImgCache, propImgCache, flashEffectsRef, tokenEffectsRef, floatEffectsRef, swingEffectsRef,
     };
 
     if (drawRafPendingRef.current) return;

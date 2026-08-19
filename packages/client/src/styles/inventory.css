@@ -40,7 +40,7 @@
 .sheet-equipment-body {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 48px;
 }
 
 .sheet-equipment-list {
@@ -58,27 +58,6 @@
 .sheet-equip-slot-label {
   font-size: 15px;
   color: var(--text-muted);
-}
-
-.sheet-equipment-figure-wrap {
-  display: flex;
-  justify-content: center;
-  flex: 1;
-}
-
-.sheet-equipment-figure {
-  position: relative;
-  aspect-ratio: 1 / 2;
-  height: 280px;
-}
-
-.sheet-equipment-svg {
-  width: 100%;
-  height: 100%;
-  fill: none;
-  stroke: var(--text-muted);
-  stroke-width: 4;
-  stroke-linecap: round;
 }
 
 .sheet-equip-slot {
@@ -101,20 +80,6 @@
 .sheet-equip-slot--target {
   border-color: var(--gold);
   border-style: dashed;
-}
-
-.sheet-equip-slot--hand-left {
-  position: absolute;
-  left: 6%;
-  top: 48%;
-  transform: translate(-50%, -50%);
-}
-
-.sheet-equip-slot--hand-right {
-  position: absolute;
-  left: 94%;
-  top: 48%;
-  transform: translate(-50%, -50%);
 }
 
 .sheet-accessories-grid {

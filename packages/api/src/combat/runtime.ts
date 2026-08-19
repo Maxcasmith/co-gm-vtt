@@ -7,7 +7,7 @@ import { toClientDungeon } from '../dungeon/index.ts';
 import { Team, Participant } from '../domain/encounter.ts';
 import { Creature } from '../domain/creature.ts';
 import { logError, logDebug } from '../logger.ts';
-import { io, ROOM, combatState, encounters, tokenPositions, campaignPlayers, playerSocketIds, enemiesReady, combatStartedAt, dungeons, pendingWeaponBonuses, microDungeons, connected, withLivePositions, getStateEngine, stateEngines } from '../state.ts';
+import { io, ROOM, combatState, encounters, tokenPositions, campaignPlayers, playerSocketIds, enemiesReady, combatStartedAt, combatScores, dungeons, pendingWeaponBonuses, microDungeons, connected, withLivePositions, getStateEngine, stateEngines } from '../state.ts';
 import { D20Roll, rollDice, fmtMod, calcMaxHp, crToXp, rollApplicableDamage } from './dice.ts';
 import { rollModeFor, addCondition, removeCondition, attackModeAgainstTarget, combineModes } from './conditions/rollModeFor.ts';
 import { ReactionOfferHook } from './stateEngine/hooks/ReactionOfferHook.ts';
@@ -1089,6 +1089,21 @@ export async function checkConcentration(cid: string, targetId: string, damage: 
 }
 
 /**
+ * Adds to a player's running Scores tally for the current encounter (combatScores) — in-memory
+ * only, not persisted per-hit. Flushed onto the character sheet once in endCombat. Gated on the
+ * encounter's own participant.isPlayer (campaignPlayers is keyed by player *name*, not charId,
+ * so it can't be used here) — skips allies, enemies, and self-inflicted hazards with no attacker.
+ */
+function bumpScore(cid: string, charId: string | undefined, field: 'enemiesKilled' | 'damageDealt' | 'damageReceived', amount: number): void {
+  if (!charId || !encounters.get(cid)?.findParticipant(charId)?.isPlayer) return;
+  let scores = combatScores.get(cid);
+  if (!scores) { scores = new Map(); combatScores.set(cid, scores); }
+  const entry = scores.get(charId) ?? { enemiesKilled: 0, damageDealt: 0, damageReceived: 0 };
+  entry[field] += amount;
+  scores.set(charId, entry);
+}
+
+/**
  * Applies damage to a player participant and runs everything that follows from it — HP persistence,
  * the damage broadcast, death-save failures for damage taken while down, and the onDown/onKill
  * stages. Shared by enemy attacks, save-based spell damage, and start-of-turn recurring damage.
@@ -1115,6 +1130,7 @@ export async function applyDamageToPlayer(
   // One event drives the damage float/flash for every source — weapon hit, spell hit, spell-save
   // damage, recurring ticks — since they all funnel through this function to apply HP loss.
   if (damage > 0) io.to(ROOM).emit('combat:damage:dealt', { targetId: charId, targetName: participant.name, damage });
+  if (damage > 0) bumpScore(cid, charId, 'damageReceived', damage);
   if (damage > 0) checkEndsIfCasterDamages(cid, charId, opts?.sourceId);
 
   if (wasDown) {
@@ -1237,6 +1253,22 @@ export async function endCombat(cid: string): Promise<void> {
   if (engine) await engine.trigger('afterCombat', { round: encounter?.currentRound?.number ?? 0 });
 
   void evaluateNemesisAfterCombat(cid);
+
+  // One process: every kill/damage tallied during the fight lands on each character sheet
+  // in a single read-modify-write, rather than a write per hit.
+  const scores = combatScores.get(cid);
+  if (scores) {
+    void Promise.all([...scores].map(([charId, s]) =>
+      updateCharacter(cid, charId, c => ({
+        ...c,
+        enemiesKilled: (c.enemiesKilled ?? 0) + s.enemiesKilled,
+        damageDealt: (c.damageDealt ?? 0) + s.damageDealt,
+        damageReceived: (c.damageReceived ?? 0) + s.damageReceived,
+      }))
+    ));
+  }
+  combatScores.delete(cid);
+
   encounter?.teardown();
   encounters.delete(cid);
   stateEngines.delete(cid);
@@ -1288,10 +1320,12 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
     effects: creature.effects,
   });
   if (damage > 0) io.to(ROOM).emit('combat:damage:dealt', { targetId, targetName: creature.name, damage });
+  if (damage > 0) bumpScore(cid, opts?.sourceId, 'damageDealt', damage);
   if (damage > 0) checkEndsIfCasterDamages(cid, targetId, opts?.sourceId);
   void saveEncounter(cid, encounter);
 
   if (creature.isDead()) {
+    bumpScore(cid, opts?.sourceId, 'enemiesKilled', 1);
     console.log(`[combat] ${creature.name} is dead`);
     encounter.removeFromTurnOrder(targetId);
     void saveEncounter(cid, encounter);
