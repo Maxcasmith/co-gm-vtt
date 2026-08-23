@@ -309,12 +309,34 @@
   gap: 6px;
 }
 
+.tile-card-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  width: 100%;
+}
+
+.tile-card-button:hover .tile-img {
+  border-color: var(--gold);
+}
+
 .tile-img {
   width: 100%;
   aspect-ratio: 1 / 1;
   object-fit: cover;
   border-radius: 6px;
   border: 1px solid var(--border);
+}
+
+.tile-img--contain {
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.tile-source-clickable {
+  cursor: pointer;
 }
 
 .tile-label {
@@ -329,6 +351,24 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+.prop-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.prop-row-description {
+  min-height: 70px;
+  resize: vertical;
+}
+
+.prop-row-remove {
+  align-self: flex-start;
 }
 
 .material-row-key {
@@ -374,3 +414,116 @@
   background: rgba(0, 0, 0, 0.2);
 }
 
+/* ── props generate sidebar — same slide-in shell as .settings-sidebar, kept separate so this
+   admin feature doesn't reach into settings.css for an unrelated panel ── */
+.props-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: 460px;
+  max-width: 90vw;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  z-index: 101;
+  transform: translateX(100%);
+  transition: transform 0.3s ease;
+}
+
+.props-sidebar--open {
+  transform: translateX(0);
+}
+
+.props-sidebar-header {
+  padding: 24px 24px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.props-sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+
+.props-sidebar-footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ── creature detail super modal — portrait one side, stat block the other ── */
+.creature-detail-body {
+  display: flex;
+  gap: 32px;
+  align-items: flex-start;
+}
+
+.creature-detail-portrait {
+  flex: 0 0 360px;
+}
+
+.creature-detail-portrait img {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.creature-detail-stats {
+  flex: 1;
+  min-width: 0;
+}
+
+.creature-detail-subtitle {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-style: italic;
+  color: var(--text-muted);
+  margin: 0 0 16px;
+}
+
+.creature-detail-label {
+  color: var(--gold);
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-right: 6px;
+}
+
+.creature-detail-vitals {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.creature-detail-abilities {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.creature-detail-ability {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.creature-detail-resistances,
+.creature-detail-attacks,
+.creature-detail-appearance {
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.creature-detail-resistances p,
+.creature-detail-attacks p,
+.creature-detail-appearance p {
+  margin: 4px 0;
+}

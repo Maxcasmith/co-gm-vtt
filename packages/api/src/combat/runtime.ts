@@ -1,4 +1,4 @@
-import type { Character, EffectSpec, CreatureType, Condition as ConditionName, ActiveCondition, AbilityKey, TrapEffect, SpellSaveResult } from 'shared';
+import type { Character, EffectSpec, CreatureType, Condition as ConditionName, ActiveCondition, AbilityKey, TrapEffect, SpellSaveResult, Weapon } from 'shared';
 import { statMod, calcAC, spellSlotsForClass, CLASS_SAVING_THROWS, CLASS_WEAPON_PROFS, findPath, hasOriginFeat, isWeapon, SKILL_ABILITY } from 'shared';
 import { getCharacter, updateCharacter, readChatLog, appendChatLog, saveEncounter, clearEncounter, clearDungeon, saveDungeon, listCharacters, loadPartyAllies, readQuests, writeQuests, readManifest, readNemeses, getConfig } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
@@ -14,6 +14,7 @@ import { ReactionOfferHook } from './stateEngine/hooks/ReactionOfferHook.ts';
 import { RetaliationOfferHook } from './stateEngine/hooks/RetaliationOfferHook.ts';
 import { offerReaction } from './stateEngine/reactionPrompt.ts';
 import { DamageResistanceHook } from './stateEngine/hooks/DamageResistanceHook.ts';
+import { registerPassiveClassHooks } from './stateEngine/passiveClassHooks.ts';
 import type { AttackerDisadvantageHook } from './stateEngine/hooks/AttackerDisadvantageHook.ts';
 import type { SanctuaryWardHook } from './stateEngine/hooks/SanctuaryWardHook.ts';
 import type { SpeedModifierHook } from './stateEngine/hooks/SpeedModifierHook.ts';
@@ -21,7 +22,7 @@ import type { ActionUnlockHook } from './stateEngine/hooks/ActionUnlockHook.ts';
 import type { GameTimeExpiryHook } from './stateEngine/hooks/ExpiryHook.ts';
 import { RecurringDamageHook } from './stateEngine/hooks/RecurringDamageHook.ts';
 import type { ConditionImmunityHook } from './stateEngine/hooks/ConditionImmunityHook.ts';
-import type { RollModifierHook } from './stateEngine/hooks/RollModifierHook.ts';
+import { sumAndConsumeRollMods, type RollModifierHook } from './stateEngine/hooks/RollModifierHook.ts';
 import type { IllusionTagHook } from './stateEngine/hooks/IllusionTagHook.ts';
 import type { IlluminationSourceHook } from './stateEngine/hooks/IlluminationSourceHook.ts';
 import { findSpell } from '../routes/spells.ts';
@@ -29,9 +30,10 @@ import { applyEffects } from '../effects.ts';
 import { endSession, dispatchDMResponse } from '../session.ts';
 import type { TacticalContext } from './ai/types.ts';
 import { generatePlans } from './ai/planGenerator.ts';
-import { evaluatePlans, actionRangeFt, findAction } from './ai/planEvaluator.ts';
+import { evaluatePlans, actionRangeFt, findAction, tokenKey } from './ai/planEvaluator.ts';
 import { selectPlan } from './ai/planSelector.ts';
-import { executeSpecialAction } from './ai/executor.ts';
+import { executeSpecialAction, findOpenAdjacent } from './ai/executor.ts';
+import { runManoeuvres } from './tactics/executionLoop.ts';
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -114,6 +116,10 @@ async function runTurnStart(cid: string): Promise<void> {
   if (!encounter || !actor) return;
   actor.refillResources();
   emitResources(actor);
+  if (actor.isPlayer) {
+    const char = await getCharacter(cid, actor.id);
+    if (char) registerPassiveClassHooks(getStateEngine(cid), actor.id, char.class, char.level ?? 1);
+  }
   await getStateEngine(cid).trigger('beforeTurn', {
     participantId: actor.id,
     participantName: actor.name,
@@ -181,6 +187,11 @@ export function emitTurn(cid: string) {
     setTimeout(() => void runEnemyAI(cid, actor), 800);
   } else if (actor.isDown()) {
     setTimeout(() => void runDeathSave(cid, actor), 800);
+  } else {
+    void (async () => {
+      const char = await getCharacter(cid, actor.id);
+      if (char?.aiControlled) setTimeout(() => void runPlayerTactics(cid, actor), 800);
+    })();
   }
 }
 
@@ -272,6 +283,75 @@ export async function stabilizeParticipant(cid: string, participant: Participant
   void appendChatLog(cid, stableMsg);
 }
 
+/**
+ * Walks `actor` up to `maxFt` toward (or, mirrored away from, for 'retreat') `targetPos`, one
+ * cell at a time — wall-aware pathing when a dungeon grid is loaded, greedy step-toward otherwise.
+ * 'approach' stops early once within `stopAtRangeFt`. Shared by runEnemyAI and the player tactics
+ * engine (combat/tactics/), so keyed by `tokenKey(actor)` rather than `actor.id` — creatures and
+ * players use different tokenPositions keys (see tokenKey's own doc). Returns wherever the walk
+ * actually ended, which may be short of `maxFt`/`targetPos` (blocked path, a trap sprung
+ * Restrained mid-walk, or combat ending mid-stride).
+ */
+export async function walkParticipant(
+  cid: string, actor: Participant, fromPos: { gx: number; gy: number }, intent: 'approach' | 'retreat',
+  targetPos: { gx: number; gy: number }, maxFt: number, stopAtRangeFt: number, conditions: ActiveCondition[] | undefined,
+): Promise<{ gx: number; gy: number }> {
+  let { gx, gy } = fromPos;
+  const maxSteps = Math.floor(maxFt / 5);
+  if (maxSteps <= 0) return { gx, gy };
+  const key = tokenKey(actor);
+
+  const destination = intent === 'retreat'
+    ? { gx: gx + Math.sign(gx - targetPos.gx) * maxSteps, gy: gy + Math.sign(gy - targetPos.gy) * maxSteps }
+    : targetPos;
+
+  const cells = dungeons.get(cid)?.cells;
+  const path = cells ? findPath(cells, gx, gy, destination.gx, destination.gy) : null;
+
+  for (let step = 0; step < maxSteps; step++) {
+    if (intent === 'approach') {
+      const distFt = Math.max(Math.abs(targetPos.gx - gx), Math.abs(targetPos.gy - gy)) * 5;
+      if (distFt <= stopAtRangeFt) break;
+    }
+
+    const pos = tokenPositions.get(cid) ?? {};
+    let next: { gx: number; gy: number } | undefined;
+    if (cells) {
+      next = path?.[step];
+      if (!next || isOccupied(pos, next.gx, next.gy, key)) break;
+    } else {
+      const dx = Math.sign(destination.gx - gx);
+      const dy = Math.sign(destination.gy - gy);
+      const candidates = [
+        { gx: gx + dx, gy: gy + dy },
+        { gx: gx + dx, gy },
+        { gx,          gy: gy + dy },
+      ].filter(c => c.gx >= 0 && c.gy >= 0 && !isOccupied(pos, c.gx, c.gy, key));
+      next = candidates[0];
+      if (!next) break;
+    }
+
+    gx = next.gx;
+    gy = next.gy;
+
+    await delay(220);
+    if (!combatState.get(cid)) break;
+
+    const updatedPos = tokenPositions.get(cid) ?? {};
+    updatedPos[key] = { gx, gy };
+    tokenPositions.set(cid, updatedPos);
+    io.to(ROOM).emit('token:moved', { tokenId: key, gx, gy });
+    await checkTrapAt(cid, gx, gy, key, actor.name, actor.isPlayer);
+    if (!combatState.get(cid)) break;
+    // maxSteps was fixed before this loop started off the pre-move speed — a trap sprung
+    // mid-walk (Snare) needs its own check here, or a restrained actor just keeps stepping
+    // for the rest of its already-decided move.
+    if (conditions?.some(c => c.name === 'Restrained')) break;
+  }
+
+  return { gx, gy };
+}
+
 export async function runEnemyAI(cid: string, actor: Participant): Promise<void> {
   if (!combatState.get(cid)) return;
   const encounter = encounters.get(cid);
@@ -304,65 +384,14 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
   const targetPosKey = target.isPlayer ? target.name : target.id;
   const targetPos = positions[targetPosKey];
 
-  let { gx, gy } = epos;
   // Restrained: speed 0, can't move — still gets its action if already in range.
-  const maxSteps = creature.conditions?.some(c => c.name === 'Restrained') ? 0 : Math.floor(creature.speed / 5);
+  const maxFt = creature.conditions?.some(c => c.name === 'Restrained') ? 0 : creature.speed;
   const rangeFt = actionRangeFt(creature, plan.actionRef);
 
-  if (plan.movement !== 'hold' && targetPos && maxSteps > 0) {
-    // Retreat walks toward a point mirrored away from the target instead of toward it — same
-    // path/greedy-step machinery either direction, just a different destination.
-    const destination = plan.movement === 'retreat'
-      ? { gx: gx + Math.sign(gx - targetPos.gx) * maxSteps, gy: gy + Math.sign(gy - targetPos.gy) * maxSteps }
-      : targetPos;
-
-    // Wall-aware route when a dungeon grid is loaded — walked one cell at a time so it can still
-    // stop early (in range of target) or pull up short of an occupied cell. No grid (arena combat)
-    // falls back to the old greedy step-toward-destination walk, same as before.
-    const cells = dungeons.get(cid)?.cells;
-    const path = cells ? findPath(cells, gx, gy, destination.gx, destination.gy) : null;
-
-    for (let step = 0; step < maxSteps; step++) {
-      if (plan.movement === 'approach') {
-        const distFt = Math.max(Math.abs(targetPos.gx - gx), Math.abs(targetPos.gy - gy)) * 5;
-        if (distFt <= rangeFt) break;
-      }
-
-      const pos = tokenPositions.get(cid) ?? {};
-      let next: { gx: number; gy: number } | undefined;
-      if (cells) {
-        next = path?.[step];
-        if (!next || isOccupied(pos, next.gx, next.gy, actor.id)) break;
-      } else {
-        const dx = Math.sign(destination.gx - gx);
-        const dy = Math.sign(destination.gy - gy);
-        const candidates = [
-          { gx: gx + dx, gy: gy + dy },
-          { gx: gx + dx, gy },
-          { gx,          gy: gy + dy },
-        ].filter(c => c.gx >= 0 && c.gy >= 0 && !isOccupied(pos, c.gx, c.gy, actor.id));
-        next = candidates[0];
-        if (!next) break;
-      }
-
-      gx = next.gx;
-      gy = next.gy;
-
-      await delay(220);
-      if (!combatState.get(cid)) return;
-
-      const updatedPos = tokenPositions.get(cid) ?? {};
-      updatedPos[actor.id] = { gx, gy };
-      tokenPositions.set(cid, updatedPos);
-      io.to(ROOM).emit('token:moved', { tokenId: actor.id, gx, gy });
-      await checkTrapAt(cid, gx, gy, actor.id, actor.name, false);
-      if (!combatState.get(cid)) return;
-      // maxSteps was fixed before this loop started off the pre-move speed — a trap sprung
-      // mid-walk (Snare) needs its own check here, or a restrained creature just keeps stepping
-      // for the rest of its already-decided move.
-      if (creature.conditions?.some(c => c.name === 'Restrained')) break;
-    }
-  }
+  const { gx, gy } = plan.movement !== 'hold' && targetPos && maxFt > 0
+    ? await walkParticipant(cid, actor, epos, plan.movement === 'retreat' ? 'retreat' : 'approach', targetPos, maxFt, rangeFt, creature.conditions)
+    : epos;
+  if (!combatState.get(cid)) return;
 
   const finalDistFt = targetPos ? Math.max(Math.abs(targetPos.gx - gx), Math.abs(targetPos.gy - gy)) * 5 : 0;
 
@@ -500,6 +529,43 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
   } else {
     console.log(`[ai] ${actor.name} cannot reach ${target.name} (${finalDistFt}ft away)`);
   }
+
+  await delay(600);
+  advanceTurn(cid);
+}
+
+/** The character's equipped main-hand weapon, or the universal unarmed strike — same shape client's CombatDock builds for the attack picker. */
+export function weaponFor(char: Character): Weapon {
+  const mainHandId = char.equipment?.mainHand;
+  const item = mainHandId ? char.inventory?.find(i => i.id === mainHandId) : undefined;
+  if (item && isWeapon(item)) return item;
+  return {
+    id: 'unarmed-strike', name: 'Unarmed Strike', description: 'A bare-handed strike.', quantity: 1,
+    type: 'weapon', damage: hasOriginFeat(char, 'Tavern Brawler') ? '1d4' : '1',
+    damageType: 'bludgeoning', attackBonus: 0, range: 5, properties: ['simple'], isFinesse: false,
+  };
+}
+
+/**
+ * Offline-party-member counterpart to runEnemyAI: a player-controlled character marked
+ * `aiControlled` plays its own turn via its authored `tactics` (competing manoeuvre chains,
+ * scored step-by-step — see combat/tactics/executionLoop.ts) instead of waiting on its client.
+ * Reuses the exact same attack/spell-attack/item resolution the client normally triggers, so the
+ * outcome is indistinguishable from a human playing that turn.
+ */
+export async function runPlayerTactics(cid: string, actor: Participant): Promise<void> {
+  if (!combatState.get(cid)) return;
+  const encounter = encounters.get(cid);
+  if (!encounter) return;
+
+  const char = await getCharacter(cid, actor.id);
+  if (!char) return advanceTurn(cid);
+
+  const positions = tokenPositions.get(cid) ?? {};
+  const round = encounter.currentRound?.number ?? 1;
+  const tacticalCtx: TacticalContext = { cid, actor, positions, allParticipants: encounter.turnOrder, round };
+
+  await runManoeuvres(cid, actor, char, tacticalCtx);
 
   await delay(600);
   advanceTurn(cid);
@@ -1013,7 +1079,7 @@ export async function rollSavingThrow(
     ...engine.getHooksOwnedBy(targetId, 'rollModifier'),
     ...engine.getHooksOwnedBy(targetId, 'rollModifierSaveOnly'),
   ] as RollModifierHook[];
-  const modBonus = rollMods.reduce((sum, h) => sum + h.sign * rollDice(`1d${h.dieSize}`), 0);
+  const modBonus = sumAndConsumeRollMods(engine, rollMods);
   const bonus = statMod(stats[ability]) + (proficient ? (char?.proficiencyBonus ?? 2) : 0) + modBonus;
 
   const mode = rollModeFor(creature ?? char ?? {}, 'save', ability);
@@ -1268,6 +1334,19 @@ export async function endCombat(cid: string): Promise<void> {
     ));
   }
   combatScores.delete(cid);
+
+  // Offline-AI-spawned party members (see rollPlayerInitiatives) only existed for this fight —
+  // any player-participant whose name isn't currently connected was necessarily one of them,
+  // since only connected names get added the normal way. Drop their token before teardown.
+  if (encounter) {
+    const positions = tokenPositions.get(cid);
+    if (positions) {
+      for (const p of encounter.players) {
+        if (!connected.has(p.name)) delete positions[p.name];
+      }
+      tokenPositions.set(cid, positions);
+    }
+  }
 
   encounter?.teardown();
   encounters.delete(cid);
@@ -1697,6 +1776,44 @@ export async function rollPlayerInitiatives(cid: string, chars: Character[]): Pr
     });
     encounter.expectedParticipantCount += allyEntries.length;
     addToTurnOrder(cid, allyEntries, entries.length * 500);
+  }
+
+  // Offline party members who opted into AI control (see the AI tab) spawn in for this fight
+  // only, adjacent to whichever online player happens to be first — same "adjacent, or stack if
+  // boxed in" rule combat/ai/executor.ts's findOpenAdjacent already gives summons. Skipped
+  // entirely if nobody's online to anchor the spawn point on; despawned again in endCombat.
+  const anchorPos = players[0] ? tokenPositions.get(cid)?.[players[0]] : undefined;
+  if (anchorPos) {
+    const offlineAiChars = chars.filter(c => !connected.has(c.name) && c.aiControlled);
+    if (offlineAiChars.length) {
+      const positions = tokenPositions.get(cid) ?? {};
+      const aiEntries = offlineAiChars.map(char => {
+        const pos = findOpenAdjacent(positions, anchorPos.gx, anchorPos.gy);
+        positions[char.name] = pos;
+        io.to(ROOM).emit('token:moved', { tokenId: char.name, gx: pos.gx, gy: pos.gy });
+
+        const alertBonus = hasOriginFeat(char, 'Alert') ? (char.proficiencyBonus ?? 2) : 0;
+        const mod = statMod(char.stats.dex) + (char.initiativeBonus ?? 0) + alertBonus;
+        const maxHp = calcMaxHp(char);
+        const participant = new Participant({
+          id: char.id,
+          name: char.name,
+          initiative: new D20Roll().roll() + mod,
+          isPlayer: true,
+          teamId: 'players',
+          currentHp: char.currentHp ?? maxHp,
+          maxHp,
+          tempHp: char.tempHp ?? 0,
+        });
+        playerTeam!.addParticipant(participant);
+        registerReactionOffers(cid, char);
+        registerStaticDamageModifiers(cid, char.id, char);
+        return participant;
+      });
+      tokenPositions.set(cid, positions);
+      encounter.expectedParticipantCount += aiEntries.length;
+      addToTurnOrder(cid, aiEntries, entries.length * 500);
+    }
   }
 }
 

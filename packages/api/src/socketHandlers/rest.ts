@@ -78,6 +78,7 @@ export async function maybeResolveRest(campaignId: string): Promise<void> {
       characterId: charId, characterName: char.name, resting: true, restType: choice.restType,
       hpGained: outcome.hpGained, currentHp: outcome.currentHp, maxHp: outcome.maxHp,
       currentSpellSlots1: outcome.currentSpellSlots1, maxSpellSlots1: outcome.maxSpellSlots1,
+      resourceUses: outcome.resourceUses,
       worldEvents,
     });
   }

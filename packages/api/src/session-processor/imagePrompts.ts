@@ -333,6 +333,16 @@ export function buildDynamicTilesetPrompt(theme: string, materials: (DungeonMate
     ? `${i + 1}. **${m.key}** — a variant of #${m.variantOf}: the same material, must merge and tile seamlessly with it, but with a bit of extra visual variety (different crack/wear/stain pattern, slight tonal shift) so it doesn't read as an exact duplicate. ${m.description}`
     : `${i + 1}. **${m.key}** — ${m.description}`);
 
+  // Explicit grid layout as a literal table (not just a numbered list) — the model was
+  // misreading numbered-list order as loose ordering rather than fixed grid position, producing
+  // materials in the wrong cells. Spelling out row/column position directly removes that ambiguity.
+  const gridRows: string[] = [];
+  for (let r = 0; r < 4; r++) {
+    const cells = materials.slice(r * 4, r * 4 + 4).map(m => m.key);
+    gridRows.push(`Row ${r + 1}: ${cells.join(' | ')}`);
+  }
+  const gridTable = gridRows.join('\n');
+
   return `Generate a **2D top-down seamless texture atlas** for a dungeon crawler.
 
 # THEME
@@ -358,7 +368,13 @@ Create a single texture atlas:
 
 No gaps or padding between textures.
 
-# MATERIALS (in order — left to right, top row, then each row down)
+# GRID LAYOUT (exact position — this is a literal map of the atlas, not a loose ordering)
+
+Each cell below MUST contain exactly the material named at that position. Do not reorder, shift, merge, or drop any cell.
+
+${gridTable}
+
+# MATERIALS (detail for each — numbers match left-to-right, top-row-down reading order of the grid above)
 
 ${lines.join('\n\n')}
 
@@ -440,17 +456,23 @@ Create a single portrait atlas:
 * **4 columns**
 * **4 rows**
 * **16 portraits**
-* Each portrait is **1:1 square**
-* Every portrait occupies exactly the same amount of space
+* Every cell is an **exact 1:1 square: width equals height, precisely, no exceptions** — never a rectangle, never taller than wide or wider than tall
+* Every cell is exactly the same size as every other cell
 * Complete atlas aspect ratio: **1:1**
-* Atlas size: **1024 × 1024**
-* Individual portrait size: **256 × 256**
+* Atlas size: **1024 × 1024** — an exact square, so 1024 ÷ 4 = 256 in both directions
+* Individual cell size: **256 × 256**, exactly — equal width and height
 
-No gaps or padding between portraits.
+# GRID LINES
+
+Draw a thin, solid, flat black line, about 4% of one cell's width thick, running along every *interior* boundary between cells — both the vertical lines between columns and the horizontal lines between rows, forming a literal 4×4 grid of exact squares over the whole atlas. Center the line exactly on the boundary, half its thickness in each of the two cells it separates. Every cell enclosed by these lines must measure exactly 256 × 256 — identical width and height, on a perfectly even 4×4 spacing with no cell larger or smaller than another. This grid is a cropping guide and will be cut out afterward — it is not part of the final art.
+
+Do **not** draw this line, or any line, along the four outer edges of the atlas (the very top, bottom, left, and right of the whole 1024×1024 image). There is a line between cell 1 and cell 2, but no line above cell 1, below cell 13, left of cell 1, or right of cell 4/8/12/16 — those four sides of the atlas are the plain background, uninterrupted, right up to the image's own edge. Only the 3 internal vertical lines and 3 internal horizontal lines exist.
+
+Every portrait's artwork — its full extent on all sides, including hair, horns, raised weapons, or tall headwear — must stay entirely on its own side of these lines. Treat each grid line as a hard wall: no part of a portrait may touch, cross, or be drawn over it.
 
 # BACKGROUND
 
-Every single portrait must sit on the exact same **flat, solid, saturated red background** (no gradient, no texture, no vignette, no shadow falloff) — identical red value in all 16 cells, edge to edge, so each portrait can be cleanly key-cropped later.
+Every single portrait must sit on the exact same **flat, solid, saturated red background** (hex approximately #E01414, no gradient, no texture, no vignette, no shadow falloff) — identical red value in all 16 cells, edge to edge, so each portrait can be cleanly key-cropped later.
 
 # CREATURES (in order — left to right, top row, then each row down)
 
@@ -460,26 +482,28 @@ ${lines.join('\n\n')}
 
 Each portrait is a **bust/head-and-shoulders framing**, front-facing or three-quarter view, centered in its cell.
 
+Every portrait, regardless of the creature's natural size or proportions, must be scaled down as needed so its full extent — including hair, horns, raised weapons, or tall headwear — fits entirely inside its own single square cell, centered, with a small margin on every side. Never enlarge a bust to the point where any part touches or crosses into a neighboring cell.
+
 No environment, no scenery, no props beyond what's held/worn by the creature itself.
 
 Consistent lighting direction and art style across all 16 — same rendering technique, same level of detail, same color saturation — so they read as one cohesive set, not 16 unrelated images.
 
 There must be:
 
-* NO borders
-* NO frames
-* NO outlines around the cells
-* NO gaps or padding between cells
+* NO frame, border, or line of any kind around the outer edge of the atlas — the grid lines exist ONLY between cells, never along the top, bottom, left, or right edge of the whole image
 * NO text or labels
 * NO numbering
+* NO part of any portrait extending past its own cell's grid line into a neighboring cell — shrink the portrait to fit instead
 
 # PRIORITIES
 
-1. Instantly readable creature silhouette/identity at small size
-2. Exact same flat red background in every cell
-3. Consistent art style and lighting across all 16 portraits
-4. Correct left-to-right, top-to-bottom order as listed above
-5. No borders, frames, or background variation`;
+1. Every cell is an exact 1:1 square, all 16 the same size, laid out on an even 4×4 grid
+2. The thin black grid line is present and unbroken on every cell boundary
+3. Instantly readable creature silhouette/identity at small size
+4. Every portrait fits entirely within its own grid-lined cell with margin on all sides — no overflow into neighboring cells
+5. Exact same flat red background in every cell
+6. Consistent art style and lighting across all 16 portraits
+7. Correct left-to-right, top-to-bottom order as listed above`;
 }
 
 export interface PropSpriteEntry {
@@ -493,7 +517,7 @@ export interface PropSpriteEntry {
 // family, via the provider's `background: 'transparent'` param) vs. a flat magenta chroma-key
 // background that dungeon/props.ts strips out afterward (dall-e models, which have no real
 // transparency option).
-export function buildPropSpritePrompt(entries: PropSpriteEntry[], transparent: boolean): string {
+export function buildPropSpritePrompt(entries: PropSpriteEntry[], transparent: boolean, atlasSize: number): string {
   const real = entries.slice(0, 36);
   const lines = real.map((e, i) => `${i + 1}. **${e.name}** — ${e.description}`);
   if (real.length < 36) {
@@ -501,6 +525,7 @@ export function buildPropSpritePrompt(entries: PropSpriteEntry[], transparent: b
     const rangeLabel = from === 36 ? '36' : `${from}-36`;
     lines.push(`${rangeLabel}. Blank ${transparent ? 'transparent' : 'magenta'} square — this sprite is just blank. The purpose of this sprite is to keep the crop grid of the others consistent.`);
   }
+  const tileSize = Math.round(atlasSize / 6);
 
   const backgroundSection = transparent
     ? `# BACKGROUND
@@ -519,13 +544,19 @@ Create a single sprite atlas:
 * **6 columns**
 * **6 rows**
 * **36 sprites**
-* Each sprite is **1:1 square**
-* Every sprite occupies exactly the same amount of space
+* Every cell is an **exact 1:1 square: width equals height, precisely, no exceptions** — never a rectangle, never taller than wide or wider than tall
+* Every cell is exactly the same size as every other cell
 * Complete atlas aspect ratio: **1:1**
-* Atlas size: **2048 × 2048**
-* Individual sprite size: **~341 × 341**
+* Atlas size: **${atlasSize} × ${atlasSize}** — an exact square, so ${atlasSize} ÷ 6 = ${tileSize} in both directions
+* Individual cell size: **${tileSize} × ${tileSize}**, exactly — equal width and height
 
-No gaps or padding between sprites.
+# GRID LINES
+
+Draw a thin, solid, flat black line, about 4% of one cell's width thick, running along every *interior* boundary between cells — both the vertical lines between columns and the horizontal lines between rows, forming a literal 6×6 grid of exact squares over the whole atlas. Center the line exactly on the boundary, half its thickness in each of the two cells it separates. Every cell enclosed by these lines must measure exactly ${tileSize} × ${tileSize} — identical width and height, on a perfectly even 6×6 spacing with no cell larger or smaller than another. This grid is a cropping guide and will be cut out afterward — it is not part of the final art.
+
+Do **not** draw this line, or any line, along the four outer edges of the atlas (the very top, bottom, left, and right of the whole 2048×2048 image). There is a line between cell 1 and cell 2, but no line above cell 1, below cell 36, left of cell 1, or right of cell 6/12/18/24/30/36 — those four sides of the atlas are the plain background, uninterrupted, right up to the image's own edge. Only the 5 internal vertical lines and 5 internal horizontal lines exist.
+
+Every object's artwork — its full extent on all four sides, including tall or thin parts — must stay entirely on its own side of these lines. Treat each grid line as a hard wall: no part of an object may touch, cross, or be drawn over it.
 
 ${backgroundSection}
 
@@ -535,7 +566,9 @@ ${lines.join('\n\n')}
 
 # SPRITE REQUIREMENTS
 
-Each sprite is the **complete object**, viewed from a three-quarter top-down angle matching a tabletop VTT token (the same angle a miniature would be viewed from on a table), centered and filling most of its cell with a small margin.
+Each sprite is the **complete object**, viewed from a three-quarter top-down angle matching a tabletop VTT token (the same angle a miniature would be viewed from on a table).
+
+Every object, regardless of its natural shape, must be scaled down as needed so its full extent — including any long, tall, or thin parts — fits entirely inside its own single square cell, centered, with a small margin on every side. An elongated object (a ladder, a spear, a table) is drawn smaller within its cell, never enlarged to the point of touching or crossing into a neighboring cell.
 
 No environment, no other objects, no characters — just the one named object per cell.
 
@@ -543,21 +576,21 @@ Consistent lighting direction and art style across all 36 — same rendering tec
 
 There must be:
 
-* NO borders
-* NO frames
-* NO outlines around the cells
-* NO gaps or padding between cells
+* NO frame, border, or line of any kind around the outer edge of the atlas — the grid lines exist ONLY between cells, never along the top, bottom, left, or right edge of the whole image
 * NO text or labels
 * NO numbering
-* NO cast shadow beyond a small contact shadow directly under the object (skip shadow entirely on transparent-background sprites)
+* NO shadow of any kind${transparent ? ' beyond a small contact shadow directly under the object' : ' — not even a small contact shadow. A shadow fading into the magenta background stops being pure magenta, which breaks clean chroma-keying and leaves a visible ring around the object. The object must sit directly on the flat magenta with nothing under it'}
+* NO part of any object extending past its own cell's grid line into a neighboring cell — shrink the object to fit instead
 
 # PRIORITIES
 
-1. Instantly readable object silhouette/identity at small size
-2. ${transparent ? 'Fully transparent background in every cell' : 'Exact same flat magenta background in every cell'}
-3. Consistent art style and lighting across all 36 sprites
-4. Correct left-to-right, top-to-bottom order as listed above
-5. No borders, frames, or background variation`;
+1. Every cell is an exact 1:1 square, all 36 the same size, laid out on an even 6×6 grid
+2. The thin black grid line is present and unbroken on every cell boundary
+3. Instantly readable object silhouette/identity at small size
+4. Every object fits entirely within its own grid-lined cell with margin on all sides — no overflow into neighboring cells
+5. ${transparent ? 'Fully transparent background in every cell' : 'Exact same flat magenta background in every cell'}
+6. Consistent art style and lighting across all 36 sprites
+7. Correct left-to-right, top-to-bottom order as listed above`;
 }
 
 export function buildWorldMapPrompt(worldMd: string, locationsSummary: string, tags: string[]): string {

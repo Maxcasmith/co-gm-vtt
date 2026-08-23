@@ -27,6 +27,8 @@ export interface Quest {
   status: "undiscovered" | "open" | "resolved";
   log: Array<{ date: string; text: string }>;
   addedAt: string;
+  /** Set when this quest was seeded by a dungeon's own goals (buildDungeonQuests) — scopes it to that dungeon's closed-world narration instead of the full campaign quest list. */
+  sourceDungeonId?: string;
 }
 
 export interface SessionManifest {

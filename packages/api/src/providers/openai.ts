@@ -191,12 +191,15 @@ function atlasSizeFor(model: string): string {
 //
 // background: only meaningful for the gpt-image family (real alpha-channel output) — dall-e models
 // don't support the param, so callers must only pass it when the model actually supports it (see
-// dungeon/props.ts, the only caller that needs real transparency).
+// dungeon/props.ts, the only caller that needs real transparency). Per OpenAI's images.generate
+// docs, background:'transparent' requires output_format to be explicitly 'png' or 'webp' — omitting
+// it is a likely cause of an earlier live rejection ("Transparent background is not supported for
+// this model") that had been read as gpt-image-2 flatly refusing transparency.
 export async function generateTilesetAtlas(prompt: string, apiKey: string, model: string, size?: string, background?: 'transparent'): Promise<Buffer> {
   const res = await fetch(`${API_BASE}/images/generations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model, prompt, n: 1, size: size ?? atlasSizeFor(model), ...(background ? { background } : {}) }),
+    body: JSON.stringify({ model, prompt, n: 1, size: size ?? atlasSizeFor(model), ...(background ? { background, output_format: 'png' } : {}) }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };

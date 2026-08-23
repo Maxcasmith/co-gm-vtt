@@ -22,6 +22,7 @@ import { IllusionTagHook } from './hooks/IllusionTagHook.ts';
 import { MovementDamageHook } from './hooks/MovementDamageHook.ts';
 import { IlluminationSourceHook } from './hooks/IlluminationSourceHook.ts';
 import { WeaponAttackOverrideHook } from './hooks/WeaponAttackOverrideHook.ts';
+import { DcModifierHook } from './hooks/DcModifierHook.ts';
 import { applyCondition, recomputeIllumination } from '../runtime.ts';
 
 export interface SpellHookContext {
@@ -55,6 +56,9 @@ function hookFromSpec(spec: HookSpec, source: string, ctx: SpellHookContext): Ho
     case 'acModifier':
       if (spec.value === undefined) return null;
       return new AcModifierHook({ ...base, value: spec.value });
+    case 'dcModifier':
+      if (spec.value === undefined) return null;
+      return new DcModifierHook({ ...base, value: spec.value });
     case 'recurringDamage':
       // Needs at least a damage tick, a temp-hp tick, or a condition to track — a spec with none
       // of those has nothing for this hook to do. Cause Fear/Ray of Sickness/Wrathful Smite's
@@ -101,7 +105,10 @@ function hookFromSpec(spec: HookSpec, source: string, ctx: SpellHookContext): Ho
       // (no `self`) has no consumer yet, so it's left registering as plain 'grantAdvantage' —
       // wrong if one ever shows up, fix then.
       return new GrantAdvantageHook({
-        ...base, kind: spec.self ? (spec.disadvantage ? 'grantDisadvantageSelf' : 'grantAdvantageSelf') : base.kind,
+        ...base,
+        kind: spec.self
+          ? (spec.disadvantage ? 'grantDisadvantageSelf' : spec.selfSpellAttacksOnly ? 'grantAdvantageSelfSpellOnly' : 'grantAdvantageSelf')
+          : base.kind,
         consumeOnUse: spec.consumeOnUse, self: spec.self, speedBonusOnUseFt: spec.speedBonusOnUseFt,
       });
     case 'damageResistance': {
@@ -147,7 +154,7 @@ function hookFromSpec(spec: HookSpec, source: string, ctx: SpellHookContext): Ho
         : spec.scopedToChosenSkill ? 'rollModifierCheck'
         : spec.savesOnly ? 'rollModifierSaveOnly'
         : base.kind;
-      return new RollModifierHook({ ...base, kind, dieSize: spec.dieSize, sign: spec.sign, skill: spec.scopedToChosenSkill ? ctx.chosenSkill : undefined });
+      return new RollModifierHook({ ...base, kind, dieSize: spec.dieSize, sign: spec.sign, skill: spec.scopedToChosenSkill ? ctx.chosenSkill : undefined, consumeOnUse: spec.consumeOnUse });
     }
     case 'conditionImmunity':
       if (!spec.immuneConditions?.length) return null;

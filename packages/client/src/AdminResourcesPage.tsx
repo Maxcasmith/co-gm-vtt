@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
 import GenerateTilesetModal from './GenerateTilesetModal.tsx';
+import GeneratePropsSidebar from './GeneratePropsSidebar.tsx';
+import PreviewCellsModal from './PreviewCellsModal.tsx';
 import BestiaryTab from './BestiaryTab.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
 
 type TilesetManifest = Record<string, Record<string, string[]>>;
-type ResourceTab = 'tiles' | 'bestiary';
+type PropsManifest = { props: Record<string, string>; sources: string[] };
+type ResourceTab = 'tiles' | 'props' | 'bestiary';
 
 function titleCase(s: string): string {
   return s.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -21,6 +24,9 @@ export default function AdminResourcesPage() {
   const [generateOpen, setGenerateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [propsManifest, setPropsManifest] = useState<PropsManifest>({ props: {}, sources: [] });
+  const [generatePropsOpen, setGeneratePropsOpen] = useState(false);
+  const [previewFile, setPreviewFile] = useState<string | null>(null);
 
   function fetchManifest() {
     fetch(`${API}/api/tilesets/manifest`)
@@ -29,7 +35,15 @@ export default function AdminResourcesPage() {
       .catch(() => {});
   }
 
+  function fetchPropsManifest() {
+    fetch(`${API}/api/props/manifest`)
+      .then(r => r.json())
+      .then((data: PropsManifest) => setPropsManifest(data))
+      .catch(() => {});
+  }
+
   useEffect(() => { if (authed) fetchManifest(); }, [authed]);
+  useEffect(() => { if (authed) fetchPropsManifest(); }, [authed]);
 
   async function handleAuth() {
     const r = await fetch(`${API}/api/admin/auth`, {
@@ -111,10 +125,48 @@ export default function AdminResourcesPage() {
 
         <div className="sheet-tabs admin-resource-tabs">
           <button className={`sheet-tab${tab === 'tiles' ? ' sheet-tab--active' : ''}`} onClick={() => setTab('tiles')}>Tiles</button>
+          <button className={`sheet-tab${tab === 'props' ? ' sheet-tab--active' : ''}`} onClick={() => setTab('props')}>Props</button>
           <button className={`sheet-tab${tab === 'bestiary' ? ' sheet-tab--active' : ''}`} onClick={() => setTab('bestiary')}>Bestiary</button>
         </div>
 
         {tab === 'bestiary' && <BestiaryTab />}
+
+        {tab === 'props' && <>
+        <div className="admin-modules-header">
+          <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">🗝️</span>Dungeon Props</h2>
+          <button className="btn-primary" onClick={() => setGeneratePropsOpen(true)}>+ Generate Test Batch</button>
+        </div>
+
+        {propsManifest.sources.length > 0 && (
+          <div className="tile-grid">
+            {propsManifest.sources.map(url => (
+              <div key={url} className="tile-source">
+                <img
+                  src={`${API}${url}`}
+                  alt="Prop source atlas"
+                  title="Click to preview how each cell would be cropped"
+                  className="tile-source-img tile-source-clickable"
+                  onClick={() => setPreviewFile(url.split('/').pop() ?? null)}
+                />
+                <span className="tile-label">Source Atlas (click to preview cells)</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {Object.keys(propsManifest.props).length === 0 && (
+          <div className="admin-table-card"><p className="admin-empty">No props generated yet.</p></div>
+        )}
+
+        <div className="tile-grid">
+          {Object.entries(propsManifest.props).map(([slug, url]) => (
+            <div key={slug} className="tile-card">
+              <img src={`${API}${url}`} alt={titleCase(slug)} title={titleCase(slug)} className="tile-img" />
+              <span className="tile-label">{titleCase(slug)}</span>
+            </div>
+          ))}
+        </div>
+        </>}
 
         {tab === 'tiles' && <>
         <div className="admin-modules-header">
@@ -192,6 +244,23 @@ export default function AdminResourcesPage() {
         password={password}
         onClose={() => setGenerateOpen(false)}
         onGenerated={fetchManifest}
+      />
+
+      <GeneratePropsSidebar
+        open={generatePropsOpen}
+        password={password}
+        onClose={() => setGeneratePropsOpen(false)}
+        onGenerated={sourceFile => {
+          fetchPropsManifest();
+          setGeneratePropsOpen(false);
+          if (sourceFile) setPreviewFile(sourceFile);
+        }}
+      />
+
+      <PreviewCellsModal
+        file={previewFile}
+        password={password}
+        onClose={() => setPreviewFile(null)}
       />
 
       {deleteTarget && (

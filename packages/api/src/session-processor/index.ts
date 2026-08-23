@@ -8,8 +8,8 @@ import {
 } from '../storage.ts';
 import { getConfig } from '../storage.ts';
 import { getFeatureProvider, type ChatMessage } from '../providers/index.ts';
-import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDungeonExplorationPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, type EntityType } from './prompts.ts';
-import type { ChatPayload } from 'shared';
+import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDungeonNarrationPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, type EntityType } from './prompts.ts';
+import type { ChatPayload, Dungeon } from 'shared';
 import { logError } from '../logger.ts';
 
 const ENTITY_TYPES: EntityType[] = ['npc', 'faction', 'location', 'character', 'nemesis'];
@@ -121,10 +121,8 @@ async function readWorldFile(campaignSlug: string, filename: string): Promise<st
   }
 }
 
-async function buildEntitySummaries(campaignSlug: string, dungeonState = ''): Promise<string> {
+async function buildEntitySummaries(campaignSlug: string): Promise<string> {
   const lines: string[] = [];
-
-  if (dungeonState) lines.push(`### Current dungeon state\n${dungeonState}`);
 
   // World bible — generated campaigns use world.md/factions.md; modules use dm-brief.md
   for (const filename of ['world.md', 'factions.md', 'dm-brief.md']) {
@@ -318,37 +316,9 @@ function buildChatMessages(log: ChatPayload[]): ChatMessage[] {
   return messages;
 }
 
-export async function getDMResponse(campaignSlug: string, dungeonState = ''): Promise<string> {
-  const [config, meta, log] = await Promise.all([
-    getConfig(),
-    getWorldMeta(campaignSlug),
-    readChatLog(campaignSlug),
-  ]);
-
-  const entitySummaries = await buildEntitySummaries(campaignSlug, dungeonState);
-  const characters = await getCharacterNames(campaignSlug);
-  const characterSummaries = characters.map(n => `- ${n}`).join('\n');
-
-  const messages = buildChatMessages(log);
-  if (messages.length === 0) return '';
-
-  const worldType = (meta?.type === 'module' ? 'campaign' : meta?.type) ?? 'campaign';
-  const system = buildDMSystemPrompt(
-    meta?.name ?? 'Unknown World',
-    worldType,
-    entitySummaries,
-    characterSummaries,
-    !!dungeonState,
-  );
-
-  const provider = getFeatureProvider(config, 'dmChatResponse');
-  return provider.chat(system, messages);
-}
-
-// Dungeon loaded, combat inactive. Same shape as getDMResponse, but the DM gets the full floor plan
-// (describeDungeonGroundTruth) so it can answer spatial questions accurately — the prompt's
-// reveal-discipline rules are what keep undiscovered entities out of the narration.
-export async function getDungeonExplorationResponse(campaignSlug: string, groundTruth: string): Promise<string> {
+// Open-world narration only — anything inside a dungeon goes through
+// getDungeonNarrationResponse instead.
+export async function getDMResponse(campaignSlug: string): Promise<string> {
   const [config, meta, log] = await Promise.all([
     getConfig(),
     getWorldMeta(campaignSlug),
@@ -363,13 +333,46 @@ export async function getDungeonExplorationResponse(campaignSlug: string, ground
   if (messages.length === 0) return '';
 
   const worldType = (meta?.type === 'module' ? 'campaign' : meta?.type) ?? 'campaign';
-  const system = buildDungeonExplorationPrompt(
+  const system = buildDMSystemPrompt(
     meta?.name ?? 'Unknown World',
     worldType,
     entitySummaries,
     characterSummaries,
-    groundTruth,
   );
+
+  const provider = getFeatureProvider(config, 'dmChatResponse');
+  return provider.chat(system, messages);
+}
+
+// Dungeon narration, closed-world — the single entry point for anything happening inside a
+// dungeon, combat or not (combatActive covers both). Deliberately does NOT call buildEntitySummaries — no world.md,
+// factions.md, dm-brief.md, or campaign-wide quests reach this pathway, only what's seeded on the
+// dungeon itself (goals) and quests actually sourced from it (sourceDungeonId match).
+export async function getDungeonNarrationResponse(
+  campaignSlug: string,
+  dungeon: Dungeon,
+  groundTruth: string,
+  combatActive: boolean,
+): Promise<string> {
+  const [config, quests, log, characterNames] = await Promise.all([
+    getConfig(),
+    readQuests(campaignSlug),
+    readChatLog(campaignSlug),
+    getCharacterNames(campaignSlug),
+  ]);
+
+  const messages = buildChatMessages(log);
+  if (messages.length === 0) return '';
+
+  const dungeonQuests = quests.filter(q => q.sourceDungeonId === dungeon.id);
+  const system = buildDungeonNarrationPrompt({
+    dungeonName: dungeon.name,
+    goals: dungeon.goals ?? [],
+    dungeonQuests,
+    characterNames,
+    groundTruth,
+    combatActive,
+  });
 
   const provider = getFeatureProvider(config, 'dmChatResponse');
   return provider.chat(system, messages);

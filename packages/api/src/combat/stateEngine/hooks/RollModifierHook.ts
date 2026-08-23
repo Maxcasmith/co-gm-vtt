@@ -1,5 +1,7 @@
 import type { TurnContext } from 'shared';
 import { Hook, type HookProps } from '../Hook.ts';
+import type { StateEngine } from '../StateEngine.ts';
+import { rollDice } from '../../dice.ts';
 
 /**
  * Marks its owner adding (Bless) or subtracting (Bane) a die, rerolled fresh every time, to
@@ -23,18 +25,25 @@ import { Hook, type HookProps } from '../Hook.ts';
  *
  * stage is 'beforeTurn' only so it has *a* stage to sit on — never fires meaningfully off it,
  * same as the other query-only hooks.
+ *
+ * `consumeOnUse` (Bardic Inspiration's single die, spent on whichever d20 Test it first gets
+ * summed into — attack roll, save, or skill check) unregisters the hook the moment
+ * sumAndConsumeRollMods below adds it to a roll, same one-shot idiom GrantAdvantageHook/
+ * OnHitBonusDamageHook already use. Bless/Bane leave it unset and just keep rerolling every time.
  */
 export class RollModifierHook extends Hook<'beforeTurn'> {
   readonly stage = 'beforeTurn' as const;
   readonly dieSize: number;
   readonly sign: 1 | -1;
   readonly skill: string | undefined;
+  readonly consumeOnUse: boolean;
 
-  constructor(props: HookProps & { dieSize: number; sign: 1 | -1; skill?: string | undefined }) {
+  constructor(props: HookProps & { dieSize: number; sign: 1 | -1; skill?: string | undefined; consumeOnUse?: boolean | undefined }) {
     super(props);
     this.dieSize = props.dieSize;
     this.sign = props.sign;
     this.skill = props.skill;
+    this.consumeOnUse = props.consumeOnUse ?? false;
   }
 
   matches(ctx: TurnContext): boolean {
@@ -42,4 +51,18 @@ export class RollModifierHook extends Hook<'beforeTurn'> {
   }
 
   apply(): void {}
+}
+
+/**
+ * Sums every hook's die into one bonus and unregisters any that are consumeOnUse — the one
+ * routine every query site (combat:attack, combat:spell:attack, rollSavingThrow, roll:check)
+ * calls instead of each reimplementing the reduce+unregister pairing.
+ */
+export function sumAndConsumeRollMods(engine: StateEngine, hooks: RollModifierHook[]): number {
+  let total = 0;
+  for (const h of hooks) {
+    total += h.sign * rollDice(`1d${h.dieSize}`);
+    if (h.consumeOnUse) engine.unregister(h.id);
+  }
+  return total;
 }

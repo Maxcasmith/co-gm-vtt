@@ -30,6 +30,8 @@ export interface ManifestRoom {
   isHallway?: boolean; // building layouts only — a passage/circulation room, not a destination
   connectsTo?: string[]; // building layouts only — names of other rooms in this manifest it directly opens onto
   description?: string; // 1-2 sentence read-aloud description, shown verbatim the moment a party first enters
+  dressing?: string[]; // ambient set-dressing, always visible, no image/discovery gate
+  hiddenDressing?: { id: string; text: string; hideDC: number }[]; // set-dressing that needs a hard search — id assigned on parse, `discovered` added when converted to DungeonRoom
 }
 
 export interface DungeonManifest {
@@ -93,6 +95,24 @@ function normalizeProps(props: unknown): ManifestProp[] | undefined {
       relX: typeof p.relX === 'number' && Number.isFinite(p.relX) ? Math.max(0, Math.min(1, p.relX)) : 0.5,
       relY: typeof p.relY === 'number' && Number.isFinite(p.relY) ? Math.max(0, Math.min(1, p.relY)) : 0.5,
       size: (PROP_SIZES as readonly string[]).includes(p.size) ? p.size : 'medium',
+    }));
+  return normalized.length ? normalized : undefined;
+}
+
+function normalizeDressing(dressing: unknown): string[] | undefined {
+  if (!Array.isArray(dressing)) return undefined;
+  const normalized = dressing.filter((d): d is string => typeof d === 'string' && d.trim().length > 0).map(d => d.trim());
+  return normalized.length ? normalized : undefined;
+}
+
+function normalizeHiddenDressing(roomIndex: number, hiddenDressing: unknown): { id: string; text: string; hideDC: number }[] | undefined {
+  if (!Array.isArray(hiddenDressing)) return undefined;
+  const normalized = hiddenDressing
+    .filter((d): d is { text: string; hideDC: number } => !!d && typeof d === 'object' && typeof (d as { text?: unknown }).text === 'string' && (d as { text: string }).text.trim().length > 0)
+    .map((d, i) => ({
+      id: `room-${roomIndex}-hidden-dressing-${i}`,
+      text: d.text.trim(),
+      hideDC: typeof d.hideDC === 'number' && Number.isFinite(d.hideDC) ? Math.max(1, Math.min(22, d.hideDC)) : 14,
     }));
   return normalized.length ? normalized : undefined;
 }
@@ -167,6 +187,11 @@ Return ONLY valid JSON, no markdown fences, no explanation:
         "relX": "number 0-1 — this prop's position within the room, left(0) to right(1).",
         "relY": "number 0-1 — this prop's position within the room, top(0) to bottom(1).",
         "size": "small|medium|large — this object's rough footprint (small: a chest/barrel, medium: a table/bed, large: a bookshelf/altar/wagon)."
+      }],
+      "dressing": ["string — a short ambient sensory or set-dressing detail, always visible the instant a party enters (no roll needed, no sprite generated). E.g. 'Cold draft from a cracked window', 'Faint smell of tallow smoke', 'Scorch marks streak the ceiling.'"],
+      "hiddenDressing": [{
+        "text": "string — a set-dressing detail that needs a hard search to notice (nothing worth a full loot/trap entry, but not ambient either — e.g. a faded symbol scratched under a shelf, a second set of footprints in the dust).",
+        "hideDC": 14
       }]
     }
   ],
@@ -180,6 +205,8 @@ IF ORGANIC: produce ${minRooms}-${maxRooms} rooms with location-authentic, atmos
 Omit "creatures"/"traps"/"loot"/"props" for rooms that don't have any — not every room needs them. Match creature types and stat blocks (use official 5e monster stat blocks as reference) to the genre. hideDC ranges 1-22 (higher = harder to spot); scale it to how well-concealed the trap/item narratively is. If the story context implies a non-hostile purpose (e.g. sneaking in to gather information), it's fine for rooms to have no creatures at all — don't force combat that doesn't fit.
 
 Give most rooms 1-4 props fitting their function (a bedroom gets a bed and a dresser, a kitchen gets a stove and shelves) — this is what makes a room feel real, not empty. Skip props only for rooms that are genuinely bare (hallways, a stripped cell, a collapsed passage).
+
+Give most rooms 2-5 "dressing" entries and, where it fits, 0-2 "hiddenDressing" entries — mundane, concrete sensory texture (temperature, smell, sound, wear, small clutter) that makes the room feel inhabited without needing an image or a stat block. Dressing must never imply a named person, faction, event, or plot thread that isn't already established by the story context or "goals" above — an unresolvable hint left dangling in a dungeon with no way to follow up on it misleads the players, it's not atmosphere. "Scorch marks on the ceiling" is fine anywhere; "scorch marks matching the Ashcult's ritual brand" is only fine if the Ashcult is actually part of this dungeon's story context.
 
 This dungeon is built for a party of ${partySize} level ${partyLevel} player characters. Scale creature counts and CRs per room to that party size and level using standard 5e encounter-building guidance — a larger party can handle more/tougher creatures per room, a smaller party needs fewer/weaker ones. The final room (or wherever the boss sits) should be a genuine threat for ${partySize} characters, not a single trivial monster.
 
@@ -198,16 +225,20 @@ Genre: ${dungeonType}`;
     const rawTheme = typeof parsed.theme === 'string' ? parsed.theme.trim().toLowerCase() : '';
     const theme: DungeonStylePack = rawTheme || 'high_fantasy';
     let bossSeen = false;
-    const rooms: ManifestRoom[] = (parsed.rooms?.length ? parsed.rooms : GENERIC_ROOMS).map(r => {
-      const { material, materialDescription, creatures, props, ...rest } = r;
+    const rooms: ManifestRoom[] = (parsed.rooms?.length ? parsed.rooms : GENERIC_ROOMS).map((r, i) => {
+      const { material, materialDescription, creatures, props, dressing, hiddenDressing, ...rest } = r;
       const materialed = typeof material === 'string' && material.trim()
         ? { ...rest, material: slugifyTheme(material), ...(typeof materialDescription === 'string' && materialDescription.trim() ? { materialDescription: materialDescription.trim() } : {}) }
         : rest;
       const normalizedProps = normalizeProps(props);
       const propped = normalizedProps ? { ...materialed, props: normalizedProps } : materialed;
-      if (!creatures?.length) return propped;
+      const normalizedDressing = normalizeDressing(dressing);
+      const dressed = normalizedDressing ? { ...propped, dressing: normalizedDressing } : propped;
+      const normalizedHiddenDressing = normalizeHiddenDressing(i, hiddenDressing);
+      const hiddenDressed = normalizedHiddenDressing ? { ...dressed, hiddenDressing: normalizedHiddenDressing } : dressed;
+      if (!creatures?.length) return hiddenDressed;
       return {
-        ...propped,
+        ...hiddenDressed,
         creatures: creatures.map(c => {
           // Trust the model for at most one boss dungeon-wide — anything past the first is downgraded
           // rather than dropped, so a model that over-marks doesn't lose the creature entirely.

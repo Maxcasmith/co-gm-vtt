@@ -66,9 +66,8 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
     if (distToRoom(startRoom, cx, cy) < MIN_DIST_FROM_START + 1) continue;
 
     const isLoot = lootRooms.has(room.id);
-    const creatureHint = hints?.creatures?.[0];
 
-    if (creatureHint) {
+    for (const creatureHint of hints?.creatures ?? []) {
       const cell = findFreeCell(room, cx, cy, occupied, cells);
       if (cell) {
         occupied.add(key(cell.x, cell.y));
@@ -77,19 +76,17 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
       }
     }
 
-    const lootHint = hints?.loot?.[0];
-    if (lootHint || isLoot) {
+    // No manifest loot hints but this room's in the smallest-area third: fall back to one auto chest.
+    const lootHints = hints?.loot?.length ? hints.loot : isLoot ? [{ name: 'Chest', hideDC: 10 }] : [];
+    for (const lootHint of lootHints) {
       const cell = findFreeCell(room, cx + 1, cy, occupied, cells);
       if (cell) {
         occupied.add(key(cell.x, cell.y));
-        const name = lootHint?.name ?? 'Chest';
-        const hideDC = lootHint?.hideDC ?? 10;
-        entities.push({ id: randomUUID(), type: 'loot', x: cell.x, y: cell.y, name, discovered: false, hideDC });
+        entities.push({ id: randomUUID(), type: 'loot', x: cell.x, y: cell.y, name: lootHint.name, discovered: false, hideDC: lootHint.hideDC });
       }
     }
 
-    const trapHint = hints?.traps?.[0];
-    if (trapHint) {
+    for (const trapHint of hints?.traps ?? []) {
       const cell = findFreeCell(room, cx - 1, cy, occupied, cells);
       if (cell) {
         occupied.add(key(cell.x, cell.y));

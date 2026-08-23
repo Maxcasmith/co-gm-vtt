@@ -129,7 +129,7 @@ function deriveSummonStatBlock(summoner: Creature, action: Extract<EnemyAction, 
   };
 }
 
-function findOpenAdjacent(positions: Record<string, { gx: number; gy: number }>, gx: number, gy: number): { gx: number; gy: number } {
+export function findOpenAdjacent(positions: Record<string, { gx: number; gy: number }>, gx: number, gy: number): { gx: number; gy: number } {
   const offsets = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
   const occupied = new Set(Object.values(positions).map(p => `${p.gx},${p.gy}`));
   for (const [dx, dy] of offsets) {

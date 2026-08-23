@@ -5,6 +5,7 @@ import { saveDungeon, saveEncounter, getConfig, readChatLog, listCharacters, rea
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateEncounterEnemies } from '../session-processor/imagePrompts.ts';
 import { generateEncounterDungeon, toClientDungeon, roomAt } from './index.ts';
+import { templateRoomEntry, type SearchFind } from './narrateEvents.ts';
 import { dungeonEvents } from './events.ts';
 import { Encounter, Team, Participant } from '../domain/encounter.ts';
 import { Creature } from '../domain/creature.ts';
@@ -52,17 +53,20 @@ export async function checkDungeonProximity(cid: string, gx: number, gy: number,
   else await startDungeonCombat(cid, aggro);
 }
 
-// Perception/Investigation checks compare against hideDC for undiscovered loot/traps within sight
-// Returns a grounded note for the DM's next response: what this roll found (or that it found
-// nothing conclusive), so the narration matches the map instead of improvising blind. Returns
-// null when there's nothing dungeon-related to say at all (no dungeon, or nothing nearby).
-export async function checkDungeonHiddenReveal(cid: string, characterName: string, total: number): Promise<string | null> {
+// Perception/Investigation checks compare against hideDC for undiscovered loot/traps within sight,
+// and against hidden dressing in the room the searcher is standing in.
+// Returns what this roll resolved so the caller can narrate it deterministically (see
+// narrateEvents.templateSearchResult): a non-empty array of finds, an EMPTY array when a hideDC was
+// in play but the roll came up short (a real, templatable miss), or null when nothing
+// dungeon-related was in range to resolve against at all — that last case means this roll wasn't a
+// dungeon search, so the caller should fall through to the narrator instead of templating.
+export async function checkDungeonHiddenReveal(cid: string, characterName: string, total: number): Promise<SearchFind[] | null> {
   const dungeon = dungeons.get(cid);
   const pos = tokenPositions.get(cid)?.[characterName];
   if (!dungeon || !pos) return null;
 
   let changed = false;
-  const found: string[] = [];
+  const found: SearchFind[] = [];
   let nearbyUncleared = false;
   for (const entity of dungeon.entities) {
     if (entity.type === 'creature' || entity.discovered || entity.hideDC === undefined) continue;
@@ -71,17 +75,27 @@ export async function checkDungeonHiddenReveal(cid: string, characterName: strin
     if (total < entity.hideDC) { nearbyUncleared = true; continue; }
     entity.discovered = true;
     changed = true;
-    found.push(entity.name);
+    found.push(entity);
     console.log(`[dungeon] ${characterName} notices ${entity.name}`);
+  }
+
+  // Hidden dressing is text-only — no coordinates, no sprite — so it resolves against the room the
+  // searcher occupies rather than sight radius/line of sight the way placed entities do.
+  for (const hd of roomAt(dungeon, pos.gx, pos.gy)?.hiddenDressing ?? []) {
+    if (hd.discovered) continue;
+    if (total < hd.hideDC) { nearbyUncleared = true; continue; }
+    hd.discovered = true;
+    changed = true;
+    found.push(hd);
+    console.log(`[dungeon] ${characterName} notices: ${hd.text}`);
   }
 
   if (changed) {
     void saveDungeon(cid, dungeon);
     io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
-    return `${characterName}'s check finds: ${found.join(', ')}.`;
   }
-  if (nearbyUncleared) return `${characterName}'s check finds nothing conclusive — whatever's here stays hidden for now.`;
-  return null;
+  if (!found.length && !nearbyUncleared) return null;
+  return found;
 }
 
 export async function generateAndBroadcastEnemies(campaignId: string, combatants: string[] = []): Promise<void> {
@@ -240,12 +254,19 @@ export function joinReinforcements(cid: string, triggerEntities: DungeonEntity[]
   }
 }
 
-// Posts a room's pre-generated description to the journal the instant a party first steps into
-// it — no LLM call on this path, so there's no wait. Rooms without a description (e.g. the
-// hand-authored GENERIC_ROOMS fallback) stay silent rather than inventing filler text.
+// Posts the room's stored facts — pre-generated description, ambient dressing, anything already
+// discovered inside it — to the journal the instant a party first steps into it. No LLM call on
+// this path, so there's no wait, and nothing is invented (see narrateEvents.templateRoomEntry).
+// Rooms carrying none of the three (e.g. the hand-authored GENERIC_ROOMS fallback) stay silent
+// rather than posting filler. room.visited (set in checkDungeonProximity) is what keeps this to
+// once per room. senderName is 'Virtual DM' so the line lands as an assistant turn in the LLM's
+// chat history rather than being replayed back to it as if a player had said it.
 dungeonEvents.on('room_entered', ({ cid, room }) => {
-  if (!room.description) return;
-  const msg = { text: room.description, senderName: 'DM', timestamp: Date.now() };
+  const dungeon = dungeons.get(cid);
+  if (!dungeon) return;
+  const text = templateRoomEntry(dungeon, room);
+  if (!text) return;
+  const msg = { text, senderName: 'Virtual DM', timestamp: Date.now() };
   io.to(ROOM).emit('chat:message', msg);
   void appendChatLog(cid, msg);
 });

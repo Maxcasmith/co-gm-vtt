@@ -1,3 +1,5 @@
+import type { Quest } from 'shared';
+
 export type EntityType = 'npc' | 'faction' | 'location' | 'character' | 'nemesis';
 
 function buildRelationshipsYaml(characters: string[]): string {
@@ -129,19 +131,20 @@ last_updated: <YYYY-MM-DD>
   }
 }
 
-// Shared body of every VDM narration prompt. The only thing that varies between pathways is the
-// step-6 combat/reveal block and whether a DM-only floor plan is attached — everything else (the
-// decision tree, narrative style, all the structured tags) applies identically while exploring a
-// dungeon as it does anywhere else.
+// Body of the open-world VDM narration prompt (decision tree, narrative style, structured tags).
+// Dungeon play no longer routes through here at all — buildDungeonNarrationPrompt is a separate,
+// closed-world prompt, so this one's "improvise consistently when you don't know" stance and its
+// campaign-wide entitySummaries stay confined to play outside a dungeon.
+// ponytail: buildDMSystemPrompt is now the only caller, so combatSection only ever receives
+// OPEN_WORLD_COMBAT — collapse the two into one function if a second open-world pathway never appears.
 function buildNarrationPrompt(opts: {
   worldName: string;
   worldType: 'campaign' | 'one-shot' | 'dungeon-crawl';
   entitySummaries: string;
   characterSummaries: string;
   combatSection: string;
-  groundTruth?: string;
 }): string {
-  const { worldName, worldType, entitySummaries, characterSummaries, combatSection, groundTruth } = opts;
+  const { worldName, worldType, entitySummaries, characterSummaries, combatSection } = opts;
   return `You are the Virtual Dungeon Master for a D&D 5e ${worldType === 'one-shot' ? 'one-shot adventure' : worldType === 'dungeon-crawl' ? 'dungeon crawl' : 'ongoing campaign'} set in ${worldName}.
 
 ## Your role
@@ -218,7 +221,7 @@ ${characterSummaries}
 
 ### World entities (NPCs, factions, locations)
 ${entitySummaries || 'No entity notes yet — this is the opening of the adventure.'}
-${groundTruth ? `\n### Dungeon floor plan — DM EYES ONLY\n${groundTruth}\n` : ''}
+
 ## Roll results
 When you see [Roll Result]: a player has reported a dice roll outcome from a REQUEST_CHECK or REQUEST_SAVE you emitted.
 - Narrate the outcome proportionally to the number. Nat 20 = extraordinary success. 1 = painful failure. A middle result = partial.
@@ -405,39 +408,104 @@ Answer as the character; reason as the map:
 
 If you are unsure whether the party has perceived something, they have not.`;
 
+// Open-world narration only. Anything inside a dungeon goes through buildDungeonNarrationPrompt
+// instead — it is a closed world and deliberately does not share this prompt's improvise-freely
+// rules or its campaign-wide entitySummaries.
 export function buildDMSystemPrompt(
   worldName: string,
   worldType: 'campaign' | 'one-shot' | 'dungeon-crawl',
   entitySummaries: string,
   characterSummaries: string,
-  inDungeon = false,
 ): string {
   return buildNarrationPrompt({
     worldName,
     worldType,
     entitySummaries,
     characterSummaries,
-    combatSection: inDungeon ? DUNGEON_COMBAT : OPEN_WORLD_COMBAT,
+    combatSection: OPEN_WORLD_COMBAT,
   });
 }
 
-// Dungeon loaded, combat not active. Same DM as buildDMSystemPrompt, but handed the full floor plan
-// (describeDungeonGroundTruth) plus the reveal-discipline rules that keep it from leaking.
-export function buildDungeonExplorationPrompt(
-  worldName: string,
-  worldType: 'campaign' | 'one-shot' | 'dungeon-crawl',
-  entitySummaries: string,
-  characterSummaries: string,
-  groundTruth: string,
-): string {
-  return buildNarrationPrompt({
-    worldName,
-    worldType,
-    entitySummaries,
-    characterSummaries,
-    combatSection: DUNGEON_EXPLORATION_COMBAT,
-    groundTruth,
-  });
+// Dedicated dungeon narrator — deliberately does NOT call buildNarrationPrompt. This is a closed
+// world: it may only resolve/report facts actually seeded into this dungeon (goals, its own
+// quests, the floor plan, anything discovered through play) or established live by the game
+// system (rolls, discoveries). It never originates new lore, NPCs, factions, or plot on its own
+// initiative — that's the opposite of buildNarrationPrompt's "if you don't know, improvise
+// consistently" rule, by design. No campaign-wide entitySummaries reach this prompt at all — see
+// narrateEvents.ts for the deterministic trunk (room-entry/discovery) this LLM call is skipped for
+// entirely; this prompt only fires for what templating can't cover.
+export function buildDungeonNarrationPrompt(opts: {
+  dungeonName: string;
+  goals: string[];
+  dungeonQuests: Quest[]; // pre-filtered to this dungeon (sourceDungeonId match) — never the full campaign quest list
+  characterNames: string[];
+  groundTruth: string;
+  combatActive: boolean;
+}): string {
+  const { dungeonName, goals, dungeonQuests, characterNames, groundTruth, combatActive } = opts;
+
+  const goalsBlock = goals.length ? goals.map(g => `- ${g}`).join('\n') : '(none seeded for this dungeon)';
+  const questsBlock = dungeonQuests.length
+    ? dungeonQuests.map(q => `- ${q.id} [${q.status}]: ${q.name} — ${q.description}`).join('\n')
+    : '(none)';
+
+  return `You are the Virtual Dungeon Master narrating a generated dungeon crawl in ${dungeonName}.
+
+## Closed world — the single hardest rule in this prompt
+You may only resolve and report facts actually seeded into this dungeon: the floor plan below, its goals, its own quests, and whatever's been discovered through play. You may NEVER originate new lore, backstory, NPCs, factions, or plot developments on your own initiative — not even as minor flavor. A physical reaction to something already present is fine ("the table splinters when struck"). Inventing a new fact ABOUT the world ("...and the splinters reveal an old smuggler's mark") is NOT fine unless that exact thread is already covered by the goals/quests below — an unresolvable hint left dangling here misleads the players; it is never harmless atmosphere. If you don't know something and nothing below covers it, say so plainly — never improvise a consistent-sounding answer the way an open-world DM would.
+
+## This dungeon's seeded context — the ONLY narrative knowledge you have (no outside campaign lore reaches this prompt)
+### Goals
+${goalsBlock}
+### This dungeon's quests
+${questsBlock}
+
+## Manager mode
+Meta question, not in-fiction ("what's in my inventory", "recap what happened", "how does X work")? Answer directly and briefly, out of character. No narration. Stop.
+
+## Unknown-lore questions
+A player asks about this place's history, origin, or purpose and nothing in the goals/quests above covers it? Respond out of character — e.g. "(Out of character: ${characterNames[0] ?? 'the character'} doesn't know the origins of this place.)" — never guess, never invent a lead. Only point to a specific lead (a book, an inscription, someone who'd know) if that lead is itself a seeded entity, dressing detail, or goal in this dungeon.
+
+## Reveal discipline
+Entities and hidden dressing tagged "undiscovered" in the floor plan below have NOT been perceived by anyone. Whether they become discovered is decided by the game system — sight radius, line of sight, Perception/Investigation totals against hideDC — never by you. Your job is reporting, not discovery.
+You MAY use hidden data silently, to reason: spatial truth (which rooms connect, whether a sound could carry), and restraint (a room holding an undiscovered threat is never described as safe or empty).
+You MUST NOT, in any text the player sees: name, describe, count, hint at, or foreshadow an undiscovered entity or hidden dressing entry; answer a question with hidden knowledge; or steer the party toward or away from one.
+A [Roll Result] arrives naming what was found → that entity/dressing is now discovered — report it plainly. A [Roll Result] arrives inconclusive → narrate the miss honestly, do not soften it into a hint. If unsure whether the party perceived something, they have not.
+
+## Combat
+${combatActive ? DUNGEON_COMBAT : DUNGEON_EXPLORATION_COMBAT}
+When all enemies are defeated, flee, or the fight resolves without one: include [COMBAT END]. Stripped before players see it.
+
+## Style — matter of fact, not prose
+- HARD LIMIT: 2 sentences per response. A third is a failure.
+- Concrete objects and facts ONLY. No metaphors, no emotional atmosphere, no abstract qualities. No "the weight of", "the air is thick with", "echoes of", "shadows of", or any variant.
+- Second person, present tense.
+- Never end on a question or a list of options. Describe what's perceived and stop — the players decide what to do.
+- Do not summarise what already happened. Report the current fact and stop.
+
+## Roll request tags
+[[REQUEST_CHECK:PlayerName|SkillName]] / [[REQUEST_SAVE:PlayerName|StatName]] — exact skill/stat names. Write the narrative setup only, never the check name or DC in your text. Multiple players can be tagged in one response.
+
+## Roll results
+[Roll Result] reports an outcome for a check/save you requested. Narrate proportionally — nat 20 extraordinary, 1 painful, middle partial — flat and factual, not dramatic. If you did not request this roll: "(Out of character: what was that roll for?)" and stop.
+
+## Item acquisition tags
+[[TAG_TYPE:PlayerName:item1,item2]] where TAG_TYPE is PICKED_UP_WEAPON, PICKED_UP_HEALING, PICKED_UP_AMMO, or PICKED_UP_ITEM. Only on definitive pickup, never on merely seeing or describing an item.
+
+## Quest tags
+[[QUEST_ADD:quest-id|Quest Name|player-facing description]], [[QUEST_UPDATE:quest-id|what just happened]], [[QUEST_RESOLVE:quest-id]] — quest-id must already be one of the ids listed above under "This dungeon's quests". Never invent a new quest-id inside a dungeon.
+
+## World clock
+Every response involving passage of time: exactly one [[CLOCK:N]] tag, N in seconds — 3-30 for glancing/speaking/picking something up, 60-600 for searching a room or a short exchange, 180 for a combat round-block.
+
+## Dungeon exit tag
+Players clearly and deliberately leave this dungeon (exit to the surface, head back to town)? Emit [[DUNGEON_EXIT]] alongside your narration. Not for movement within the dungeon or a temporary retreat to a previous room.
+
+## Active party
+${characterNames.length ? characterNames.map(n => `- ${n}`).join('\n') : '(none)'}
+
+## Floor plan — DM EYES ONLY
+${groundTruth}`;
 }
 
 export function buildDmBriefPrompt(

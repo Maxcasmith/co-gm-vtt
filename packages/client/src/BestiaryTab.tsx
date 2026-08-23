@@ -1,18 +1,30 @@
 import { useEffect, useState } from 'react';
+import CreatureDetailModal from './CreatureDetailModal.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
 
 interface BestiaryCreature {
   slug: string;
   name: string;
-  cr: number;
+  cr?: number;
   creatureType?: string;
+  role?: string;
+  hp?: number;
+  ac?: number;
+  speed?: number;
+  stats?: { str: number; dex: number; con: number; int: number; wis: number; cha: number };
+  attacks?: { name: string; bonus: number; damage: string }[];
+  appearance?: string;
+  damageResistances?: string[];
+  damageVulnerabilities?: string[];
+  damageImmunities?: string[];
   portraitSrc?: string;
 }
 
 export default function BestiaryTab() {
   const [creatures, setCreatures] = useState<BestiaryCreature[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<BestiaryCreature | null>(null);
 
   useEffect(() => {
     fetch(`${API}/api/creatures/manifest`)
@@ -59,14 +71,14 @@ export default function BestiaryTab() {
               <div className="tiles-accordion-body">
                 <div className="tile-grid">
                   {group.map(c => (
-                    <div key={c.slug} className="tile-card">
+                    <button key={c.slug} className="tile-card tile-card-button" onClick={() => setSelected(c)}>
                       {c.portraitSrc ? (
                         <img src={`${API}${c.portraitSrc}`} alt={c.name} title={c.name} className="tile-img" />
                       ) : (
                         <div className="tile-img tile-img--placeholder" title={c.name} aria-label={c.name}>{c.name[0]}</div>
                       )}
                       <span className="tile-label">{c.name}</span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -74,6 +86,7 @@ export default function BestiaryTab() {
           </div>
         );
       })}
+      <CreatureDetailModal creature={selected} onClose={() => setSelected(null)} />
     </div>
   );
 }

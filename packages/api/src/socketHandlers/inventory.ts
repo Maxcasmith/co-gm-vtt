@@ -1,9 +1,51 @@
 import { isWeapon, isArmor, CLASS_WEAPON_PROFS, CLASS_ARMOR_TRAINING, characterLightRangeFt } from 'shared';
+import type { Manoeuvre } from 'shared';
 import { getCharacter, updateCharacter } from '../storage.ts';
 import { io, ROOM, playerSocketIds, encounters } from '../state.ts';
 import { rollDice, calcMaxHp } from '../combat/dice.ts';
 import { setLightSourceFor } from '../combat/runtime.ts';
 import type { JoinContext } from './context.ts';
+
+// Mirrors InventoryTab's click-handler name match (client has no structured heal data to read —
+// Consumable.effect is free text) — kept in sync manually since there's no shared item-effects table.
+const POTION_OF_HEALING_NAME = /potion of healing/i;
+const GOODBERRY_NAME = /goodberry/i;
+
+/**
+ * AI tactics' "Use Consumable" directive — the server-side equivalent of InventoryTab's click
+ * handler (consume, then conditionally heal), collapsed into one call since a tactics step
+ * doesn't have a UI event to dispatch two events from. No general effect system exists yet, so
+ * anything other than Potion of Healing/Goodberry just gets consumed with no mechanical effect —
+ * same as it would from a manual click today.
+ */
+export async function resolvePlayerItemUse(
+  campaignId: string, { characterId, characterName, itemId }: { characterId: string; characterName: string; itemId: string },
+): Promise<void> {
+  const char = await getCharacter(campaignId, characterId);
+  const item = char?.inventory?.find(i => i.id === itemId);
+  if (!char || !item) return;
+
+  const quantity = item.quantity - 1;
+  await updateCharacter(campaignId, characterId, c => ({
+    ...c,
+    inventory: quantity > 0
+      ? (c.inventory ?? []).map(i => i.id === itemId ? { ...i, quantity } : i)
+      : (c.inventory ?? []).filter(i => i.id !== itemId),
+  }));
+  const sid = playerSocketIds.get(characterId);
+  if (sid) io.to(sid).emit('character:inventory:remove', { itemId, quantity: Math.max(0, quantity) });
+
+  const healDice = POTION_OF_HEALING_NAME.test(item.name) ? '2d4+4' : GOODBERRY_NAME.test(item.name) ? '1d1' : null;
+  if (healDice) {
+    const maxHp = calcMaxHp(char);
+    const healAmount = rollDice(healDice);
+    const currentHp = Math.min(maxHp, (char.currentHp ?? maxHp) + healAmount);
+    await updateCharacter(campaignId, characterId, c => ({ ...c, currentHp, maxHp }));
+    const participant = encounters.get(campaignId)?.findParticipant(characterId);
+    if (participant) { participant.maxHp = maxHp; participant.heal(healAmount); }
+    io.to(ROOM).emit('consumable:heal:result', { characterId, characterName, healAmount, currentHp, maxHp });
+  }
+}
 
 export function registerInventoryHandlers(ctx: JoinContext): void {
   const { socket, campaignId } = ctx;
@@ -79,6 +121,16 @@ export function registerInventoryHandlers(ctx: JoinContext): void {
 
       const sid = playerSocketIds.get(characterId);
       if (sid) io.to(sid).emit('character:inventory:remove', { itemId, quantity: Math.max(0, quantity) });
+    })();
+  });
+
+  // AI tab (character sheet): persists the manoeuvre list + the offline/AI-controlled toggle.
+  // Private like consumable:used — only the owning character's own client needs to hear it back.
+  socket.on('character:tactics:update', ({ characterId, tactics, aiControlled }: { characterId: string; tactics: Manoeuvre[]; aiControlled: boolean }) => {
+    void (async () => {
+      await updateCharacter(campaignId, characterId, c => ({ ...c, tactics, aiControlled }));
+      const sid = playerSocketIds.get(characterId);
+      if (sid) io.to(sid).emit('character:tactics:update', { characterId, tactics, aiControlled });
     })();
   });
 

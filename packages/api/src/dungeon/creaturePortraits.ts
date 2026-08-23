@@ -2,15 +2,29 @@ import { existsSync } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
-import type { AppConfig, DungeonEntity } from 'shared';
+import type { AppConfig, DungeonEntity, EnemyStatBlock } from 'shared';
 import { slugifyTheme } from 'shared';
+import type { GridRect } from './tilesets.ts';
 import { CREATURES_DIR } from '../storage.ts';
 import { generateTilesetAtlas } from '../providers/openai.ts';
 import { buildCreaturePortraitPrompt } from '../session-processor/imagePrompts.ts';
-import { computeGridRects } from './tilesets.ts';
+import { detectGridBoundaries } from './gridDetect.ts';
 import { logError } from '../logger.ts';
 
 const BATCH_SIZE = 16;
+const GRID_SIZE = 4; // 16 cells, 4x4
+const ATLAS_SIZE = 1024; // fixed size every raw atlas gets force-resized to before grid detection/cropping
+const INSET_FRACTION = 0.02; // extra margin past the detected line, to clear its thickness/anti-aliasing
+
+// Red key-color check passed into the shared detector (see gridDetect.ts/props.ts) — distinguishes
+// buildCreaturePortraitPrompt's flat red background (kept in the final portrait, unlike props'
+// magenta which gets chroma-keyed out) from real drawn portrait content.
+const RED_KEY: [number, number, number] = [224, 20, 20];
+const RED_THRESHOLD = 70;
+function isRed(r: number, g: number, b: number): boolean {
+  const dr = r - RED_KEY[0], dg = g - RED_KEY[1], db = b - RED_KEY[2];
+  return dr * dr + dg * dg + db * db < RED_THRESHOLD * RED_THRESHOLD;
+}
 
 // slugifyTheme is a generic slugifier despite the name (see shared/types/dungeon.ts) — reused
 // here for creature names so "Giant Fire Beetle" -> "giant-fire-beetle", same dedup/matching
@@ -29,11 +43,15 @@ function hasPortrait(slug: string): boolean {
 
 // Sidecar next to the portrait — the bestiary manifest reads storage/creatures/<slug>/stats.json
 // the same way tilesets.ts reads directory names, so a creature only needs to appear here once.
-async function writeStatsIfMissing(slug: string, name: string, cr: number, creatureType: string | undefined): Promise<void> {
+// Only "printed stat block" fields survive here (not id/ownerId/conditions/portraitSrc, which are
+// per-encounter runtime state) — first-seen wins, same global-reuse contract as the portrait itself,
+// so a "Skeleton" from one dungeon's stat block is what every future encounter's bestiary entry shows.
+async function writeStatsIfMissing(slug: string, statBlock: EnemyStatBlock): Promise<void> {
   const statsPath = path.join(CREATURES_DIR, slug, 'stats.json');
   if (existsSync(statsPath)) return;
+  const { name, cr, creatureType, hp, ac, speed, stats, attacks, actions, appearance, role, damageResistances, damageVulnerabilities, damageImmunities } = statBlock;
   await mkdir(path.join(CREATURES_DIR, slug), { recursive: true });
-  await writeFile(statsPath, JSON.stringify({ name, cr, creatureType }, null, 2), 'utf-8');
+  await writeFile(statsPath, JSON.stringify({ name, cr, creatureType, hp, ac, speed, stats, attacks, actions, appearance, role, damageResistances, damageVulnerabilities, damageImmunities }, null, 2), 'utf-8');
 }
 
 // Synchronous, deterministic — sets every creature entity's portraitSrc to where its portrait
@@ -76,7 +94,7 @@ export async function generateCreaturePortraits(entities: DungeonEntity[], confi
   for (const entity of entities) {
     if (entity.type !== 'creature' || !entity.statBlock) continue;
     const slug = portraitSlug(entity.statBlock.name);
-    statsWrites.push(writeStatsIfMissing(slug, entity.statBlock.name, entity.statBlock.cr, entity.statBlock.creatureType));
+    statsWrites.push(writeStatsIfMissing(slug, entity.statBlock));
     if (!entity.statBlock.appearance || seen.has(slug) || hasPortrait(slug)) continue;
     seen.add(slug);
     needed.push({ slug, name: entity.statBlock.name, appearance: entity.statBlock.appearance, isBoss: entity.statBlock.isBoss });
@@ -102,18 +120,54 @@ async function generateBatch(batch: PendingPortrait[], apiKey: string, model: st
   console.log(`[creaturePortraits] requesting atlas from ${model}…`);
   const rawAtlas = await generateTilesetAtlas(prompt, apiKey, model, '1024x1024');
 
-  const { width, height } = await sharp(rawAtlas).metadata();
+  // Persisted unmodified, before the resize/crop below — same review purpose as props.ts's _source
+  // save. Not exposed through any route or the bestiary manifest (routes/creatures.ts skips this
+  // directory): this is just an on-disk copy to inspect later, not a feature.
+  const rawMeta = await sharp(rawAtlas).metadata();
+  const sourceExt = rawMeta.format === 'png' ? 'png' : 'jpg';
+  const sourceDir = path.join(CREATURES_DIR, '_source');
+  await mkdir(sourceDir, { recursive: true });
+  await writeFile(path.join(sourceDir, `portraits_${Date.now()}.${sourceExt}`), rawAtlas);
+
+  // Force-resized to a fixed size before detection/cropping, same as props.ts — the model doesn't
+  // always return exactly the requested size, but the grid must still be evenly 4x4 for tileSize math.
+  const atlas = await sharp(rawAtlas).resize(ATLAS_SIZE, ATLAS_SIZE, { fit: 'fill' }).toBuffer();
+  const { width, height } = await sharp(atlas).metadata();
   if (!width || !height) throw new Error('Portrait atlas has no dimensions');
 
-  const slugs = batch.map(b => b.slug);
-  const { rects, warning } = computeGridRects(width, height, 4, 4, slugs);
-  if (warning) console.warn(`[creaturePortraits] ${warning}`);
+  // buildCreaturePortraitPrompt asks the model to draw a thin black line on every internal cell
+  // boundary — a visual fence keeping busts from bleeding into the row below. Crop between whatever
+  // lines actually got drawn (same detectGridBoundaries pipeline props.ts uses), never a naive even
+  // division — a bust drawn slightly oversized bleeds across the row boundary otherwise, cutting two
+  // different creatures' heads in half into the same cell.
+  const { rows, cols } = await detectGridBoundaries(atlas, width, height, isRed);
+  const actualCols = cols.length - 1, actualRows = rows.length - 1;
+  if (actualCols !== GRID_SIZE || actualRows !== GRID_SIZE) {
+    console.warn(`[creaturePortraits] detected a ${actualCols}x${actualRows} grid, not the requested ${GRID_SIZE}x${GRID_SIZE} — cropping against what was actually drawn`);
+  }
+
+  const rects: GridRect[] = [];
+  batch.forEach((b, i) => {
+    const r = Math.floor(i / actualCols), c = i % actualCols;
+    if (r >= actualRows) {
+      console.warn(`[creaturePortraits] no ${r + 1}th row in the detected grid — skipping "${b.name}", it will need a re-run`);
+      return;
+    }
+    rects.push({ material: b.slug, left: cols[c]!, top: rows[r]!, width: cols[c + 1]! - cols[c]!, height: rows[r + 1]! - rows[r]! });
+  });
 
   await Promise.all(rects.map(async rect => {
     if (rect.width <= 0 || rect.height <= 0) return;
     const dir = path.join(CREATURES_DIR, rect.material);
     await mkdir(dir, { recursive: true });
-    const tile = await sharp(rawAtlas).extract({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }).jpeg({ quality: 90 }).toBuffer();
+    const insetX = Math.round(rect.width * INSET_FRACTION);
+    const insetY = Math.round(rect.height * INSET_FRACTION);
+    const tile = await sharp(atlas).extract({
+      left: rect.left + insetX,
+      top: rect.top + insetY,
+      width: rect.width - insetX * 2,
+      height: rect.height - insetY * 2,
+    }).jpeg({ quality: 90 }).toBuffer();
     await writeFile(path.join(dir, 'portrait_01.jpg'), tile);
   }));
   console.log(`[creaturePortraits] wrote ${rects.length} portraits to storage/creatures/`);

@@ -34,7 +34,9 @@ const sessionKey = (id: string) => `vtt-session:${id}`;
 function readSession(campaignId: string): Character | null {
   try {
     const raw = sessionStorage.getItem(sessionKey(campaignId));
-    return raw ? (JSON.parse(raw) as Character) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Character;
+    return parsed.stats ? parsed : null;
   } catch {
     return null;
   }
@@ -82,6 +84,12 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [itemQtyOverrides, setItemQtyOverrides] = useState<Record<string, number>>({});
   const [equipment, setEquipment] = useState<Character['equipment']>(character.equipment);
   const [liveConditions, setLiveConditions] = useState<Character['conditions']>(character.conditions);
+  // Same pattern `equipment` uses: AITab edits its own copy of tactics/aiControlled and never
+  // touches the `character` object the overlay was opened with, so without mirroring the saved
+  // value back here, switching tabs (which unmounts AITab) would show stale pre-edit tactics
+  // even though the edit already made it to disk.
+  const [tactics, setTactics] = useState<Character['tactics']>(character.tactics);
+  const [aiControlled, setAiControlled] = useState<Character['aiControlled']>(character.aiControlled);
   // Party allies (recruited NPCs, Find Familiar/Unseen Servant companions) — a subset of the
   // turn order, kept separately so Canvas can render their tokens and let an owner (ownerId
   // matching this character) drag theirs the same way they drag their own.
@@ -176,6 +184,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       .then((c: Character) => {
         onCharacterUpdateRef.current(c);
         setEquipment(c.equipment);
+        setTactics(c.tactics);
+        setAiControlled(c.aiControlled);
         if (c.maxSpellSlots1) setPlayerSlotsState({ current: c.currentSpellSlots1 ?? c.maxSpellSlots1, max: c.maxSpellSlots1 });
       })
       .catch(() => {});
@@ -210,6 +220,11 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('character:equipment:update', ({ characterId, slot, itemId }) => {
       if (characterId !== character.id) return;
       setEquipment(prev => ({ ...prev, [slot]: itemId ?? undefined }));
+    });
+    socket.on('character:tactics:update', ({ characterId, tactics, aiControlled }) => {
+      if (characterId !== character.id) return;
+      setTactics(tactics);
+      setAiControlled(aiControlled);
     });
     socket.on('character:inventory:remove', ({ itemId, quantity }) => {
       setItemQtyOverrides(prev => ({ ...prev, [itemId]: quantity }));
@@ -400,15 +415,17 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     if (active) { setJournalOpen(false); setQuickChatOpen(false); }
     if (!active) { setIsMyTurn(false); setVictory(null); setDefeated(false); setDeadCreatureIds(new Set()); setDownPlayerNames(new Set()); setDeadPlayerNames(new Set()); setPlayerHpState(null); setCompanions([]); setActiveBuffs([]); setElevations({}); }
   }), []);
-  // Ally roster (teamId 'players', isPlayer false) — recruited NPCs and spell-summoned
-  // companions both flow through the same turn-order broadcasts real players do.
+  // Ally roster (teamId 'players') — recruited NPCs, spell-summoned companions, and offline
+  // party members who opted into AI control (see the AI tab) all flow through the same
+  // turn-order broadcasts real players do; the last group is isPlayer:true but absent from
+  // `connected`, which is what distinguishes them from an actually-present player here.
   useEffect(() => on('vtt:combat:initiative', ({ entry }) => {
-    if (entry.isPlayer || entry.teamId !== 'players') return;
+    if (entry.teamId !== 'players' || (entry.isPlayer && connected.includes(entry.name))) return;
     setCompanions(prev => [...prev.filter(e => e.id !== entry.id), entry]);
-  }), []);
+  }), [connected]);
   useEffect(() => on('vtt:combat:turn:order', ({ entries }) => {
-    setCompanions(entries.filter(e => !e.isPlayer && e.teamId === 'players'));
-  }), []);
+    setCompanions(entries.filter(e => e.teamId === 'players' && (!e.isPlayer || !connected.includes(e.name))));
+  }), [connected]);
   useEffect(() => on('vtt:combat:turn', ({ actorName }) => setIsMyTurn(actorName === character.name)), [character.name]);
   useEffect(() => on('vtt:combat:attack', ({ attackerId, attackerName, targetId, weapon, bonusSpell }) => {
     socketRef.current?.emit('combat:attack', { attackerId, attackerName, targetId, weapon, ...(bonusSpell ? { bonusSpell } : {}) });
@@ -421,6 +438,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   }), []);
   useEffect(() => on('vtt:equipment:update', payload => {
     socketRef.current?.emit('character:equipment:update', payload);
+  }), []);
+  useEffect(() => on('vtt:tactics:update', payload => {
+    socketRef.current?.emit('character:tactics:update', payload);
   }), []);
   // Movement resets to full only at the START of this player's turn, not on combat start
   useEffect(() => { if (!combatActive) setMovementRemaining(0); }, [combatActive]);
@@ -582,6 +602,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       .filter(item => item.quantity > 0),
     equipment,
     conditions: liveConditions,
+    tactics,
+    aiControlled,
   };
 
   return (

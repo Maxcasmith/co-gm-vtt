@@ -46,6 +46,10 @@ export interface DungeonRoom {
   connectsTo?: string[];
   description?: string;
   visited?: boolean;
+  /** Ambient set-dressing — always visible the moment the room is described, no image, no discovery gate. */
+  dressing?: string[];
+  /** Set-dressing that needs a hard search to notice — same discovered/hideDC gate as DungeonEntity, but text-only (no sprite, no combat-grid presence). */
+  hiddenDressing?: { id: string; text: string; hideDC: number; discovered: boolean }[];
 }
 
 /**

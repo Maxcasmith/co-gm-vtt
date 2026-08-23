@@ -4,6 +4,7 @@ import type { Quest } from "./world.ts";
 import type { Weapon } from "./items.ts";
 import type { Spell } from "./spells.ts";
 import type { Condition, ActiveCondition } from "./conditions.ts";
+import type { Manoeuvre } from "./tactics.ts";
 
 export type Player = string;
 
@@ -59,6 +60,7 @@ export interface RestResultBroadcast {
   maxHp?: number;
   currentSpellSlots1?: number;
   maxSpellSlots1?: number;
+  resourceUses?: Record<string, number>;
   worldEvents?: string;
 }
 
@@ -156,6 +158,11 @@ export interface ServerToClientEvents {
     currentSpellSlots1: number;
     maxSpellSlots1: number;
   }) => void;
+  /** Pushed after any AbilityDef spend (combat:ability:use) — mirrors combat:player:slots but for the generic resource pool (Rage charges, Second Wind, ...) instead of spell slots. */
+  "combat:player:featureResources": (data: {
+    characterId: string;
+    resourceUses: Record<string, number>;
+  }) => void;
   "consumable:heal:result": (data: {
     characterId: string;
     characterName: string;
@@ -205,6 +212,7 @@ export interface ServerToClientEvents {
     slot: "head" | "body" | "gloves" | "boots" | "mainHand" | "offHand";
     itemId: string | null;
   }) => void;
+  "character:tactics:update": (data: { characterId: string; tactics: Manoeuvre[]; aiControlled: boolean }) => void;
   "dungeon:generating": () => void;
   "dungeon:loaded": (dungeon: Dungeon) => void;
   "dungeon:cleared": () => void;
@@ -273,6 +281,14 @@ export interface ClientToServerEvents {
     originGx?: number;
     originGy?: number;
   }) => void;
+  /** Generic "use ability" action (AbilityDef, abilities.ts) — Rage, Second Wind, Bardic Inspiration, ... — the counterpart to combat:attack/combat:spell:cast for class features that are neither. */
+  "combat:ability:use": (payload: {
+    casterId: string;
+    casterName: string;
+    abilityKey: string;
+    /** Required when the AbilityDef's target is 'ally' (Bardic Inspiration) — who onUse/hooks apply to. Ignored for 'self' abilities. */
+    targetId?: string;
+  }) => void;
   "character:equipment:update": (payload: {
     characterId: string;
     slot: "head" | "body" | "gloves" | "boots" | "mainHand" | "offHand";
@@ -285,6 +301,7 @@ export interface ClientToServerEvents {
     healDice?: string;
   }) => void;
   "consumable:used": (payload: { characterId: string; itemId: string }) => void;
+  "character:tactics:update": (payload: { characterId: string; tactics: Manoeuvre[]; aiControlled: boolean }) => void;
   "combat:reaction:respond": (payload: {
     requestId: string;
     /** Which option's spellName was picked, or null to decline/take the hit. */

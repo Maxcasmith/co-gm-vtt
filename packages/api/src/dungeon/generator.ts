@@ -75,6 +75,8 @@ export function generateGrid(manifest: DungeonManifest, opts?: { width?: number;
       ...(manifestRoom.role ? { role: manifestRoom.role } : {}),
       ...(manifestRoom.material ? { material: manifestRoom.material } : {}),
       ...(manifestRoom.description && manifestRoom.role !== 'entrance' ? { description: manifestRoom.description } : {}),
+      ...(manifestRoom.dressing?.length ? { dressing: manifestRoom.dressing } : {}),
+      ...(manifestRoom.hiddenDressing?.length ? { hiddenDressing: manifestRoom.hiddenDressing.map(d => ({ ...d, discovered: false })) } : {}),
     });
     centers.push({ x: cursorX + Math.floor(w / 2), y: cursorY + Math.floor(h / 2) });
 

@@ -242,6 +242,8 @@ export function generateBuildingLayout(manifest: DungeonManifest, opts?: { width
       ...(manifestRoom.isHallway ? { isHallway: true } : {}),
       ...(connections.length ? { connectsTo: connections } : {}),
       ...(manifestRoom.description && manifestRoom.role !== 'entrance' ? { description: manifestRoom.description } : {}),
+      ...(manifestRoom.dressing?.length ? { dressing: manifestRoom.dressing } : {}),
+      ...(manifestRoom.hiddenDressing?.length ? { hiddenDressing: manifestRoom.hiddenDressing.map(d => ({ ...d, discovered: false })) } : {}),
     });
   });
 

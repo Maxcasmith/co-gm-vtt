@@ -8,7 +8,6 @@ export function ScoresTab({ character }: { character: Character }) {
   ];
   return (
     <div className="sheet-feature-group">
-      <p className="sheet-feature-group-title">Scores</p>
       {scores.map((s) => (
         <div key={s.label} className="sheet-score-row">
           <span className="sheet-score-name">{s.label}</span>

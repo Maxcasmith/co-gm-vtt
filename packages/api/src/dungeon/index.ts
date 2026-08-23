@@ -76,15 +76,15 @@ export function buildDungeonQuests(dungeon: Dungeon, existingQuests: Quest[]): Q
   const toAdd: Quest[] = [];
 
   for (const goal of dungeon.goals ?? []) {
-    toAdd.push({ id: goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), name: goal, description: goal, status: 'open', log: [], addedAt: today });
+    toAdd.push({ id: goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), name: goal, description: goal, status: 'open', log: [], addedAt: today, sourceDungeonId: dungeon.id });
   }
 
   const boss = dungeon.entities.find(e => e.type === 'creature' && e.statBlock?.isBoss);
   if (boss) {
-    toAdd.push({ id: `boss-${boss.id}`, name: `Defeat ${boss.name}`, description: `Defeat ${boss.name}.`, status: 'open', log: [], addedAt: today });
+    toAdd.push({ id: `boss-${boss.id}`, name: `Defeat ${boss.name}`, description: `Defeat ${boss.name}.`, status: 'open', log: [], addedAt: today, sourceDungeonId: dungeon.id });
   }
 
-  toAdd.push({ id: 'exit-dungeon', name: `Escape ${dungeon.name}`, description: `Find a way out of ${dungeon.name}.`, status: 'open', log: [], addedAt: today });
+  toAdd.push({ id: 'exit-dungeon', name: `Escape ${dungeon.name}`, description: `Find a way out of ${dungeon.name}.`, status: 'open', log: [], addedAt: today, sourceDungeonId: dungeon.id });
 
   const merged = [...existingQuests];
   for (const quest of toAdd) {
@@ -195,6 +195,8 @@ export function describeDungeonState(dungeon: Dungeon, positions: Record<string,
     if (!room) continue;
     const here = dungeon.entities.filter(e => e.discovered && e.x >= room.x && e.x < room.x + room.width && e.y >= room.y && e.y < room.y + room.height);
     for (const e of here) lines.push(`  - already discovered here: ${e.name}`);
+    for (const d of room.dressing ?? []) lines.push(`  - ${d}`);
+    for (const hd of room.hiddenDressing ?? []) if (hd.discovered) lines.push(`  - already discovered here: ${hd.text}`);
   }
   return lines.join('\n');
 }
@@ -238,6 +240,11 @@ export function describeDungeonGroundTruth(dungeon: Dungeon, positions: Record<s
     const role = room.role ? ` (${room.role})` : '';
     const connects = room.connectsTo?.length ? ` — connects to: ${room.connectsTo.join(', ')}` : '';
     lines.push(`- ${room.name}${kind}${role}${connects}`);
+    for (const d of room.dressing ?? []) lines.push(`  - dressing: ${d}`);
+    for (const hd of room.hiddenDressing ?? []) {
+      const state = hd.discovered ? 'discovered' : 'undiscovered — never state outright in narration';
+      lines.push(`  - hidden dressing (hideDC ${hd.hideDC}, ${state}): ${hd.text}`);
+    }
   }
 
   if (dungeon.entities.length) {

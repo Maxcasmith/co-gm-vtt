@@ -1,5 +1,5 @@
 import type { Character } from 'shared';
-import { spellSlotsForClass, statMod } from 'shared';
+import { spellSlotsForClass, statMod, applyResourceRestRegain } from 'shared';
 import { HIT_DICE } from './state.ts';
 import { calcMaxHp } from './combat/dice.ts';
 
@@ -16,6 +16,7 @@ export interface RestOutcome {
   currentSpellSlots1: number;
   maxSpellSlots1: number;
   hitDiceUsed: number;
+  resourceUses: Record<string, number>;
 }
 
 export function applyLongRest(char: Character): RestOutcome {
@@ -25,7 +26,8 @@ export function applyLongRest(char: Character): RestOutcome {
   const totalHitDice = char.level ?? 1;
   const restored = Math.max(1, Math.floor(totalHitDice / 2));
   const hitDiceUsed = Math.max(0, (char.hitDiceUsed ?? 0) - restored);
-  return { currentHp: maxHp, maxHp, currentSpellSlots1: maxSpellSlots1, maxSpellSlots1, hitDiceUsed };
+  const resourceUses = applyResourceRestRegain(char, 'long');
+  return { currentHp: maxHp, maxHp, currentSpellSlots1: maxSpellSlots1, maxSpellSlots1, hitDiceUsed, resourceUses };
 }
 
 export function applyShortRest(char: Character, hitDiceSpent: number): RestOutcome {
@@ -45,6 +47,7 @@ export function applyShortRest(char: Character, hitDiceSpent: number): RestOutco
   // Pact Magic uniquely recovers on a short rest; other casters' slots don't.
   const maxSpellSlots1 = spellSlotsForClass(char.class);
   const currentSpellSlots1 = char.class === 'Warlock' ? maxSpellSlots1 : (char.currentSpellSlots1 ?? maxSpellSlots1);
+  const resourceUses = applyResourceRestRegain(char, 'short');
 
-  return { hpGained, currentHp, maxHp, currentSpellSlots1, maxSpellSlots1, hitDiceUsed: (char.hitDiceUsed ?? 0) + spend };
+  return { hpGained, currentHp, maxHp, currentSpellSlots1, maxSpellSlots1, hitDiceUsed: (char.hitDiceUsed ?? 0) + spend, resourceUses };
 }

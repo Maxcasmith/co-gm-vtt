@@ -9,8 +9,9 @@ import { FeaturesTab } from "./characterSheet/FeaturesTab.tsx";
 import { InventoryTab } from "./characterSheet/InventoryTab.tsx";
 import { SpellsTab } from "./characterSheet/SpellsTab.tsx";
 import { ScoresTab } from "./characterSheet/ScoresTab.tsx";
+import { AITab } from "./characterSheet/AITab.tsx";
 
-type SheetTab = "abilities" | "features" | "inventory" | "spells" | "scores";
+type SheetTab = "abilities" | "features" | "inventory" | "spells" | "ai" | "scores";
 
 interface Props {
   character: Character;
@@ -27,6 +28,7 @@ const TAB_ORDER: { id: SheetTab; label: string }[] = [
   { id: "inventory", label: "Inventory" },
   { id: "spells", label: "Spells" },
   { id: "features", label: "Features" },
+  { id: "ai", label: "Combat AI" },
   { id: "scores", label: "Scores" },
 ];
 
@@ -306,6 +308,7 @@ export default function CharacterSheetOverlay({
           {tab === "inventory" && (
             <InventoryTab character={character} sessionActive={sessionActive} />
           )}
+          {tab === "ai" && <AITab character={character} />}
           {tab === "scores" && <ScoresTab character={character} />}
           {tab === "spells" && (
             <SpellsTab

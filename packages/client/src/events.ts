@@ -1,4 +1,4 @@
-import type { EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon, ReactionOffer, Condition } from 'shared';
+import type { EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon, ReactionOffer, Condition, Manoeuvre } from 'shared';
 
 // ── Payload types ─────────────────────────────────────────────────────────────
 //
@@ -66,6 +66,7 @@ export interface ConsumableUsedPayload { item: Consumable; characterId: string }
 export interface ConsumableHealPayload { characterId: string; characterName: string; healDice?: string }
 export interface ConsumableHealResultPayload { characterId: string; characterName: string; healAmount: number; currentHp: number; maxHp: number }
 export interface EquipmentUpdatePayload { characterId: string; slot: 'head' | 'body' | 'gloves' | 'boots' | 'mainHand' | 'offHand'; itemId: string | null }
+export interface TacticsUpdatePayload { characterId: string; tactics: Manoeuvre[]; aiControlled: boolean }
 export interface CombatTurnPayload { actorName: string; speedMultiplier?: number; speedBonusFt?: number; buffs?: string[] }
 export type CombatTurnEndPayload = Record<string, never>
 export interface ConditionEscapeAttemptPayload { targetId: string; name: Condition }
@@ -209,6 +210,7 @@ export interface VTTEventMap {
   'vtt:consumable:heal':        ConsumableHealPayload;
   'vtt:consumable:heal:result': ConsumableHealResultPayload;
   'vtt:equipment:update':       EquipmentUpdatePayload;
+  'vtt:tactics:update':         TacticsUpdatePayload;
   'vtt:combat:turn':            CombatTurnPayload;
   'vtt:combat:turn:end':        CombatTurnEndPayload;
   'vtt:condition:escape:attempt': ConditionEscapeAttemptPayload;

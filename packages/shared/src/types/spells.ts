@@ -72,8 +72,10 @@ export interface EffectSpec {
  * 'linkedActionEconomy' is Wardaway's "action or bonus action, not both" — arms itself on the
  * owner's next beforeTurn and disarms on that same turn's afterTurn regardless of whether it
  * fired, so `duration` is always 'endOfCombat' (self-managed, no generic expiry needed).
+ * 'dcModifier' is Innate Sorcery's +1 to the owner's own spell save DC — reuses `value` the same
+ * way acModifier does, just added at each DC computation site (dcBonusFor) instead of an AC one.
  */
-export type HookType = "acModifier" | "recurringDamage" | "onHitBonusDamage" | "grantAdvantage" | "damageResistance" | "acOverride" | "retaliateDamage" | "attackerDisadvantage" | "sanctuaryWard" | "speedModifier" | "linkedActionEconomy" | "reactionLock" | "actionUnlock" | "rollModifier" | "conditionImmunity" | "illusionTag" | "movementDamage" | "illuminationSource" | "weaponAttackOverride";
+export type HookType = "acModifier" | "recurringDamage" | "onHitBonusDamage" | "grantAdvantage" | "damageResistance" | "acOverride" | "retaliateDamage" | "attackerDisadvantage" | "sanctuaryWard" | "speedModifier" | "linkedActionEconomy" | "reactionLock" | "actionUnlock" | "rollModifier" | "conditionImmunity" | "illusionTag" | "movementDamage" | "illuminationSource" | "weaponAttackOverride" | "dcModifier";
 
 /**
  * A hook declared by a spell, instantiated into a live Hook class by the engine's factory
@@ -90,7 +92,7 @@ export interface HookSpec {
   duration: HookDuration;
   /** Higher runs first. Modifiers should outrank reaction offers so an offer sees the final value. */
   priority?: number;
-  value?: number; // acModifier: the AC bonus
+  value?: number; // acModifier: the AC bonus; dcModifier: the spell save DC bonus
   scaling?: Scaling; // recurringDamage/onHitBonusDamage: dice, upcast-aware; weaponAttackOverride: Shillelagh's level-scaled replacement die (resolved once at cast time into WeaponAttackOverrideHook.damageDie)
   damageType?: string; // recurringDamage/onHitBonusDamage/damageResistance: Fire, Acid, Force, ...
   /** damageResistance only — which way the multiplier goes. reduceFlat subtracts a flat `1d{reduceDieSize}` instead of multiplying (the Resistance cantrip). */
@@ -123,7 +125,7 @@ export interface HookSpec {
   creatureTypes?: CreatureType[];
   /** Same meaning as EffectSpec.gatedBySave — this hook only registers if the triggering save was failed (Searing Smite's Burning starts only if the weapon-hit STR/CON save is failed). */
   gatedBySave?: boolean;
-  /** grantAdvantage/onHitBonusDamage only — unregisters itself after firing once (Guiding Bolt's single next attack, Zephyr Strike's one-shot bonus damage) instead of lasting the full duration (Faerie Fire's whole concentration, Divine Favor's every hit). */
+  /** grantAdvantage/onHitBonusDamage/rollModifier only — unregisters itself after firing once (Guiding Bolt's single next attack, Zephyr Strike's one-shot bonus damage, Bardic Inspiration's single die) instead of lasting the full duration (Faerie Fire's whole concentration, Divine Favor's every hit, Bless/Bane's every roll). */
   consumeOnUse?: boolean;
   /** speedModifier only — fraction of base speed available (0.5 = halved). Omit for a pure-bonusFt modifier (Longstrider). */
   multiplier?: number;
@@ -137,6 +139,8 @@ export interface HookSpec {
    * registered under a different kind ('grantAdvantageSelf') to keep the two lookups apart.
    */
   self?: boolean;
+  /** grantAdvantage only, self:true — narrows it to spell attack rolls only (Innate Sorcery), registering under kind 'grantAdvantageSelfSpellOnly' instead of the plain 'grantAdvantageSelf' every weapon AND spell attack site checks. Weapon-attack resolution never queries this narrower kind. */
+  selfSpellAttacksOnly?: boolean;
   /** grantAdvantage only, self:true — flips it to disadvantage instead (Frostbite's "disadvantage on the next weapon attack it makes"). Registers under kind 'grantDisadvantageSelf' rather than 'grantAdvantageSelf'. */
   disadvantage?: boolean;
   /** grantAdvantage only, self:true — feet of speed granted immediately (not through the normal per-turn speedModifier query) the moment the hook fires, hit or miss (Zephyr Strike's +30ft on that attack). Sent straight to the owner's own socket since movement is client-owned. */

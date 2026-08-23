@@ -2,12 +2,13 @@ import type { CharacterStats } from 'shared';
 import { statMod } from 'shared';
 import { getCharacter, appendChatLog } from '../storage.ts';
 import { io, ROOM, STAT_FULL, BG_SKILLS, SAVE_PROFS, getStateEngine } from '../state.ts';
-import { D20Roll, rollDice } from '../combat/dice.ts';
+import { D20Roll } from '../combat/dice.ts';
 import { rollModeFor } from '../combat/conditions/rollModeFor.ts';
 import { checkDungeonHiddenReveal } from '../dungeon/runtime.ts';
+import { templateSearchResult } from '../dungeon/narrateEvents.ts';
 import { dispatchDMResponse } from '../session.ts';
 import type { JoinContext } from './context.ts';
-import type { RollModifierHook } from '../combat/stateEngine/hooks/RollModifierHook.ts';
+import { sumAndConsumeRollMods, type RollModifierHook } from '../combat/stateEngine/hooks/RollModifierHook.ts';
 
 export function registerRollHandlers(ctx: JoinContext): void {
   const { socket } = ctx;
@@ -23,11 +24,16 @@ export function registerRollHandlers(ctx: JoinContext): void {
         (BG_SKILLS[char.background] ?? []).includes(skill)
       ) : false;
       const expert = proficient && Boolean(skill) && (char.expertiseSkills ?? []).includes(skill!);
-      // Guidance — rerolled fresh against every check, not fixed at cast time (see RollModifierHook).
+      const engine = getStateEngine(campaignId);
+      // Guidance — rerolled fresh against every check, not fixed at cast time (see RollModifierHook),
+      // scoped to the one named skill it bonuses. Bardic Inspiration registers unscoped ('rollModifier',
+      // the same kind Bless/Bane use) since its die applies to ANY d20 Test — attack roll, save, or
+      // check, any skill — and is consumeOnUse, spent the moment it's summed into a roll here.
       const skillMods = skill
-        ? (getStateEngine(campaignId).getHooksOwnedBy(characterId, 'rollModifierCheck') as RollModifierHook[]).filter(h => h.skill === skill)
+        ? (engine.getHooksOwnedBy(characterId, 'rollModifierCheck') as RollModifierHook[]).filter(h => h.skill === skill)
         : [];
-      const skillBonus = skillMods.reduce((sum, h) => sum + h.sign * rollDice(`1d${h.dieSize}`), 0);
+      const unscopedMods = engine.getHooksOwnedBy(characterId, 'rollModifier') as RollModifierHook[];
+      const skillBonus = sumAndConsumeRollMods(engine, [...skillMods, ...unscopedMods]);
       const modifier = base + (expert ? 4 : proficient ? 2 : 0) + skillBonus;
       const mode = rollModeFor(char, 'check', statKey);
       const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
@@ -38,8 +44,18 @@ export function registerRollHandlers(ctx: JoinContext): void {
       await appendChatLog(campaignId, { text: checkResult.description, senderName: 'System', timestamp: Date.now() });
       io.to(ROOM).emit('roll:result', checkResult);
       if (skill && /^(perception|investigation)$/i.test(skill)) {
-        const note = await checkDungeonHiddenReveal(campaignId, char.name, total);
-        if (note) await appendChatLog(campaignId, { text: note, senderName: 'System', timestamp: Date.now() });
+        const finds = await checkDungeonHiddenReveal(campaignId, char.name, total);
+        // A dungeon hideDC actually resolved (a hit, or a clean miss against something hidden
+        // nearby) → the outcome is fully determined by the map, so template it and skip the LLM
+        // entirely. null means this roll had nothing dungeon-side to resolve against, so it falls
+        // through to the narrator as before — better an LLM turn than a wrong templated one.
+        if (finds) {
+          const text = (finds.length ? finds.map(f => templateSearchResult(char.name, f)) : [templateSearchResult(char.name, null)]).join('\n');
+          const senderName = 'Virtual DM';
+          await appendChatLog(campaignId, { text, senderName, timestamp: Date.now() });
+          io.to(ROOM).emit('session:recap', { text, senderName, checkRequests: [] });
+          return;
+        }
       }
       dispatchDMResponse(campaignId);
     })();

@@ -3,6 +3,7 @@ import { existsSync } from 'fs';
 import { readdir, readFile } from 'fs/promises';
 import path from 'path';
 import { slugifyTheme } from 'shared';
+import type { EnemyStatBlock } from 'shared';
 import { CREATURES_DIR } from '../storage.ts';
 
 export const creaturesRouter = Router();
@@ -18,29 +19,31 @@ function titleCase(s: string): string {
   return s.replace(/-+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-interface CreatureManifestEntry {
+// Everything creaturePortraits.ts's writeStatsIfMissing persists — see that function for which
+// EnemyStatBlock fields survive (runtime-only ones like id/ownerId/conditions don't).
+type PersistedStats = Partial<Pick<EnemyStatBlock, 'name' | 'cr' | 'creatureType' | 'hp' | 'ac' | 'speed' | 'stats' | 'attacks' | 'actions' | 'appearance' | 'role' | 'damageResistances' | 'damageVulnerabilities' | 'damageImmunities'>>;
+
+interface CreatureManifestEntry extends PersistedStats {
   slug: string;
   name: string;
-  cr?: number;
-  creatureType?: string;
   portraitSrc?: string;
 }
 
-// Mirrors tilesets.ts's manifest — one directory per creature under storage/creatures/, name/cr/
-// creatureType read from the stats.json sidecar creaturePortraits.ts writes next to the portrait.
+// Mirrors tilesets.ts's manifest — one directory per creature under storage/creatures/, full
+// stat block read from the stats.json sidecar creaturePortraits.ts writes next to the portrait
+// (name/cr/creatureType always present once dungeon-generated; older sidecars from before the
+// stat block expansion just come back with those three fields and nothing else).
 creaturesRouter.get('/manifest', async (_req, res) => {
   const creatures: CreatureManifestEntry[] = [];
   if (existsSync(CREATURES_DIR)) {
-    const slugDirs = (await readdir(CREATURES_DIR, { withFileTypes: true })).filter(e => e.isDirectory());
+    const slugDirs = (await readdir(CREATURES_DIR, { withFileTypes: true })).filter(e => e.isDirectory() && e.name !== '_source');
     await Promise.all(slugDirs.map(async dir => {
       const slug = dir.name;
-      const entry: CreatureManifestEntry = { slug, name: titleCase(slug) };
+      let stats: PersistedStats = {};
       try {
-        const stats = JSON.parse(await readFile(path.join(CREATURES_DIR, slug, 'stats.json'), 'utf-8')) as { name?: string; cr?: number; creatureType?: string };
-        if (stats.name) entry.name = stats.name;
-        if (stats.cr !== undefined) entry.cr = stats.cr;
-        if (stats.creatureType !== undefined) entry.creatureType = stats.creatureType;
+        stats = JSON.parse(await readFile(path.join(CREATURES_DIR, slug, 'stats.json'), 'utf-8')) as PersistedStats;
       } catch { /* no stats.json yet — fall back to slug-derived name */ }
+      const entry: CreatureManifestEntry = { ...stats, slug, name: stats.name ?? titleCase(slug) };
       if (existsSync(path.join(CREATURES_DIR, slug, 'portrait_01.jpg'))) {
         entry.portraitSrc = `/api/creatures/${slug}/portrait_01.jpg`;
       }

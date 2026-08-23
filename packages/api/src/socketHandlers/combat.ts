@@ -1,5 +1,5 @@
 import type { TurnOrderEntry, Weapon, Spell, SpellAttackResult, SpellSaveOutcome, SpellSaveResult, CreatureType, Character, ActionResource, AttackContext, DungeonEntity, EffectSpec, AbilityKey, HookSpec } from 'shared';
-import { CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, isAmmunition, statMod, parseRangeFeet, resolveForcedMovement, findPath, effectApplies, actionCostFromCastingTime, requiresConcentration, resolveSpellDamageDice, hasOriginFeat, crossesObscuredArea } from 'shared';
+import { CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, isAmmunition, statMod, parseRangeFeet, resolveForcedMovement, findPath, effectApplies, actionCostFromCastingTime, requiresConcentration, resolveSpellDamageDice, hasOriginFeat, crossesObscuredArea, ABILITY_DEFS, trySpendResource } from 'shared';
 import { randomUUID } from 'crypto';
 import { getCharacter, updateCharacter, saveEncounter, listCharacters, getConfig, appendChatLog, saveDungeon } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
@@ -10,7 +10,8 @@ import { io, ROOM, combatState, encounters, tokenPositions, dungeons, playerSock
 import { toClientDungeon } from '../dungeon/index.ts';
 import { registerSpellHooks } from '../combat/stateEngine/registerSpellHooks.ts';
 import { RecurringDamageHook } from '../combat/stateEngine/hooks/RecurringDamageHook.ts';
-import type { RollModifierHook } from '../combat/stateEngine/hooks/RollModifierHook.ts';
+import { sumAndConsumeRollMods, type RollModifierHook } from '../combat/stateEngine/hooks/RollModifierHook.ts';
+import { dcBonusFor } from '../combat/stateEngine/hooks/DcModifierHook.ts';
 import type { WeaponAttackOverrideHook } from '../combat/stateEngine/hooks/WeaponAttackOverrideHook.ts';
 import { resolveReaction } from '../combat/stateEngine/reactionPrompt.ts';
 import { D20Roll, rollDice, fmtMod, rollApplicableDamage, rollApplicableHeal, rollChainableDamage } from '../combat/dice.ts';
@@ -214,7 +215,7 @@ function placeTrapSpell(cid: string, char: Character, casterName: string, spell:
     return;
   }
   const spellAbility = CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int';
-  const dc = 8 + (char.proficiencyBonus ?? 2) + statMod(char.stats[spellAbility]);
+  const dc = 8 + (char.proficiencyBonus ?? 2) + statMod(char.stats[spellAbility]) + dcBonusFor(getStateEngine(cid), char.id);
   const entity: DungeonEntity = {
     id: randomUUID(), type: 'trap', x: originGx, y: originGy, name: spell.name,
     discovered: false, hideDC: dc, placedBy: casterName,
@@ -369,146 +370,12 @@ function updateFollowingObjects(cid: string, tokenId: string, gx: number, gy: nu
   }
 }
 
-export function registerCombatHandlers(ctx: JoinContext): void {
-  const { socket, campaignId } = ctx;
-
-  socket.on('token:move', ({ tokenId, gx, gy }) => {
-    void (async () => {
-      if (!(await canMove(campaignId, tokenId))) return;
-
-      const positions = tokenPositions.get(campaignId) ?? {};
-      const origin = positions[tokenId];
-
-      // Backstop for the client's own wall-aware drop gating — reject a destination no walkable
-      // route reaches from the token's last known cell (or, with no known cell yet, that isn't
-      // floor at all), rather than trusting whatever gx/gy the socket message carries.
-      const cells = dungeons.get(campaignId)?.cells;
-      if (cells) {
-        const blocked = origin ? !findPath(cells, origin.gx, origin.gy, gx, gy) : cells[gy]?.[gx] !== 1;
-        if (blocked) return;
-      }
-
-      positions[tokenId] = { gx, gy };
-      tokenPositions.set(campaignId, positions);
-      socket.to(ROOM).emit('token:moved', { tokenId, gx, gy });
-      updateFollowingObjects(campaignId, tokenId, gx, gy);
-      if (origin) void checkMovementTriggers(campaignId, tokenId, origin.gx, origin.gy, gx, gy);
-
-      if (connected.has(tokenId)) {
-        void checkDungeonProximity(campaignId, gx, gy, tokenId);
-      } else {
-        // GM-dragged enemy/ally token — the AI's own movement loop checks traps step-by-step as
-        // it walks, but a manual drag jumps straight to the destination with no loop to hook, so
-        // it needs its own check here. No-ops safely if tokenId isn't a live participant.
-        const name = encounters.get(campaignId)?.findParticipant(tokenId)?.name ?? tokenId;
-        void checkTrapAt(campaignId, gx, gy, tokenId, name, false);
-      }
-    })();
-  });
-
-  // Manual GM-driven condition control — traps, cures, anything outside the spell-save path
-  // that already applies conditions on a failed save. Works on players and creatures, in or
-  // out of combat (see applyCondition/clearCondition in runtime.ts for target resolution).
-  socket.on('combat:condition:add', ({ targetId, name }) => {
-    void applyCondition(campaignId, targetId, name);
-  });
-
-  socket.on('combat:condition:remove', ({ targetId, name }) => {
-    void clearCondition(campaignId, targetId, name);
-  });
-
-  // Player-initiated escape attempt (Ensnaring Strike/Entangle's "make a Strength (Athletics)
-  // check to escape") — spends the actor's own action, unlike saveToEnd's automatic per-turn
-  // reroll. targetId is always the escaping creature itself; RAW also lets a creature within
-  // reach attempt it on someone else's behalf, not modeled here (no reach/adjacency check exists
-  // for a non-attack action yet).
-  socket.on('combat:condition:escape', ({ targetId, name }) => {
-    void (async () => {
-      const cid = campaignId;
-      if (!combatState.get(cid)) return;
-
-      const engine = getStateEngine(cid);
-      const hook = engine.getHooksOwnedBy(targetId, 'recurringDamage')
-        .find((h): h is RecurringDamageHook => h instanceof RecurringDamageHook && h.conditionName === name && !!h.escapeSkillCheck);
-      if (!hook?.escapeSkillCheck) return;
-      if (!trySpendAction(cid, targetId, 'action')) return;
-
-      const result = await hook.attemptEscape(engine);
-      if (!result) return;
-
-      const participant = encounters.get(cid)?.findParticipant(targetId);
-      const targetName = participant?.name ?? targetId;
-      console.log(`[escape] ${targetName} attempts ${hook.escapeSkillCheck} vs DC${result.dc}: d20+${result.bonus}=${result.total} — ${result.succeeded ? 'FREE' : 'STUCK'}`);
-      const msg = {
-        text: `${targetName} attempts to escape (${hook.escapeSkillCheck} ${fmtMod(result.bonus)}, DC${result.dc}): ${result.total} — ${result.succeeded ? 'breaks free!' : 'still stuck.'}`,
-        senderName: 'System', timestamp: Date.now(),
-      };
-      void appendChatLog(cid, msg);
-      io.to(ROOM).emit('chat:message', msg);
-      io.to(ROOM).emit('combat:condition:escape:result', {
-        targetId, targetName, name, skill: hook.escapeSkillCheck,
-        roll: result.roll, bonus: result.bonus, total: result.total, dc: result.dc, succeeded: result.succeeded,
-      });
-    })();
-  });
-
-  // Elevation tracker — a token/player's height off the ground (Feather Fall, falling damage).
-  // No permission gate on who can set whose: GM narration ("you fall") and a player's own
-  // Jump/climb both need to move it, same trust model as token:move.
-  socket.on('combat:elevation:set', ({ targetId, elevationFt }) => {
-    if (!combatState.get(campaignId)) return;
-    void applyElevationChange(campaignId, targetId, elevationFt);
-  });
-
-  // Disengage — makes this actor's movement not provoke Opportunity Attacks for the rest of
-  // their turn (checkOpportunityAttacks reads Participant.disengaging directly, no hook needed).
-  socket.on('combat:disengage', ({ actorId }) => {
-    const participant = encounters.get(campaignId)?.findParticipant(actorId);
-    if (participant) participant.disengaging = true;
-  });
-
-  // Illusion detection (Disguise Self) — works with or without active combat, same as casting
-  // the spell itself does. Results go only to the investigator's own socket: RAW's "you see
-  // through it" is knowledge specific to them, not a public reveal to the whole table.
-  socket.on('combat:illusion:investigate', ({ targetId, investigatorId }) => {
-    void (async () => {
-      const cid = campaignId;
-      const tags = await investigateIllusion(cid, targetId, investigatorId);
-      if (!tags.length) return;
-      const targetName = encounters.get(cid)?.findParticipant(targetId)?.name
-        ?? (await getCharacter(cid, targetId))?.name ?? targetId;
-      const sid = playerSocketIds.get(investigatorId);
-      if (sid) io.to(sid).emit('combat:illusion:investigate:result', { targetId, targetName, tags });
-    })();
-  });
-
-  socket.on('combat:initiative:roll', (entry: TurnOrderEntry) => {
-    const cid = campaignId;
-    if (!combatState.get(cid)) return;
-    const encounter = encounters.get(cid);
-    if (!encounter) return;
-
-    let participant = encounter.findParticipant(entry.id);
-    if (!participant) {
-      encounter.expectedParticipantCount++;
-      participant = new Participant({
-        id: entry.id,
-        name: entry.name,
-        initiative: entry.initiative,
-        isPlayer: entry.isPlayer,
-      });
-    } else {
-      participant.initiative = entry.initiative;
-    }
-
-    encounter.addToTurnOrder(participant);
-    io.to(ROOM).emit('combat:initiative', entry);
-    tryBeginCombat(cid);
-    void saveEncounter(cid, encounter);
-  });
-
-  socket.on('combat:attack', ({ attackerId, attackerName, targetId, weapon, bonusSpell }: { attackerId: string; attackerName: string; targetId: string; weapon: Weapon; bonusSpell?: Spell }) => {
-    void (async () => {
+export async function resolvePlayerAttack(
+  campaignId: string,
+  { attackerId, attackerName, targetId, weapon, bonusSpell }: {
+    attackerId: string; attackerName: string; targetId: string; weapon: Weapon; bonusSpell?: Spell;
+  },
+): Promise<{ hit: boolean } | undefined> {
       const cid = campaignId;
       if (!combatState.get(cid)) return;
       const encounter = encounters.get(cid);
@@ -558,8 +425,9 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const isProficient = weapon.properties?.some(p => classWeaponProfs.includes(p as 'simple' | 'martial'));
       const weaponBonus = (weapon.attackBonus ?? 0) + (isProficient ? charProf : 0);
       // Bless/Bane — rerolled fresh against every attack, not fixed at cast time (see RollModifierHook).
+      // Bardic Inspiration's single die is unregistered the moment it's summed in (consumeOnUse).
       const rollMods = getStateEngine(cid).getHooksOwnedBy(attackerId, 'rollModifier') as RollModifierHook[];
-      const attackBonus = statBonus + weaponBonus + rollMods.reduce((sum, h) => sum + h.sign * rollDice(`1d${h.dieSize}`), 0) + bladeWardPenalty(cid, targetId);
+      const attackBonus = statBonus + weaponBonus + sumAndConsumeRollMods(getStateEngine(cid), rollMods) + bladeWardPenalty(cid, targetId);
 
       const positions = tokenPositions.get(cid) ?? {};
       const attackerPos = positions[attackerName];
@@ -638,7 +506,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
             let dc = 0;
             if (pending.save) {
               const casterAbility = CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int';
-              dc = 8 + charProf + statMod(char.stats[casterAbility]);
+              dc = 8 + charProf + statMod(char.stats[casterAbility]) + dcBonusFor(getStateEngine(cid), attackerId);
               const { saved: s, roll: saveRoll, bonus: saveBonus, total: saveTotal } =
                 await rollSavingThrow(cid, targetId, pending.save.ability, dc);
               saved = s;
@@ -747,7 +615,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
             const ungatedHooks = pending.hooks?.filter(h => !h.gatedBySave);
             if (ungatedHooks?.length) {
               const casterAbility = CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int';
-              const dc = 8 + charProf + statMod(char.stats[casterAbility]);
+              const dc = 8 + charProf + statMod(char.stats[casterAbility]) + dcBonusFor(engine, attackerId);
               await registerSpellHooks(engine, ungatedHooks, pending.spellName, {
                 ownerId: targetId, casterId: attackerId,
                 casterLevel: pending.casterLevel, slotLevel: pending.slotLevel,
@@ -819,16 +687,15 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           io.to(ROOM).emit('chat:message', msg);
         } catch (err) { logError('index:combatFlavour', err); }
       })();
-    })();
-  });
+      return { hit };
+}
 
-  // Spell attack (e.g. Fire Bolt, or Jim's Magic Missile's 3 darts) — mirrors combat:attack but
-  // uses the caster's spellcasting modifier for the attack roll and adds no stat mod to damage.
-  // One attack roll per entry in targetIds — most spells send a single entry (spellTargetCount
-  // defaults to {min:1,max:1}), darts/blasts send one per accumulated target, and Chaos
-  // Bolt/Chromatic Orb's dice-triggered leap pushes extra entries onto the queue mid-resolution.
-  socket.on('combat:spell:attack', ({ casterId, casterName, targetIds, spell, slotLevel, chosenDamageType }) => {
-    void (async () => {
+export async function resolvePlayerSpellAttack(
+  campaignId: string,
+  { casterId, casterName, targetIds, spell, slotLevel, chosenDamageType }: {
+    casterId: string; casterName: string; targetIds: string[]; spell: Spell; slotLevel: number; chosenDamageType?: string;
+  },
+): Promise<{ hit: boolean } | undefined> {
       const cid = campaignId;
       if (!combatState.get(cid)) return;
       const encounter = encounters.get(cid);
@@ -858,8 +725,8 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       // Caster-side, so the same for every target in a chain (Chaos Bolt/Chromatic Orb); Blade
       // Ward is target-side instead and gets added per-target below, inside the loop.
       const rollMods = getStateEngine(cid).getHooksOwnedBy(casterId, 'rollModifier') as RollModifierHook[];
-      const baseAttackBonus = abilityMod + charProf + rollMods.reduce((sum, h) => sum + h.sign * rollDice(`1d${h.dieSize}`), 0);
-      const dc = 8 + charProf + abilityMod;
+      const baseAttackBonus = abilityMod + charProf + sumAndConsumeRollMods(getStateEngine(cid), rollMods);
+      const dc = 8 + charProf + abilityMod + dcBonusFor(getStateEngine(cid), casterId);
 
       const engine = getStateEngine(cid);
       await engine.trigger('beforeSpellCast', {
@@ -908,7 +775,10 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         } else {
           const spellMode = rollModeFor(char, 'attack');
           const targetHasAdvantageGrant = engine.hasHookOwnedBy(targetId, 'grantAdvantage');
-          const casterHasSelfAdvantage = engine.hasHookOwnedBy(casterId, 'grantAdvantageSelf');
+          // Innate Sorcery registers narrower ('grantAdvantageSelfSpellOnly') so it never also
+          // grants advantage on this caster's weapon attacks — see combat:attack's own
+          // grantAdvantageSelf-only check, which deliberately does NOT read this narrower kind.
+          const casterHasSelfAdvantage = engine.hasHookOwnedBy(casterId, 'grantAdvantageSelf') || engine.hasHookOwnedBy(casterId, 'grantAdvantageSelfSpellOnly');
           const targetRestrained = attackModeAgainstTarget(creature) > 0;
           const positions = tokenPositions.get(cid) ?? {};
           const casterPos = positions[casterName] ?? positions[casterId];
@@ -1048,7 +918,158 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         casterId, casterName, spellName: spell.name,
         spellLevel: spell.level, slotLevel, targetIds,
       });
+      return { hit: hitTargetIds.length > 0 };
+}
+
+export function registerCombatHandlers(ctx: JoinContext): void {
+  const { socket, campaignId } = ctx;
+
+  socket.on('token:move', ({ tokenId, gx, gy }) => {
+    void (async () => {
+      if (!(await canMove(campaignId, tokenId))) return;
+
+      const positions = tokenPositions.get(campaignId) ?? {};
+      const origin = positions[tokenId];
+
+      // Backstop for the client's own wall-aware drop gating — reject a destination no walkable
+      // route reaches from the token's last known cell (or, with no known cell yet, that isn't
+      // floor at all), rather than trusting whatever gx/gy the socket message carries.
+      const cells = dungeons.get(campaignId)?.cells;
+      if (cells) {
+        const blocked = origin ? !findPath(cells, origin.gx, origin.gy, gx, gy) : cells[gy]?.[gx] !== 1;
+        if (blocked) return;
+      }
+
+      positions[tokenId] = { gx, gy };
+      tokenPositions.set(campaignId, positions);
+      socket.to(ROOM).emit('token:moved', { tokenId, gx, gy });
+      updateFollowingObjects(campaignId, tokenId, gx, gy);
+      if (origin) void checkMovementTriggers(campaignId, tokenId, origin.gx, origin.gy, gx, gy);
+
+      if (connected.has(tokenId)) {
+        void checkDungeonProximity(campaignId, gx, gy, tokenId);
+      } else {
+        // GM-dragged enemy/ally token — the AI's own movement loop checks traps step-by-step as
+        // it walks, but a manual drag jumps straight to the destination with no loop to hook, so
+        // it needs its own check here. No-ops safely if tokenId isn't a live participant.
+        const name = encounters.get(campaignId)?.findParticipant(tokenId)?.name ?? tokenId;
+        void checkTrapAt(campaignId, gx, gy, tokenId, name, false);
+      }
     })();
+  });
+
+  // Manual GM-driven condition control — traps, cures, anything outside the spell-save path
+  // that already applies conditions on a failed save. Works on players and creatures, in or
+  // out of combat (see applyCondition/clearCondition in runtime.ts for target resolution).
+  socket.on('combat:condition:add', ({ targetId, name }) => {
+    void applyCondition(campaignId, targetId, name);
+  });
+
+  socket.on('combat:condition:remove', ({ targetId, name }) => {
+    void clearCondition(campaignId, targetId, name);
+  });
+
+  // Player-initiated escape attempt (Ensnaring Strike/Entangle's "make a Strength (Athletics)
+  // check to escape") — spends the actor's own action, unlike saveToEnd's automatic per-turn
+  // reroll. targetId is always the escaping creature itself; RAW also lets a creature within
+  // reach attempt it on someone else's behalf, not modeled here (no reach/adjacency check exists
+  // for a non-attack action yet).
+  socket.on('combat:condition:escape', ({ targetId, name }) => {
+    void (async () => {
+      const cid = campaignId;
+      if (!combatState.get(cid)) return;
+
+      const engine = getStateEngine(cid);
+      const hook = engine.getHooksOwnedBy(targetId, 'recurringDamage')
+        .find((h): h is RecurringDamageHook => h instanceof RecurringDamageHook && h.conditionName === name && !!h.escapeSkillCheck);
+      if (!hook?.escapeSkillCheck) return;
+      if (!trySpendAction(cid, targetId, 'action')) return;
+
+      const result = await hook.attemptEscape(engine);
+      if (!result) return;
+
+      const participant = encounters.get(cid)?.findParticipant(targetId);
+      const targetName = participant?.name ?? targetId;
+      console.log(`[escape] ${targetName} attempts ${hook.escapeSkillCheck} vs DC${result.dc}: d20+${result.bonus}=${result.total} — ${result.succeeded ? 'FREE' : 'STUCK'}`);
+      const msg = {
+        text: `${targetName} attempts to escape (${hook.escapeSkillCheck} ${fmtMod(result.bonus)}, DC${result.dc}): ${result.total} — ${result.succeeded ? 'breaks free!' : 'still stuck.'}`,
+        senderName: 'System', timestamp: Date.now(),
+      };
+      void appendChatLog(cid, msg);
+      io.to(ROOM).emit('chat:message', msg);
+      io.to(ROOM).emit('combat:condition:escape:result', {
+        targetId, targetName, name, skill: hook.escapeSkillCheck,
+        roll: result.roll, bonus: result.bonus, total: result.total, dc: result.dc, succeeded: result.succeeded,
+      });
+    })();
+  });
+
+  // Elevation tracker — a token/player's height off the ground (Feather Fall, falling damage).
+  // No permission gate on who can set whose: GM narration ("you fall") and a player's own
+  // Jump/climb both need to move it, same trust model as token:move.
+  socket.on('combat:elevation:set', ({ targetId, elevationFt }) => {
+    if (!combatState.get(campaignId)) return;
+    void applyElevationChange(campaignId, targetId, elevationFt);
+  });
+
+  // Disengage — makes this actor's movement not provoke Opportunity Attacks for the rest of
+  // their turn (checkOpportunityAttacks reads Participant.disengaging directly, no hook needed).
+  socket.on('combat:disengage', ({ actorId }) => {
+    const participant = encounters.get(campaignId)?.findParticipant(actorId);
+    if (participant) participant.disengaging = true;
+  });
+
+  // Illusion detection (Disguise Self) — works with or without active combat, same as casting
+  // the spell itself does. Results go only to the investigator's own socket: RAW's "you see
+  // through it" is knowledge specific to them, not a public reveal to the whole table.
+  socket.on('combat:illusion:investigate', ({ targetId, investigatorId }) => {
+    void (async () => {
+      const cid = campaignId;
+      const tags = await investigateIllusion(cid, targetId, investigatorId);
+      if (!tags.length) return;
+      const targetName = encounters.get(cid)?.findParticipant(targetId)?.name
+        ?? (await getCharacter(cid, targetId))?.name ?? targetId;
+      const sid = playerSocketIds.get(investigatorId);
+      if (sid) io.to(sid).emit('combat:illusion:investigate:result', { targetId, targetName, tags });
+    })();
+  });
+
+  socket.on('combat:initiative:roll', (entry: TurnOrderEntry) => {
+    const cid = campaignId;
+    if (!combatState.get(cid)) return;
+    const encounter = encounters.get(cid);
+    if (!encounter) return;
+
+    let participant = encounter.findParticipant(entry.id);
+    if (!participant) {
+      encounter.expectedParticipantCount++;
+      participant = new Participant({
+        id: entry.id,
+        name: entry.name,
+        initiative: entry.initiative,
+        isPlayer: entry.isPlayer,
+      });
+    } else {
+      participant.initiative = entry.initiative;
+    }
+
+    encounter.addToTurnOrder(participant);
+    io.to(ROOM).emit('combat:initiative', entry);
+    tryBeginCombat(cid);
+    void saveEncounter(cid, encounter);
+  });
+
+  socket.on('combat:attack', (payload: { attackerId: string; attackerName: string; targetId: string; weapon: Weapon; bonusSpell?: Spell }) => {
+    void resolvePlayerAttack(campaignId, payload);
+  });
+
+  // Spell attack (e.g. Fire Bolt, or Jim's Magic Missile's 3 darts) — mirrors combat:attack but
+  // uses the caster's spellcasting modifier for the attack roll and adds no stat mod to damage.
+  // One attack roll per entry in targetIds — most spells send a single entry (spellTargetCount
+  // defaults to {min:1,max:1}), darts/blasts send one per accumulated target, and Chaos
+  // Bolt/Chromatic Orb's dice-triggered leap pushes extra entries onto the queue mid-resolution.
+  socket.on('combat:spell:attack', (payload: { casterId: string; casterName: string; targetIds: string[]; spell: Spell; slotLevel: number; chosenDamageType?: string }) => {
+    void resolvePlayerSpellAttack(campaignId, payload);
   });
 
   // Save-based spell (single-target or AoE) — computes the DC once, then rolls each
@@ -1106,7 +1127,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           await registerSpellHooks(getStateEngine(cid), spell.combat.hooks, spell.name, {
             ownerId: casterId, casterId, casterLevel: char.level ?? 1, slotLevel,
             currentRound: 1,
-            dc: 8 + (char.proficiencyBonus ?? 2) + abilityMod,
+            dc: 8 + (char.proficiencyBonus ?? 2) + abilityMod + dcBonusFor(getStateEngine(cid), casterId),
             currentWorldTimeSecs: await getWorldTimeSecs(cid),
           });
         }
@@ -1126,8 +1147,21 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const castCost = spell.combat?.actionCostOverride ?? actionCostFromCastingTime(spell.castingTime);
       if (castCost && castCost !== 'reaction' && !trySpendAction(cid, casterId, castCost)) return;
 
+      // Ranger's Favored Enemy: Hunter's Mark twice per Long Rest with no slot spent, per 2024
+      // PHB — the resource is spent here instead of the slot below, same shape as Redirecting an
+      // already-sustained spell being free, just costing a different pool instead of nothing.
+      let spentFavoredEnemy = false;
+      if (spell.name === "Hunter's Mark" && char.class === 'Ranger') {
+        const nextResourceUses = trySpendResource(char, 'favoredEnemy');
+        if (nextResourceUses) {
+          spentFavoredEnemy = true;
+          await updateCharacter(cid, casterId, fresh => ({ ...fresh, resourceUses: nextResourceUses }));
+          io.to(ROOM).emit('combat:player:featureResources', { characterId: casterId, resourceUses: nextResourceUses });
+        }
+      }
+
       // Redirecting an already-sustained spell (Hunter's Mark, Witch Bolt) is free — no slot, per RAW.
-      const free = await isConcentratingOn(cid, casterId, spell.name);
+      const free = spentFavoredEnemy || await isConcentratingOn(cid, casterId, spell.name);
       if (!free && !(await trySpendSpellSlot(cid, casterId, char, slotLevel))) {
         const sid = playerSocketIds.get(casterId);
         if (sid) io.to(sid).emit('combat:attack:blocked', { reason: 'No spell slots left' });
@@ -1256,7 +1290,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         // Computed even for spells with no save of their own — a plain-hooks spell can still
         // carry a hook that rolls its own save later (Sanctuary's sanctuaryWard, read via ctx.dc
         // same as recurringDamage's saveToEnd), frozen at the caster's stats now same as any DC.
-        const dc = 8 + (char.proficiencyBonus ?? 2) + statMod(char.stats[CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int']);
+        const dc = 8 + (char.proficiencyBonus ?? 2) + statMod(char.stats[CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int']) + dcBonusFor(engine, casterId);
         const currentWorldTimeSecs = combat?.hooks?.length ? await getWorldTimeSecs(cid) : undefined;
         let first = true;
         for (const targetId of targetIds) {
@@ -1334,7 +1368,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const casterSpellAbility = CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int';
       const casterAbilityMod = statMod(char.stats[casterSpellAbility]);
       const charProf = char.proficiencyBonus ?? 2;
-      const dc = 8 + charProf + casterAbilityMod;
+      const dc = 8 + charProf + casterAbilityMod + dcBonusFor(engine, casterId);
 
       const saveAbility = combat?.save?.ability ?? casterSpellAbility;
       const halfOnSave = combat?.save?.halfOnSave ?? false;
@@ -1555,6 +1589,71 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           } catch (err) { logError('index:combatFlavour', err); }
         })();
       }
+    })();
+  });
+
+  // Generic "use ability" action (AbilityDef) — Rage, Second Wind, Bardic Inspiration, ... —
+  // the counterpart to combat:attack/combat:spell:cast for class features that spend a
+  // RESOURCE_DEFS pool instead of a spell slot. Reuses the same dice/apply helpers the spell
+  // pipeline above uses (rollApplicableHeal, applyHealingToPlayer, ...) against onUse's
+  // EffectSpec list, rather than a parallel resolution path.
+  socket.on('combat:ability:use', ({ casterId, casterName, abilityKey, targetId }: { casterId: string; casterName: string; abilityKey: string; targetId?: string }) => {
+    void (async () => {
+      const cid = campaignId;
+      if (!combatState.get(cid)) return;
+      const encounter = encounters.get(cid);
+      if (!encounter) return;
+
+      const ability = ABILITY_DEFS[abilityKey];
+      if (!ability) return;
+
+      const char = await getCharacter(cid, casterId);
+      if (!char || char.class !== ability.class) return;
+
+      const casterParticipant = encounter.findParticipant(casterId);
+      if (!casterParticipant || casterParticipant.isDead()) return;
+
+      // 'self' abilities (Rage, Second Wind) apply to the caster; 'ally' ones (Bardic
+      // Inspiration) need a real targetId naming who receives onUse/hooks.
+      const effectId = ability.target === 'self' ? casterId : targetId;
+      if (!effectId) return;
+      const effectParticipant = ability.target === 'self' ? casterParticipant : encounter.findParticipant(effectId);
+      if (!effectParticipant || effectParticipant.isDead()) return;
+
+      if (!trySpendAction(cid, casterId, ability.actionCost)) return;
+
+      const nextResourceUses = trySpendResource(char, ability.resourceKey);
+      if (!nextResourceUses) {
+        const sid = playerSocketIds.get(casterId);
+        if (sid) io.to(sid).emit('combat:attack:blocked', { reason: `No uses of ${ability.label} left` });
+        return;
+      }
+      await updateCharacter(cid, casterId, fresh => ({ ...fresh, resourceUses: nextResourceUses }));
+      io.to(ROOM).emit('combat:player:featureResources', { characterId: casterId, resourceUses: nextResourceUses });
+
+      // Second Wind's "1d10 + Fighter level" reuses the ability-mod dice idiom (base die +
+      // a flat number added once) with the caster's level standing in for an ability modifier —
+      // resolveSpellDamageDice doesn't care what the number represents, only that it's added.
+      const rolledHeal = rollApplicableHeal(ability.onUse, char.level ?? 1, 0, char.level ?? 1);
+      if (rolledHeal) {
+        if (effectParticipant.isPlayer) applyHealingToPlayer(cid, effectParticipant, effectId, rolledHeal.total, ability.label);
+        else if (effectParticipant.creature) applyHealingToCreature(cid, effectId, rolledHeal.total);
+      }
+
+      // Self-buff or ally-buff hooks (Rage, Bardic Inspiration) — identical path a buff spell
+      // (Mage Armor, Bless) already registers through; reactivating replaces rather than stacks.
+      if (ability.hooks?.length) {
+        const needsWorldTime = ability.hooks.some(h => h.duration.until === 'gameTime');
+        await registerSpellHooks(getStateEngine(cid), ability.hooks, ability.label, {
+          ownerId: effectId, casterId, casterLevel: char.level ?? 1, slotLevel: 0,
+          currentRound: encounter.currentRound?.number ?? 1,
+          currentWorldTimeSecs: needsWorldTime ? await getWorldTimeSecs(cid) : undefined,
+        });
+      }
+
+      const msg = { text: `${casterName} uses ${ability.label}${ability.target === 'ally' ? ` on ${effectParticipant.name}` : ''}.`, senderName: 'System', timestamp: Date.now() };
+      void appendChatLog(cid, msg);
+      io.to(ROOM).emit('chat:message', msg);
     })();
   });
 

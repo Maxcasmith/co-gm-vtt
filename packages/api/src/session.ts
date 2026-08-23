@@ -4,7 +4,7 @@ import path from 'path';
 import { CAMPAIGNS_DIR, listEntitySlugs, readEntity, getWorldMeta, getConfig, saveDungeon, readManifest, writeManifest, emptyManifest, readQuests, appendChatLog } from './storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
 import { buildRecapPrompt } from './session-processor/prompts.ts';
-import { processSession, getDMResponse, getDungeonExplorationResponse } from './session-processor/index.ts';
+import { processSession, getDMResponse, getDungeonNarrationResponse } from './session-processor/index.ts';
 import { describeDungeonState, describeDungeonGroundTruth } from './dungeon/index.ts';
 import { processVdmResponse } from './tag-processor.ts';
 import { logError } from './logger.ts';
@@ -121,11 +121,20 @@ export function dispatchDMResponse(cid: string): void {
       const playerPositions = Object.fromEntries(
         Object.entries(tokenPositions.get(cid) ?? {}).filter(([name]) => connected.has(name))
       );
-      // Dungeon loaded, combat not active → dedicated exploration pathway with the full floor plan.
-      // Otherwise (no dungeon, or combat narration between turns) → the general narrator, same as always.
-      const response = dungeon && !combatState.get(cid)
-        ? await getDungeonExplorationResponse(cid, describeDungeonGroundTruth(dungeon, playerPositions))
-        : await getDMResponse(cid, dungeon ? describeDungeonState(dungeon, playerPositions) : '');
+      // Anything inside a dungeon → the closed-world dungeon narrator, combat or not. Exploration
+      // gets the full floor plan so spatial questions can be answered accurately; combat gets the
+      // lighter discovered-only view, since between-turn narration has no spatial reasoning to do
+      // and the mechanical combat log already carries the blow-by-blow. Only genuinely open-world
+      // play still reaches the general narrator.
+      const combatActive = !!combatState.get(cid);
+      const response = dungeon
+        ? await getDungeonNarrationResponse(
+            cid,
+            dungeon,
+            combatActive ? describeDungeonState(dungeon, playerPositions) : describeDungeonGroundTruth(dungeon, playerPositions),
+            combatActive,
+          )
+        : await getDMResponse(cid);
       if (!response) return;
 
       if (response.includes('[COMBAT END]') && combatState.get(cid)) {
