@@ -1,0 +1,75 @@
+/* ── Character storyboard slideshow (cold-open cutscene) ─────────────────── */
+
+.storyboard-overlay {
+  background: #05050a;
+  overflow: hidden;
+}
+
+.storyboard-character-name {
+  position: absolute;
+  top: 32px;
+  left: 40px;
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--gold, #c9a84c);
+}
+
+.storyboard-slide {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  animation: storyboard-ken-burns 12s ease-out forwards, storyboard-fade-in 0.6s ease-out;
+}
+
+/* Duration must track SLIDE_DURATION_MS in StoryboardOverlay.tsx — the slide's own React `key`
+   remounts this element on every advance, restarting the animation from scratch each time. */
+@keyframes storyboard-ken-burns {
+  from { transform: scale(1); }
+  to   { transform: scale(1.08); }
+}
+
+@keyframes storyboard-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* True fade to/from black, independent of the per-slide opacity fade above — covers the whole
+   overlay rather than just the image, so the character name and caption fade with it too. Starts
+   opaque (curtain down) and lifts once StoryboardOverlay flips phase to 'playing'; dropped back to
+   opaque for the 'outro' phase at the end. Duration must track CURTAIN_FADE_MS in
+   StoryboardOverlay.tsx, which is how long onDone waits before firing. */
+.storyboard-curtain {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 1;
+  transition: opacity 1s ease;
+  pointer-events: none;
+}
+
+.storyboard-curtain--lifted {
+  opacity: 0;
+}
+
+.storyboard-caption {
+  position: absolute;
+  bottom: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(70vw, 760px);
+  margin: 0;
+  padding: 14px 28px;
+  font-family: 'Crimson Pro', serif;
+  font-style: italic;
+  font-size: 20px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--text, #ddd0bb);
+  background: rgba(8, 8, 18, 0.7);
+  border-radius: 4px;
+  animation: storyboard-fade-in 0.8s ease-out;
+}

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "recover-the-drowned-manifest-from-the-cargo-hold",
+    "name": "Recover the Drowned Manifest from the Cargo Hold",
+    "description": "Recover the Drowned Manifest from the Cargo Hold",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-23",
+    "sourceDungeonId": "a25956fc-ca1e-4621-9593-c7fda5cdffe1"
+  },
+  {
+    "id": "find-the-ship-s-logbook-on-the-bridge",
+    "name": "Find the ship's logbook on the Bridge",
+    "description": "Find the ship's logbook on the Bridge",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-23",
+    "sourceDungeonId": "a25956fc-ca1e-4621-9593-c7fda5cdffe1"
+  },
+  {
+    "id": "boss-acbf6e4a-60a4-4ba1-8ed8-a3d5f7effe70",
+    "name": "Defeat Herald of the Drowned Tide",
+    "description": "Defeat Herald of the Drowned Tide.",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-23",
+    "sourceDungeonId": "a25956fc-ca1e-4621-9593-c7fda5cdffe1"
+  },
+  {
+    "id": "exit-dungeon",
+    "name": "Escape The Drowned Manifest of the *Cassilda Queen*",
+    "description": "Find a way out of The Drowned Manifest of the *Cassilda Queen*.",
+    "status": "undiscovered",
+    "log": [],
+    "addedAt": "2026-08-23",
+    "sourceDungeonId": "a25956fc-ca1e-4621-9593-c7fda5cdffe1"
+  }
+]

@@ -444,7 +444,7 @@ export function buildCreaturePortraitPrompt(entries: CreaturePortraitEntry[]): s
   if (real.length < 16) {
     const from = real.length + 1;
     const rangeLabel = from === 16 ? '16' : `${from}-16`;
-    lines.push(`${rangeLabel}. Blank black square — this portrait is just blank and black. The purpose of this portrait is to keep the crop grid of the others consistent`);
+    lines.push(`${rangeLabel}. Blank magenta square (hex approximately #FF00FF, flat and solid, no gradient) — this portrait is just blank magenta, no art, no red background. The purpose of this portrait is to keep the crop grid of the others consistent.`);
   }
 
   return `Generate a **2D character portrait atlas** for a dungeon crawler's enemy tokens.
@@ -591,6 +591,108 @@ There must be:
 5. ${transparent ? 'Fully transparent background in every cell' : 'Exact same flat magenta background in every cell'}
 6. Consistent art style and lighting across all 36 sprites
 7. Correct left-to-right, top-to-bottom order as listed above`;
+}
+
+export interface StoryboardSubject {
+  name: string;
+  species?: string;
+  class?: string;
+  backstory?: string;
+}
+
+// A matched visual/narration pair for one storyboard panel — produced together by
+// buildStoryboardBeatsPrompt so the image atlas and the voiceover are guaranteed to agree on what
+// each panel actually shows, instead of the image call and a separate caption call each condensing
+// the same raw backstory independently and landing on different, sometimes redundant, beats.
+export interface StoryboardBeat {
+  visual: string;
+  narration: string;
+}
+
+// Single condensation pass — read once, split once. Runs BEFORE buildStoryboardPrompt; its
+// "visual" fields become that prompt's per-panel breakdown, and its "narration" fields become the
+// slide captions directly, with no second independent read of the backstory. Fixes two problems
+// confirmed live: redundant slides (two panels that were really the same beat) and captions that
+// described something other than what the image actually showed — both symptoms of the old
+// image-call and caption-call each choosing beats on their own.
+export function buildStoryboardBeatsPrompt(character: StoryboardSubject, count: number): string {
+  const roleLine = [character.species, character.class].filter(Boolean).join(' ');
+  return `You are breaking a tabletop RPG character's backstory into exactly ${count} key moments for a cold-open cutscene storyboard (Resident Evil 2/3 style) — a sequence of panels with a first-person voiceover.
+
+CHARACTER: ${character.name}${roleLine ? `, a ${roleLine}` : ''}
+
+BACKSTORY:
+${(character.backstory ?? '').slice(0, 2400)}
+
+Identify the ${count} MOST IMPORTANT, VISUALLY DISTINCT moments in this backstory, in chronological order — the turning points that actually matter, not incidental detail.
+
+Each moment must:
+* Depict a clearly different scene, action, location, or turning point than every other moment — never split one real beat into two, and never promote a minor detail to its own moment when it isn't essential to the arc
+* Together cover the full arc: start near the character's origin/ordinary world and end on the moment their story arrives at the present, right before the game begins
+* Be something that can be drawn as ONE concrete scene — a specific action, place, and moment, not an abstract feeling or a summary of a whole stretch of time
+
+For each moment, produce a matched pair:
+* "visual": a concrete scene description for an image generator — subject, action, setting, mood, 1-2 sentences, no dialogue, no text-in-image
+* "narration": a first-person voiceover line spoken by ${character.name}, describing EXACTLY what's shown in that same "visual" — never narrating something the image doesn't depict. 1-3 short sentences, never a full paragraph.
+
+Narration style — grounded storytelling, not a police report and not a poem. Write like someone who actually lived it, telling it well: concrete events, real stakes, some natural rhythm and weight to the sentences — but every line still has to sound like something a real person would actually say out loud, not a novelist reaching for effect. Avoid ornamental metaphor/simile that stands IN PLACE of the fact ("the old wood began", "bleed quietly enough", "the fog swallowed the road") — but a plain image tied directly to something actually in the scene (a locked gate, a burned house, a name on a grave) is fine and often stronger than the bare fact alone. Vary sentence length for rhythm — don't force every line into the same flat subject-verb-object shape. The events should carry the emotional weight; the wording supports them, it doesn't perform instead of them.
+
+Respond with ONLY a JSON array of exactly ${count} objects, no other text:
+[{ "visual": "...", "narration": "..." }, ...]`;
+}
+
+export function buildStoryboardPrompt(
+  character: StoryboardSubject,
+  appearanceDescription: string,
+  beats: string[], // one "visual" description per panel, already condensed — see buildStoryboardBeatsPrompt
+  cols: number,
+  rows: number,
+  atlasW: number,
+  atlasH: number,
+  tileW: number,
+  tileH: number,
+): string {
+  const count = cols * rows;
+  const roleLine = [character.species, character.class].filter(Boolean).join(' ');
+  // Literal per-position table, not just a numbered list — same fix buildDynamicTilesetPrompt uses
+  // for materials: a numbered list reads as loose ordering to the model, a table reads as fixed
+  // grid position.
+  const panelTable = beats.map((b, i) => `Panel ${i + 1}: ${b}`).join('\n');
+  return `Create a **cinematic opening storyboard** for a tabletop RPG character, in the style of a survival-horror game's cold-open cutscene (like Resident Evil 2/3's title sequence) — a grid of moody, painterly panels that tell the character's backstory up to the start of the game.
+
+# CHARACTER
+
+Name: ${character.name}${roleLine ? `\n${roleLine}` : ''}
+Appearance: ${appearanceDescription}
+
+# PANELS (exact position — this is a literal map of the atlas, not a loose ordering)
+
+Each cell below MUST depict exactly the moment described at that position, and nothing else. Do not reorder, merge, split, or drop any panel; do not add a moment that isn't listed.
+
+${panelTable}
+
+# OUTPUT
+
+Create a single storyboard atlas:
+
+* **${cols} columns, ${rows} rows** (${count} panels total, read left-to-right then top-to-bottom, in the order listed above)
+* Every cell is exactly the same size as every other cell
+* Complete atlas size: **${atlasW} × ${atlasH}** pixels, exactly — this is the actual canvas you are rendering, not a suggestion
+* Individual cell size: **${tileW} × ${tileH}** pixels, exactly — ${atlasW} ÷ ${cols} = ${tileW}, ${atlasH} ÷ ${rows} = ${tileH}
+* Each panel is a self-contained cinematic scene depicting exactly its own listed moment, composed to fill its own ${tileW}×${tileH} cell — never composed as if the cell were square or a different shape than stated
+* The character (matching the appearance described above) should appear consistently across every panel they're present in — same face, hair, build, clothing style
+
+# STYLE
+
+Dark, painterly, moody illustration — heavy shadow, restrained desaturated palette, dramatic single-source lighting. Same rendering technique, same level of detail, same color grade across all ${count} panels, so they read as one cohesive sequence rather than unrelated images.
+
+# RULES
+
+* NO text, lettering, numbers, or captions anywhere in the image — the story is told entirely through the imagery, captions are added separately afterward
+* NO frame or border around the outer edge of the atlas
+* A thin dark divider line between panels is fine but not required
+* Every panel fits entirely within its own ${tileW}×${tileH} cell — nothing overflows into a neighboring panel, nothing composed for a different aspect ratio than the cell actually is
+* Panels progress in a clear visual chronology from the character's past toward the present moment the game begins`;
 }
 
 export function buildWorldMapPrompt(worldMd: string, locationsSummary: string, tags: string[]): string {

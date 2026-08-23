@@ -27,7 +27,7 @@ const roomB = dungeon.rooms[1]!;
 
 // ── room entry ────────────────────────────────────────────────────────────────
 const entry = templateRoomEntry(dungeon, roomA);
-if (entry !== 'A low vaulted chamber.\nCracked flagstones underfoot.\nA toppled bench.\nHere: Rusty Key (loot).') {
+if (entry !== 'A low vaulted chamber.\nCracked flagstones underfoot.\nA toppled bench.\nHere: Rusty Key.') {
   throw new Error(`unexpected room-entry text:\n${entry}`);
 }
 if (entry.includes('Tripwire')) throw new Error(`undiscovered entity leaked into room-entry text:\n${entry}`);

@@ -5,6 +5,7 @@ import type { Weapon } from "./items.ts";
 import type { Spell } from "./spells.ts";
 import type { Condition, ActiveCondition } from "./conditions.ts";
 import type { Manoeuvre } from "./tactics.ts";
+import type { StoryboardQueuePayload } from "./storyboard.ts";
 
 export type Player = string;
 
@@ -76,6 +77,7 @@ export interface ServerToClientEvents {
     checkRequests?: CheckRequest[];
   }) => void;
   "dm:thinking": (active: boolean) => void;
+  "storyboard:queue": (payload: StoryboardQueuePayload) => void;
   "combat:state": (active: boolean) => void;
   "encounter:generating": () => void;
   "encounter:ready": (enemies: EnemyStatBlock[]) => void;

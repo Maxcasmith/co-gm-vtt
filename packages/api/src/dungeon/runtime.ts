@@ -68,10 +68,16 @@ export async function checkDungeonHiddenReveal(cid: string, characterName: strin
   let changed = false;
   const found: SearchFind[] = [];
   let nearbyUncleared = false;
+  // Scoped to the room the searcher is standing in — not sight radius/LOS across the whole map,
+  // which let a search in one room turn up loot sitting in a room two doors down whenever the
+  // corridor between them happened to have clear line of sight.
+  const playerRoom = roomAt(dungeon, pos.gx, pos.gy);
   for (const entity of dungeon.entities) {
     if (entity.type === 'creature' || entity.discovered || entity.hideDC === undefined) continue;
-    if (Math.max(Math.abs(pos.gx - entity.x), Math.abs(pos.gy - entity.y)) > PLAYER_SIGHT_RADIUS) continue;
-    if (!hasLineOfSight(dungeon.cells, pos.gx, pos.gy, entity.x, entity.y)) continue;
+    const inRange = playerRoom
+      ? roomAt(dungeon, entity.x, entity.y)?.id === playerRoom.id
+      : Math.max(Math.abs(pos.gx - entity.x), Math.abs(pos.gy - entity.y)) <= 2 && hasLineOfSight(dungeon.cells, pos.gx, pos.gy, entity.x, entity.y);
+    if (!inRange) continue;
     if (total < entity.hideDC) { nearbyUncleared = true; continue; }
     entity.discovered = true;
     changed = true;
@@ -81,7 +87,7 @@ export async function checkDungeonHiddenReveal(cid: string, characterName: strin
 
   // Hidden dressing is text-only — no coordinates, no sprite — so it resolves against the room the
   // searcher occupies rather than sight radius/line of sight the way placed entities do.
-  for (const hd of roomAt(dungeon, pos.gx, pos.gy)?.hiddenDressing ?? []) {
+  for (const hd of playerRoom?.hiddenDressing ?? []) {
     if (hd.discovered) continue;
     if (total < hd.hideDC) { nearbyUncleared = true; continue; }
     hd.discovered = true;

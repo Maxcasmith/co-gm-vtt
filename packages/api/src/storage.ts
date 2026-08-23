@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir, readdir, rm } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, WorldState, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord } from 'shared';
+import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, WorldState, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord, CharacterStoryboard, StoryboardTestRecord } from 'shared';
 import { Encounter } from './domain/encounter.ts';
 import { renderDungeonAscii } from './dungeon/index.ts';
 import { logError } from './logger.ts';
@@ -16,9 +16,10 @@ export const PREMADE_DIR   = path.join(STORAGE_DIR, 'premade');
 export const TILESETS_DIR  = path.join(STORAGE_DIR, 'tilesets');
 export const CREATURES_DIR = path.join(STORAGE_DIR, 'creatures');
 export const PROPS_DIR      = path.join(STORAGE_DIR, 'props');
+export const STORYBOARD_TEST_DIR = path.join(STORAGE_DIR, 'storyboard-test');
 
 const NARRATIVE_FEATURES: AppConfig['workflows'][number]['features'] = [
-  'campaignConcepts', 'dungeonPremise', 'backstoryGeneration', 'backstoryCheck', 'worldLoreSync',
+  'campaignConcepts', 'dungeonPremise', 'backstoryGeneration', 'backstoryCheck', 'worldLoreSync', 'storyboardCaptions',
   'nemesisGeneration', 'dmBrief', 'questGeneration', 'dmChatResponse', 'sessionTriage', 'sessionRecap', 'tagEffectProcessing',
 ];
 const WORLD_AND_COMBAT_FEATURES: AppConfig['workflows'][number]['features'] = [
@@ -33,7 +34,7 @@ const DEFAULT_CONFIG: AppConfig = {
     { id: 'default-combat', name: 'Combat & World', enabled: true, models: [{ provider: 'openai', model: 'gpt-4o-mini' }], features: WORLD_AND_COMBAT_FEATURES },
   ],
   apiKeys:  { openai: '', anthropic: '', deepseek: '', kimi: '' },
-  image:    { model: 'gpt-image-1', generateWorldMap: false, generateTilesets: false },
+  image:    { model: 'gpt-image-1', generateWorldMap: false, generateTilesets: false, generateStoryboard: false },
   narration: { model: 'none', voice: 'onyx' },
 };
 
@@ -186,6 +187,31 @@ export async function writeCharacterImage(slug: string, charId: string, filename
   const dir = partyDir(slug, charId);
   await mkdir(dir, { recursive: true });
   await writeFile(path.join(dir, filename), data);
+}
+
+export async function getCharacterStoryboard(slug: string, charId: string): Promise<CharacterStoryboard | null> {
+  try {
+    const raw = await readFile(path.join(partyDir(slug, charId), 'storyboard.json'), 'utf-8');
+    return JSON.parse(raw) as CharacterStoryboard;
+  } catch {
+    return null;
+  }
+}
+
+// Admin Resources "storyboard test" sandbox — a single scratch record, not tied to any campaign
+// or character, so the storyboard pipeline can be exercised without spending a real character slot.
+export async function writeStoryboardTestFile(filename: string, data: Buffer): Promise<void> {
+  await mkdir(STORYBOARD_TEST_DIR, { recursive: true });
+  await writeFile(path.join(STORYBOARD_TEST_DIR, filename), data);
+}
+
+export async function getStoryboardTestRecord(): Promise<StoryboardTestRecord | null> {
+  try {
+    const raw = await readFile(path.join(STORYBOARD_TEST_DIR, 'record.json'), 'utf-8');
+    return JSON.parse(raw) as StoryboardTestRecord;
+  } catch {
+    return null;
+  }
 }
 
 export async function listEntitySlugs(slug: string, type: string): Promise<string[]> {

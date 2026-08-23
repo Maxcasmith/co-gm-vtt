@@ -73,6 +73,8 @@ export interface DungeonEntity {
   name: string;
   discovered: boolean;
   hideDC?: number;
+  /** type === 'loot' only — the actual items inside, seeded at generation so opening it reveals something concrete and consistent instead of the narrator improvising contents on the spot. */
+  contents?: string[];
   statBlock?: EnemyStatBlock;
   /** type === 'trap' only. Missing = falls back to a generic default (see checkTrapAt). */
   trap?: TrapEffect;

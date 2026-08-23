@@ -3,13 +3,15 @@ import type { Request, Response } from 'express';
 import { rm, readdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 import { slugifyTheme } from 'shared';
-import type { Dungeon, DungeonMaterialSpec } from 'shared';
-import { CAMPAIGNS_DIR, PROPS_DIR, TILESETS_DIR, getConfig, getWorldMeta, listCampaigns } from '../storage.ts';
+import type { Dungeon, DungeonMaterialSpec, StoryboardTestRecord } from 'shared';
+import { CAMPAIGNS_DIR, PROPS_DIR, TILESETS_DIR, STORYBOARD_TEST_DIR, getConfig, getWorldMeta, listCampaigns, writeStoryboardTestFile, getStoryboardTestRecord } from '../storage.ts';
 import { saveCampaignAsAdventure, SAVED_ADVENTURES_DIR } from '../adventures/storage.ts';
 import { generateExtendedTileset } from '../dungeon/tilesets.ts';
 import { generatePropSpriteBatch, previewGridCells } from '../dungeon/props.ts';
 import type { PendingProp } from '../dungeon/props.ts';
+import { runStoryboardPipeline, SLIDE_COUNT } from '../dungeon/storyboard.ts';
 import { logError } from '../logger.ts';
 
 function slugify(name: string): string {
@@ -248,5 +250,110 @@ adminRouter.get('/props/preview-cells/:file', async (req, res) => {
   } catch (err) {
     logError('routes/admin:previewGridCells', err);
     res.status(500).json({ error: 'Could not preview this atlas' });
+  }
+});
+
+// ── Storyboard test sandbox ─────────────────────────────────────────────────
+// A single scratch record (not a real character) so the storyboard pipeline can be tested/tuned
+// without spending a real character slot and without needing the settings toggle enabled.
+
+adminRouter.get('/storyboard-test', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  res.json({ record: await getStoryboardTestRecord() });
+});
+
+// SSE, mirrors /tilesets/generate. Bypasses config.image.generateStoryboard — same as every other
+// admin generate route ignoring its equivalent settings toggle, this is an explicit on-demand test.
+adminRouter.post('/storyboard-test/generate', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const { name, backstory, portraitBase64 } = req.body as { name?: string; backstory?: string; portraitBase64?: string };
+  if (!name?.trim() || !backstory?.trim()) {
+    res.status(400).json({ error: 'name and backstory are required' });
+    return;
+  }
+
+  const config = await getConfig();
+  if (!config.apiKeys.openai) {
+    res.status(400).json({ error: 'No OpenAI API key configured' });
+    return;
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  function send(data: object) { res.write(`data: ${JSON.stringify(data)}\n\n`); }
+
+  try {
+    // A regenerate that only tweaks name/backstory can omit the image and reuse the last upload —
+    // the whole point of persisting this sandbox is not having to redo every input each time.
+    const portraitBuffer = portraitBase64?.trim()
+      ? await sharp(Buffer.from(portraitBase64, 'base64')).jpeg().toBuffer()
+      : await readFile(path.join(STORYBOARD_TEST_DIR, 'portrait.jpg')).catch(() => null);
+    if (!portraitBuffer) {
+      send({ type: 'error', message: 'A portrait image is required' });
+      return;
+    }
+    const { slides: results, rawAtlas } = await runStoryboardPipeline({ name, backstory }, portraitBuffer, config, message => send({ type: 'progress', message }));
+
+    send({ type: 'progress', message: 'Saving portrait, source atlas, and slides…' });
+    await writeStoryboardTestFile('portrait.jpg', portraitBuffer);
+    await writeStoryboardTestFile('source.jpg', await sharp(rawAtlas).jpeg().toBuffer());
+    // This sandbox reuses the same fixed filenames on every regenerate (see comment above), so the
+    // URLs below must change even when the path doesn't — otherwise a regenerate for a totally
+    // different character never re-fetches at all: React sees an unchanged `src` string and never
+    // re-issues the request, so the old cached bytes just keep showing. Confirmed live. `generatedAt`
+    // as a cache-busting query param forces both React and the browser to treat it as a new image.
+    const v = Date.now();
+    const slides = await Promise.all(results.map(async ({ buffer, caption }, i) => {
+      const n = i + 1;
+      await writeStoryboardTestFile(`slide_${n}.jpg`, buffer);
+      return { url: `/api/admin/storyboard-test/slide/${n}?v=${v}`, caption };
+    }));
+
+    const record: StoryboardTestRecord = {
+      name, backstory, portraitUrl: `/api/admin/storyboard-test/portrait?v=${v}`, slides,
+      generatedAt: new Date().toISOString(),
+      sourceUrl: `/api/admin/storyboard-test/source?v=${v}`,
+    };
+    await writeStoryboardTestFile('record.json', Buffer.from(JSON.stringify(record, null, 2)));
+    send({ type: 'complete', record });
+  } catch (err) {
+    logError('routes/admin:storyboardTestGenerate', err);
+    send({ type: 'error', message: err instanceof Error ? err.message : 'Generation failed' });
+  } finally {
+    res.end();
+  }
+});
+
+// Unguarded, same as routes/props.ts's sprite serving — imagery is fetched by plain <img src>,
+// which can't attach the admin password header.
+adminRouter.get('/storyboard-test/portrait', (_req, res) => {
+  res.sendFile('portrait.jpg', { root: STORYBOARD_TEST_DIR }, err => {
+    if (err) res.status(404).json({ error: 'Portrait not found' });
+  });
+});
+
+adminRouter.get('/storyboard-test/source', (_req, res) => {
+  res.sendFile('source.jpg', { root: STORYBOARD_TEST_DIR }, err => {
+    if (err) res.status(404).json({ error: 'Source atlas not found' });
+  });
+});
+
+adminRouter.get('/storyboard-test/slide/:n', (req, res) => {
+  const n = req.params['n']!;
+  if (!new RegExp(`^[1-${SLIDE_COUNT}]$`).test(n)) { res.status(400).json({ error: 'Invalid slide number' }); return; }
+  res.sendFile(`slide_${n}.jpg`, { root: STORYBOARD_TEST_DIR }, err => {
+    if (err) res.status(404).json({ error: 'Slide not found' });
+  });
+});
+
+adminRouter.delete('/storyboard-test', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    if (existsSync(STORYBOARD_TEST_DIR)) await rm(STORYBOARD_TEST_DIR, { recursive: true });
+    res.json({ ok: true });
+  } catch (err) {
+    logError('routes/admin:deleteStoryboardTest', err);
+    res.status(500).json({ ok: false, error: String(err) });
   }
 });

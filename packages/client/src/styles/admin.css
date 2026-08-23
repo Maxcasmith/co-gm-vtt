@@ -186,6 +186,22 @@
 
 .btn-danger:hover { background: #8b2020; color: #fff; box-shadow: 0 0 12px rgba(139, 32, 32, 0.5); }
 
+.btn-play {
+  font-family: 'Cinzel', serif;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 5px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid #c9a84c;
+  background: none;
+  color: #e8c95f;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.btn-play:hover { background: #c9a84c; color: #1a1508; box-shadow: 0 0 12px rgba(201, 168, 76, 0.5); }
+
 .admin-feedback {
   font-size: 11px;
   color: var(--text-muted);
@@ -217,6 +233,12 @@
 
 .admin-modules-header .admin-section-title {
   margin-bottom: 0;
+}
+
+.admin-modules-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .admin-module-counts {

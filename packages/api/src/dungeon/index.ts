@@ -171,7 +171,9 @@ function resolveRoom(dungeon: Dungeon, gx: number, gy: number): { room?: Dungeon
 }
 
 function entityStatus(e: DungeonEntity): string {
-  return e.discovered ? 'discovered' : `undiscovered, hideDC ${e.hideDC ?? '?'}`;
+  if (!e.discovered) return `undiscovered, hideDC ${e.hideDC ?? '?'}`;
+  if (e.type === 'loot' && e.contents?.length) return `discovered — contains: ${e.contents.join(', ')}`;
+  return 'discovered';
 }
 
 // Ambient grounding for the DM's narrative context — which room each player is in, and what's

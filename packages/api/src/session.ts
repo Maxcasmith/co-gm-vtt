@@ -1,9 +1,9 @@
 import { readdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { CAMPAIGNS_DIR, listEntitySlugs, readEntity, getWorldMeta, getConfig, saveDungeon, readManifest, writeManifest, emptyManifest, readQuests, appendChatLog } from './storage.ts';
+import { CAMPAIGNS_DIR, listEntitySlugs, readEntity, getWorldMeta, getConfig, saveDungeon, loadDungeon, readManifest, writeManifest, emptyManifest, readQuests, appendChatLog } from './storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
-import { buildRecapPrompt } from './session-processor/prompts.ts';
+import { buildRecapPrompt, buildDungeonRecapPrompt } from './session-processor/prompts.ts';
 import { processSession, getDMResponse, getDungeonNarrationResponse } from './session-processor/index.ts';
 import { describeDungeonState, describeDungeonGroundTruth } from './dungeon/index.ts';
 import { processVdmResponse } from './tag-processor.ts';
@@ -87,12 +87,17 @@ async function buildEntitySummaries(campaignId: string): Promise<string> {
   return lines.join('\n\n') || '(no entity notes yet)';
 }
 
+export async function isFirstSession(campaignId: string): Promise<boolean> {
+  const sessionsDir = path.join(CAMPAIGNS_DIR, campaignId, 'sessions');
+  return !existsSync(sessionsDir) || (await readdir(sessionsDir)).length === 0;
+}
+
 export async function runRecap(campaignId: string): Promise<{ text: string; isFirstSession: boolean }> {
   const sessionsDir = path.join(CAMPAIGNS_DIR, campaignId, 'sessions');
-  const isFirstSession = !existsSync(sessionsDir) || (await readdir(sessionsDir)).length === 0;
+  const firstSession = await isFirstSession(campaignId);
 
   let lastSessionText: string | null = null;
-  if (!isFirstSession) {
+  if (!firstSession) {
     const files = (await readdir(sessionsDir)).sort();
     const last = files[files.length - 1];
     if (last) {
@@ -104,12 +109,32 @@ export async function runRecap(campaignId: string): Promise<{ text: string; isFi
     }
   }
 
-  const entitySummaries = await buildEntitySummaries(campaignId);
   const meta = await getWorldMeta(campaignId);
   const config = await getConfig();
   const provider = getFeatureProvider(config, 'sessionRecap');
-  const text = await provider.complete(buildRecapPrompt(lastSessionText, entitySummaries, meta?.name ?? 'Unknown World', isFirstSession));
-  return { text, isFirstSession };
+
+  // Dungeon-crawl worlds are closed-world (see getDungeonNarrationResponse) — the open-world recap
+  // pulls in world.md/factions.md/NPC notes and improvises freely, which is exactly what invented
+  // the hallucinated rope-ladder/gills prose. Route through the dungeon's own seeded goals/quests
+  // and floor plan instead, same as every other narration path into a dungeon.
+  if (meta?.type === 'dungeon-crawl') {
+    const dungeon = dungeons.get(campaignId) ?? await loadDungeon(campaignId);
+    const dungeonQuests = dungeon ? (await readQuests(campaignId)).filter(q => q.sourceDungeonId === dungeon.id) : [];
+    const groundTruth = dungeon ? describeDungeonGroundTruth(dungeon, {}) : '(no dungeon generated yet)';
+    const text = await provider.complete(buildDungeonRecapPrompt({
+      dungeonName: dungeon?.name ?? meta.name ?? 'the dungeon',
+      goals: dungeon?.goals ?? [],
+      dungeonQuests,
+      groundTruth,
+      lastSessionText,
+      isFirstSession: firstSession,
+    }));
+    return { text, isFirstSession: firstSession };
+  }
+
+  const entitySummaries = await buildEntitySummaries(campaignId);
+  const text = await provider.complete(buildRecapPrompt(lastSessionText, entitySummaries, meta?.name ?? 'Unknown World', firstSession));
+  return { text, isFirstSession: firstSession };
 }
 
 export function dispatchDMResponse(cid: string): void {

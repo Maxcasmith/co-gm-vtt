@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
-import type { Character, Player, EnemyStatBlock, TokenPosition, Dungeon, Quest, TurnOrderEntry } from 'shared';
+import type { Character, Player, EnemyStatBlock, TokenPosition, Dungeon, Quest, TurnOrderEntry, StoryboardQueuePayload } from 'shared';
 import { HIT_DICE } from './character-creation/srd.ts';
 import Canvas from './Canvas.tsx';
 import EncounterLoadingOverlay from './EncounterLoadingOverlay.tsx';
 import DungeonLoadingOverlay from './DungeonLoadingOverlay.tsx';
+import StoryboardOverlay from './StoryboardOverlay.tsx';
+import PartyMemberOverlay from './PartyMemberOverlay.tsx';
 import { useDungeonReady } from './canvas/useDungeonReady.ts';
 import CommandPalette from './CommandPalette.tsx';
 import CharacterSheetOverlay from './CharacterSheetOverlay.tsx';
@@ -64,6 +66,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [devModalOpen, setDevModalOpen] = useState(false);
   const [sessionActive, setSessionActive] = useState(false);
+  const [storyboardQueue, setStoryboardQueue] = useState<StoryboardQueuePayload | null>(null);
   const [combatActive, setCombatActive] = useState(false);
   const [encounter, setEncounter] = useState<EnemyStatBlock[] | null>(null);
   const [tokenPositions, setTokenPositions] = useState<Record<string, { gx: number; gy: number }>>({});
@@ -80,6 +83,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [partyHp, setPartyHp] = useState<Record<string, { current: number; max: number }>>({});
   const [tokenUrls, setTokenUrls] = useState<Record<string, string>>({});
   const [portraitUrls, setPortraitUrls] = useState<Record<string, string>>({});
+  const [partyCharacterIds, setPartyCharacterIds] = useState<Record<string, string>>({});
+  const [viewingMemberId, setViewingMemberId] = useState<string | null>(null);
   const [acquisitions, setAcquisitions] = useState<Character['inventory']>([]);
   const [itemQtyOverrides, setItemQtyOverrides] = useState<Record<string, number>>({});
   const [equipment, setEquipment] = useState<Character['equipment']>(character.equipment);
@@ -191,6 +196,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       .catch(() => {});
     socket.on('players:update', setConnected);
     socket.on('players:characters', map => {
+      setPartyCharacterIds(map);
       setTokenUrls(Object.fromEntries(
         Object.entries(map).map(([name, charId]) => [name, `${API}/api/campaigns/${character.campaignId}/party/${charId}/token`])
       ));
@@ -273,6 +279,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     });
 
     socket.on('session:state', setSessionActive);
+    socket.on('storyboard:queue', setStoryboardQueue);
     socket.on('dm:thinking', setDmThinking);
     socket.on('combat:state', active => {
       setCombatActive(active);
@@ -629,10 +636,20 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       />
       {currentRoomName && <div className="room-name-banner">{currentRoomName}</div>}
       <TurnOrderBar campaignId={character.campaignId} encounter={encounter} deadCreatureIds={deadCreatureIds} />
-      <PartyHud connected={connected} portraitUrls={portraitUrls} self={character.name} hp={partyHp} selfTempHp={playerHpState?.temp} />
+      <PartyHud
+        connected={connected}
+        portraitUrls={portraitUrls}
+        characterIds={partyCharacterIds}
+        self={character.name}
+        hp={partyHp}
+        selfTempHp={playerHpState?.temp}
+        onSelectMember={setViewingMemberId}
+      />
       <CombatDock character={liveCharacter} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} activeBuffs={activeBuffs} elevationFt={elevations[character.id] ?? 0} />
       <EncounterLoadingOverlay />
       <DungeonLoadingOverlay visible={!!dungeon && !dungeonReady} generating={dungeonGenerating} />
+      {storyboardQueue && <StoryboardOverlay queue={storyboardQueue} onDone={() => setStoryboardQueue(null)} />}
+      <PartyMemberOverlay characterId={viewingMemberId} campaignId={character.campaignId} onClose={() => setViewingMemberId(null)} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} header={<span className="palette-clock">{formatWorldTime(worldTimeSecs)}</span>} />
       <CharacterSheetOverlay
         character={liveCharacter}

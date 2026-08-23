@@ -471,6 +471,7 @@ Entities and hidden dressing tagged "undiscovered" in the floor plan below have 
 You MAY use hidden data silently, to reason: spatial truth (which rooms connect, whether a sound could carry), and restraint (a room holding an undiscovered threat is never described as safe or empty).
 You MUST NOT, in any text the player sees: name, describe, count, hint at, or foreshadow an undiscovered entity or hidden dressing entry; answer a question with hidden knowledge; or steer the party toward or away from one.
 A [Roll Result] arrives naming what was found → that entity/dressing is now discovered — report it plainly. A [Roll Result] arrives inconclusive → narrate the miss honestly, do not soften it into a hint. If unsure whether the party perceived something, they have not.
+The same restraint applies to whole ROOMS. A room's full description and dressing (below) get posted automatically, verbatim, the instant the party first enters it — that already happened for any room marked as such below, and you must never re-post that same content yourself afterward, no matter what's asked ("what's beyond this door", "anything else around", "remind me where I am", or any other question about a room already entered). Answer the SPECIFIC thing asked with new, narrow detail only — never restate the room's description/dressing/entity list to preamble your answer. For a room the party hasn't stepped into yet, the same content is off-limits for a different reason: it hasn't been posted at all, so revealing it early spoils it. A glance toward an unentered room gets at most a one-clause physical teaser (e.g. "a corridor continues past the doorway") — never its description, dressing, or contents.
 
 ## Combat
 ${combatActive ? DUNGEON_COMBAT : DUNGEON_EXPLORATION_COMBAT}
@@ -491,6 +492,7 @@ When all enemies are defeated, flee, or the fight resolves without one: include 
 
 ## Item acquisition tags
 [[TAG_TYPE:PlayerName:item1,item2]] where TAG_TYPE is PICKED_UP_WEAPON, PICKED_UP_HEALING, PICKED_UP_AMMO, or PICKED_UP_ITEM. Only on definitive pickup, never on merely seeing or describing an item.
+A discovered "loot" entity in the floor plan above that lists "contains: ..." — that list is the ONLY source of truth for what's inside it. When a player opens it, narrate and tag exactly those items, never invent different or additional ones. A loot entity with no "contains:" listed is empty — say so plainly, don't invent contents to fill it.
 
 ## Quest tags
 [[QUEST_ADD:quest-id|Quest Name|player-facing description]], [[QUEST_UPDATE:quest-id|what just happened]], [[QUEST_RESOLVE:quest-id]] — quest-id must already be one of the ids listed above under "This dungeon's quests". Never invent a new quest-id inside a dungeon.
@@ -616,6 +618,53 @@ World context (background reference only):
 ${entitySummaries}
 
 Write a "previously on…" recap of 3–4 sentences in second person. Summarise the most consequential things the players did and any unresolved tensions. Stop after the summary — do not write a new scene, do not describe where the players are now, do not add a transition line. The session will resume naturally from where it left off. No preamble — begin immediately with "Previously on…".`;
+}
+
+// Dungeon-crawl session open, closed-world — mirrors buildDungeonNarrationPrompt's constraints
+// rather than buildRecapPrompt's: no world.md/factions.md/entitySummaries reach this pathway,
+// only the dungeon's own seeded goals/quests and its floor plan.
+export function buildDungeonRecapPrompt(opts: {
+  dungeonName: string;
+  goals: string[];
+  dungeonQuests: Quest[]; // pre-filtered to this dungeon (sourceDungeonId match)
+  groundTruth: string;
+  lastSessionText: string | null;
+  isFirstSession: boolean;
+}): string {
+  const { dungeonName, goals, dungeonQuests, groundTruth, lastSessionText, isFirstSession } = opts;
+
+  const goalsBlock = goals.length ? goals.map(g => `- ${g}`).join('\n') : '(none seeded for this dungeon)';
+  const questsBlock = dungeonQuests.length
+    ? dungeonQuests.map(q => `- ${q.id} [${q.status}]: ${q.name} — ${q.description}`).join('\n')
+    : '(none)';
+
+  const intro = isFirstSession
+    ? `You are the Virtual Dungeon Master opening the very first session of a dungeon crawl in ${dungeonName}.`
+    : `You are the Virtual Dungeon Master opening a new session of a dungeon crawl in ${dungeonName}.`;
+
+  const task = isFirstSession
+    ? `Write an opening narration of 2–3 sentences maximum. Second person, present tense. Describe only what a party arriving at the entrance can directly see, hear, or smell, drawn only from the floor plan below. Do not invent history, purpose, or lore beyond the goals listed. End on the immediate scene, not a question. No preamble, no "Welcome" — begin mid-scene.`
+    : `What happened last session:
+${lastSessionText ?? 'No detailed notes available.'}
+
+Write a "previously on…" recap of 2–3 sentences in second person. Draw only on the last session's events and the goals/quests below — never invent a new fact about the dungeon. Stop after the summary — no new scene, no transition line. No preamble — begin immediately with "Previously on…".`;
+
+  return `${intro}
+
+## Closed world
+You may only reference what's seeded into this dungeon: the floor plan, its goals, its quests, and what happened last session. Never invent new lore, NPCs, or backstory not covered below — not even as minor flavor.
+
+## Reveal discipline
+The floor plan below includes undiscovered entities and hidden dressing (marked as such) for your spatial reasoning only. Never name, describe, count, or hint at anything not marked discovered.
+
+### Goals
+${goalsBlock}
+### This dungeon's quests
+${questsBlock}
+### Floor plan
+${groundTruth}
+
+${task}`;
 }
 
 export function buildTriagePrompt(

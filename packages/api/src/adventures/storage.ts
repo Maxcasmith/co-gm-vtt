@@ -53,7 +53,11 @@ export async function saveCampaignAsAdventure(campaignSlug: string, adventureSlu
   let hasDungeon = false;
   try {
     const dungeon = JSON.parse(await readFile(dungeonPath, 'utf-8')) as Dungeon;
-    dungeon.entities = dungeon.entities.map(e => ({ ...e, discovered: false }));
+    // Only entities that are actually hidden behind a Perception check reset — decorative props
+    // (type 'object') are placed with discovered: true and stay that way (see placer.ts), since
+    // furniture isn't something a search reveals. Resetting them too left every prop invisible in
+    // any campaign cloned from a template.
+    dungeon.entities = dungeon.entities.map(e => e.hideDC === undefined ? e : { ...e, discovered: false });
     await writeFile(dungeonPath, JSON.stringify(dungeon, null, 2), 'utf-8');
     hasDungeon = true;
   } catch (err) { logError('adventures/storage:saveCampaignAsAdventure:dungeon', err); }

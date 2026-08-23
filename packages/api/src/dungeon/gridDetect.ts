@@ -11,6 +11,14 @@ const BLACK_LUMA = 90; // a pixel this dark or darker on all three channels coun
 const LINE_ALPHA_MIN = 200; // the grid line must also be this opaque — on a real-alpha atlas, transparent background commonly exports as (0,0,0) with alpha 0, which is RGB-identical to the opaque black line
 const DARK_BAND_THRESHOLD = 0.85; // a row/col must be at least this dark edge-to-edge to count as part of a line — an object's own dark pixels only ever cover a fraction of a row/col, never nearly all of it
 const MIN_BAND_THICKNESS = 2; // ignore single stray dark pixels/rows that aren't a real drawn line
+// ponytail: a real dark object (hair, cloak) spanning enough of an axis can cross the darkness
+// threshold at two nearby positions instead of one, registering as two separate bands a few px
+// apart — each contributes its own boundary, carving a sliver cell between them (confirmed live:
+// two creature portraits cropped to 7px/13px wide). Bands this close together are merged into one
+// before boundary math runs. Upgrade path if a false split ever survives this: detect it per-row
+// instead of column-wide, so a line only counts where it's dark in every row of ITS OWN cell band,
+// not the whole atlas height.
+const MIN_BAND_GAP_FRACTION = 0.05;
 const MIN_CONTENT_PIXELS = 50; // a region needs at least this many non-background pixels to count as real object content, not stray border-corner anti-aliasing
 const AA_EDGE_MARGIN = 6; // pixels of anti-aliasing blend to skip right past a detected line's edge before scanning for content
 
@@ -25,7 +33,21 @@ function findDarkBands(darkFractionAt: (pos: number) => number, axisLength: numb
     if (!dark && start !== -1) { bands.push({ start, end: p - 1 }); start = -1; }
   }
   if (start !== -1) bands.push({ start, end: axisLength - 1 });
-  return bands.filter(b => b.end - b.start + 1 >= MIN_BAND_THICKNESS);
+  return mergeCloseBands(bands.filter(b => b.end - b.start + 1 >= MIN_BAND_THICKNESS), axisLength);
+}
+
+function mergeCloseBands(bands: DarkBand[], axisLength: number): DarkBand[] {
+  const minGap = axisLength * MIN_BAND_GAP_FRACTION;
+  const merged: DarkBand[] = [];
+  for (const band of bands) {
+    const last = merged[merged.length - 1];
+    if (last && band.start - last.end < minGap) {
+      last.end = band.end;
+    } else {
+      merged.push({ ...band });
+    }
+  }
+  return merged;
 }
 
 // Turns raw dark bands into cell-boundary positions. The atlas's own outer border (unwanted — the

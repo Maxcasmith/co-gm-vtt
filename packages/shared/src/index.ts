@@ -10,3 +10,4 @@ export * from "./types/config.ts";
 export * from "./types/world.ts";
 export * from "./types/events.ts";
 export * from "./types/tactics.ts";
+export * from "./types/storyboard.ts";

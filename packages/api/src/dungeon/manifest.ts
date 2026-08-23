@@ -6,6 +6,8 @@ import { logError } from '../logger.ts';
 export interface ManifestHazard {
   name: string;
   hideDC: number;
+  /** loot only — the actual item(s) found inside, so the narrator has something concrete to reveal instead of inventing contents when it's opened. */
+  contents?: string[];
 }
 
 export interface ManifestProp {
@@ -122,9 +124,9 @@ const GENERIC_WOOD_DESC = 'Worn wooden floor planks, warm honey-brown tone, fain
 const GENERIC_ROOMS: ManifestRoom[] = [
   { name: 'Entrance', size: 'medium', role: 'entrance', material: 'wood', materialDescription: GENERIC_WOOD_DESC },
   { name: 'Guard Room', size: 'small', material: 'wood', materialDescription: GENERIC_WOOD_DESC, creatures: [{ id: 'guard-1', name: 'Guard', cr: 0.25, hp: 11, ac: 12, speed: 30, stats: { str: 13, dex: 12, con: 12, int: 10, wis: 10, cha: 10 }, attacks: [{ name: 'Spear', bonus: 3, damage: '1d6+1' }], creatureType: 'Humanoid', appearance: 'A weary human guard in scuffed leather armor, iron spear in hand, a plain steel cap pulled low.' }] },
-  { name: 'Storage Room', size: 'small', material: 'wood', materialDescription: GENERIC_WOOD_DESC, loot: [{ name: 'Supplies', hideDC: 8 }] },
+  { name: 'Storage Room', size: 'small', material: 'wood', materialDescription: GENERIC_WOOD_DESC, loot: [{ name: 'Supplies', hideDC: 8, contents: ['a coil of rope', 'a half-empty waterskin'] }] },
   { name: 'Junction', size: 'small', material: 'wood', materialDescription: GENERIC_WOOD_DESC },
-  { name: 'Vault', size: 'medium', material: 'wood', materialDescription: GENERIC_WOOD_DESC, traps: [{ name: 'Trapped Chest', hideDC: 15 }], loot: [{ name: 'Treasure Chest', hideDC: 12 }] },
+  { name: 'Vault', size: 'medium', material: 'wood', materialDescription: GENERIC_WOOD_DESC, traps: [{ name: 'Trapped Chest', hideDC: 15 }], loot: [{ name: 'Treasure Chest', hideDC: 12, contents: ['a small pouch of gold coins'] }] },
   { name: 'Inner Chamber', size: 'large', material: 'wood', materialDescription: GENERIC_WOOD_DESC, creatures: [{ id: 'boss-1', name: 'Boss', cr: 1, hp: 27, ac: 14, speed: 30, stats: { str: 15, dex: 13, con: 14, int: 10, wis: 11, cha: 12 }, attacks: [{ name: 'Greatsword', bonus: 5, damage: '2d6+3' }], creatureType: 'Humanoid', isBoss: true, appearance: 'A towering armored warlord, a notched greatsword resting on one shoulder, a battle-scarred face set in a cold glare.' }], role: 'exit' },
 ];
 
@@ -180,7 +182,7 @@ Return ONLY valid JSON, no markdown fences, no explanation:
         "appearance": "string — 1-2 sentence physical description (build, coloring, notable features, worn/carried gear). No narrative framing, just what it looks like — this feeds an image generator, not the read-aloud text."
       }],
       "traps": [{ "name": "string — trap description", "hideDC": 14 }],
-      "loot": [{ "name": "string — item or treasure", "hideDC": 8 }],
+      "loot": [{ "name": "string — the container or where it's found, e.g. 'Treasure Chest', 'Loose Floorboard'", "hideDC": 8, "contents": ["string — a specific item actually inside, e.g. '15 gold pieces', 'a silver locket'. 1-3 entries. This is the ONLY source of truth for what's in it — nothing else gets improvised when a player opens it."] }],
       "props": [{
         "name": "string — short name for a piece of furniture/decor in this room, e.g. 'Wooden Table', 'Iron Chest', 'Hay Bale'. Reuse the EXACT SAME name across every room that should share the same sprite (e.g. every plain wooden table in the dungeon uses the name 'Wooden Table') rather than inventing near-duplicate names for the same object — this dungeon may use AT MOST 32 distinct prop names in total across all rooms.",
         "description": "string — vivid visual description of this exact object's appearance (materials, color, wear, shape) for an image generator, isolated on its own with no scene/background. Reuse the EXACT SAME description verbatim wherever the name is reused.",

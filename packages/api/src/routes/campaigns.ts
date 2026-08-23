@@ -6,11 +6,12 @@ import {
   CAMPAIGNS_DIR,
   getConfig, writeCampaignFile, listCampaigns,
   getWorldMeta, writeWorldMeta,
-  writeCharacter, updateCharacter, getCharacter, listCharacters, findCharacterByPassword, writeCharacterImage,
+  writeCharacter, updateCharacter, getCharacter, listCharacters, findCharacterByPassword, writeCharacterImage, getCharacterStoryboard,
   readCampaignFile, writeEntity,
   listEntitySlugs, readEntity, saveDungeon, saveDungeonAscii, writeManifest, readManifest, emptyManifest, readQuests, writeQuests,
 } from '../storage.ts';
 import { generateDungeon, buildDungeonQuests } from '../dungeon/index.ts';
+import { generateCharacterStoryboard, SLIDE_COUNT } from '../dungeon/storyboard.ts';
 import { calcMaxHp } from '../combat/dice.ts';
 import { getFeatureProvider } from '../providers/index.ts';
 import { copyCompendiumToCampaign } from '../compendium/storage.ts';
@@ -323,6 +324,7 @@ campaignsRouter.post('/:id/party', async (req, res) => {
   await writeCharacter(slug, charId, character);
   res.json({ id: charId });
   void syncCharacterToWorldLore(slug, character);
+  void generateCharacterStoryboard(slug, character);
 });
 
 // Fire-and-forget: deconstructs a finalised character's backstory into world content — NPCs,
@@ -469,6 +471,23 @@ campaignsRouter.get('/:id/party/:charId/token', (req, res) => {
   const { id, charId } = req.params as { id: string; charId: string };
   res.sendFile(`${id}/party/${charId}/token.png`, { root: CAMPAIGNS_DIR }, err => {
     if (err) res.status(404).json({ error: 'Token not found' });
+  });
+});
+
+// Manifest (slide URLs + captions) as JSON — for an on-demand single-viewer "Play" fetch, distinct
+// from the room-wide session-start broadcast (socketHandlers/session.ts's storyboard:queue).
+campaignsRouter.get('/:id/party/:charId/storyboard', async (req, res) => {
+  const { id, charId } = req.params as { id: string; charId: string };
+  const storyboard = await getCharacterStoryboard(id, charId);
+  if (!storyboard) { res.status(404).json({ error: 'No storyboard generated for this character' }); return; }
+  res.json(storyboard);
+});
+
+campaignsRouter.get('/:id/party/:charId/storyboard/:n', (req, res) => {
+  const { id, charId, n } = req.params as { id: string; charId: string; n: string };
+  if (!new RegExp(`^[1-${SLIDE_COUNT}]$`).test(n)) { res.status(400).json({ error: 'Invalid slide number' }); return; }
+  res.sendFile(`${id}/party/${charId}/storyboard_slide_${n}.jpg`, { root: CAMPAIGNS_DIR }, err => {
+    if (err) res.status(404).json({ error: 'Storyboard slide not found' });
   });
 });
 

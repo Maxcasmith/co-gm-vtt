@@ -1,7 +1,8 @@
-import { readQuests, readManifest, appendChatLog } from '../storage.ts';
+import { readQuests, readManifest, appendChatLog, getConfig } from '../storage.ts';
 import { ensureSessionQuests } from '../session-processor/index.ts';
 import { io, ROOM, sessionState } from '../state.ts';
-import { runRecap, endSession } from '../session.ts';
+import { runRecap, endSession, isFirstSession } from '../session.ts';
+import { getStoryboardQueue } from '../dungeon/storyboard.ts';
 import { logError } from '../logger.ts';
 import type { JoinContext } from './context.ts';
 
@@ -12,6 +13,16 @@ export function registerSessionHandlers(ctx: JoinContext): void {
     sessionState.set(cid, true);
     io.to(ROOM).emit('session:state', true);
     io.to(ROOM).emit('dm:thinking', true);
+    void (async () => {
+      try {
+        const config = await getConfig();
+        if (!config.image.generateStoryboard || !(await isFirstSession(cid))) return;
+        const queue = await getStoryboardQueue(cid);
+        if (queue.entries.length) io.to(ROOM).emit('storyboard:queue', queue);
+      } catch (err) {
+        logError('socketHandlers/session:storyboardQueue', err);
+      }
+    })();
     void (async () => {
       try {
         await ensureSessionQuests(cid);

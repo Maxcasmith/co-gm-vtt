@@ -26,6 +26,22 @@ function isRed(r: number, g: number, b: number): boolean {
   return dr * dr + dg * dg + db * db < RED_THRESHOLD * RED_THRESHOLD;
 }
 
+// Blank filler cells (padding an under-full batch out to 16, see buildCreaturePortraitPrompt) used
+// to be solid black — indistinguishable from the thin black grid lines to detectGridBoundaries's
+// darkness scan, which corrupted boundary detection for any batch under 16 real creatures (the
+// common case). Now magenta: distinct from both the black grid lines and the red creature
+// background, so a blank cell can never register as a line, and isBackgroundOrBlank below keeps it
+// out of the "real content" count for the outer-border trim too.
+const MAGENTA_KEY: [number, number, number] = [255, 0, 255];
+const MAGENTA_THRESHOLD = 70;
+function isMagenta(r: number, g: number, b: number): boolean {
+  const dr = r - MAGENTA_KEY[0], dg = g - MAGENTA_KEY[1], db = b - MAGENTA_KEY[2];
+  return dr * dr + dg * dg + db * db < MAGENTA_THRESHOLD * MAGENTA_THRESHOLD;
+}
+function isBackgroundOrBlank(r: number, g: number, b: number): boolean {
+  return isRed(r, g, b) || isMagenta(r, g, b);
+}
+
 // slugifyTheme is a generic slugifier despite the name (see shared/types/dungeon.ts) — reused
 // here for creature names so "Giant Fire Beetle" -> "giant-fire-beetle", same dedup/matching
 // philosophy tilesets.ts uses for theme keywords.
@@ -113,46 +129,65 @@ export async function generateCreaturePortraits(entities: DungeonEntity[], confi
   }
 }
 
+const MAX_ATLAS_ATTEMPTS = 3;
+
 async function generateBatch(batch: PendingPortrait[], apiKey: string, model: string): Promise<void> {
   console.log(`[creaturePortraits] generating portraits for: ${batch.map(b => b.name).join(', ')}`);
   const prompt = buildCreaturePortraitPrompt(batch.map(b => ({ name: b.name, appearance: b.appearance, ...(b.isBoss ? { isBoss: true } : {}) })));
 
-  console.log(`[creaturePortraits] requesting atlas from ${model}…`);
-  const rawAtlas = await generateTilesetAtlas(prompt, apiKey, model, '1024x1024');
+  // A detected grid shape that doesn't match the requested GRID_SIZE x GRID_SIZE isn't just cosmetic
+  // — cropping against it maps batch[i] to detected-column-i, which silently grabs the wrong region
+  // (confirmed live: a mismatched 6x1 detection produced a "Herald" portrait that was actually two
+  // OTHER creatures spliced together across a real divider). Root cause for under-full batches:
+  // buildCreaturePortraitPrompt used to pad unused cells with solid-BLACK "blank square" placeholders
+  // (to keep the real cells' grid consistent) — indistinguishable from the thin black dividing lines
+  // to detectGridBoundaries's darkness scan, corrupting the boundary math wherever blanks were. Fixed
+  // at the source: blanks are now magenta (see isBackgroundOrBlank below), so they never read as
+  // dark. This reject-and-retry stays as a second line of defense against whatever the model draws
+  // wrong on its own — never crop against a shape we didn't ask for.
+  let atlas: Buffer | undefined, rows: number[] | undefined, cols: number[] | undefined;
+  for (let attempt = 1; attempt <= MAX_ATLAS_ATTEMPTS; attempt++) {
+    console.log(`[creaturePortraits] requesting atlas from ${model}… (attempt ${attempt}/${MAX_ATLAS_ATTEMPTS})`);
+    const rawAtlas = await generateTilesetAtlas(prompt, apiKey, model, '1024x1024');
 
-  // Persisted unmodified, before the resize/crop below — same review purpose as props.ts's _source
-  // save. Not exposed through any route or the bestiary manifest (routes/creatures.ts skips this
-  // directory): this is just an on-disk copy to inspect later, not a feature.
-  const rawMeta = await sharp(rawAtlas).metadata();
-  const sourceExt = rawMeta.format === 'png' ? 'png' : 'jpg';
-  const sourceDir = path.join(CREATURES_DIR, '_source');
-  await mkdir(sourceDir, { recursive: true });
-  await writeFile(path.join(sourceDir, `portraits_${Date.now()}.${sourceExt}`), rawAtlas);
+    // Persisted unmodified, before the resize/crop below — same review purpose as props.ts's _source
+    // save. Not exposed through any route or the bestiary manifest (routes/creatures.ts skips this
+    // directory): this is just an on-disk copy to inspect later, not a feature.
+    const rawMeta = await sharp(rawAtlas).metadata();
+    const sourceExt = rawMeta.format === 'png' ? 'png' : 'jpg';
+    const sourceDir = path.join(CREATURES_DIR, '_source');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(path.join(sourceDir, `portraits_${Date.now()}.${sourceExt}`), rawAtlas);
 
-  // Force-resized to a fixed size before detection/cropping, same as props.ts — the model doesn't
-  // always return exactly the requested size, but the grid must still be evenly 4x4 for tileSize math.
-  const atlas = await sharp(rawAtlas).resize(ATLAS_SIZE, ATLAS_SIZE, { fit: 'fill' }).toBuffer();
-  const { width, height } = await sharp(atlas).metadata();
-  if (!width || !height) throw new Error('Portrait atlas has no dimensions');
+    // Force-resized to a fixed size before detection/cropping, same as props.ts — the model doesn't
+    // always return exactly the requested size, but the grid must still be evenly 4x4 for tileSize math.
+    const candidateAtlas = await sharp(rawAtlas).resize(ATLAS_SIZE, ATLAS_SIZE, { fit: 'fill' }).toBuffer();
+    const { width, height } = await sharp(candidateAtlas).metadata();
+    if (!width || !height) throw new Error('Portrait atlas has no dimensions');
 
-  // buildCreaturePortraitPrompt asks the model to draw a thin black line on every internal cell
-  // boundary — a visual fence keeping busts from bleeding into the row below. Crop between whatever
-  // lines actually got drawn (same detectGridBoundaries pipeline props.ts uses), never a naive even
-  // division — a bust drawn slightly oversized bleeds across the row boundary otherwise, cutting two
-  // different creatures' heads in half into the same cell.
-  const { rows, cols } = await detectGridBoundaries(atlas, width, height, isRed);
-  const actualCols = cols.length - 1, actualRows = rows.length - 1;
-  if (actualCols !== GRID_SIZE || actualRows !== GRID_SIZE) {
-    console.warn(`[creaturePortraits] detected a ${actualCols}x${actualRows} grid, not the requested ${GRID_SIZE}x${GRID_SIZE} — cropping against what was actually drawn`);
+    // buildCreaturePortraitPrompt asks the model to draw a thin black line on every internal cell
+    // boundary — a visual fence keeping busts from bleeding into the row below. Crop between whatever
+    // lines actually got drawn (same detectGridBoundaries pipeline props.ts uses), never a naive even
+    // division — a bust drawn slightly oversized bleeds across the row boundary otherwise, cutting two
+    // different creatures' heads in half into the same cell.
+    const boundaries = await detectGridBoundaries(candidateAtlas, width, height, isBackgroundOrBlank);
+    const actualCols = boundaries.cols.length - 1, actualRows = boundaries.rows.length - 1;
+    if (actualCols === GRID_SIZE && actualRows === GRID_SIZE) {
+      atlas = candidateAtlas; rows = boundaries.rows; cols = boundaries.cols;
+      break;
+    }
+    console.warn(`[creaturePortraits] attempt ${attempt}: detected a ${actualCols}x${actualRows} grid, not the requested ${GRID_SIZE}x${GRID_SIZE} — discarding and ${attempt < MAX_ATLAS_ATTEMPTS ? 're-requesting' : 'giving up'}`);
+  }
+  if (!atlas || !rows || !cols) {
+    console.error(`[creaturePortraits] gave up on batch [${batch.map(b => b.name).join(', ')}] after ${MAX_ATLAS_ATTEMPTS} attempts — no portraits written, will retry whenever this creature is next needed`);
+    return;
   }
 
+  // GRID_SIZE x GRID_SIZE is guaranteed at this point (the loop above only breaks on an exact match),
+  // so batch[i] maps onto the real, requested grid — no dynamic actualCols/actualRows guessing needed.
   const rects: GridRect[] = [];
   batch.forEach((b, i) => {
-    const r = Math.floor(i / actualCols), c = i % actualCols;
-    if (r >= actualRows) {
-      console.warn(`[creaturePortraits] no ${r + 1}th row in the detected grid — skipping "${b.name}", it will need a re-run`);
-      return;
-    }
+    const r = Math.floor(i / GRID_SIZE), c = i % GRID_SIZE;
     rects.push({ material: b.slug, left: cols[c]!, top: rows[r]!, width: cols[c + 1]! - cols[c]!, height: rows[r + 1]! - rows[r]! });
   });
 

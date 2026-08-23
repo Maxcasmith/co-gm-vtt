@@ -77,12 +77,12 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
     }
 
     // No manifest loot hints but this room's in the smallest-area third: fall back to one auto chest.
-    const lootHints = hints?.loot?.length ? hints.loot : isLoot ? [{ name: 'Chest', hideDC: 10 }] : [];
+    const lootHints = hints?.loot?.length ? hints.loot : isLoot ? [{ name: 'Chest', hideDC: 10, contents: ['a few silver coins'] }] : [];
     for (const lootHint of lootHints) {
       const cell = findFreeCell(room, cx + 1, cy, occupied, cells);
       if (cell) {
         occupied.add(key(cell.x, cell.y));
-        entities.push({ id: randomUUID(), type: 'loot', x: cell.x, y: cell.y, name: lootHint.name, discovered: false, hideDC: lootHint.hideDC });
+        entities.push({ id: randomUUID(), type: 'loot', x: cell.x, y: cell.y, name: lootHint.name, discovered: false, hideDC: lootHint.hideDC, ...(lootHint.contents ? { contents: lootHint.contents } : {}) });
       }
     }
 

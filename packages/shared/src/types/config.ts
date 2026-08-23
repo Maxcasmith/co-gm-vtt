@@ -11,7 +11,7 @@ export interface ModelTier {
 }
 
 export type AiFeature =
-  | "campaignConcepts" | "dungeonPremise" | "backstoryGeneration" | "backstoryCheck" | "worldLoreSync"
+  | "campaignConcepts" | "dungeonPremise" | "backstoryGeneration" | "backstoryCheck" | "worldLoreSync" | "storyboardCaptions"
   | "nemesisGeneration" | "dmBrief" | "questGeneration" | "dmChatResponse" | "sessionTriage" | "sessionRecap" | "tagEffectProcessing"
   | "worldGeneration" | "dungeonGeneration" | "worldStateAdvance"
   | "combatNarration" | "encounterGeneration" | "improvisedResolution"
@@ -29,6 +29,7 @@ export interface ImageConfig {
   model: ImageModel;
   generateWorldMap: boolean;
   generateTilesets: boolean;
+  generateStoryboard: boolean;
 }
 
 export type NarrationModel = "none" | "browser" | "tts-1" | "tts-1-hd";

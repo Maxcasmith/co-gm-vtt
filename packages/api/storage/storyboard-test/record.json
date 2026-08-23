@@ -1,0 +1,45 @@
+{
+  "name": "Preston Winchester",
+  "backstory": "Preston Winchester is a paranormal investigator P.I from waterdeep. he uses his Sorcery and devil patron to uncover demonic crimes of the occult in waterdeeps underworld\n\nAfter his Sister Clarica died, the duty of caring for her daughter Alicia has bestowed upon Preston. Preston has been raising Alicia for a year and a half.\n\nLately Alicia has been having nightmares, nightmares of her mother Clarica calling her to a land called \"Barovia\". Alicia initially frightened by the nightmares has succumb to them being the only time she gets to see her mother.\n\nOne night whilst in his study Preston catches Alicia sleep walking. realizing the nightmares are getting worse he turns to his arcane occult research which leads him to a camp of people called the Vistani. With Alicia and his black hound Baskerville by his side he travels to the vistani camp in hope they will have the answer to clearing Alicia of her nightmares.\n\nThat night Alicia being beckoned by her mother sleepwalks into the mists, Preston and Baskerville chasing after her they eventually lose her, then each other.\n\nPreston awakens in the forest of Barovia, surrounded by mist where the story begins.\n",
+  "portraitUrl": "/api/admin/storyboard-test/portrait?v=1787516303007",
+  "slides": [
+    {
+      "url": "/api/admin/storyboard-test/slide/1?v=1787516303007",
+      "caption": "I'm a private investigator in Waterdeep. I work the occult cases. My magic lets me see what the city watch can't."
+    },
+    {
+      "url": "/api/admin/storyboard-test/slide/2?v=1787516303007",
+      "caption": "My sister Clarica died. Her daughter Alicia had no one else left. So I took her in."
+    },
+    {
+      "url": "/api/admin/storyboard-test/slide/3?v=1787516303007",
+      "caption": "I raised her for a year and a half. Me, Alicia, and my hound Baskerville. We made it work."
+    },
+    {
+      "url": "/api/admin/storyboard-test/slide/4?v=1787516303007",
+      "caption": "Then the nightmares started. She dreamed of her mother, calling her to a place called Barovia."
+    },
+    {
+      "url": "/api/admin/storyboard-test/slide/5?v=1787516303007",
+      "caption": "One night I caught her sleepwalking through my study. That's when I knew the dreams were getting worse."
+    },
+    {
+      "url": "/api/admin/storyboard-test/slide/6?v=1787516303007",
+      "caption": "I went through every occult text I owned. Everything pointed to one group of people. The Vistani."
+    },
+    {
+      "url": "/api/admin/storyboard-test/slide/7?v=1787516303007",
+      "caption": "I took Alicia and Baskerville and traveled to their camp. I hoped they had a way to end her nightmares."
+    },
+    {
+      "url": "/api/admin/storyboard-test/slide/8?v=1787516303007",
+      "caption": "That night she walked into the mists, following her mother's voice. Baskerville and I ran after her. We lost her. Then I lost him too."
+    },
+    {
+      "url": "/api/admin/storyboard-test/slide/9?v=1787516303007",
+      "caption": "I woke up alone in a forest I'd never seen before. Nothing but mist in every direction. This is where it starts."
+    }
+  ],
+  "generatedAt": "2026-08-23T20:18:23.008Z",
+  "sourceUrl": "/api/admin/storyboard-test/source?v=1787516303007"
+}

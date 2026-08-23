@@ -179,7 +179,7 @@ export async function generateBattleMap(prompt: string, apiKey: string, model: s
 // gpt-image-2 takes arbitrary WIDTHxHEIGHT (both divisible by 16, aspect ratio 1:3-3:1, total
 // pixels 655,360-8,294,400) — 1152x576 is the smallest exact-2:1 size clearing that pixel floor,
 // landing in the cheapest ~1K pricing tier with no squash needed downstream.
-function atlasSizeFor(model: string): string {
+export function atlasSizeFor(model: string): string {
   if (model === 'gpt-image-2') return '1152x576';
   if (model.startsWith('gpt-image-')) return '1536x1024';
   if (model === 'dall-e-3') return '1792x1024';

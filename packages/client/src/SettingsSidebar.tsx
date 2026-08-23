@@ -84,7 +84,7 @@ const OPENAI_VOICES = [
 const DEFAULT_CONFIG: AppConfig = {
   workflows: [],
   apiKeys: { openai: '', anthropic: '', deepseek: '', kimi: '' },
-  image: { model: 'gpt-image-1', generateWorldMap: false, generateTilesets: false },
+  image: { model: 'gpt-image-1', generateWorldMap: false, generateTilesets: false, generateStoryboard: false },
   narration: { model: 'none', voice: 'onyx' },
 };
 
@@ -252,6 +252,23 @@ export default function SettingsSidebar({ open, onClose }: Props) {
                 className={`settings-toggle ${config.image.generateTilesets ? 'settings-toggle--on' : ''}`}
                 onClick={() => setConfig(c => ({ ...c, image: { ...c.image, generateTilesets: !c.image.generateTilesets } }))}
                 aria-pressed={config.image.generateTilesets}
+              >
+                <span className="settings-toggle-thumb" />
+              </button>
+            </div>
+            <div className="settings-toggle-row">
+              <div className="settings-toggle-text">
+                <span className="settings-toggle-label">Generate character storyboards</span>
+                <span className="settings-toggle-desc">
+                  {config.image.generateStoryboard
+                    ? 'When a character is finished, their backstory is turned into a 9-slide opening storyboard, played as a slideshow the first time anyone starts the session.'
+                    : 'No opening storyboard will be generated for new characters.'}
+                </span>
+              </div>
+              <button
+                className={`settings-toggle ${config.image.generateStoryboard ? 'settings-toggle--on' : ''}`}
+                onClick={() => setConfig(c => ({ ...c, image: { ...c.image, generateStoryboard: !c.image.generateStoryboard } }))}
+                aria-pressed={config.image.generateStoryboard}
               >
                 <span className="settings-toggle-thumb" />
               </button>

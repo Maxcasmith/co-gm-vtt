@@ -34,6 +34,10 @@ const AI_FEATURES: { id: AiFeature; label: string; description: string; group: s
     description: 'After a character is finalized, extracts NPCs/locations/quest hooks from their backstory into the world. Fire-and-forget background task — never blocks character creation.',
   },
   {
+    id: 'storyboardCaptions', label: 'Storyboard Captions', group: 'Narrative',
+    description: 'Condenses a finalized character’s backstory into 9 key beats (a visual description + a matching first-person caption line each) for their opening storyboard. Fire-and-forget background task — never blocks character creation.',
+  },
+  {
     id: 'nemesisGeneration', label: 'Nemesis Generation', group: 'World',
     description: 'Evaluates surviving enemies after combat to decide if one becomes a recurring nemesis. Runs once per fight, in the background.',
   },

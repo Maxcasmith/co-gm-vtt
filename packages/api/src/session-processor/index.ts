@@ -234,15 +234,21 @@ export async function generateDmBrief(
 const UNDISCOVERED_THRESHOLD = 2;
 
 export async function ensureSessionQuests(campaignSlug: string): Promise<void> {
+  // Dungeon-crawl worlds are closed-world: quests come only from the dungeon's own seeded goals
+  // (buildDungeonQuests), never invented mid-session. A campaign-wide invented quest here would be
+  // untagged (no sourceDungeonId), so the dungeon narrator would never surface it — permanently
+  // orphaned since there's no open-world narration path left to discover it through either.
+  const meta = await getWorldMeta(campaignSlug);
+  if (meta?.type === 'dungeon-crawl') return;
+
   const quests = await readQuests(campaignSlug);
   const undiscovered = quests.filter(q => q.status === 'undiscovered');
   if (undiscovered.length >= UNDISCOVERED_THRESHOLD) return;
 
   try {
-    const [manifest, actsRaw, meta] = await Promise.all([
+    const [manifest, actsRaw] = await Promise.all([
       readManifest(campaignSlug),
       readCampaignFile(campaignSlug, 'acts.json'),
-      getWorldMeta(campaignSlug),
     ]);
 
     const acts = actsRaw ? JSON.parse(actsRaw) as Array<{ act: number; conditions: string[] }> : [];

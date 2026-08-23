@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Character } from "shared";
+import type { Character, CharacterStoryboard, StoryboardQueuePayload } from "shared";
 import { calcACBreakdown, spellSlotsForClass } from "shared";
 import { on, dispatch } from "./events.ts";
 import { HIT_DICE } from "./character-creation/srd.ts";
@@ -10,8 +10,10 @@ import { InventoryTab } from "./characterSheet/InventoryTab.tsx";
 import { SpellsTab } from "./characterSheet/SpellsTab.tsx";
 import { ScoresTab } from "./characterSheet/ScoresTab.tsx";
 import { AITab } from "./characterSheet/AITab.tsx";
+import { InfoTab } from "./characterSheet/InfoTab.tsx";
+import StoryboardOverlay from "./StoryboardOverlay.tsx";
 
-type SheetTab = "abilities" | "features" | "inventory" | "spells" | "ai" | "scores";
+type SheetTab = "abilities" | "features" | "inventory" | "spells" | "ai" | "scores" | "info";
 
 interface Props {
   character: Character;
@@ -30,6 +32,7 @@ const TAB_ORDER: { id: SheetTab; label: string }[] = [
   { id: "features", label: "Features" },
   { id: "ai", label: "Combat AI" },
   { id: "scores", label: "Scores" },
+  { id: "info", label: "Info" },
 ];
 
 // XP required to reach each level (index = level, so index 1 = 300 XP to reach level 2)
@@ -49,6 +52,7 @@ export default function CharacterSheetOverlay({
 }: Props) {
   const [visible, setVisible] = useState(false);
   const [tab, setTab] = useState<SheetTab>("abilities");
+  const [playingBackstory, setPlayingBackstory] = useState<CharacterStoryboard | null>(null);
   const hasSpells = (character.spells?.length ?? 0) > 0;
   const TABS = TAB_ORDER.filter((t) => t.id !== "spells" || hasSpells);
   const [combatActive, setCombatActive] = useState(false);
@@ -127,7 +131,10 @@ export default function CharacterSheetOverlay({
 
   useEffect(() => {
     const unsubOpen = on("vtt:sheet:opened", () => setVisible(true));
-    const unsubClose = on("vtt:sheet:closed", () => setVisible(false));
+    const unsubClose = on("vtt:sheet:closed", () => {
+      setVisible(false);
+      setPlayingBackstory(null);
+    });
     return () => {
       unsubOpen();
       unsubClose();
@@ -147,6 +154,13 @@ export default function CharacterSheetOverlay({
   }, [visible]);
 
   if (!visible) return null;
+
+  if (playingBackstory) {
+    const queue: StoryboardQueuePayload = {
+      entries: [{ characterId: character.id, characterName: character.name, slides: playingBackstory.slides }],
+    };
+    return <StoryboardOverlay queue={queue} onDone={() => setPlayingBackstory(null)} />;
+  }
 
   const hitDie = HIT_DICE[character.class] ?? 8;
   const derivedMaxHp = hitDie + modNum(character.stats.con);
@@ -310,6 +324,9 @@ export default function CharacterSheetOverlay({
           )}
           {tab === "ai" && <AITab character={character} />}
           {tab === "scores" && <ScoresTab character={character} />}
+          {tab === "info" && (
+            <InfoTab character={character} onPlay={setPlayingBackstory} />
+          )}
           {tab === "spells" && (
             <SpellsTab
               character={character}

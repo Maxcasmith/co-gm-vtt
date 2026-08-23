@@ -13,7 +13,10 @@ const SAVE_STAT: Record<string, string> = {
   charisma: 'CHA', cha: 'CHA',
 };
 
-function reqKey(req: CheckRequest) { return `${req.player}:${req.skill}:${req.type}`; }
+// Scoped to the message it came with (timestamp), not just player/skill/type — otherwise rolling
+// one Investigation check marks every future Investigation-check request for that player as already
+// done, since a bare player/skill/type key collides across messages.
+function reqKey(timestamp: number, req: CheckRequest) { return `${timestamp}:${req.player}:${req.skill}:${req.type}`; }
 function reqStat(req: CheckRequest): string {
   if (req.type === 'check') return SKILLS.find(s => s.name === req.skill)?.stat ?? req.skill.slice(0, 3).toUpperCase();
   return SAVE_STAT[req.skill.toLowerCase()] ?? req.skill.slice(0, 3).toUpperCase();
@@ -55,7 +58,7 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
       for (const msg of messages) {
         for (const req of msg.checkRequests ?? []) {
           if (req.player === result.characterName && req.type === result.rollType && reqStat(req) === result.stat) {
-            next.delete(reqKey(req));
+            next.delete(reqKey(msg.timestamp, req));
           }
         }
       }
@@ -66,7 +69,7 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
       for (const msg of messages) {
         for (const req of msg.checkRequests ?? []) {
           if (req.player === result.characterName && req.type === result.rollType && reqStat(req) === result.stat) {
-            next.add(reqKey(req));
+            next.add(reqKey(msg.timestamp, req));
           }
         }
       }
@@ -96,8 +99,8 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
     setInput('');
   }
 
-  function rollRequest(req: CheckRequest) {
-    const key = reqKey(req);
+  function rollRequest(timestamp: number, req: CheckRequest) {
+    const key = reqKey(timestamp, req);
     setRollingKeys(prev => new Set([...prev, key]));
     const stat = reqStat(req).toLowerCase();
     const base = { characterId: character.id, campaignId: character.campaignId, stat };
@@ -134,7 +137,7 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
                   {myRequests.length > 0 && (
                     <div className="journal-roll-requests">
                       {myRequests.map(req => {
-                        const key = reqKey(req);
+                        const key = reqKey(msg.timestamp, req);
                         if (doneKeys.has(key)) return null;
                         const rolling = rollingKeys.has(key);
                         return (
@@ -142,7 +145,7 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
                             key={key}
                             className="journal-roll-btn"
                             disabled={rolling}
-                            onClick={() => rollRequest(req)}
+                            onClick={() => rollRequest(msg.timestamp, req)}
                           >
                             {rolling ? 'Rolling…' : `Roll ${req.skill} ${req.type === 'save' ? 'Save' : 'Check'}`}
                           </button>

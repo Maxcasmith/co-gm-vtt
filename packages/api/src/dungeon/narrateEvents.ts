@@ -30,7 +30,7 @@ export function templateRoomEntry(dungeon: Dungeon, room: DungeonRoom): string |
     e.x >= room.x && e.x < room.x + room.width &&
     e.y >= room.y && e.y < room.y + room.height,
   );
-  if (here.length) lines.push(`Here: ${here.map(e => `${e.name} (${e.type})`).join(', ')}.`);
+  if (here.length) lines.push(`Here: ${here.map(e => e.name).join(', ')}.`);
 
   return lines.length ? lines.join('\n') : null;
 }
