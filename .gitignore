@@ -6,3 +6,8 @@ packages/api/storage/campaigns/
 packages/api/storage/config.json
 packages/api/storage/compendium/adventures/
 packages/api/storage/logs/
+packages/api/storage/props/
+packages/api/storage/creatures/
+packages/api/storage/tilesets/
+packages/api/storage/saved-adventures/
+packages/api/storage/storyboard-test/
