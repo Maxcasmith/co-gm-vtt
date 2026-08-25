@@ -22,6 +22,10 @@ export interface AbilityDef {
   onUse: EffectSpec[];
   /** Self-buff hooks this activation registers (Rage's resistance + melee damage bonus) — reuses registerSpellHooks, the exact path a self-buff spell (Mage Armor, Divine Favor) already goes through. */
   hooks?: HookSpec[];
+  /** Present only for a "pick a name from this list" ability (Tinker's Magic) — the socket payload's chosenItem must be one of these; the server grants it as an inventory item instead of running onUse/hooks. */
+  itemChoices?: string[];
+  /** Present only for a "spend any amount up to what's left" ability (Lay on Hands) — the socket payload's chosenAmount is clamped to the pool and healed directly, bypassing onUse's dice-scaling path entirely. */
+  amountChoice?: true;
 }
 
 /** Populated per-feature as each is wired up (see build audit) — empty is a valid, fully-functional state. */
@@ -93,5 +97,39 @@ export const ABILITY_DEFS: Record<string, AbilityDef> = {
     hooks: [
       { type: "rollModifier", duration: { until: "gameTime", gameSecs: 3600 }, dieSize: 6, sign: 1, consumeOnUse: true },
     ],
+  },
+  // 2024 PHB Artificer: Magic action (modeled as the 'action' cost), create one mundane item
+  // from the list within 5ft, gone at your next Long Rest. ponytail: simplified — the item lands
+  // straight in inventory rather than tracking world position + Long-Rest expiry, and none of
+  // these get a mechanical effect (Caltrops don't hazard, Rope doesn't climb); upgrade if a
+  // player actually wants Tinker's Magic to do more than furnish flavor gear.
+  tinkersMagic: {
+    key: "tinkersMagic",
+    label: "Tinker's Magic",
+    class: "Artificer",
+    actionCost: "action",
+    resourceKey: "tinkersMagic",
+    target: "self",
+    onUse: [],
+    itemChoices: [
+      "Ball Bearings", "Basket", "Bedroll", "Bell", "Blanket", "Block and Tackle", "Bottle, Glass",
+      "Bucket", "Caltrops", "Candle", "Crowbar", "Flask", "Grappling Hook", "Hunting Trap", "Jug",
+      "Lamp", "Manacles", "Net", "Oil", "Paper", "Parchment", "Pole", "Pouch", "Rope", "Sack",
+      "Shovel", "Spikes, Iron", "String", "Tinderbox", "Torch", "Vial",
+    ],
+  },
+  // 2024 PHB Paladin: Bonus Action, touch a creature and spend any amount of the Lay on Hands
+  // pool (RESOURCE_DEFS.layOnHands) to heal it — see AbilityDef.amountChoice. 'ally' target
+  // reuses the same self-or-other-party-member picker Bardic Inspiration uses (clicking your own
+  // token is a valid "ally" pick there already).
+  layOnHands: {
+    key: "layOnHands",
+    label: "Lay on Hands",
+    class: "Paladin",
+    actionCost: "bonusAction",
+    resourceKey: "layOnHands",
+    target: "ally",
+    onUse: [],
+    amountChoice: true,
   },
 };

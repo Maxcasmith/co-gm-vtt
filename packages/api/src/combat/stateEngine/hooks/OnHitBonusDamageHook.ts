@@ -22,6 +22,7 @@ export class OnHitBonusDamageHook extends Hook<'beforeDamage'> {
   private readonly casterLevel: number;
   private readonly slotLevel: number;
   private readonly consumeOnUse: boolean;
+  private readonly requiresOneHandedMeleeNoOffhand: boolean;
 
   constructor(props: HookProps & {
     markedTargetId?: string | undefined;
@@ -30,6 +31,8 @@ export class OnHitBonusDamageHook extends Hook<'beforeDamage'> {
     casterLevel: number;
     slotLevel: number;
     consumeOnUse?: boolean | undefined;
+    /** Dueling Fighting Style: only fires on a Melee weapon hit made one-handed, with no other weapon equipped. */
+    requiresOneHandedMeleeNoOffhand?: boolean | undefined;
   }) {
     super(props);
     this.markedTargetId = props.markedTargetId;
@@ -38,10 +41,14 @@ export class OnHitBonusDamageHook extends Hook<'beforeDamage'> {
     this.casterLevel = props.casterLevel;
     this.slotLevel = props.slotLevel;
     this.consumeOnUse = props.consumeOnUse ?? false;
+    this.requiresOneHandedMeleeNoOffhand = props.requiresOneHandedMeleeNoOffhand ?? false;
   }
 
   matches(ctx: DamageContext): boolean {
-    return ctx.sourceId === this.ownerId && (this.markedTargetId === undefined || ctx.targetId === this.markedTargetId);
+    if (ctx.sourceId !== this.ownerId) return false;
+    if (this.markedTargetId !== undefined && ctx.targetId !== this.markedTargetId) return false;
+    if (this.requiresOneHandedMeleeNoOffhand && !(ctx.isMelee && !ctx.weaponTwoHanded && !ctx.hasOffhandWeapon)) return false;
+    return true;
   }
 
   apply(ctx: DamageContext, engine: StateEngine): void {

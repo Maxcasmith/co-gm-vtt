@@ -10,6 +10,21 @@ export interface ManifestHazard {
   contents?: string[];
 }
 
+export interface ManifestTrap {
+  /** Pure flavor — what the party perceives. NEVER a DC, skill name, or method to beat it. */
+  name: string;
+  hideDC: number;
+  kind: 'damage' | 'seal';
+  // kind === 'damage' only:
+  saveAbility?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
+  dc?: number;
+  damageFormula?: string;
+  damageType?: string;
+  // kind === 'seal' only — hidden resolution mechanics, never echoed into `name`.
+  escapeSkill?: string;
+  escapeDC?: number;
+}
+
 export interface ManifestProp {
   name: string;
   description: string; // visual description for the sprite generator — feeds buildPropSpritePrompt, never forwarded to DungeonRoom
@@ -23,7 +38,7 @@ export interface ManifestRoom {
   size: 'small' | 'medium' | 'large';
   role?: 'entrance' | 'exit';
   creatures?: EnemyStatBlock[];
-  traps?: ManifestHazard[];
+  traps?: ManifestTrap[];
   loot?: ManifestHazard[];
   props?: ManifestProp[];
   key?: string; // single-char id for the organic grid prompt — assigned here, never left to the LLM
@@ -126,7 +141,7 @@ const GENERIC_ROOMS: ManifestRoom[] = [
   { name: 'Guard Room', size: 'small', material: 'wood', materialDescription: GENERIC_WOOD_DESC, creatures: [{ id: 'guard-1', name: 'Guard', cr: 0.25, hp: 11, ac: 12, speed: 30, stats: { str: 13, dex: 12, con: 12, int: 10, wis: 10, cha: 10 }, attacks: [{ name: 'Spear', bonus: 3, damage: '1d6+1' }], creatureType: 'Humanoid', appearance: 'A weary human guard in scuffed leather armor, iron spear in hand, a plain steel cap pulled low.' }] },
   { name: 'Storage Room', size: 'small', material: 'wood', materialDescription: GENERIC_WOOD_DESC, loot: [{ name: 'Supplies', hideDC: 8, contents: ['a coil of rope', 'a half-empty waterskin'] }] },
   { name: 'Junction', size: 'small', material: 'wood', materialDescription: GENERIC_WOOD_DESC },
-  { name: 'Vault', size: 'medium', material: 'wood', materialDescription: GENERIC_WOOD_DESC, traps: [{ name: 'Trapped Chest', hideDC: 15 }], loot: [{ name: 'Treasure Chest', hideDC: 12, contents: ['a small pouch of gold coins'] }] },
+  { name: 'Vault', size: 'medium', material: 'wood', materialDescription: GENERIC_WOOD_DESC, traps: [{ name: 'Trapped Chest', hideDC: 15, kind: 'damage', saveAbility: 'dex', dc: 13, damageFormula: '1d4', damageType: 'Piercing' }], loot: [{ name: 'Treasure Chest', hideDC: 12, contents: ['a small pouch of gold coins'] }] },
   { name: 'Inner Chamber', size: 'large', material: 'wood', materialDescription: GENERIC_WOOD_DESC, creatures: [{ id: 'boss-1', name: 'Boss', cr: 1, hp: 27, ac: 14, speed: 30, stats: { str: 15, dex: 13, con: 14, int: 10, wis: 11, cha: 12 }, attacks: [{ name: 'Greatsword', bonus: 5, damage: '2d6+3' }], creatureType: 'Humanoid', isBoss: true, appearance: 'A towering armored warlord, a notched greatsword resting on one shoulder, a battle-scarred face set in a cold glare.' }], role: 'exit' },
 ];
 
@@ -144,11 +159,20 @@ export async function fetchManifest(
   partySize = 4,
   partyLevel = 1,
   onToken: (t: string) => void = () => {},
+  // Generated before this call (see session-processor's generateDungeonQuests) — these ARE
+  // dungeon.goals now, set directly below regardless of what the model echoes back in its own
+  // "goals" field. Still described in the prompt so the floor plan is actually designed around
+  // them (a rescue goal needs a captive placed somewhere), not just labeled with them.
+  predefinedQuests: { name: string; description: string }[] = [],
 ): Promise<DungeonManifest> {
-  if (isGeneric(name)) return { rooms: assignKeys(GENERIC_ROOMS), structureType: 'organic', theme: 'high_fantasy', goals: [], illumination: 1, materials: collectDungeonMaterials(GENERIC_ROOMS), props: collectDungeonProps(GENERIC_ROOMS) };
+  const predefinedGoals = predefinedQuests.map(q => q.description);
+  if (isGeneric(name)) return { rooms: assignKeys(GENERIC_ROOMS), structureType: 'organic', theme: 'high_fantasy', goals: predefinedGoals, illumination: 1, materials: collectDungeonMaterials(GENERIC_ROOMS), props: collectDungeonProps(GENERIC_ROOMS) };
 
   const contextBlock = storyContext
     ? `\nRecent story context (what's actually happening — use this to decide what belongs in each room, not just the genre label):\n${storyContext}\n`
+    : '';
+  const questsBlock = predefinedQuests.length
+    ? `\nThis dungeon's goal(s) are already decided — do not invent your own, and design rooms, creatures, and loot to actually serve them (a "rescue" goal needs a captive placed somewhere; a "retrieve X" goal needs X seeded as loot):\n${predefinedQuests.map(q => `- ${q.name}: ${q.description}`).join('\n')}\n`
     : '';
 
   const [minRooms, maxRooms] = roomRange;
@@ -181,7 +205,17 @@ Return ONLY valid JSON, no markdown fences, no explanation:
         "creatureType": "one of: ${CREATURE_TYPES.join('|')}",
         "appearance": "string — 1-2 sentence physical description (build, coloring, notable features, worn/carried gear). No narrative framing, just what it looks like — this feeds an image generator, not the read-aloud text."
       }],
-      "traps": [{ "name": "string — trap description", "hideDC": 14 }],
+      "traps": [{
+        "name": "string — pure sensory/flavor description of the trap. NEVER include a DC, a skill name, or how to beat it — e.g. write 'a swollen door with a rusted latch', never 'a swollen door (DC 14 Athletics to force)'.",
+        "hideDC": 14,
+        "kind": "damage|seal — 'damage' actually hurts whoever triggers it (a blade, a dart, a fall). 'seal' does NOT deal damage — it's an environmental consequence like a door slamming shut or an alarm sounding, meant to be worked around, not survived.",
+        "saveAbility": "str|dex|con|int|wis|cha — kind:'damage' only, whichever ability makes sense for dodging/resisting it",
+        "dc": "number — kind:'damage' only, the save DC",
+        "damageFormula": "string, e.g. '2d10' — kind:'damage' only, scale it to the party's level, not always the maximum",
+        "damageType": "string, e.g. Piercing — kind:'damage' only",
+        "escapeSkill": "string, e.g. Athletics — kind:'seal' only, the skill that would resolve the consequence",
+        "escapeDC": "number — kind:'seal' only, the DC for escapeSkill"
+      }],
       "loot": [{ "name": "string — the container or where it's found, e.g. 'Treasure Chest', 'Loose Floorboard'", "hideDC": 8, "contents": ["string — a specific item actually inside, e.g. '15 gold pieces', 'a silver locket'. 1-3 entries. This is the ONLY source of truth for what's in it — nothing else gets improvised when a player opens it."] }],
       "props": [{
         "name": "string — short name for a piece of furniture/decor in this room, e.g. 'Wooden Table', 'Iron Chest', 'Hay Bale'. Reuse the EXACT SAME name across every room that should share the same sprite (e.g. every plain wooden table in the dungeon uses the name 'Wooden Table') rather than inventing near-duplicate names for the same object — this dungeon may use AT MOST 32 distinct prop names in total across all rooms.",
@@ -205,6 +239,7 @@ IF BUILDING: produce the ${minRooms}-${maxRooms} REAL rooms a location of this e
 IF ORGANIC: produce ${minRooms}-${maxRooms} rooms with location-authentic, atmospheric names fitting a natural/dug space (e.g. for a crypt: "Ossuary", "Collapsed Passage"). Omit "isHallway" and "connectsTo" entirely for organic rooms — layout is handled separately.
 
 Omit "creatures"/"traps"/"loot"/"props" for rooms that don't have any — not every room needs them. Match creature types and stat blocks (use official 5e monster stat blocks as reference) to the genre. hideDC ranges 1-22 (higher = harder to spot); scale it to how well-concealed the trap/item narratively is. If the story context implies a non-hostile purpose (e.g. sneaking in to gather information), it's fine for rooms to have no creatures at all — don't force combat that doesn't fit.
+Most traps should be "seal" kind, not "damage" — an environmental obstacle (a door that slams shut, a passage that collapses, an alarm) makes for better play than a random damage roll on discovery. Reach for "damage" only when the trap's whole concept is physically hurting whoever sets it off (a dart trap, a pressure-plate blade). Never let "name" hint at the DC or the way past it — that's the players' problem to solve, not something you hand them.
 
 Give most rooms 1-4 props fitting their function (a bedroom gets a bed and a dresser, a kitchen gets a stove and shelves) — this is what makes a room feel real, not empty. Skip props only for rooms that are genuinely bare (hallways, a stripped cell, a collapsed passage).
 
@@ -215,7 +250,7 @@ This dungeon is built for a party of ${partySize} level ${partyLevel} player cha
 At most ONE creature in the entire dungeon may have "isBoss": true — only set it when the scenario genuinely supports a climactic final threat (a named leader, the thing the story context is building toward). Leave every other creature without the field entirely; not every dungeon needs a boss.
 
 "goals" (0-3 entries): concrete, player-facing narrative objectives specific to this location and story context — not generic filler like "explore the dungeon" or "defeat the boss" or "find the exit" (those are tracked separately by the game itself). Only include a goal when the story context actually motivates one; an empty array is correct for a dungeon with no specific narrative hook beyond exploring it.
-${contextBlock}
+${questsBlock}${contextBlock}
 Location: ${name}
 Genre: ${dungeonType}`;
 
@@ -251,11 +286,15 @@ Genre: ${dungeonType}`;
         }),
       };
     });
-    const goals = Array.isArray(parsed.goals) ? parsed.goals.filter((g): g is string => typeof g === 'string' && g.trim().length > 0) : [];
+    // predefinedGoals (when given) are authoritative — never trust the model's own echo of
+    // "goals" over the ones it was explicitly told were already decided.
+    const goals = predefinedGoals.length
+      ? predefinedGoals
+      : (Array.isArray(parsed.goals) ? parsed.goals.filter((g): g is string => typeof g === 'string' && g.trim().length > 0) : []);
     const illumination = typeof parsed.illumination === 'number' && Number.isFinite(parsed.illumination) ? Math.max(0, Math.min(1, parsed.illumination)) : 1;
     return { rooms: assignKeys(rooms), structureType, theme, goals, illumination, materials: collectDungeonMaterials(rooms), props: collectDungeonProps(rooms) };
   } catch (err) {
     logError('dungeon/manifest:fetchManifest', err);
-    return { rooms: assignKeys(GENERIC_ROOMS), structureType: 'organic', theme: 'high_fantasy', goals: [], illumination: 1, materials: collectDungeonMaterials(GENERIC_ROOMS), props: collectDungeonProps(GENERIC_ROOMS) };
+    return { rooms: assignKeys(GENERIC_ROOMS), structureType: 'organic', theme: 'high_fantasy', goals: predefinedGoals, illumination: 1, materials: collectDungeonMaterials(GENERIC_ROOMS), props: collectDungeonProps(GENERIC_ROOMS) };
   }
 }

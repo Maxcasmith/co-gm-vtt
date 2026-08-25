@@ -393,10 +393,15 @@ export default function Canvas({ player, characterId, character, connected, show
         }
 
         if (playerPos) {
-          const range = targetingNow.kind === 'weapon' ? targetingNow.weapon.range : parseRangeFeet(targetingNow.spell.range);
+          // Bardic Inspiration is currently the only ability targeting, at 60ft per the 2024 PHB —
+          // hardcoded rather than a lookup table until a second ranged ability shows up.
+          const range = targetingNow.kind === 'weapon' ? targetingNow.weapon.range
+            : targetingNow.kind === 'ability' ? 60
+            : parseRangeFeet(targetingNow.spell.range);
           const extendedRange = targetingNow.kind === 'weapon' ? targetingNow.weapon.extendedRange : undefined;
           const maxRangeCells = extendedRange ? Math.floor(extendedRange / 5) : Math.floor(range / 5);
-          for (const enemy of encounter!) {
+          // Abilities (Bardic Inspiration) target allies only — skip the enemy loop entirely.
+          if (targetingNow.kind !== 'ability') for (const enemy of encounter!) {
             const epos = tokenPositions[enemy.id];
             if (!epos) continue;
             if (Math.max(Math.abs(epos.gx - playerPos.gx), Math.abs(epos.gy - playerPos.gy)) > maxRangeCells) continue;
@@ -404,7 +409,7 @@ export default function Canvas({ player, characterId, character, connected, show
             const ey = epos.gy * hdCellSz + hdCellSz / 2;
             if (Math.hypot(mx - ex, my - ey) <= TOKEN_R) {
               if (targetingNow.kind === 'weapon') {
-                dispatch('vtt:combat:attack', { attackerName: player, attackerId: characterId, targetId: enemy.id, targetName: enemy.name, weapon: targetingNow.weapon, ...(targetingNow.bonusSpell ? { bonusSpell: targetingNow.bonusSpell } : {}) });
+                dispatch('vtt:combat:attack', { attackerName: player, attackerId: characterId, targetId: enemy.id, targetName: enemy.name, weapon: targetingNow.weapon, ...(targetingNow.bonusSpell ? { bonusSpell: targetingNow.bonusSpell } : {}), ...(targetingNow.isOffhand ? { isOffhand: true } : {}), ...(targetingNow.useLuckPoint ? { useLuckPoint: true } : {}), ...(targetingNow.useInspiration ? { useInspiration: true } : {}) });
               } else {
                 tryCastOnTarget(enemy.id);
               }
@@ -413,10 +418,11 @@ export default function Canvas({ player, characterId, character, connected, show
             }
           }
 
-          // Buff/utility spells (Bless, Aid, ...) target party members, not enemies — including
-          // the caster's own token. Weapon attacks and attack-roll spells skip this: there's no
-          // legitimate reason to attack-roll a party member from a stray click.
-          if (targetingNow.kind === 'spell' && targetingNow.spell.combat?.resolution !== 'attack') {
+          // Buff/utility spells (Bless, Aid, ...) and self-target abilities' ally pick (Bardic
+          // Inspiration) target party members, not enemies — including the caster's own token.
+          // Weapon attacks and attack-roll spells skip this: there's no legitimate reason to
+          // attack-roll a party member from a stray click.
+          if (targetingNow.kind === 'ability' || (targetingNow.kind === 'spell' && targetingNow.spell.combat?.resolution !== 'attack')) {
             for (const name of connected) {
               const ppos = tokenPositions[name];
               if (!ppos) continue;
@@ -424,7 +430,11 @@ export default function Canvas({ player, characterId, character, connected, show
               const px = ppos.gx * hdCellSz + hdCellSz / 2;
               const py = ppos.gy * hdCellSz + hdCellSz / 2;
               if (Math.hypot(mx - px, my - py) <= TOKEN_R) {
-                tryCastOnTarget(name);
+                if (targetingNow.kind === 'ability') {
+                  dispatch('vtt:combat:ability:use', { casterId: targetingNow.casterId, casterName: player, abilityKey: targetingNow.abilityKey, targetId: name, ...(targetingNow.chosenAmount !== undefined ? { chosenAmount: targetingNow.chosenAmount } : {}) });
+                } else {
+                  tryCastOnTarget(name);
+                }
                 e.preventDefault();
                 return;
               }
@@ -528,10 +538,12 @@ export default function Canvas({ player, characterId, character, connected, show
       }
 
       if (playerPos) {
-        const range = targetingNow.kind === 'weapon' ? targetingNow.weapon.range : parseRangeFeet(targetingNow.spell.range);
+        const range = targetingNow.kind === 'weapon' ? targetingNow.weapon.range
+          : targetingNow.kind === 'ability' ? 60
+          : parseRangeFeet(targetingNow.spell.range);
         const extendedRange = targetingNow.kind === 'weapon' ? targetingNow.weapon.extendedRange : undefined;
         const maxRangeCells = extendedRange ? Math.floor(extendedRange / 5) : Math.floor(range / 5);
-        for (const enemy of encounter ?? []) {
+        for (const enemy of (targetingNow.kind === 'ability' ? [] : encounter ?? [])) {
           const epos = tokenPositions[enemy.id];
           if (!epos || Math.max(Math.abs(epos.gx - playerPos.gx), Math.abs(epos.gy - playerPos.gy)) > maxRangeCells) continue;
           const ex = epos.gx * mmCellSz + mmCellSz / 2;

@@ -16,7 +16,11 @@ export function registerJoin(ctx: JoinContext): void {
   const cpl = campaignPlayers.get(campaignId) ?? [];
   if (!cpl.includes(player)) { cpl.push(player); campaignPlayers.set(campaignId, cpl); }
 
-  void readChatLog(campaignId).then(history => socket.emit('chat:history', history));
+  // Bracket-wrapped System entries (e.g. "[Combat over — ... Describe the aftermath.]") are
+  // DM-only instructions persisted so the narration prompt sees them as context — never meant
+  // for a player's chat log, same convention as [COMBAT END]/[Roll Result] elsewhere.
+  void readChatLog(campaignId).then(history =>
+    socket.emit('chat:history', history.filter(m => !(m.senderName === 'System' && /^\[.*\]$/.test(m.text)))));
   socket.emit('session:state', sessionState.get(campaignId) ?? false);
   socket.emit('combat:state', combatState.get(campaignId) ?? false);
   void Promise.all([readQuests(campaignId), readManifest(campaignId)]).then(([quests, manifest]) => {

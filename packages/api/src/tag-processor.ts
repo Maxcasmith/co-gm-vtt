@@ -1,4 +1,4 @@
-import type { Item, Weapon, Consumable, Ammunition, EnemyStatBlock, CheckRequest } from 'shared';
+import type { Item, Weapon, Consumable, Ammunition, EnemyStatBlock, CheckRequest, CurrencyDenomination } from 'shared';
 import { randomUUID } from 'crypto';
 import type { StoryProviderAdapter } from './providers/index.ts';
 import { logError } from './logger.ts';
@@ -20,7 +20,10 @@ export type TagEffect =
   | { type: 'nemesis_create'; boundTo: string; name: string; detail: string; statBlock?: EnemyStatBlock }
   | { type: 'nemesis_retire'; name: string }
   | { type: 'ally_xp'; allyName: string; amount: number }
-  | { type: 'ally_learn'; allyName: string; attackName: string; bonus: number; damageFormula: string };
+  | { type: 'ally_learn'; allyName: string; attackName: string; bonus: number; damageFormula: string }
+  | { type: 'currency_add'; player: string; denom: CurrencyDenomination; amount: number }
+  | { type: 'currency_remove'; player: string; denom: CurrencyDenomination; amount: number }
+  | { type: 'spell_cast'; player: string; spellName: string };
 
 interface ProcessResult {
   text: string;
@@ -93,6 +96,40 @@ Items to structure:\n${itemList}`;
   } catch (err) {
     logError('tag-processor:structureItems', err);
     return [];
+  }
+}
+
+/**
+ * Self-healing backstop for a missed PICKED_UP_* tag: the prompt makes the tag mandatory
+ * alongside pickup narration, but that's an instruction, not a guarantee. Called only when
+ * session.ts's own heuristic already flagged the response as pickup-shaped with no tag — this
+ * does a second, narrow, single-purpose extraction pass (does this text actually describe a
+ * definitive pickup, and of what) rather than trusting the first pass's compliance a second time.
+ * A "no" here (any player is null) means the heuristic false-positived — a common, harmless case
+ * (past tense reference to already-owned gear, "you could take X" hypotheticals, etc).
+ */
+export async function repairMissedPickup(
+  text: string,
+  adapter: StoryProviderAdapter,
+): Promise<TagEffect | null> {
+  const prompt = `A D&D game's narration text may or may not describe a player definitively receiving/picking up one or more physical items (not coins/currency — that's handled separately).
+Return ONLY valid JSON, no markdown fences, no explanation: { "player": "exact player name, or null if no definitive pickup happened", "items": ["item name", ...] }
+Only report a pickup that DEFINITELY happened in the text — not an item merely seen, described, or mentioned in passing. If unsure, return player: null.
+
+Text: ${text}`;
+
+  try {
+    const raw = await adapter.complete(prompt);
+    const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    const parsed = JSON.parse(cleaned) as { player?: string | null; items?: string[] };
+    if (!parsed.player || !parsed.items?.length) return null;
+    const items = await structureItems('PICKED_UP_ITEM', parsed.items, adapter);
+    if (!items.length) return null;
+    console.log(`[tag-repair] recovered missed pickup for ${parsed.player}: ${parsed.items.join(', ')}`);
+    return { type: 'inventory_add', player: parsed.player, items };
+  } catch (err) {
+    logError('tag-processor:repairMissedPickup', err);
+    return null;
   }
 }
 
@@ -222,6 +259,39 @@ export async function processVdmResponse(
     }
   }
 
+  const CURRENCY_DENOMS = new Set(['platinum', 'gold', 'electrum', 'silver', 'bronze']);
+  const CURRENCY_ADD_RE = /\[\[CURRENCY_ADD:([^:[\]]+):(\d+):([a-z]+)\]\]/g;
+  for (const match of [...text.matchAll(CURRENCY_ADD_RE)]) {
+    const player = match[1]?.trim();
+    const amount = parseInt(match[2] ?? '', 10);
+    const denom = match[3]?.trim().toLowerCase();
+    if (player && !isNaN(amount) && amount > 0 && denom && CURRENCY_DENOMS.has(denom)) {
+      console.log(`[tag] CURRENCY_ADD: ${player} +${amount} ${denom}`);
+      effects.push({ type: 'currency_add', player, denom: denom as CurrencyDenomination, amount });
+    }
+  }
+
+  const CURRENCY_REMOVE_RE = /\[\[CURRENCY_REMOVE:([^:[\]]+):(\d+):([a-z]+)\]\]/g;
+  for (const match of [...text.matchAll(CURRENCY_REMOVE_RE)]) {
+    const player = match[1]?.trim();
+    const amount = parseInt(match[2] ?? '', 10);
+    const denom = match[3]?.trim().toLowerCase();
+    if (player && !isNaN(amount) && amount > 0 && denom && CURRENCY_DENOMS.has(denom)) {
+      console.log(`[tag] CURRENCY_REMOVE: ${player} -${amount} ${denom}`);
+      effects.push({ type: 'currency_remove', player, denom: denom as CurrencyDenomination, amount });
+    }
+  }
+
+  const CAST_SPELL_RE = /\[\[CAST_SPELL:([^:[\]]+):([^\]]+)\]\]/g;
+  for (const match of [...text.matchAll(CAST_SPELL_RE)]) {
+    const player = match[1]?.trim();
+    const spellName = match[2]?.trim();
+    if (player && spellName) {
+      console.log(`[tag] CAST_SPELL: ${player} casts ${spellName}`);
+      effects.push({ type: 'spell_cast', player, spellName });
+    }
+  }
+
   const ALLY_XP_RE = /\[\[ALLY_XP:([^:[\]]+):(\d+)\]\]/g;
   for (const match of [...text.matchAll(ALLY_XP_RE)]) {
     const allyName = match[1]?.trim();
@@ -281,6 +351,6 @@ export async function processVdmResponse(
     }),
   ]);
 
-  const strippedText = text.replace(TAG_RE, '').replace(PARTY_JOIN_RE, '').replace(SCENE_BUILD_RE, '').replace(NPC_BUILD_RE, '').replace(COMBAT_INIT_RE, '').replace(DUNGEON_EXIT_RE, '').replace(SPEAKING_AS_RE, '').replace(CHECK_RE, '').replace(SAVE_RE, '').replace(DUNGEON_GEN_RE, '').replace(QUEST_ADD_RE, '').replace(QUEST_UPDATE_RE, '').replace(QUEST_RESOLVE_RE, '').replace(CLOCK_RE, '').replace(NEMESIS_RETIRE_RE, '').replace(ALLY_XP_RE, '').replace(ALLY_LEARN_RE, '').replace(/\s{2,}/g, ' ').trim();
+  const strippedText = text.replace(TAG_RE, '').replace(PARTY_JOIN_RE, '').replace(SCENE_BUILD_RE, '').replace(NPC_BUILD_RE, '').replace(COMBAT_INIT_RE, '').replace(DUNGEON_EXIT_RE, '').replace(SPEAKING_AS_RE, '').replace(CHECK_RE, '').replace(SAVE_RE, '').replace(DUNGEON_GEN_RE, '').replace(QUEST_ADD_RE, '').replace(QUEST_UPDATE_RE, '').replace(QUEST_RESOLVE_RE, '').replace(CLOCK_RE, '').replace(NEMESIS_RETIRE_RE, '').replace(ALLY_XP_RE, '').replace(ALLY_LEARN_RE, '').replace(CURRENCY_ADD_RE, '').replace(CURRENCY_REMOVE_RE, '').replace(CAST_SPELL_RE, '').replace(/\s{2,}/g, ' ').trim();
   return { text: strippedText, effects, checkRequests, ...(speakingAs !== undefined ? { speakingAs } : {}) };
 }

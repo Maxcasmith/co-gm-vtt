@@ -11,6 +11,8 @@ export class Item {
   iconPath?: string;
   /** Radius (ft) this item lights up while equipped — a torch. Hard cutoff, no falloff; see Dungeon.lightSources. */
   lightEmissionRangeFt?: number;
+  /** Removed from inventory the next time the owner finishes a Long Rest — Tinker's Magic's crafted items. */
+  expiresOnLongRest?: boolean;
 
   constructor(props: {
     id: string;
@@ -20,6 +22,7 @@ export class Item {
     type?: string;
     iconPath?: string;
     lightEmissionRangeFt?: number;
+    expiresOnLongRest?: boolean;
   }) {
     this.id = props.id;
     this.name = props.name;
@@ -28,6 +31,7 @@ export class Item {
     this.type = props.type;
     this.iconPath = props.iconPath;
     this.lightEmissionRangeFt = props.lightEmissionRangeFt;
+    this.expiresOnLongRest = props.expiresOnLongRest;
   }
 }
 

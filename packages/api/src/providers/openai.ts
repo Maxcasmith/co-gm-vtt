@@ -23,7 +23,10 @@ export async function openaiChat(system: string, messages: ChatMessage[], apiKey
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model,
-      max_completion_tokens: 1024,
+      // Was 1024 — on a reasoning model (reasoning_effort set), reasoning tokens are deducted
+      // from this same budget, so the visible reply could get cut to almost nothing. Matches
+      // openaiComplete's cap below rather than being the one outlier.
+      max_completion_tokens: 8000,
       ...(reasoningEffort && { reasoning_effort: reasoningEffort }),
       messages: [{ role: 'system', content: system }, ...messages],
     }),
@@ -33,7 +36,8 @@ export async function openaiChat(system: string, messages: ChatMessage[], apiKey
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
     throw new Error(err.error?.message ?? res.statusText);
   }
-  const data = await res.json() as { choices: { message: { content: string } }[] };
+  const data = await res.json() as { choices: { message: { content: string }; finish_reason?: string }[] };
+  if (data.choices[0]?.finish_reason === 'length') logError('providers/openai:openaiChat', new Error('response truncated at max_completion_tokens'));
   return data.choices[0]?.message.content ?? '';
 }
 

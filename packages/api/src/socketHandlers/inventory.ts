@@ -1,4 +1,4 @@
-import { isWeapon, isArmor, CLASS_WEAPON_PROFS, CLASS_ARMOR_TRAINING, characterLightRangeFt } from 'shared';
+import { isWeapon, isArmor, effectiveWeaponProfs, effectiveArmorTraining, characterLightRangeFt } from 'shared';
 import type { Manoeuvre } from 'shared';
 import { getCharacter, updateCharacter } from '../storage.ts';
 import { io, ROOM, playerSocketIds, encounters } from '../state.ts';
@@ -70,8 +70,8 @@ export function registerInventoryHandlers(ctx: JoinContext): void {
         // 5.5e proficiency gate: class must be trained in the weapon's category
         // (simple/martial, read off the free-text properties tag) or the armor's
         // training bucket (light/medium/heavy/shield).
-        const weaponProfs = CLASS_WEAPON_PROFS[char.class] ?? [];
-        const armorTraining = CLASS_ARMOR_TRAINING[char.class] ?? [];
+        const weaponProfs = effectiveWeaponProfs(char);
+        const armorTraining = effectiveArmorTraining(char);
         const proficient =
           isWeapon(item) ? weaponProfs.includes(item.properties.includes('martial') ? 'martial' : 'simple') :
           isArmor(item) ? (item.isShield ? armorTraining.includes('shield') : item.armorType === 'none' || armorTraining.includes(item.armorType)) :

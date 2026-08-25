@@ -8,8 +8,8 @@ import {
 } from '../storage.ts';
 import { getConfig } from '../storage.ts';
 import { getFeatureProvider, type ChatMessage } from '../providers/index.ts';
-import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDungeonNarrationPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, type EntityType } from './prompts.ts';
-import type { ChatPayload, Dungeon } from 'shared';
+import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDungeonNarrationPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, buildDungeonQuestPrompt, type EntityType } from './prompts.ts';
+import type { AppConfig, ChatPayload, Dungeon, Quest } from 'shared';
 import { logError } from '../logger.ts';
 
 const ENTITY_TYPES: EntityType[] = ['npc', 'faction', 'location', 'character', 'nemesis'];
@@ -288,6 +288,31 @@ export async function ensureSessionQuests(campaignSlug: string): Promise<void> {
     }
   } catch (err) {
     logError('session-processor/index:ensureSessionQuests', err);
+  }
+}
+
+// Generated BEFORE the dungeon itself (see effects.ts's dungeon_gen handler) — dungeonId is
+// already decided by the caller and stamped onto every quest returned here, so unlike
+// ensureSessionQuests these are never orphaned: they're scoped to this dungeon's closed-world
+// narration from the moment they exist, whether or not the dungeon has finished generating yet.
+export async function generateDungeonQuests(
+  cid: string, dungeonId: string, name: string, dungeonType: string, storyContext: string, config: AppConfig,
+): Promise<Quest[]> {
+  try {
+    const existingIds = (await readQuests(cid)).map(q => q.id);
+    const provider = getFeatureProvider(config, 'questGeneration');
+    const prompt = buildDungeonQuestPrompt({ locationName: name, dungeonType, storyContext, existingIds });
+    const raw = await provider.complete(prompt);
+    const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```\s*$/, '');
+    const generated = JSON.parse(cleaned) as Array<{ id: string; name: string; description: string }>;
+
+    const today = new Date().toISOString().slice(0, 10);
+    return generated
+      .filter(q => q.id && q.name && !existingIds.includes(q.id))
+      .map(q => ({ id: q.id, name: q.name, description: q.description, status: 'open' as const, log: [], addedAt: today, sourceDungeonId: dungeonId }));
+  } catch (err) {
+    logError('session-processor/index:generateDungeonQuests', err);
+    return [];
   }
 }
 

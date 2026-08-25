@@ -739,6 +739,9 @@
 }
 
 .skill-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 10px 14px 6px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
@@ -892,6 +895,83 @@
 
 .skill-source--faded {
   opacity: 0.35;
+}
+
+/* ── choice picker (fighting style / class order / invocations) ── */
+.choice-picker {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.choice-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
+}
+
+.choice-item:last-child { border-bottom: none; }
+.choice-item:hover { background: var(--surface-hover); }
+
+.choice-item--preview { background: var(--surface-hover); }
+
+.choice-item--active { background: rgba(212, 175, 55, 0.1); }
+.choice-item--active:hover,
+.choice-item--active.choice-item--preview { background: rgba(212, 175, 55, 0.16); }
+
+.choice-item--full { opacity: 0.4; }
+
+.choice-check {
+  width: 16px;
+  flex-shrink: 0;
+  text-align: center;
+  color: var(--gold);
+  font-size: 13px;
+}
+
+.choice-name {
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  color: var(--text);
+}
+
+.choice-item--active .choice-name { color: var(--gold); }
+
+.choice-info {
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.choice-info-name {
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin: 0 0 6px;
+}
+
+.choice-info-desc {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  margin: 0;
 }
 
 .char-sheet-hint {

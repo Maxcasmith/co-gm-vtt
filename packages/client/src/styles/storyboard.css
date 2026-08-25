@@ -1,19 +1,8 @@
 /* ── Character storyboard slideshow (cold-open cutscene) ─────────────────── */
 
 .storyboard-overlay {
-  background: #05050a;
+  background: #000;
   overflow: hidden;
-}
-
-.storyboard-character-name {
-  position: absolute;
-  top: 32px;
-  left: 40px;
-  font-family: 'Cinzel', serif;
-  font-size: 13px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--gold, #c9a84c);
 }
 
 .storyboard-slide {
@@ -37,11 +26,11 @@
   to   { opacity: 1; }
 }
 
-/* True fade to/from black, independent of the per-slide opacity fade above — covers the whole
-   overlay rather than just the image, so the character name and caption fade with it too. Starts
-   opaque (curtain down) and lifts once StoryboardOverlay flips phase to 'playing'; dropped back to
-   opaque for the 'outro' phase at the end. Duration must track CURTAIN_FADE_MS in
-   StoryboardOverlay.tsx, which is how long onDone waits before firing. */
+/* True fade to/from black, independent of the per-slide Ken Burns/opacity animation above — covers
+   the whole overlay rather than just the image, so the caption fades with it too. Opaque by
+   default (curtain down); StoryboardOverlay lifts it for phase 'visible' and drops it again for
+   every transition — the initial intro, the gap between every pair of slides, and the final outro
+   all reuse this same element. Duration must track CURTAIN_FADE_MS in StoryboardOverlay.tsx. */
 .storyboard-curtain {
   position: absolute;
   inset: 0;
@@ -53,6 +42,33 @@
 
 .storyboard-curtain--lifted {
   opacity: 0;
+}
+
+/* Stacked after the curtain in the DOM (see StoryboardOverlay.tsx), so it stays visible/clickable
+   even while the screen is black — a viewer can skip during the intro fade or a between-slide gap,
+   not just while a slide is showing. */
+.storyboard-skip {
+  position: absolute;
+  top: 28px;
+  right: 36px;
+  background: none;
+  border: none;
+  padding: 8px 14px;
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text, #ddd0bb);
+  cursor: pointer;
+  opacity: 0.35;
+  transform: translateY(0);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.storyboard-skip:hover,
+.storyboard-skip:focus-visible {
+  opacity: 1;
+  transform: translateY(3px);
 }
 
 .storyboard-caption {

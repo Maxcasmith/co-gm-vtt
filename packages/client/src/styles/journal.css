@@ -210,6 +210,48 @@
   cursor: default;
 }
 
+.journal-roll-request {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.journal-luck-toggle {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface-hover);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.journal-luck-toggle--active {
+  border-color: var(--gold);
+  background: var(--border);
+}
+
+.journal-cast-row {
+  display: flex;
+  gap: 10px;
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.journal-cast-select {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 14px;
+  padding: 10px 14px;
+  outline: none;
+}
+
 .journal-input-row {
   display: flex;
   gap: 10px;

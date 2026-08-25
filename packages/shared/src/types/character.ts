@@ -52,6 +52,10 @@ export interface Character {
   createdAt: string;
   inventory?: Array<Item | Weapon | Armor | Consumable | Ammunition>;
   gold?: number;
+  platinum?: number;
+  electrum?: number;
+  silver?: number;
+  bronze?: number;
   speed?: number;
   initiativeBonus?: number;
   xp?: number;
@@ -70,10 +74,18 @@ export interface Character {
   hitDiceUsed?: number;
   /** Per-feature limited-use pools (Rage, Second Wind, Bardic Inspiration, ...) — see RESOURCE_DEFS. Keyed entries missing here default to full (resourceCurrent). */
   resourceUses?: Record<string, number> | undefined;
+  /** Gained from Musician's performance (or a DM award) — spend it to give a just-rolled d20 Test Advantage, same mechanical effect as rerolling and taking the higher result. Granting always overwrites, never stacks (RAW). */
+  heroicInspiration?: boolean;
   spells?: string[]; // learned spell names
   spellSources?: Record<string, string>; // spell name → source label (class name or feat/species name), for display only
   /** Origin feat picked at creation (e.g. 'Magic Initiate (Cleric)') — drives FEAT_SPELL_GRANTS below. */
   speciesOriginFeat?: string;
+  /** Fighting Style feature pick at creation (Fighter's level 1 choice) — e.g. 'Archery', 'Dueling'. */
+  fightingStyle?: string;
+  /** Divine Order (Cleric) or Primal Order (Druid) pick at creation — e.g. 'Protector', 'Thaumaturge', 'Magician', 'Warden'. See effectiveWeaponProfs/effectiveArmorTraining. */
+  classOrder?: string;
+  /** Eldritch Invocations picked at creation (Warlock's level 1 choice, choose 2) — selection only, no mechanics wired yet. */
+  invocations?: string[];
   equipment?: {
     head?: string;
     body?: string;
@@ -246,6 +258,45 @@ export const CLASS_ARMOR_TRAINING: Record<string, ArmorTraining[]> = {
   Wizard: [],
 };
 
+/**
+ * Weapon/armor proficiency, adjusted for a Cleric's Divine Order or Druid's Primal Order pick
+ * (Character.classOrder) — Protector and Warden are the only picks that widen the class's base
+ * table (Martial weapons for both, Heavy armor for Protector only). Every consumer of
+ * CLASS_WEAPON_PROFS/CLASS_ARMOR_TRAINING that checks a specific character's proficiency (not
+ * just "what does this class get by default") should read through these instead of the raw
+ * tables, or a Protector/Warden pick silently has no effect.
+ */
+export function effectiveWeaponProfs(character: Pick<Character, "class" | "classOrder">): WeaponProficiency[] {
+  const base = CLASS_WEAPON_PROFS[character.class] ?? [];
+  const grantsMartial =
+    (character.class === "Cleric" && character.classOrder === "Protector") ||
+    (character.class === "Druid" && character.classOrder === "Warden");
+  return grantsMartial && !base.includes("martial") ? [...base, "martial"] : base;
+}
+
+export function effectiveArmorTraining(character: Pick<Character, "class" | "classOrder">): ArmorTraining[] {
+  const base = CLASS_ARMOR_TRAINING[character.class] ?? [];
+  const grantsHeavy = character.class === "Cleric" && character.classOrder === "Protector";
+  return grantsHeavy && !base.includes("heavy") ? [...base, "heavy"] : base;
+}
+
+/** The 5 currency denominations tracked on a Character sheet — see InventoryTab's currency block. */
+export type CurrencyDenomination = 'platinum' | 'gold' | 'electrum' | 'silver' | 'bronze';
+
+export function currencyAmount(character: Pick<Character, CurrencyDenomination>, denom: CurrencyDenomination): number {
+  return character[denom] ?? 0;
+}
+
+/** Returns the character's next amount for that denomination after adding. */
+export function addCurrency(character: Pick<Character, CurrencyDenomination>, denom: CurrencyDenomination, amount: number): number {
+  return currencyAmount(character, denom) + amount;
+}
+
+/** Returns the character's next amount for that denomination after spending — floored at 0, never goes negative. */
+export function removeCurrency(character: Pick<Character, CurrencyDenomination>, denom: CurrencyDenomination, amount: number): number {
+  return Math.max(0, currencyAmount(character, denom) - amount);
+}
+
 export function statMod(score: number) {
   return Math.floor((score - 10) / 2);
 }
@@ -347,6 +398,10 @@ export function characterLightRangeFt(character: Character): number {
 export interface ResourceDef {
   key: string;
   label: string;
+  /** Owning class — resourceMax/applyResourceRestRegain only grant this pool to a matching character. Omit for a feat-gated pool (see featGate). */
+  class?: string;
+  /** Origin feat that grants this pool instead of a class (e.g. Lucky, Musician) — checked via hasOriginFeat. */
+  featGate?: string;
   max: (character: Character) => number;
   /** Amount regained on finishing that rest type; 'full' tops off to max. Omit a rest type if the feature doesn't regain on it (e.g. most features don't regain on a short rest). */
   regain: { short?: "full" | number; long?: "full" | number };
@@ -358,6 +413,7 @@ export const RESOURCE_DEFS: Record<string, ResourceDef> = {
   secondWind: {
     key: "secondWind",
     label: "Second Wind",
+    class: "Fighter",
     max: character => {
       const level = character.level ?? 1;
       return 2 + (level >= 17 ? 3 : level >= 11 ? 2 : level >= 5 ? 1 : 0);
@@ -371,6 +427,7 @@ export const RESOURCE_DEFS: Record<string, ResourceDef> = {
   rage: {
     key: "rage",
     label: "Rage",
+    class: "Barbarian",
     max: character => {
       const level = character.level ?? 1;
       if (level >= 17) return 6;
@@ -385,6 +442,7 @@ export const RESOURCE_DEFS: Record<string, ResourceDef> = {
   innateSorcery: {
     key: "innateSorcery",
     label: "Innate Sorcery",
+    class: "Sorcerer",
     max: character => character.proficiencyBonus ?? 2,
     regain: { long: "full" },
   },
@@ -392,6 +450,7 @@ export const RESOURCE_DEFS: Record<string, ResourceDef> = {
   favoredEnemy: {
     key: "favoredEnemy",
     label: "Favored Enemy",
+    class: "Ranger",
     max: () => 2,
     regain: { long: "full" },
   },
@@ -399,13 +458,87 @@ export const RESOURCE_DEFS: Record<string, ResourceDef> = {
   bardicInspiration: {
     key: "bardicInspiration",
     label: "Bardic Inspiration",
+    class: "Bard",
     max: character => character.proficiencyBonus ?? 2,
     regain: { long: "full" },
   },
+  // 2024 PHB Artificer: uses equal to Intelligence modifier (minimum 1), all regained on a Long Rest only.
+  tinkersMagic: {
+    key: "tinkersMagic",
+    label: "Tinker's Magic",
+    class: "Artificer",
+    max: character => Math.max(1, statMod(character.stats.int)),
+    regain: { long: "full" },
+  },
+  // 2024 PHB Paladin: pool of 5 HP per Paladin level, spent in any amount up to what remains.
+  // No Short Rest regain — only a Long Rest tops it back up.
+  layOnHands: {
+    key: "layOnHands",
+    label: "Lay on Hands",
+    class: "Paladin",
+    max: character => 5 * (character.level ?? 1),
+    regain: { long: "full" },
+  },
+  // 2024 PHB Wizard: usable once per Long Rest, but only by finishing a Short Rest — see
+  // applyShortRest (rest.ts), which is the only place this ever gets spent. max:1 rather than a
+  // boolean so it reads through the same resourceCurrent/resourceMax plumbing as every other pool.
+  arcaneRecovery: {
+    key: "arcaneRecovery",
+    label: "Arcane Recovery",
+    class: "Wizard",
+    max: () => 1,
+    regain: { long: "full" },
+  },
+  // Origin feat Lucky: uses equal to proficiency bonus, spent on a d20 Test for Advantage or on
+  // an incoming attack roll for Disadvantage. All regained on a Long Rest only.
+  luckPoints: {
+    key: "luckPoints",
+    label: "Luck Points",
+    featGate: "Lucky",
+    max: character => character.proficiencyBonus ?? 2,
+    regain: { long: "full" },
+  },
+  // Magic Initiate's 1st-level spell: castable once per Long Rest with no spell slot spent —
+  // its own pool, separate from the character's class slots (see FEAT_SPELL_GRANTS above). One
+  // def per variant since a character only ever has one of the three.
+  magicInitiateClericSpell: { key: "magicInitiateClericSpell", label: "Magic Initiate: Cleric Spell", featGate: "Magic Initiate (Cleric)", max: () => 1, regain: { long: "full" } },
+  magicInitiateDruidSpell:  { key: "magicInitiateDruidSpell",  label: "Magic Initiate: Druid Spell",  featGate: "Magic Initiate (Druid)",  max: () => 1, regain: { long: "full" } },
+  magicInitiateWizardSpell: { key: "magicInitiateWizardSpell", label: "Magic Initiate: Wizard Spell", featGate: "Magic Initiate (Wizard)", max: () => 1, regain: { long: "full" } },
+  // Origin feat Crafter's Fast Crafting: one item from FAST_CRAFTING_TABLE, once per Long Rest.
+  fastCrafting: { key: "fastCrafting", label: "Fast Crafting", featGate: "Crafter", max: () => 1, regain: { long: "full" } },
+  // Origin feat Musician: play an instrument once per Short or Long Rest to grant Heroic
+  // Inspiration to nearby allies (see grantMusicianInspiration, runtime.ts).
+  musicianPerformance: { key: "musicianPerformance", label: "Musician's Performance", featGate: "Musician", max: () => 1, regain: { short: "full", long: "full" } },
 };
 
+/**
+ * Origin feat Crafter's Fast Crafting table (2024 PHB) — items a Crafter can produce on a Long
+ * Rest, gone at the next one. Tool-proficiency gating is skipped: this app doesn't track tool
+ * proficiencies at all (Tinker's own "proficiency with Tinker's Tools" is flavor-only here too),
+ * so every item on the table is offered rather than filtering by a tool the character can't record.
+ */
+export const FAST_CRAFTING_TABLE = [
+  'Acid', 'Alchemist\'s Fire', 'Antitoxin', 'Firework', 'Perfume', 'Soap', 'Basic Poison',
+] as const;
+
+/** Which RESOURCE_DEFS key holds this character's Magic Initiate freebie-spell use, if any. */
+export function magicInitiateResourceKey(character: Pick<Character, "background" | "species" | "speciesOriginFeat">): string | undefined {
+  if (hasOriginFeat(character, "Magic Initiate (Cleric)")) return "magicInitiateClericSpell";
+  if (hasOriginFeat(character, "Magic Initiate (Druid)")) return "magicInitiateDruidSpell";
+  if (hasOriginFeat(character, "Magic Initiate (Wizard)")) return "magicInitiateWizardSpell";
+  return undefined;
+}
+
+function ownsResource(character: Character, def: ResourceDef): boolean {
+  if (def.class) return def.class === character.class;
+  if (def.featGate) return hasOriginFeat(character, def.featGate);
+  return false;
+}
+
 export function resourceMax(character: Character, key: string): number {
-  return RESOURCE_DEFS[key]?.max(character) ?? 0;
+  const def = RESOURCE_DEFS[key];
+  if (!def || !ownsResource(character, def)) return 0;
+  return def.max(character);
 }
 
 /** Unspent (never touched this character) reads as full, same convention as currentSpellSlots1. */
@@ -420,10 +553,18 @@ export function trySpendResource(character: Character, key: string): Record<stri
   return { ...(character.resourceUses ?? {}), [key]: current - 1 };
 }
 
+/** Spends a chosen amount from an HP-style pool (Lay on Hands) rather than a fixed single use. */
+export function trySpendResourceAmount(character: Character, key: string, amount: number): Record<string, number> | undefined {
+  const current = resourceCurrent(character, key);
+  if (amount <= 0 || amount > current) return undefined;
+  return { ...(character.resourceUses ?? {}), [key]: current - amount };
+}
+
 /** Applies every RESOURCE_DEFS regain rule for one rest type, returning the character's next resourceUses map. */
 export function applyResourceRestRegain(character: Character, restType: "short" | "long"): Record<string, number> {
   const next: Record<string, number> = { ...(character.resourceUses ?? {}) };
   for (const def of Object.values(RESOURCE_DEFS)) {
+    if (!ownsResource(character, def)) continue;
     const regain = def.regain[restType];
     if (regain === undefined) continue;
     const max = def.max(character);

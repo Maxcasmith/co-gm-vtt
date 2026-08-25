@@ -29,7 +29,7 @@
     0 1px 3px rgba(0, 0, 0, 1),
     0 2px 12px rgba(0, 0, 0, 0.9),
     0 4px 24px rgba(0, 0, 0, 0.7);
-  animation: quote-fade 5.5s ease forwards;
+  animation: quote-fade 16.5s ease forwards;
 }
 
 .chat-widget-sender {

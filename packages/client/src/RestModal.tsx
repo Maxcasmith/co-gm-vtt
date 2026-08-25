@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Character } from 'shared';
+import { hasOriginFeat, resourceCurrent, FAST_CRAFTING_TABLE } from 'shared';
 import { on, dispatch } from './events.ts';
 import type { RestResultPayload } from './events.ts';
 import { HIT_DICE } from './character-creation/srd.ts';
@@ -19,6 +20,8 @@ export default function RestModal({ character }: Props) {
   const [resting, setResting]           = useState(true);
   const [restType, setRestType]         = useState<RestType>('short');
   const [hitDiceSpent, setHitDiceSpent] = useState(0);
+  const [craftedItem, setCraftedItem] = useState('');
+  const [grantInspiration, setGrantInspiration] = useState(false);
   const [brokenTokens, setBrokenTokens] = useState<Set<string>>(new Set());
   const [waiting, setWaiting]           = useState(false);
   const [allCommitted, setAllCommitted] = useState(false);
@@ -39,6 +42,8 @@ export default function RestModal({ character }: Props) {
     setResting(true);
     setRestType('short');
     setHitDiceSpent(0);
+    setCraftedItem('');
+    setGrantInspiration(false);
     setResult(null);
     setWaiting(false);
     setAllCommitted(false);
@@ -53,7 +58,11 @@ export default function RestModal({ character }: Props) {
       dispatch('vtt:chat:message-sent', { text: `(Out of character: ${character.name} skips the rest and stays on watch.)`, senderName: character.name, timestamp: Date.now() });
     }
     setWaiting(true);
-    dispatch('vtt:rest:choice', { resting, restType, hitDiceSpent });
+    dispatch('vtt:rest:choice', {
+      resting, restType, hitDiceSpent,
+      ...(resting && restType === 'long' && craftedItem ? { craftedItem } : {}),
+      ...(resting && grantInspiration ? { grantInspiration: true } : {}),
+    });
   }
 
   function handleCancel() {
@@ -157,6 +166,27 @@ export default function RestModal({ character }: Props) {
                       <button className="rest-hitdice-btn" onClick={() => setHitDiceSpent(Math.min(hitDiceRemaining, hitDiceSpent + 1))}>+</button>
                       <span className="rest-hitdice-max">/ {hitDiceRemaining}</span>
                     </div>
+                  </div>
+                )}
+
+                {isSelf && resting && restType === 'long' && hasOriginFeat(character, 'Crafter') && resourceCurrent(character, 'fastCrafting') > 0 && (
+                  <div className="rest-feat-option">
+                    <span className="rest-feat-option-label">Fast Craft</span>
+                    <select className="rest-feat-select" value={craftedItem} onChange={e => setCraftedItem(e.target.value)}>
+                      <option value="">— none —</option>
+                      {FAST_CRAFTING_TABLE.map(name => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                  </div>
+                )}
+
+                {isSelf && resting && hasOriginFeat(character, 'Musician') && resourceCurrent(character, 'musicianPerformance') > 0 && (
+                  <div className="rest-feat-option">
+                    <button
+                      className={`rest-toggle${grantInspiration ? ' rest-toggle--active' : ''}`}
+                      onClick={() => setGrantInspiration(prev => !prev)}
+                    >
+                      Play Instrument (grant Inspiration)
+                    </button>
                   </div>
                 )}
               </div>

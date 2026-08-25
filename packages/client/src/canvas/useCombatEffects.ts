@@ -56,12 +56,15 @@ export function useCombatEffects(
 
   // The one place damage gets drawn — flash + floating number. Every damage source (weapon hit,
   // spell hit, spell-save damage) routes through this instead of each pushing its own float.
-  function pushDamageFloat(targetId: string, targetName: string, damage: number) {
+  function pushDamageFloat(targetId: string, targetName: string, damage: number, isCrit?: boolean) {
     const resolved = resolveTokenPos(targetId, targetName);
     if (!resolved) return;
     const now = Date.now();
     flashEffectsRef.current.push({ tokenKey: resolved.tokenKey, startTime: now });
     floatEffectsRef.current.push({ id: now, gx: resolved.pos.gx, gy: resolved.pos.gy, text: `-${damage}`, isHit: true, startTime: now });
+    // A second float, same origin — drawScene.ts renders it above the damage number in a
+    // multi-color gradient and skips the normal fill color for it.
+    if (isCrit) floatEffectsRef.current.push({ id: now + 1, gx: resolved.pos.gx, gy: resolved.pos.gy, text: 'CRIT!!', isHit: true, isCrit: true, startTime: now });
     kickAnimLoop();
   }
 
@@ -99,7 +102,7 @@ export function useCombatEffects(
   // server-side, so every damage source (weapon hit, spell hit, spell-save damage, recurring
   // ticks) draws the same way without each attack-result handler needing its own float call.
   useEffect(() => on('vtt:combat:damage:dealt', result => {
-    pushDamageFloat(result.targetId, result.targetName, result.damage);
+    pushDamageFloat(result.targetId, result.targetName, result.damage, result.isCrit);
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => on('vtt:combat:attack:result', result => {

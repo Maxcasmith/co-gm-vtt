@@ -1,12 +1,12 @@
 import { readdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { CAMPAIGNS_DIR, listEntitySlugs, readEntity, getWorldMeta, getConfig, saveDungeon, loadDungeon, readManifest, writeManifest, emptyManifest, readQuests, appendChatLog } from './storage.ts';
+import { CAMPAIGNS_DIR, listEntitySlugs, readEntity, getWorldMeta, getConfig, saveDungeon, loadDungeon, readManifest, writeManifest, emptyManifest, readQuests, appendChatLog, readChatLog } from './storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
 import { buildRecapPrompt, buildDungeonRecapPrompt } from './session-processor/prompts.ts';
 import { processSession, getDMResponse, getDungeonNarrationResponse } from './session-processor/index.ts';
-import { describeDungeonState, describeDungeonGroundTruth } from './dungeon/index.ts';
-import { processVdmResponse } from './tag-processor.ts';
+import { describeDungeonState, describeDungeonGroundTruth, describeCombatLocation } from './dungeon/index.ts';
+import { processVdmResponse, repairMissedPickup } from './tag-processor.ts';
 import { logError } from './logger.ts';
 import { io, ROOM, sessionState, combatState, dungeons, tokenPositions, connected, dmQueue } from './state.ts';
 import { endCombat } from './combat/runtime.ts';
@@ -137,7 +137,43 @@ export async function runRecap(campaignId: string): Promise<{ text: string; isFi
   return { text, isFirstSession: firstSession };
 }
 
-export function dispatchDMResponse(cid: string): void {
+function normalizeSentence(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  let intersection = 0;
+  for (const word of a) if (b.has(word)) intersection++;
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+// Backstop for the "never restate a dressing/scene detail" prompt instruction — that's an
+// instruction, not a guarantee. Strips a sentence from the new response if it's a close word-set
+// match (Jaccard > 0.6) for a sentence the DM already said in its last few turns. Falls back to
+// the untouched response if stripping would empty it out — an occasional repeat beats a blank turn.
+export function stripRepeatedSentences(newText: string, recentDmText: string): string {
+  const recentSets = recentDmText
+    .split(/(?<=[.!?])\s+/)
+    .map(s => normalizeSentence(s))
+    .filter(s => s.split(/\s+/).length >= 4)
+    .map(s => new Set(s.split(/\s+/)));
+  if (!recentSets.length) return newText;
+
+  const sentences = newText.split(/(?<=[.!?])\s+/);
+  const kept = sentences.filter(sentence => {
+    const norm = normalizeSentence(sentence);
+    const words = norm.split(/\s+/).filter(Boolean);
+    if (words.length < 4) return true; // too short to judge meaningfully — keep
+    const wordSet = new Set(words);
+    return !recentSets.some(rs => jaccard(wordSet, rs) > 0.6);
+  });
+
+  const result = kept.join(' ').replace(/\s{2,}/g, ' ').trim();
+  return result.length ? result : newText;
+}
+
+export function dispatchDMResponse(cid: string, combatEndedNear?: { gx: number; gy: number }[]): void {
   if (!sessionState.get(cid)) return;
   io.to(ROOM).emit('dm:thinking', true);
   queueDMResponse(cid, async () => {
@@ -152,13 +188,18 @@ export function dispatchDMResponse(cid: string): void {
       // and the mechanical combat log already carries the blow-by-blow. Only genuinely open-world
       // play still reaches the general narrator.
       const combatActive = !!combatState.get(cid);
+      let groundTruth = dungeon
+        ? (combatActive ? describeDungeonState(dungeon, playerPositions) : describeDungeonGroundTruth(dungeon, playerPositions))
+        : undefined;
+      // Victory dispatch only: anchor the aftermath to where the fight actually happened (the
+      // defeated creatures' own positions), not just the player's token — a ranged/aggro fight
+      // can end with the player still standing well outside the room the kill happened in.
+      if (dungeon && combatEndedNear?.length) {
+        groundTruth = `${groundTruth}\n${describeCombatLocation(dungeon, combatEndedNear)}`;
+      }
+      if (dungeon) console.log(`[dm] dispatch cid=${cid} combatActive=${combatActive} positions=${JSON.stringify(playerPositions)} combatEndedNear=${JSON.stringify(combatEndedNear ?? [])}`);
       const response = dungeon
-        ? await getDungeonNarrationResponse(
-            cid,
-            dungeon,
-            combatActive ? describeDungeonState(dungeon, playerPositions) : describeDungeonGroundTruth(dungeon, playerPositions),
-            combatActive,
-          )
+        ? await getDungeonNarrationResponse(cid, dungeon, groundTruth!, combatActive)
         : await getDMResponse(cid);
       if (!response) return;
 
@@ -170,11 +211,28 @@ export function dispatchDMResponse(cid: string): void {
 
       const rawResponse = response.replace(/\[COMBAT END\]/g, '').trim();
       const config = await getConfig();
-      const { text: cleanResponse, effects, speakingAs, checkRequests } = hasFeatureProvider(config, 'tagEffectProcessing')
+      const { text: taggedCleanResponse, effects, speakingAs, checkRequests } = hasFeatureProvider(config, 'tagEffectProcessing')
         ? await processVdmResponse(rawResponse, getFeatureProvider(config, 'tagEffectProcessing'))
         : { text: rawResponse, effects: [], speakingAs: undefined, checkRequests: [] };
 
+      const recentLog = await readChatLog(cid);
+      const recentDmText = recentLog.slice(-12).filter(m => m.senderName === 'Virtual DM' || m.senderName.endsWith('(Virtual DM)')).map(m => m.text).join(' ');
+      const cleanResponse = stripRepeatedSentences(taggedCleanResponse, recentDmText);
+
       await applyEffects(cid, effects);
+
+      // The prompt makes the PICKED_UP_* tag mandatory alongside pickup narration, but that's an
+      // instruction, not a guarantee. When narration reads like a pickup and no tag fired, run a
+      // second, narrow extraction pass on the flagged text and apply whatever it finds — a repair,
+      // not just a log, so a skipped tag doesn't silently leave the item out of inventory.
+      if (!effects.some(e => e.type === 'inventory_add') && /\b(you (take|pick up|pocket|grab)|picks? up (a|an|the|some)|stashes? (it|them|the) (in|into)|slips? (it|them) into (your|his|her|their) (pack|pocket|bag))\b/i.test(cleanResponse)) {
+        console.warn(`[dm] cid=${cid} narration reads like an item pickup but no PICKED_UP_* tag was emitted — attempting repair: "${cleanResponse.slice(0, 200)}"`);
+        if (hasFeatureProvider(config, 'tagEffectProcessing')) {
+          void repairMissedPickup(cleanResponse, getFeatureProvider(config, 'tagEffectProcessing')).then(repaired => {
+            if (repaired) void applyEffects(cid, [repaired]);
+          });
+        }
+      }
 
       const senderName = speakingAs ? `${speakingAs} (Virtual DM)` : 'Virtual DM';
       await appendChatLog(cid, { text: cleanResponse, senderName, timestamp: Date.now() });

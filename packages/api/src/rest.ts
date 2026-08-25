@@ -1,5 +1,5 @@
-import type { Character } from 'shared';
-import { spellSlotsForClass, statMod, applyResourceRestRegain } from 'shared';
+import type { Character, InventoryItem } from 'shared';
+import { spellSlotsForClass, statMod, applyResourceRestRegain, resourceCurrent, trySpendResource } from 'shared';
 import { HIT_DICE } from './state.ts';
 import { calcMaxHp } from './combat/dice.ts';
 
@@ -17,6 +17,8 @@ export interface RestOutcome {
   maxSpellSlots1: number;
   hitDiceUsed: number;
   resourceUses: Record<string, number>;
+  /** Present only when a Long Rest removed expired items (Tinker's Magic) — omitted otherwise so a Short Rest's spread never touches inventory. */
+  inventory?: InventoryItem[];
 }
 
 export function applyLongRest(char: Character): RestOutcome {
@@ -27,7 +29,9 @@ export function applyLongRest(char: Character): RestOutcome {
   const restored = Math.max(1, Math.floor(totalHitDice / 2));
   const hitDiceUsed = Math.max(0, (char.hitDiceUsed ?? 0) - restored);
   const resourceUses = applyResourceRestRegain(char, 'long');
-  return { currentHp: maxHp, maxHp, currentSpellSlots1: maxSpellSlots1, maxSpellSlots1, hitDiceUsed, resourceUses };
+  // Tinker's Magic items vanish the moment their owner finishes a Long Rest.
+  const inventory = (char.inventory ?? []).filter(i => !i.expiresOnLongRest);
+  return { currentHp: maxHp, maxHp, currentSpellSlots1: maxSpellSlots1, maxSpellSlots1, hitDiceUsed, resourceUses, inventory };
 }
 
 export function applyShortRest(char: Character, hitDiceSpent: number): RestOutcome {
@@ -46,8 +50,17 @@ export function applyShortRest(char: Character, hitDiceSpent: number): RestOutco
 
   // Pact Magic uniquely recovers on a short rest; other casters' slots don't.
   const maxSpellSlots1 = spellSlotsForClass(char.class);
-  const currentSpellSlots1 = char.class === 'Warlock' ? maxSpellSlots1 : (char.currentSpellSlots1 ?? maxSpellSlots1);
-  const resourceUses = applyResourceRestRegain(char, 'short');
+  let currentSpellSlots1 = char.class === 'Warlock' ? maxSpellSlots1 : (char.currentSpellSlots1 ?? maxSpellSlots1);
+  let resourceUses = applyResourceRestRegain(char, 'short');
+
+  // Arcane Recovery: once per Long Rest, finishing a Short Rest recovers spell slots totaling
+  // up to half the Wizard's level (rounded up) — this app tracks only level-1 slots, so that
+  // slot-level cap and "slot count" are the same number for a level-1 Wizard.
+  if (char.class === 'Wizard' && resourceCurrent(char, 'arcaneRecovery') > 0 && currentSpellSlots1 < maxSpellSlots1) {
+    const recoverable = Math.ceil((char.level ?? 1) / 2);
+    currentSpellSlots1 = Math.min(maxSpellSlots1, currentSpellSlots1 + recoverable);
+    resourceUses = trySpendResource({ ...char, resourceUses }, 'arcaneRecovery') ?? resourceUses;
+  }
 
   return { hpGained, currentHp, maxHp, currentSpellSlots1, maxSpellSlots1, hitDiceUsed: (char.hitDiceUsed ?? 0) + spend, resourceUses };
 }

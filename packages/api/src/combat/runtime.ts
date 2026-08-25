@@ -1,5 +1,5 @@
 import type { Character, EffectSpec, CreatureType, Condition as ConditionName, ActiveCondition, AbilityKey, TrapEffect, SpellSaveResult, Weapon } from 'shared';
-import { statMod, calcAC, spellSlotsForClass, CLASS_SAVING_THROWS, CLASS_WEAPON_PROFS, findPath, hasOriginFeat, isWeapon, SKILL_ABILITY } from 'shared';
+import { statMod, calcAC, spellSlotsForClass, CLASS_SAVING_THROWS, effectiveWeaponProfs, findPath, hasOriginFeat, isWeapon, isArmor, SKILL_ABILITY, trySpendResource, resourceCurrent, magicInitiateResourceKey } from 'shared';
 import { getCharacter, updateCharacter, readChatLog, appendChatLog, saveEncounter, clearEncounter, clearDungeon, saveDungeon, listCharacters, loadPartyAllies, readQuests, writeQuests, readManifest, readNemeses, getConfig } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateCombatFlavour, evaluateNemesisCandidates } from '../session-processor/imagePrompts.ts';
@@ -8,13 +8,13 @@ import { Team, Participant } from '../domain/encounter.ts';
 import { Creature } from '../domain/creature.ts';
 import { logError, logDebug } from '../logger.ts';
 import { io, ROOM, combatState, encounters, tokenPositions, campaignPlayers, playerSocketIds, enemiesReady, combatStartedAt, combatScores, dungeons, pendingWeaponBonuses, microDungeons, connected, withLivePositions, getStateEngine, stateEngines } from '../state.ts';
-import { D20Roll, rollDice, fmtMod, calcMaxHp, crToXp, rollApplicableDamage } from './dice.ts';
+import { D20Roll, rollDice, fmtMod, calcMaxHp, crToXp, rollApplicableDamage, resolveHit } from './dice.ts';
 import { rollModeFor, addCondition, removeCondition, attackModeAgainstTarget, combineModes } from './conditions/rollModeFor.ts';
 import { ReactionOfferHook } from './stateEngine/hooks/ReactionOfferHook.ts';
 import { RetaliationOfferHook } from './stateEngine/hooks/RetaliationOfferHook.ts';
 import { offerReaction } from './stateEngine/reactionPrompt.ts';
 import { DamageResistanceHook } from './stateEngine/hooks/DamageResistanceHook.ts';
-import { registerPassiveClassHooks } from './stateEngine/passiveClassHooks.ts';
+import { registerPassiveClassHooks, registerPassiveFightingStyleHooks } from './stateEngine/passiveClassHooks.ts';
 import type { AttackerDisadvantageHook } from './stateEngine/hooks/AttackerDisadvantageHook.ts';
 import type { SanctuaryWardHook } from './stateEngine/hooks/SanctuaryWardHook.ts';
 import type { SpeedModifierHook } from './stateEngine/hooks/SpeedModifierHook.ts';
@@ -118,7 +118,10 @@ async function runTurnStart(cid: string): Promise<void> {
   emitResources(actor);
   if (actor.isPlayer) {
     const char = await getCharacter(cid, actor.id);
-    if (char) registerPassiveClassHooks(getStateEngine(cid), actor.id, char.class, char.level ?? 1);
+    if (char) {
+      registerPassiveClassHooks(getStateEngine(cid), actor.id, char.class, char.level ?? 1);
+      if (char.fightingStyle) registerPassiveFightingStyleHooks(getStateEngine(cid), actor.id, char.fightingStyle);
+    }
   }
   await getStateEngine(cid).trigger('beforeTurn', {
     participantId: actor.id,
@@ -352,6 +355,104 @@ export async function walkParticipant(
   return { gx, gy };
 }
 
+/**
+ * Protection Fighting Style: before an attack roll against targetKeyId is made, offers the
+ * reaction to any player-controlled ally within 5ft of the target who has the style, a shield
+ * equipped, and a reaction available. Has to run pre-roll — the same reason "Protection from Evil
+ * and Good"'s disadvantage check runs pre-roll in runEnemyAI below — but the source here is a
+ * reaction someone chooses rather than a standing hook, so it can't reuse ReactionOfferHook's
+ * afterAttackRoll timing (that one only reacts to seeing the outcome, too late for this).
+ * Only the first eligible protector is offered; declining or timing out means the attack rolls normally.
+ */
+async function offerProtectionReaction(
+  cid: string,
+  participants: Participant[],
+  positions: Record<string, { gx: number; gy: number }>,
+  targetKeyId: string,
+  targetPos: { gx: number; gy: number } | undefined,
+  targetName: string,
+  attackerName: string,
+): Promise<boolean> {
+  if (!targetPos) return false;
+  for (const p of participants) {
+    if (!p.isPlayer || p.id === targetKeyId || !p.hasResource('reaction')) continue;
+    const ppos = positions[p.name];
+    if (!ppos) continue;
+    if (Math.max(Math.abs(ppos.gx - targetPos.gx), Math.abs(ppos.gy - targetPos.gy)) > 1) continue; // 5ft
+    const char = await getCharacter(cid, p.id);
+    if (!char || char.fightingStyle !== 'Protection') continue;
+    const hasShield = [char.equipment?.mainHand, char.equipment?.offHand]
+      .some(id => { const item = char.inventory?.find(i => i.id === id); return item && isArmor(item) && item.isShield; });
+    if (!hasShield) continue;
+
+    const picked = await offerReaction(p.id, [{
+      spellName: 'Protection', kind: 'protect',
+      attackerName, sourceName: 'Fighting Style: Protection', targetName,
+    }]);
+    if (!picked) continue;
+    if (!combatState.get(cid) || !p.hasResource('reaction')) continue; // re-check after await
+    p.trySpend('reaction');
+    emitResources(p);
+    console.log(`[protection] ${p.name} imposes Disadvantage on ${attackerName}'s attack against ${targetName}`);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Origin feat Lucky, defensive half: offers the target a Luck Point spend to impose Disadvantage
+ * on an incoming attack, pre-roll — same timing as offerProtectionReaction above, just
+ * self-targeted and spending a Luck Point instead of a reaction.
+ */
+async function offerLuckDisadvantage(cid: string, targetId: string, targetName: string, attackerName: string): Promise<boolean> {
+  const char = await getCharacter(cid, targetId);
+  if (!char || !hasOriginFeat(char, 'Lucky') || resourceCurrent(char, 'luckPoints') <= 0) return false;
+
+  const picked = await offerReaction(targetId, [{
+    spellName: 'Lucky', kind: 'luck', attackerName, sourceName: 'Feat: Lucky',
+  }]);
+  if (!picked) return false;
+
+  // Re-check after the await — the point may already be gone (another attack spent it).
+  const fresh = await getCharacter(cid, targetId);
+  if (!combatState.get(cid) || !fresh) return false;
+  const nextResourceUses = trySpendResource(fresh, 'luckPoints');
+  if (!nextResourceUses) return false;
+  await updateCharacter(cid, targetId, c => ({ ...c, resourceUses: nextResourceUses }));
+  io.to(ROOM).emit('combat:player:featureResources', { characterId: targetId, resourceUses: nextResourceUses });
+  console.log(`[lucky] ${targetName} spends a Luck Point to impose Disadvantage on ${attackerName}'s attack`);
+  return true;
+}
+
+/**
+ * Origin feat Lucky, offensive half: spends a Luck Point for `char` if they asked for one and
+ * have one to spend. The player decides prospectively (before rolling), unlike the defensive
+ * half above which has to interrupt the attacker — so this is a plain synchronous spend, not an
+ * offer. Returns whether the point was actually spent (drives withAdvantage at the call site).
+ */
+export async function trySpendLuckForAdvantage(cid: string, characterId: string, char: Character, requested: boolean | undefined): Promise<boolean> {
+  if (!requested || !hasOriginFeat(char, 'Lucky') || resourceCurrent(char, 'luckPoints') <= 0) return false;
+  const nextResourceUses = trySpendResource(char, 'luckPoints');
+  if (!nextResourceUses) return false;
+  await updateCharacter(cid, characterId, c => ({ ...c, resourceUses: nextResourceUses }));
+  io.to(ROOM).emit('combat:player:featureResources', { characterId, resourceUses: nextResourceUses });
+  return true;
+}
+
+/**
+ * Heroic Inspiration (granted by Musician's performance, or a DM award): spends it for `char` if
+ * they asked for one and have one to spend. Mechanically modeled as Advantage on the roll rather
+ * than "reroll and take the higher" (RAW) — same output distribution, and it lets this reuse the
+ * exact prospective-spend shape trySpendLuckForAdvantage already established.
+ */
+export async function trySpendHeroicInspiration(cid: string, characterId: string, char: Character, requested: boolean | undefined): Promise<boolean> {
+  if (!requested || !char.heroicInspiration) return false;
+  await updateCharacter(cid, characterId, c => ({ ...c, heroicInspiration: false }));
+  const sid = playerSocketIds.get(characterId);
+  if (sid) io.to(sid).emit('character:inspiration:update', { heroicInspiration: false });
+  return true;
+}
+
 export async function runEnemyAI(cid: string, actor: Participant): Promise<void> {
   if (!combatState.get(cid)) return;
   const encounter = encounters.get(cid);
@@ -425,7 +526,19 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
         // grantAdvantage (the d20 is already picked by the time beforeAttackRoll's chain runs).
         const wardedAgainst = engine.getHooksOwnedBy(targetKeyId, 'attackerDisadvantage')
           .some(h => (h as AttackerDisadvantageHook).appliesTo(creature.creatureType ?? 'Humanoid'));
-        const mode = combineModes(rollModeFor(creature, 'attack'), attackModeAgainstTarget(targetHolder ?? {}), wardedAgainst ? -1 : 0);
+        // Protection Fighting Style — offered only when the target is a player (protectors are
+        // always player-controlled too); suspends here while the protector decides.
+        const protectedAgainst = targetParticipant.isPlayer && await offerProtectionReaction(
+          cid, encounter.turnOrder, positions, targetKeyId, targetPos, targetParticipant.name, actor.name,
+        );
+        if (!combatState.get(cid)) return;
+        // Lucky — offered after Protection, so a player doesn't burn a Luck Point on an attack an
+        // ally already turned to Disadvantage for free.
+        const luckDisadvantage = targetParticipant.isPlayer && !protectedAgainst && await offerLuckDisadvantage(
+          cid, targetKeyId, targetParticipant.name, actor.name,
+        );
+        if (!combatState.get(cid)) return;
+        const mode = combineModes(rollModeFor(creature, 'attack'), attackModeAgainstTarget(targetHolder ?? {}), wardedAgainst || protectedAgainst || luckDisadvantage ? -1 : 0);
         const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
         const attackBonus = atk.bonus + bladeWardPenalty(cid, targetKeyId);
 
@@ -444,12 +557,13 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
           attackBonus,
           ac: targetAc,
           total: roll + attackBonus,
-          hit: roll + attackBonus >= targetAc,
+          hit: resolveHit(roll, attackBonus, targetAc),
         }));
         if (!combatState.get(cid)) return;
 
         atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
-        atkCtx.hit = atkCtx.total >= atkCtx.ac;
+        atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
+        const isCrit = atkCtx.d20 === 20;
 
         // Sanctuary — only worth checking on a roll that would otherwise land; a miss doesn't
         // need the save. ponytail: no retargeting (RAW lets the attacker pick a new target
@@ -471,7 +585,7 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
             sourceId: actor.id,
             targetId: targetKeyId,
             targetName: targetParticipant.name,
-            amount: rollDice(atk.damage),
+            amount: isCrit ? rollDice(atk.damage) + rollDice(atk.damage) : rollDice(atk.damage),
             damageType: undefined,
             sourceName: atk.name,
           });
@@ -483,6 +597,7 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
               await applyDamageToPlayer(cid, playerParticipant, damage, {
                 charId: targetCharForAttack.id,
                 sourceId: actor.id,
+                isCrit,
               });
               remainingHp = playerParticipant.currentHp;
               targetDead = playerParticipant.currentHp <= 0;
@@ -490,7 +605,7 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
             }
           } else {
             // Ally or other non-player target — use creature damage path
-            await applyDamageToCreature(cid, targetParticipant.id, damage, { sourceId: actor.id });
+            await applyDamageToCreature(cid, targetParticipant.id, damage, { sourceId: actor.id, isCrit });
             remainingHp = encounter.findCreature(targetParticipant.id)?.currentHp;
             targetDead = encounter.findCreature(targetParticipant.id)?.isDead() ?? false;
           }
@@ -504,7 +619,7 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
         io.to(ROOM).emit('combat:attack:result', {
           attackerName: actor.name, targetName: targetParticipant.name, targetId,
           weaponName: atk.name, isMelee: true, d20: roll, attackBonus: atk.bonus, statBonus: atk.bonus, statName: 'Attack', weaponBonus: 0, total, ac: targetAc,
-          hit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
+          hit, isCrit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
         });
 
         const cfg = await getConfig();
@@ -515,7 +630,7 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
             // Monster attacks aren't modeled with a range yet (see EnemyStatBlock.attacks) — the client
             // only reads isMelee for player-sourced swing effects, so this is inert here regardless.
             weaponName: atk.name, isMelee: true, d20: roll, attackBonus: atk.bonus, statBonus: atk.bonus, statName: 'Attack', weaponBonus: 0, total, ac: targetAc,
-            hit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
+            hit, isCrit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
           };
           const flavour = await generateCombatFlavour(atkResult, cfgAdapter);
           if (flavour) {
@@ -807,7 +922,7 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
     statBonus = useDex ? dexMod : strMod;
     statName = useDex ? 'Dexterity' : 'Strength';
     const charProf = char.proficiencyBonus ?? 2;
-    const classWeaponProfs = CLASS_WEAPON_PROFS[char.class] ?? [];
+    const classWeaponProfs = effectiveWeaponProfs(char);
     const isProficient = !weapon || weapon.properties?.some(p => classWeaponProfs.includes(p as 'simple' | 'martial'));
     const weaponBonus = (weapon?.attackBonus ?? 0) + (isProficient ? charProf : 0);
     attackBonus = statBonus + weaponBonus;
@@ -837,9 +952,14 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
   }
   const targetKeyId = target.isPlayer ? (targetChar?.id ?? target.id) : target.id;
 
+  // Lucky — offered pre-roll same as runEnemyAI's attack path; opportunity attacks are a
+  // separate resolution function so they need their own offer, not shared plumbing.
+  const luckDisadvantage = target.isPlayer && await offerLuckDisadvantage(cid, targetKeyId, target.name, reactor.name);
+  if (!combatState.get(cid)) return;
   const mode = combineModes(
     rollModeFor(reactorChar ?? reactor.creature ?? {}, 'attack'),
     attackModeAgainstTarget(targetChar ?? target.creature ?? {}),
+    luckDisadvantage ? -1 : 0,
   );
   const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
   attackBonus += bladeWardPenalty(cid, targetKeyId);
@@ -847,11 +967,12 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
     attackerId: reactor.id, attackerName: reactor.name,
     targetId: targetKeyId, targetName: target.name, targetIsPlayer: target.isPlayer,
     sourceName: weaponName, d20: roll, attackBonus, ac: targetAc,
-    total: roll + attackBonus, hit: roll + attackBonus >= targetAc,
+    total: roll + attackBonus, hit: resolveHit(roll, attackBonus, targetAc),
   }));
   if (!combatState.get(cid)) return;
   atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
-  atkCtx.hit = atkCtx.total >= atkCtx.ac;
+  atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
+  const isCrit = atkCtx.d20 === 20;
 
   let damage: number | undefined;
   let remainingHp: number | undefined;
@@ -859,16 +980,16 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
   if (atkCtx.hit) {
     const dmgCtx = await engine.trigger('beforeDamage', {
       sourceId: reactor.id, targetId: targetKeyId, targetName: target.name,
-      amount: rollDice(damageFormula) + (reactor.isPlayer ? statBonus : 0),
+      amount: (isCrit ? rollDice(damageFormula) + rollDice(damageFormula) : rollDice(damageFormula)) + (reactor.isPlayer ? statBonus : 0),
       damageType, sourceName: weaponName,
     });
     damage = Math.max(0, dmgCtx.amount);
     if (target.isPlayer && targetChar) {
-      await applyDamageToPlayer(cid, target, damage, { charId: targetChar.id, sourceId: reactor.id });
+      await applyDamageToPlayer(cid, target, damage, { charId: targetChar.id, sourceId: reactor.id, isCrit });
       remainingHp = target.currentHp;
       targetDead = target.currentHp <= 0;
     } else {
-      await applyDamageToCreature(cid, target.id, damage, { sourceId: reactor.id });
+      await applyDamageToCreature(cid, target.id, damage, { sourceId: reactor.id, isCrit });
       remainingHp = encounter.findCreature(target.id)?.currentHp;
       targetDead = encounter.findCreature(target.id)?.isDead() ?? false;
     }
@@ -879,7 +1000,7 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
   io.to(ROOM).emit('combat:attack:result', {
     attackerName: reactor.name, targetName: target.name, targetId: targetKeyId,
     weaponName, isMelee: true, d20: roll, attackBonus, statBonus, statName, weaponBonus: attackBonus - statBonus,
-    total: atkCtx.total, ac: targetAc, hit: atkCtx.hit, damage, damageFormula: atkCtx.hit ? damageFormula : undefined,
+    total: atkCtx.total, ac: targetAc, hit: atkCtx.hit, isCrit, damage, damageFormula: atkCtx.hit ? damageFormula : undefined,
     remainingHp, targetDead,
   });
   const msg = { text: `${reactor.name} makes an Opportunity Attack on ${target.name}${atkCtx.hit ? ` — hit for ${damage}!` : ' — misses.'}`, senderName: 'System', timestamp: Date.now() };
@@ -1178,7 +1299,7 @@ export async function applyDamageToPlayer(
   cid: string,
   participant: Participant,
   damage: number,
-  opts?: { charId?: string; sourceId?: string },
+  opts?: { charId?: string; sourceId?: string; isCrit?: boolean },
 ): Promise<void> {
   const charId = opts?.charId ?? participant.id;
   const wasDown = participant.isDown();
@@ -1195,7 +1316,7 @@ export async function applyDamageToPlayer(
   });
   // One event drives the damage float/flash for every source — weapon hit, spell hit, spell-save
   // damage, recurring ticks — since they all funnel through this function to apply HP loss.
-  if (damage > 0) io.to(ROOM).emit('combat:damage:dealt', { targetId: charId, targetName: participant.name, damage });
+  if (damage > 0) io.to(ROOM).emit('combat:damage:dealt', { targetId: charId, targetName: participant.name, damage, isCrit: !!opts?.isCrit });
   if (damage > 0) bumpScore(cid, charId, 'damageReceived', damage);
   if (damage > 0) checkEndsIfCasterDamages(cid, charId, opts?.sourceId);
 
@@ -1213,10 +1334,7 @@ export async function applyDamageToPlayer(
       });
     }
     if (nowDead) await markPlayerDead(cid, participant, charId, opts?.sourceId);
-    return;
-  }
-
-  if (participant.isDown()) {
+  } else if (participant.isDown()) {
     // 5e: being incapacitated ends concentration outright, no save.
     await breakConcentration(cid, charId);
     await getStateEngine(cid).trigger('onDown', {
@@ -1224,6 +1342,14 @@ export async function applyDamageToPlayer(
     });
   } else if (damage > 0) {
     await checkConcentration(cid, charId, damage);
+  }
+
+  // Exploration has no turn-cycle equivalent of emitTurn's allPlayersDown() check (combat's own
+  // TPK detection) — this is the one place both combat and exploration damage funnel through, so
+  // it's the right single spot to also catch a wipe that happens outside combat (a trap, ...).
+  if (!combatState.get(cid) && participant.isDown()) {
+    const chars = await listCharacters(cid);
+    if (chars.length && chars.every(c => (c.currentHp ?? 0) <= 0)) endCombatDefeated(cid);
   }
 }
 
@@ -1356,8 +1482,13 @@ export async function endCombat(cid: string): Promise<void> {
   void clearEncounter(cid);
 }
 
+// Guards endCombatDefeated against firing twice for the same wipe — combatState can't serve
+// that purpose here since this now also fires with no active combat (an exploration death).
+const defeatedCampaigns = new Set<string>();
+
 export function endCombatDefeated(cid: string): void {
-  if (!combatState.get(cid)) return;
+  if (defeatedCampaigns.has(cid)) return;
+  defeatedCampaigns.add(cid);
   combatState.set(cid, false);
   enemiesReady.delete(cid);
   io.to(ROOM).emit('combat:defeat');
@@ -1366,6 +1497,7 @@ export function endCombatDefeated(cid: string): void {
     io.to(ROOM).emit('combat:state', false);
     microDungeons.delete(cid);
     endSession(cid);
+    defeatedCampaigns.delete(cid);
   }, 8000);
 }
 
@@ -1381,7 +1513,7 @@ export async function resolveQuest(cid: string, questId: string): Promise<void> 
   io.to(ROOM).emit('quest:update', { quests, act: manifest?.act ?? 1 });
 }
 
-export async function applyDamageToCreature(cid: string, targetId: string, damage: number, opts?: { sourceId?: string }): Promise<void> {
+export async function applyDamageToCreature(cid: string, targetId: string, damage: number, opts?: { sourceId?: string; isCrit?: boolean }): Promise<void> {
   const encounter = encounters.get(cid);
   if (!encounter) return;
 
@@ -1398,7 +1530,7 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
     maxHp: creature.hp,
     effects: creature.effects,
   });
-  if (damage > 0) io.to(ROOM).emit('combat:damage:dealt', { targetId, targetName: creature.name, damage });
+  if (damage > 0) io.to(ROOM).emit('combat:damage:dealt', { targetId, targetName: creature.name, damage, isCrit: !!opts?.isCrit });
   if (damage > 0) bumpScore(cid, opts?.sourceId, 'damageDealt', damage);
   if (damage > 0) checkEndsIfCasterDamages(cid, targetId, opts?.sourceId);
   void saveEncounter(cid, encounter);
@@ -1430,6 +1562,13 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
       const enemyStatBlocks = encounter.enemies
         .filter(p => p.creature)
         .map(p => p.creature!.toStatBlock());
+      // Where the fight actually happened, not wherever the player's own token last sat — for
+      // dungeon-crawl aggro combat especially, the player may never have walked fully into the
+      // room a ranged fight was triggered in. See startDungeonCombat: this id is the same one
+      // tokenPositions was seeded with when the creature entered combat.
+      const enemyPositions = enemyStatBlocks
+        .map(e => tokenPositions.get(cid)?.[e.id])
+        .filter((p): p is { gx: number; gy: number } => !!p);
       const totalXp = enemyStatBlocks.reduce((sum, e) => sum + crToXp(e.cr), 0);
       const playerCount = campaignPlayers.get(cid)?.length ?? 1;
       const xpPerPlayer = Math.floor(totalXp / playerCount);
@@ -1497,7 +1636,7 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
         const kills = enemyStatBlocks.map(e => e.name).join(', ');
         const summary = `[Combat over — party victorious. Defeated: ${kills}. ${xpPerPlayer} XP awarded per player. Describe the immediate aftermath and give the party something to act on.]`;
         void appendChatLog(cid, { text: summary, senderName: 'System', timestamp: Date.now() }).then(() => {
-          dispatchDMResponse(cid);
+          dispatchDMResponse(cid, enemyPositions);
         });
       }, 7000);
     }
@@ -1506,12 +1645,10 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
   }
 }
 
-// Generic fallback for dungeon-authored traps that don't carry their own effect data yet
-// (manifest.ts traps are just {name, hideDC} today) — a plain "ouch" rather than nothing.
-const DEFAULT_TRAP_EFFECT: TrapEffect = {
-  save: { ability: 'dex', dc: 13, halfOnSave: true },
-  effects: [{ type: 'damage', damageType: 'Piercing', scaling: { mode: 'spell-slot', base: '2d10', tiers: [] } }],
-};
+// Fallback only for a trap entity saved before manifest-authored traps carried real effect data
+// (placer.ts now always populates entity.trap). No damage — guessing a lethal formula for a trap
+// whose actual effect was never recorded is worse than under-reacting to it.
+const DEFAULT_TRAP_EFFECT: TrapEffect = { effects: [] };
 
 /**
  * The one trap-trigger listener, called from every place a token can step onto a trap's cell:
@@ -1529,6 +1666,22 @@ export async function checkTrapAt(cid: string, gx: number, gy: number, triggerId
   if (!dungeon || !entity) return;
 
   const trapDef = entity.trap ?? DEFAULT_TRAP_EFFECT;
+
+  // 'seal' traps aren't single-use in the usual sense — the consequence (a door sealed shut, an
+  // alarm sounding) outlasts the trigger, so the entity stays in place with its hidden
+  // escapeSkill/escapeDC intact for the DM's ground truth to keep reasoning about (see
+  // describeDungeonGroundTruth's entityStatus). No save, no damage: just narrate the trigger, plain.
+  if (trapDef.kind === 'seal') {
+    entity.discovered = true;
+    void saveDungeon(cid, dungeon);
+    io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+    const msg = { text: `${triggerName} triggers ${entity.name}!`, senderName: 'System', timestamp: Date.now() };
+    io.to(ROOM).emit('chat:message', msg);
+    void appendChatLog(cid, msg);
+    logDebug(`[trap] ${entity.name} (seal) triggered by ${triggerName} at (${gx},${gy})`);
+    return;
+  }
+
   dungeon.entities = dungeon.entities.filter(e => e.id !== entity.id);
   void saveDungeon(cid, dungeon);
   io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
@@ -1845,10 +1998,62 @@ export function addToTurnOrder(cid: string, entries: Participant[], baseDelay = 
   });
 }
 
+/**
+ * Origin feat Alert's swap clause: offers targetId (a willing ally) the chance to trade rolled
+ * Initiative with characterId. Once per combat per requester (alertSwapUsed), not per-turn, so
+ * it isn't cleared by refillResources. Only a real connected player can be offered — offerReaction
+ * needs a live socket to prompt, which AI-controlled allies and summons don't have.
+ */
+export async function requestAlertSwap(cid: string, characterId: string, targetId: string): Promise<void> {
+  if (!combatState.get(cid)) return;
+  const encounter = encounters.get(cid);
+  if (!encounter) return;
+
+  const requester = encounter.findParticipant(characterId);
+  const target = encounter.findParticipant(targetId);
+  if (!requester || !target || requester.id === target.id || !target.isPlayer) return;
+  if (requester.alertSwapUsed) return;
+
+  const char = await getCharacter(cid, characterId);
+  if (!char || !hasOriginFeat(char, 'Alert')) return;
+
+  const picked = await offerReaction(targetId, [{
+    spellName: 'Alert Swap', kind: 'swap', attackerName: requester.name, sourceName: 'Alert',
+  }]);
+  if (!picked) return;
+
+  // Re-check after the await — combat may have ended, or this got used elsewhere in the meantime.
+  if (!combatState.get(cid) || !encounters.get(cid) || requester.alertSwapUsed) return;
+
+  const requesterInit = requester.initiative;
+  requester.initiative = target.initiative;
+  target.initiative = requesterInit;
+  requester.alertSwapUsed = true;
+  encounter.addToTurnOrder(requester);
+  encounter.addToTurnOrder(target);
+  io.to(ROOM).emit('combat:initiative', requester.toTurnOrderEntry());
+  io.to(ROOM).emit('combat:initiative', target.toTurnOrderEntry());
+  console.log(`[alert] ${requester.name} swaps Initiative with ${target.name}`);
+}
+
 // Only level-1 slots are tracked today (no spells-known growth past level 1 exists yet
 // either — see spellSlotsForClass). Cantrips (slotLevel 0) and any untracked tier are free.
 export async function trySpendSpellSlot(cid: string, charId: string, char: Character, slotLevel: number): Promise<boolean> {
   if (slotLevel !== 1) return true;
+
+  // A non-caster class (spellSlotsForClass 0) has no slot pool of its own to spend from — the
+  // only 1st-level spell it could be casting is Magic Initiate's freebie, which comes out of its
+  // own once-per-Long-Rest pool instead (see magicInitiateResourceKey/FEAT_SPELL_GRANTS).
+  if (spellSlotsForClass(char.class) === 0) {
+    const key = magicInitiateResourceKey(char);
+    if (!key) return false;
+    const nextResourceUses = trySpendResource(char, key);
+    if (!nextResourceUses) return false;
+    await updateCharacter(cid, charId, c => ({ ...c, resourceUses: nextResourceUses }));
+    io.to(ROOM).emit('combat:player:featureResources', { characterId: charId, resourceUses: nextResourceUses });
+    return true;
+  }
+
   const current = char.currentSpellSlots1 ?? spellSlotsForClass(char.class);
   if (current <= 0) return false;
   const next = current - 1;

@@ -82,6 +82,12 @@ export interface DamageContext {
   damageType?: string | undefined;
   /** Display name of the weapon, spell, or effect dealing the damage. */
   sourceName: string;
+  // Weapon-shape flags, set only on a weapon-attack hit (resolvePlayerAttack) — the Dueling
+  // Fighting Style's "one-handed Melee weapon, no other weapon" gate needs to see the weapon's
+  // hands and the attacker's other hand; nothing else reads these today.
+  isMelee?: boolean | undefined;
+  weaponTwoHanded?: boolean | undefined;
+  hasOffhandWeapon?: boolean | undefined;
 }
 
 export interface SaveContext {

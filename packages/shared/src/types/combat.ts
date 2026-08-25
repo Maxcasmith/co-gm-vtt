@@ -108,6 +108,7 @@ export interface AttackResult {
   total: number;
   ac: number;
   hit: boolean;
+  isCrit: boolean;
   damage?: number | undefined;
   damageRoll?: number | undefined;
   damageType?: string | undefined;
@@ -138,6 +139,7 @@ export interface SpellAttackResult {
   total: number;
   ac: number;
   hit: boolean;
+  isCrit: boolean;
   damage?: number | undefined;
   damageRoll?: number | undefined;
   damageType?: string | undefined;

@@ -186,8 +186,8 @@ export interface ClassFeature { name: string; description: string }
 
 export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
   Artificer: [
-    { name: "Magical Tinkering", description: "You can use your tools to imbue a Tiny nonmagical object with one of several minor magical properties, such as shedding light, emitting a recorded message, or producing an odor." },
     { name: "Spellcasting", description: "You've studied the workings of magic and can cast Artificer spells. Intelligence is your spellcasting ability. You prepare spells from the Artificer spell list each long rest." },
+    { name: "Tinker's Magic", description: "You know the Mending cantrip. As a Magic action while holding Tinker's Tools, you can create one mundane item (Rope, Caltrops, a Grappling Hook, and more) in an unoccupied space within 5 feet of yourself. The item lasts until you finish a Long Rest, then vanishes. Usable a number of times equal to your Intelligence modifier (minimum of once) per Long Rest." },
   ],
   Barbarian: [
     { name: "Rage", description: "On your turn you can enter a Rage as a Bonus Action. While raging you gain Advantage on Strength checks and saves, +2 to damage with Strength-based attacks, and Resistance to Bludgeoning, Piercing, and Slashing damage." },
@@ -217,7 +217,7 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
     { name: "Unarmored Defense", description: "While you aren't wearing armor or wielding a Shield, your Armor Class equals 10 + your Dexterity modifier + your Wisdom modifier." },
   ],
   Paladin: [
-    { name: "Lay on Hands", description: "You have a pool of healing power equal to 5 x your Paladin level. As an action you can touch a creature to restore any number of hit points from your pool, or expend 5 points to cure one disease or poison." },
+    { name: "Lay on Hands", description: "You have a pool of healing power equal to 5 x your Paladin level. As a Bonus Action you can touch a creature to restore any number of hit points from your pool, or expend 5 points to cure one disease or poison." },
     { name: "Spellcasting", description: "You draw divine power to cast Paladin spells. Charisma is your spellcasting ability. You prepare spells from the Paladin list each long rest." },
     { name: "Weapon Mastery", description: "You can use the Mastery property of two kinds of weapons. You may change your choices whenever you finish a Long Rest." },
   ],
@@ -246,6 +246,51 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
     { name: "Spellcasting", description: "As a student of arcane magic you have a spellbook and can prepare spells from it each Long Rest. Intelligence is your spellcasting ability. You begin with six 1st-level spells in your book." },
   ],
 };
+
+// ── Fighting Styles (Fighter level 1 choice) ─────────────────────────────────
+
+export interface FightingStyle { name: string; description: string }
+
+export const FIGHTING_STYLES: FightingStyle[] = [
+  { name: "Archery", description: "You gain a +2 bonus to attack rolls you make with Ranged weapons." },
+  { name: "Defense", description: "While you are wearing Armor, you gain a +1 bonus to Armor Class." },
+  { name: "Dueling", description: "While you are wielding a Melee weapon in one hand and no other weapons, you gain a +2 bonus to damage rolls with that weapon." },
+  { name: "Great Weapon Fighting", description: "When you roll a 1 or 2 on a damage die for an attack you make with a Melee weapon that you are wielding with two hands, you can reroll the die and must use the new roll, even if the new roll is a 1 or a 2. The weapon must have the Two-Handed or Versatile property to gain this benefit." },
+  { name: "Protection", description: "When a creature you can see attacks a target other than you that is within 5 feet of you, you can take a Reaction to impose Disadvantage on the attack roll. You must be wielding a Shield." },
+  { name: "Two-Weapon Fighting", description: "When you engage in Two-Weapon Fighting, you can add your ability modifier to the damage of the second attack." },
+];
+
+// ── Divine Order / Primal Order (Cleric / Druid level 1 choice) ──────────────
+// Only the mechanically-wired half of each description is asserted here (weapon/armor
+// proficiency, the bonus cantrip) — see effectiveWeaponProfs/effectiveArmorTraining (shared) and
+// SpellsTab's orderCantripBonus.
+
+export interface ClassOrder { name: string; description: string }
+
+export const DIVINE_ORDERS: ClassOrder[] = [
+  { name: "Protector", description: "You are trained for battle. You gain proficiency with Martial weapons and Heavy armor." },
+  { name: "Thaumaturge", description: "You know one extra cantrip from the Cleric spell list, on top of the cantrips granted by Spellcasting." },
+];
+
+export const PRIMAL_ORDERS: ClassOrder[] = [
+  { name: "Magician", description: "You know one extra cantrip from the Druid spell list, on top of the cantrips granted by Spellcasting." },
+  { name: "Warden", description: "Trained for battle, you gain proficiency with Martial weapons." },
+];
+
+// ── Eldritch Invocations (Warlock level 1 choice, choose 2) ──────────────────
+// 2024 PHB's full invocation list has ~28 entries, most gated behind Warlock level 2+ or a
+// prerequisite invocation — this is only the subset with no prerequisite at all, i.e. what's
+// actually choosable at level 1. Selection only for now — no mechanical effects wired yet.
+
+export interface Invocation { name: string; description: string }
+
+export const ELDRITCH_INVOCATIONS: Invocation[] = [
+  { name: "Armor of Shadows", description: "You can cast Mage Armor on yourself without expending a spell slot." },
+  { name: "Eldritch Mind", description: "You have Advantage on Constitution saving throws that you make to maintain Concentration." },
+  { name: "Pact of the Blade", description: "As a Bonus Action, you can conjure a pact weapon in your hand — a Simple or Martial Melee weapon of your choice with which you bond. Until the bond ends, you have proficiency with the weapon, and you can use it as a Spellcasting Focus. Whenever you attack with the bonded weapon, you can use your Charisma modifier for the attack and damage rolls instead of Strength or Dexterity." },
+  { name: "Pact of the Chain", description: "You learn the Find Familiar spell and can cast it as a Magic action without expending a spell slot. When you take the Attack action, you can forgo one of your own attacks to let your familiar make one attack with its Reaction." },
+  { name: "Pact of the Tome", description: "A Book of Shadows appears in your hand at the end of a Short or Long Rest. Choose three cantrips and two 1st-level Ritual spells from any class's spell list — while the book is on your person, you have them prepared as Warlock spells. You can also use the book as a Spellcasting Focus." },
+];
 
 // Sourced from shared (server needs the same table for spell save resolution);
 // re-cased to uppercase here since StatName/STAT_NAMES are uppercase throughout this file.
@@ -366,6 +411,7 @@ export const SHOP_ITEMS: ShopItem[] = [
   { id: 'dagger',            name: 'Dagger',              cost:  2, description: '1d4 piercing. Finesse, light, thrown (20/60 ft).', type: 'weapon', damage: '1d4', damageType: 'piercing', attackBonus: 0, range: 5, extendedRange: 60, properties: ['finesse', 'light', 'thrown', 'simple'], isFinesse: true },
   { id: 'warhammer',         name: 'Warhammer',           cost: 15, description: '1d8 bludgeoning. Versatile (1d10).',               type: 'weapon', damage: '1d8', damageType: 'bludgeoning', attackBonus: 0, range: 5, properties: ['versatile', 'martial'] },
   { id: 'torch',             name: 'Torch',               cost:  1, description: '1d4 bludgeoning. Light, simple. Sheds light in a 20-foot radius while held.', type: 'weapon', damage: '1d4', damageType: 'bludgeoning', attackBonus: 0, range: 5, properties: ['light', 'simple'], lightEmissionRangeFt: 20 },
+  { id: 'healers-kit',       name: "Healer's Kit",       cost:  5, description: 'Origin feat Healer: tend a creature within 5ft for HP (batch of 10 uses).', type: 'consumable', quantityPerPurchase: 10 },
 ];
 
 export const ORIGIN_FEAT_DETAILS: Record<string, BackgroundFeat> = {

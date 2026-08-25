@@ -6,7 +6,7 @@ import { resolveImprovisedAction, generateCombatFlavour } from '../session-proce
 import { handleAdminCommand } from '../effects.ts';
 import { logError } from '../logger.ts';
 import { io, ROOM, combatState, encounters } from '../state.ts';
-import { D20Roll, rollDice, fmtMod } from '../combat/dice.ts';
+import { D20Roll, rollDice, fmtMod, resolveHit } from '../combat/dice.ts';
 import { applyDamageToCreature } from '../combat/runtime.ts';
 import { dispatchDMResponse } from '../session.ts';
 import type { JoinContext } from './context.ts';
@@ -57,15 +57,16 @@ export function registerChatHandlers(ctx: JoinContext): void {
                 const roll = new D20Roll().roll();
                 const mod = statMod(char.stats[statKey]);
                 const total = roll + mod;
-                const hit = total >= result.dc;
-                const dmgRoll = hit ? rollDice(result.damageFormula) : undefined;
+                const hit = resolveHit(roll, mod, result.dc);
+                const isCrit = roll === 20;
+                const dmgRoll = hit ? (isCrit ? rollDice(result.damageFormula) + rollDice(result.damageFormula) : rollDice(result.damageFormula)) : undefined;
 
                 const rollMsg = { text: `${senderName} rolls ${result.stat?.toUpperCase() ?? 'STR'}: ${roll}${fmtMod(mod)} = ${total} vs DC ${result.dc} — ${hit ? `HIT! ${dmgRoll} ${result.damageType ?? ''} damage` : 'MISS'}.`, senderName: 'System', timestamp: Date.now() };
                 await appendChatLog(campaignId, rollMsg);
                 io.to(ROOM).emit('chat:message', rollMsg);
 
                 if (hit && dmgRoll) {
-                  void applyDamageToCreature(campaignId, result.targetId, dmgRoll);
+                  void applyDamageToCreature(campaignId, result.targetId, dmgRoll, { isCrit });
                 }
 
                 const weapon = new WeaponClass({
@@ -84,6 +85,7 @@ export function registerChatHandlers(ctx: JoinContext): void {
                   targetName: enemies.find(e => e.id === result.targetId)?.name ?? 'target',
                   targetId: result.targetId,
                   weaponName: weapon.name,
+                  isMelee: weapon.range <= 10,
                   d20: roll,
                   attackBonus: mod,
                   statBonus: mod,
@@ -92,6 +94,7 @@ export function registerChatHandlers(ctx: JoinContext): void {
                   total,
                   ac: result.dc,
                   hit,
+                  isCrit,
                   damage: dmgRoll,
                   damageFormula: result.damageFormula,
                   remainingHp: encounter!.findCreature(result.targetId)?.currentHp,

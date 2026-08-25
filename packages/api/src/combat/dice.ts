@@ -24,11 +24,32 @@ export class D20Roll {
 
 export function fmtMod(n: number) { return n >= 0 ? `+${n}` : `${n}`; }
 
+/** 5e attack resolution: a natural 1 always misses, a natural 20 always hits (and crits), otherwise total vs AC. */
+export function resolveHit(d20: number, attackBonus: number, ac: number): boolean {
+  if (d20 === 1) return false;
+  if (d20 === 20) return true;
+  return d20 + attackBonus >= ac;
+}
+
 export function rollDice(formula: string): number {
   const m = formula.match(/^(\d+)d(\d+)([+-]\d+)?$/i);
   if (!m) return 1;
   let total = parseInt(m[3] ?? '0');
   for (let i = 0; i < parseInt(m[1]!); i++) total += Math.floor(Math.random() * parseInt(m[2]!)) + 1;
+  return Math.max(1, total);
+}
+
+/** Great Weapon Fighting: reroll each damage die that comes up at or below `threshold` once, keeping the reroll. */
+export function rollDiceRerollLow(formula: string, threshold = 2): number {
+  const m = formula.match(/^(\d+)d(\d+)([+-]\d+)?$/i);
+  if (!m) return 1;
+  const faces = parseInt(m[2]!);
+  let total = parseInt(m[3] ?? '0');
+  for (let i = 0; i < parseInt(m[1]!); i++) {
+    let die = Math.floor(Math.random() * faces) + 1;
+    if (die <= threshold) die = Math.floor(Math.random() * faces) + 1;
+    total += die;
+  }
   return Math.max(1, total);
 }
 

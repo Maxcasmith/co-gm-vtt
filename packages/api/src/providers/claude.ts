@@ -13,14 +13,15 @@ export async function claudeChat(system: string, messages: ChatMessage[], apiKey
       'x-api-key': apiKey,
       'anthropic-version': ANTHROPIC_VERSION,
     },
-    body: JSON.stringify({ model, max_tokens: 1024, system, messages }),
+    body: JSON.stringify({ model, max_tokens: 8000, system, messages }),
     ...(timeoutSeconds ? { signal: AbortSignal.timeout(timeoutSeconds * 1000) } : {}),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
     throw new Error(err.error?.message ?? res.statusText);
   }
-  const data = await res.json() as { content: { text: string }[] };
+  const data = await res.json() as { content: { text: string }[]; stop_reason?: string };
+  if (data.stop_reason === 'max_tokens') logError('providers/claude:claudeChat', new Error('response truncated at max_tokens'));
   return data.content[0]?.text ?? '';
 }
 

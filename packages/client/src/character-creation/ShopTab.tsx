@@ -1,14 +1,20 @@
 import type { InventoryItem } from 'shared';
+import { hasOriginFeat } from 'shared';
 import emptyFrameIcon from '../assets/icons/Icon-Frame-Blue.jpg';
 import { useCharacter } from './CharacterContext.tsx';
 import { SHOP_ITEMS } from './srd.ts';
 
 export default function ShopTab() {
   const c = useCharacter();
+  // Origin feat Crafter: 20% discount on nonmagical items — everything in SHOP_ITEMS qualifies
+  // (starting gear only, no magic items sold here).
+  const hasCrafterDiscount = hasOriginFeat(c, 'Crafter');
+  const priceFor = (cost: number) => hasCrafterDiscount ? Math.ceil(cost * 0.8) : cost;
 
   function buy(shopItemId: string) {
     const item = SHOP_ITEMS.find(i => i.id === shopItemId);
-    if (!item || c.gold < item.cost) return;
+    const price = item ? priceFor(item.cost) : 0;
+    if (!item || c.gold < price) return;
 
     const qty = item.quantityPerPurchase ?? 1;
     const existing = c.inventory.find(i => i.id === item.id);
@@ -18,7 +24,7 @@ export default function ShopTab() {
       : [...c.inventory, { ...itemData, quantity: qty } as InventoryItem];
 
     c.set('inventory', next);
-    c.set('gold', c.gold - item.cost);
+    c.set('gold', c.gold - price);
   }
 
   function sell(itemId: string) {
@@ -63,10 +69,15 @@ export default function ShopTab() {
               <p className="shop-item-desc">{item.description}</p>
             </div>
             <div className="shop-item-right">
-              <span className="shop-item-cost">{item.cost} gp</span>
+              <span className="shop-item-cost">
+                {hasCrafterDiscount && priceFor(item.cost) !== item.cost && (
+                  <span className="shop-item-cost-original">{item.cost} gp</span>
+                )}
+                {priceFor(item.cost)} gp
+              </span>
               <button
                 className="shop-buy-btn"
-                disabled={c.gold < item.cost}
+                disabled={c.gold < priceFor(item.cost)}
                 onClick={() => buy(item.id)}
               >Buy</button>
             </div>

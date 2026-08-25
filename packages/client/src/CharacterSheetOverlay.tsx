@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Character, CharacterStoryboard, StoryboardQueuePayload } from "shared";
+import type { Character, CharacterStoryboard, StoryboardQueuePayload, WorldMeta } from "shared";
 import { calcACBreakdown, spellSlotsForClass } from "shared";
 import { on, dispatch } from "./events.ts";
 import { HIT_DICE } from "./character-creation/srd.ts";
@@ -12,6 +12,7 @@ import { ScoresTab } from "./characterSheet/ScoresTab.tsx";
 import { AITab } from "./characterSheet/AITab.tsx";
 import { InfoTab } from "./characterSheet/InfoTab.tsx";
 import StoryboardOverlay from "./StoryboardOverlay.tsx";
+import { LevelUpScreen } from "./characterSheet/LevelUpScreen.tsx";
 
 type SheetTab = "abilities" | "features" | "inventory" | "spells" | "ai" | "scores" | "info";
 
@@ -53,8 +54,21 @@ export default function CharacterSheetOverlay({
   const [visible, setVisible] = useState(false);
   const [tab, setTab] = useState<SheetTab>("abilities");
   const [playingBackstory, setPlayingBackstory] = useState<CharacterStoryboard | null>(null);
+  const [levelingUp, setLevelingUp] = useState(false);
   const hasSpells = (character.spells?.length ?? 0) > 0;
-  const TABS = TAB_ORDER.filter((t) => t.id !== "spells" || hasSpells);
+  // The Info tab is the backstory/storyboard tab — meaningless outside a real campaign (one-shots
+  // and dungeon-crawls don't carry a character arc the same way) and pointless with no backstory
+  // to show, so it doesn't exist at all rather than existing empty.
+  const [worldType, setWorldType] = useState<WorldMeta["type"] | null>(null);
+  useEffect(() => {
+    fetch(`${API}/api/campaigns/${character.campaignId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((m: WorldMeta | null) => setWorldType(m?.type ?? null))
+      .catch(() => setWorldType(null));
+  }, [character.campaignId]);
+  const hasBackstory = !!character.backstory?.trim();
+  const showInfoTab = worldType === "campaign" && hasBackstory;
+  const TABS = TAB_ORDER.filter((t) => (t.id !== "spells" || hasSpells) && (t.id !== "info" || showInfoTab));
   const [combatActive, setCombatActive] = useState(false);
   const [isMyTurn, setIsMyTurn] = useState(false);
   const [actionAvailable, setActionAvailable] = useState(true);
@@ -134,6 +148,7 @@ export default function CharacterSheetOverlay({
     const unsubClose = on("vtt:sheet:closed", () => {
       setVisible(false);
       setPlayingBackstory(null);
+      setLevelingUp(false);
     });
     return () => {
       unsubOpen();
@@ -160,6 +175,21 @@ export default function CharacterSheetOverlay({
       entries: [{ characterId: character.id, characterName: character.name, slides: playingBackstory.slides }],
     };
     return <StoryboardOverlay queue={queue} onDone={() => setPlayingBackstory(null)} />;
+  }
+
+  if (levelingUp) {
+    return (
+      <LevelUpScreen
+        character={character}
+        fromLevel={currentLevel}
+        toLevel={currentLevel + 1}
+        onConfirm={() => {
+          void handleLevelUp();
+          setLevelingUp(false);
+        }}
+        onClose={() => setLevelingUp(false)}
+      />
+    );
   }
 
   const hitDie = HIT_DICE[character.class] ?? 8;
@@ -294,7 +324,7 @@ export default function CharacterSheetOverlay({
                   <button
                     className={`sheet-levelup-btn${canLevel ? " sheet-levelup-btn--ready" : ""}`}
                     disabled={!canLevel}
-                    onClick={() => void handleLevelUp()}
+                    onClick={() => setLevelingUp(true)}
                   >
                     LEVEL UP
                   </button>

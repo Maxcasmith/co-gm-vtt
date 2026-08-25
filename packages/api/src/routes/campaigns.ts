@@ -17,7 +17,7 @@ import { getFeatureProvider } from '../providers/index.ts';
 import { copyCompendiumToCampaign } from '../compendium/storage.ts';
 import { copyAdventureToCampaign } from '../adventures/storage.ts';
 import { buildConceptsPrompt, buildWorldGenPrompt, buildDungeonCrawlPremisePrompt, buildBackstoryCheckPrompt, buildBackstoryGeneratePrompt, buildBackstoryExtractPrompt } from '../prompts.ts';
-import { processSession, generateDmBrief } from '../session-processor/index.ts';
+import { processSession, generateDmBrief, generateDungeonQuests } from '../session-processor/index.ts';
 import { processPortrait } from '../utils/image.ts';
 import { buildWorldMapPrompt } from '../session-processor/imagePrompts.ts';
 import { generateBattleMap } from '../providers/openai.ts';
@@ -153,10 +153,18 @@ campaignsRouter.post('/generate', async (req, res) => {
         concept: { name: concept.name, description: concept.description },
       });
 
+      send({ type: 'progress', message: 'Generating quest…' });
+      // Same quest-first pattern as effects.ts's dungeon_gen handler (mid-campaign dungeons) —
+      // generated before the floor plan so it can be designed to serve the quest, id decided up
+      // front so the quest is tagged and written before the dungeon itself exists.
+      const dungeonId = randomUUID();
+      const predefinedQuests = await generateDungeonQuests(slug, dungeonId, title, 'dungeon-crawl', tags.join(', '), config);
+      if (predefinedQuests.length) await writeQuests(slug, [...(await readQuests(slug)), ...predefinedQuests]);
+
       send({ type: 'progress', message: 'Generating dungeon…' });
       const dungeon = await generateDungeon(
         title, 'dungeon-crawl', getFeatureProvider(config, 'dungeonGeneration'), tags.join(', '),
-        { width: 100, height: 100, roomRange: [14, 20], partySize },
+        { width: 100, height: 100, roomRange: [14, 20], partySize, id: dungeonId, predefinedQuests },
         token => send({ type: 'token', text: token }),
         config,
       );
@@ -321,6 +329,12 @@ campaignsRouter.post('/:id/party', async (req, res) => {
   }
   const charId = data.id ?? randomUUID();
   const character: Character = { ...data, id: charId, campaignId: slug, createdAt: new Date().toISOString() };
+  // 2024 PHB Artificer (Tinker's Magic): always knows Mending, free of the normal cantrip
+  // choices — granted here rather than as a pickable option, since it's automatic per RAW.
+  if (character.class === 'Artificer' && !(character.spells ?? []).includes('Mending')) {
+    character.spells = [...(character.spells ?? []), 'Mending'];
+    character.spellSources = { ...(character.spellSources ?? {}), Mending: "Tinker's Magic" };
+  }
   await writeCharacter(slug, charId, character);
   res.json({ id: charId });
   void syncCharacterToWorldLore(slug, character);

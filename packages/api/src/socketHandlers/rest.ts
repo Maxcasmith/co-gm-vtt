@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { hasOriginFeat, trySpendResource, FAST_CRAFTING_TABLE } from 'shared';
 import { io, ROOM, playerSocketIds, pendingRests, type RestChoice } from '../state.ts';
 import { listCharacters, updateCharacter, getConfig, readWorldState, writeWorldState, readCampaignFile } from '../storage.ts';
 import { getFeatureProvider } from '../providers/index.ts';
@@ -12,10 +14,10 @@ export function registerRestHandlers(ctx: JoinContext): void {
 
   socket.on('rest:open', () => { io.to(ROOM).emit('rest:open'); });
 
-  socket.on('rest:choice', ({ campaignId, characterId, resting, restType, hitDiceSpent }) => {
+  socket.on('rest:choice', ({ campaignId, characterId, resting, restType, hitDiceSpent, craftedItem, grantInspiration }) => {
     let votes = pendingRests.get(campaignId);
     if (!votes) { votes = new Map<string, RestChoice>(); pendingRests.set(campaignId, votes); }
-    votes.set(characterId, { resting, restType, hitDiceSpent });
+    votes.set(characterId, { resting, restType, hitDiceSpent, ...(craftedItem ? { craftedItem } : {}), ...(grantInspiration ? { grantInspiration } : {}) });
     void broadcastRestProgress(campaignId);
     void maybeResolveRest(campaignId);
   });
@@ -74,6 +76,43 @@ export async function maybeResolveRest(campaignId: string): Promise<void> {
 
     const outcome = choice.restType === 'long' ? applyLongRest(char) : applyShortRest(char, choice.hitDiceSpent);
     await updateCharacter(campaignId, charId, fresh => ({ ...fresh, ...outcome }));
+
+    // Origin feat Crafter: Fast Crafting, Long Rest only — one item from the table, gone at the next one.
+    if (choice.restType === 'long' && choice.craftedItem && hasOriginFeat(char, 'Crafter') && (FAST_CRAFTING_TABLE as readonly string[]).includes(choice.craftedItem)) {
+      const charWithOutcome = { ...char, resourceUses: outcome.resourceUses };
+      const nextResourceUses = trySpendResource(charWithOutcome, 'fastCrafting');
+      if (nextResourceUses) {
+        const item = {
+          id: randomUUID(), type: 'consumable' as const, name: choice.craftedItem,
+          description: 'Fast-crafted with Crafter. Vanishes at your next Long Rest.',
+          quantity: 1, effect: '', actionCost: 'action' as const, expiresOnLongRest: true,
+        };
+        await updateCharacter(campaignId, charId, fresh => ({
+          ...fresh, resourceUses: nextResourceUses, inventory: [...(fresh.inventory ?? []), item],
+        }));
+        outcome.resourceUses = nextResourceUses;
+        const sid = playerSocketIds.get(charId);
+        if (sid) io.to(sid).emit('character:inventory:add', [item]);
+      }
+    }
+
+    // Origin feat Musician: once per Short or Long Rest, grant Heroic Inspiration to up to
+    // Proficiency Bonus other party members. ponytail: no "who's in earshot" targeting — grants
+    // to the first N other party members in roster order; upgrade if manual ally-picking matters.
+    if (choice.grantInspiration && hasOriginFeat(char, 'Musician')) {
+      const charWithOutcome = { ...char, resourceUses: outcome.resourceUses };
+      const nextResourceUses = trySpendResource(charWithOutcome, 'musicianPerformance');
+      if (nextResourceUses) {
+        outcome.resourceUses = nextResourceUses;
+        const recipients = party.filter(c => c.id !== charId).slice(0, char.proficiencyBonus ?? 2);
+        for (const ally of recipients) {
+          await updateCharacter(campaignId, ally.id, fresh => ({ ...fresh, heroicInspiration: true }));
+          const sid = playerSocketIds.get(ally.id);
+          if (sid) io.to(sid).emit('character:inspiration:update', { heroicInspiration: true });
+        }
+      }
+    }
+
     io.to(ROOM).emit('rest:result', {
       characterId: charId, characterName: char.name, resting: true, restType: choice.restType,
       hpGained: outcome.hpGained, currentHp: outcome.currentHp, maxHp: outcome.maxHp,

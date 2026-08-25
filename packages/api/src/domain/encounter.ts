@@ -89,6 +89,15 @@ export class Participant {
   /** Took the Disengage action this turn — its movement doesn't provoke Opportunity Attacks (see checkOpportunityAttacks, runtime.ts). Cleared on refillResources like every other per-turn flag. */
   disengaging = false;
 
+  /** Origin feat Savage Attacker's "once per turn" reroll — cleared on refillResources like every other per-turn flag. */
+  savageAttackerUsed = false;
+
+  /** Origin feat Tavern Brawler's "once per turn" push — cleared on refillResources like every other per-turn flag. */
+  tavernBrawlerPushUsed = false;
+
+  /** Origin feat Alert's initiative-swap clause — once per combat, not per-turn, so this is never cleared by refillResources. */
+  alertSwapUsed = false;
+
   constructor(props: {
     id: string;
     name: string;
@@ -152,6 +161,8 @@ export class Participant {
     this.bonusActionsRemaining = 1;
     this.reactionsRemaining = 1;
     this.disengaging = false;
+    this.savageAttackerUsed = false;
+    this.tavernBrawlerPushUsed = false;
   }
 
   hasResource(kind: ActionResource): boolean {

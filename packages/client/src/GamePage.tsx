@@ -87,6 +87,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [viewingMemberId, setViewingMemberId] = useState<string | null>(null);
   const [acquisitions, setAcquisitions] = useState<Character['inventory']>([]);
   const [itemQtyOverrides, setItemQtyOverrides] = useState<Record<string, number>>({});
+  const [resourceOverrides, setResourceOverrides] = useState<Record<string, number> | null>(null);
+  const [inspirationOverride, setInspirationOverride] = useState<boolean | null>(null);
   const [equipment, setEquipment] = useState<Character['equipment']>(character.equipment);
   const [liveConditions, setLiveConditions] = useState<Character['conditions']>(character.conditions);
   // Same pattern `equipment` uses: AITab edits its own copy of tactics/aiControlled and never
@@ -235,6 +237,27 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('character:inventory:remove', ({ itemId, quantity }) => {
       setItemQtyOverrides(prev => ({ ...prev, [itemId]: quantity }));
     });
+    // Generic resource-pool pushes (Rage, Second Wind, Luck Points, ...) — keeps CombatDock's
+    // resourceCurrent()-driven pips (and Lucky's point count) live without a full character
+    // refetch. Kept as a separate override (see itemQtyOverrides above) rather than merged into
+    // `character` directly — this effect only runs once per character.name, so `character` here
+    // would otherwise be a stale closure by the time this fires.
+    socket.on('combat:player:featureResources', ({ characterId, resourceUses }) => {
+      if (characterId !== character.id) return;
+      setResourceOverrides(resourceUses);
+    });
+    // Heroic Inspiration granted (Musician) or spent (roll toggles) — same stale-closure reasoning
+    // as featureResources above, kept as its own override for the same fix.
+    socket.on('character:inspiration:update', ({ heroicInspiration }) => {
+      setInspirationOverride(heroicInspiration);
+    });
+    socket.on('character:currency:update', ({ characterId }) => {
+      if (characterId !== character.id) return;
+      fetch(`${API}/api/campaigns/${character.campaignId}/party/${character.id}`)
+        .then(r => r.json())
+        .then((c: Character) => onCharacterUpdateRef.current(c))
+        .catch(() => {});
+    });
     socket.on('character:condition:update', ({ targetId, conditions }) => {
       if (targetId !== character.id) return;
       setLiveConditions(conditions);
@@ -254,6 +277,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     // Bridge roll events from the UI → socket
     const unsubCheck = on('vtt:roll:check', payload => socket.emit('roll:check', payload));
     const unsubSave  = on('vtt:roll:save',  payload => socket.emit('roll:save',  payload));
+    const unsubCastExploration = on('vtt:spell:cast:exploration', payload => socket.emit('spell:cast:exploration', payload));
 
     // Replay persisted history into chat on join
     socket.on('chat:history', messages => {
@@ -396,12 +420,15 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     const unsubEscape       = on('vtt:condition:escape:attempt', payload => socket.emit('combat:condition:escape', payload));
     const unsubElevation    = on('vtt:combat:elevation:set', payload => socket.emit('combat:elevation:set', payload));
     const unsubDisengage    = on('vtt:combat:disengage', payload => socket.emit('combat:disengage', payload));
+    const unsubAlertSwap    = on('vtt:combat:alert:swap', payload => socket.emit('combat:alert:swap', { ...payload, campaignId: character.campaignId }));
+    const unsubHealerKit    = on('vtt:combat:healerKit:use', payload => socket.emit('combat:healerKit:use', payload));
 
     return () => {
       socketRef.current = null;
       socket.disconnect();
       unsubCheck();
       unsubSave();
+      unsubCastExploration();
       unsubChat();
       unsubTokenMove();
       unsubTurnEnd();
@@ -412,6 +439,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       unsubEscape();
       unsubElevation();
       unsubDisengage();
+      unsubAlertSwap();
+      unsubHealerKit();
       unsubHeal();
       unsubConsumableUsed();
     };
@@ -434,8 +463,11 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     setCompanions(entries.filter(e => e.teamId === 'players' && (!e.isPlayer || !connected.includes(e.name))));
   }), [connected]);
   useEffect(() => on('vtt:combat:turn', ({ actorName }) => setIsMyTurn(actorName === character.name)), [character.name]);
-  useEffect(() => on('vtt:combat:attack', ({ attackerId, attackerName, targetId, weapon, bonusSpell }) => {
-    socketRef.current?.emit('combat:attack', { attackerId, attackerName, targetId, weapon, ...(bonusSpell ? { bonusSpell } : {}) });
+  useEffect(() => on('vtt:combat:attack', ({ attackerId, attackerName, targetId, weapon, bonusSpell, isOffhand, useLuckPoint, useInspiration }) => {
+    socketRef.current?.emit('combat:attack', { attackerId, attackerName, targetId, weapon, ...(bonusSpell ? { bonusSpell } : {}), ...(isOffhand ? { isOffhand } : {}), ...(useLuckPoint ? { useLuckPoint } : {}), ...(useInspiration ? { useInspiration } : {}) });
+  }), []);
+  useEffect(() => on('vtt:combat:ability:use', ({ casterId, casterName, abilityKey, targetId, chosenItem, chosenAmount }) => {
+    socketRef.current?.emit('combat:ability:use', { casterId, casterName, abilityKey, targetId, chosenItem, chosenAmount });
   }), []);
   useEffect(() => on('vtt:combat:spell:attack', ({ casterId, casterName, targetIds, spell, slotLevel, chosenDamageType }) => {
     socketRef.current?.emit('combat:spell:attack', { casterId, casterName, targetIds, spell, slotLevel, chosenDamageType });
@@ -611,6 +643,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     conditions: liveConditions,
     tactics,
     aiControlled,
+    resourceUses: resourceOverrides ?? character.resourceUses,
+    heroicInspiration: inspirationOverride ?? character.heroicInspiration,
   };
 
   return (
@@ -645,10 +679,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         selfTempHp={playerHpState?.temp}
         onSelectMember={setViewingMemberId}
       />
-      <CombatDock character={liveCharacter} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} activeBuffs={activeBuffs} elevationFt={elevations[character.id] ?? 0} />
+      <CombatDock character={liveCharacter} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} activeBuffs={activeBuffs} elevationFt={elevations[character.id] ?? 0} connectedAllies={connected} allyCharacterIds={partyCharacterIds} />
       <EncounterLoadingOverlay />
       <DungeonLoadingOverlay visible={!!dungeon && !dungeonReady} generating={dungeonGenerating} />
-      {storyboardQueue && <StoryboardOverlay queue={storyboardQueue} onDone={() => setStoryboardQueue(null)} />}
+      {storyboardQueue && <StoryboardOverlay queue={storyboardQueue} onDone={() => setStoryboardQueue(null)} skippable={false} />}
       <PartyMemberOverlay characterId={viewingMemberId} campaignId={character.campaignId} onClose={() => setViewingMemberId(null)} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} header={<span className="palette-clock">{formatWorldTime(worldTimeSecs)}</span>} />
       <CharacterSheetOverlay
@@ -657,7 +691,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         currentSpellSlots1={playerSlotsState?.current} maxSpellSlots1={playerSlotsState?.max}
         sessionActive={sessionActive}
       />
-      <JournalOverlay open={journalOpen} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} />
+      <JournalOverlay open={journalOpen} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} combatActive={combatActive} />
       <QuestLog open={questLogOpen} onClose={() => setQuestLogOpen(false)} quests={quests} act={act} />
       <CombatLogOverlay open={combatLogOpen} onClose={() => setCombatLogOpen(false)} />
       <DevModal open={devModalOpen} onClose={() => setDevModalOpen(false)} />
@@ -667,7 +701,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       {defeated && <DefeatScreen onDismiss={() => setDefeated(false)} />}
       <ReactionPrompt onRespond={(requestId, spellName) => socketRef.current?.emit('combat:reaction:respond', { requestId, spellName })} />
       <ShortcutsOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
-      <RestModal character={character} />
+      <RestModal character={liveCharacter} />
       <BattleMapBackground worldMapUrl={worldMapUrl} />
       <div className="item-notifications">
         {itemNotifications.map(n => (

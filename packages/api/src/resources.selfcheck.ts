@@ -19,7 +19,7 @@ function char(resourceUses?: Record<string, number>): Character {
 const realDefs = { ...RESOURCE_DEFS };
 for (const key of Object.keys(RESOURCE_DEFS)) delete RESOURCE_DEFS[key];
 
-const testDef: ResourceDef = { key: 'testCharges', label: 'Test Charges', max: () => 2, regain: { short: 1, long: 'full' } };
+const testDef: ResourceDef = { key: 'testCharges', label: 'Test Charges', class: 'Barbarian', max: () => 2, regain: { short: 1, long: 'full' } };
 RESOURCE_DEFS['testCharges'] = testDef;
 
 // Untouched character reads as full.
@@ -29,6 +29,11 @@ assert.strictEqual(resourceCurrent(char(), 'testCharges'), 2);
 // Unknown key is inert, not a crash.
 assert.strictEqual(resourceMax(char(), 'nope'), 0);
 assert.strictEqual(resourceCurrent(char(), 'nope'), 0);
+
+// Wrong-class character gets nothing, even though the key exists.
+const wizard = { ...char(), class: 'Wizard' };
+assert.strictEqual(resourceMax(wizard, 'testCharges'), 0);
+assert.deepStrictEqual(applyResourceRestRegain(wizard, 'long'), {});
 
 // Spending decrements, and stops at zero.
 const afterOne = trySpendResource(char(), 'testCharges');
@@ -47,11 +52,18 @@ assert.deepStrictEqual(applyResourceRestRegain(char({ testCharges: 0 }), 'long')
 
 // A def with no rule for a rest type is left untouched by that rest.
 delete RESOURCE_DEFS['testCharges'];
-RESOURCE_DEFS['longOnly'] = { key: 'longOnly', label: 'Long Only', max: () => 3, regain: { long: 'full' } };
+RESOURCE_DEFS['longOnly'] = { key: 'longOnly', label: 'Long Only', class: 'Barbarian', max: () => 3, regain: { long: 'full' } };
 assert.deepStrictEqual(applyResourceRestRegain(char({ longOnly: 1 }), 'short'), { longOnly: 1 });
 assert.deepStrictEqual(applyResourceRestRegain(char({ longOnly: 1 }), 'long'), { longOnly: 3 });
 
 delete RESOURCE_DEFS['longOnly'];
+
+// Feat-gated pool (no `class`): granted by hasOriginFeat, not character.class.
+RESOURCE_DEFS['featPool'] = { key: 'featPool', label: 'Feat Pool', featGate: 'Lucky', max: () => 2, regain: { long: 'full' } };
+const lucky = { ...char(), background: 'Merchant' }; // Merchant -> Lucky (BACKGROUND_FEAT)
+assert.strictEqual(resourceMax(lucky, 'featPool'), 2);
+assert.strictEqual(resourceMax(char(), 'featPool'), 0); // Sage background doesn't grant Lucky
+delete RESOURCE_DEFS['featPool'];
 
 // Restore the real defs so a script running after this one in the same process sees them.
 Object.assign(RESOURCE_DEFS, realDefs);

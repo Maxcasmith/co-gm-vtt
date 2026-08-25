@@ -78,13 +78,25 @@ export default function ReactionPrompt({ onRespond }: Props) {
               <p className="reaction-detail">
                 {option.sourceName} is moving out of your reach. Strike now, before it's gone?
               </p>
+            ) : option.kind === 'protect' ? (
+              <p className="reaction-detail">
+                {option.attackerName} is attacking {option.targetName}, within 5 feet of you. Impose Disadvantage on the attack?
+              </p>
+            ) : option.kind === 'luck' ? (
+              <p className="reaction-detail">
+                {option.attackerName}&apos;s {option.sourceName} is attacking you. Spend a Luck Point to impose Disadvantage on the attack?
+              </p>
+            ) : option.kind === 'swap' ? (
+              <p className="reaction-detail">
+                {option.attackerName} wants to swap their rolled Initiative with yours. Accept?
+              </p>
             ) : (
               <p className="reaction-detail">
                 {option.attackerName}&apos;s {option.sourceName} just hit you. Strike back?
               </p>
             )}
             <button className="reaction-accept" onClick={() => respond(option.spellName)}>
-              {option.kind === 'opportunity' ? 'Attack' : `Cast ${option.spellName}`}
+              {option.kind === 'opportunity' ? 'Attack' : option.kind === 'protect' ? 'Protect' : option.kind === 'luck' ? 'Spend Luck Point' : option.kind === 'swap' ? 'Swap' : `Cast ${option.spellName}`}
             </button>
           </div>
         ))}

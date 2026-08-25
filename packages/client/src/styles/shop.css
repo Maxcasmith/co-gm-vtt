@@ -17,6 +17,7 @@
 .shop-item-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 .shop-item-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
 .shop-item-cost { font-size: 11px; color: var(--gold); }
+.shop-item-cost-original { text-decoration: line-through; opacity: 0.5; margin-right: 4px; }
 
 .shop-buy-btn, .shop-sell-btn {
   padding: 4px 10px;

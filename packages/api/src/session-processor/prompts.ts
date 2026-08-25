@@ -228,7 +228,7 @@ When you see [Roll Result]: a player has reported a dice roll outcome from a REQ
 - If you did NOT ask for this roll: respond out of character — "(Out of character: what was that roll for?)" — then stop.
 
 ## Item acquisition tags
-When a player finds, receives, or picks up any item, include a structured tag so the game system can update their inventory. Tags are stripped before players see them.
+Whenever your narration says a player finds, receives, or picks up an item, you MUST include a matching structured tag in the same response — this is a system requirement, not optional. The tag is the ONLY way the item reaches the player's actual inventory; narrating a pickup without it means the item you just described never exists mechanically, even though you told the player they have it. Tags are stripped before players see them.
 
 Format: [[TAG_TYPE:PlayerName:item1,item2,item3]]
 
@@ -239,7 +239,7 @@ Tag types:
 - PICKED_UP_ITEM — everything else (food, tools, keys, equipment)
 
 Example: Jill picks up a med kit and some bandages → include [[PICKED_UP_HEALING:Jill Valentine:med kit,bandages]] alongside your narration.
-Only emit a tag when items are definitively received, not when merely seen or described.
+Only emit a tag when items are definitively received, not when merely seen or described — but if you do narrate a definitive pickup, the tag is mandatory in that same response, every time, no exceptions.
 
 ## Speaking as an NPC
 When your response is primarily a named NPC speaking directly (dialogue, not narration), emit this tag at the very start so the chat system can label it correctly:
@@ -406,7 +406,8 @@ Answer as the character; reason as the map:
 - A [Roll Result] arrives reporting nothing conclusive → narrate the miss honestly. Do not soften it into a hint.
 - A [Roll Result] arrives naming what was found → that entity is now discovered. Narrate it fully and concretely.
 
-If you are unsure whether the party has perceived something, they have not.`;
+If you are unsure whether the party has perceived something, they have not.
+A triggered "sealed shut" trap's entity status carries a hidden escape DC/skill, marked DM-eyes-only — never state that DC or skill in narration, even after it's sprung. When a player proposes a specific way to deal with it (force it, pick it, burn through it, whatever fits the fiction), judge whether their approach is plausible and, if so, emit [[REQUEST_CHECK:Name|Skill]] using the skill that best matches what they actually tried — not necessarily the hidden escapeSkill verbatim — at your own narrative discretion, then compare their result to the hidden DC yourself. Let them find the solution; don't hand it to them first.`;
 
 // Open-world narration only. Anything inside a dungeon goes through buildDungeonNarrationPrompt
 // instead — it is a closed world and deliberately does not share this prompt's improvise-freely
@@ -483,6 +484,7 @@ When all enemies are defeated, flee, or the fight resolves without one: include 
 - Second person, present tense.
 - Never end on a question or a list of options. Describe what's perceived and stop — the players decide what to do.
 - Do not summarise what already happened. Report the current fact and stop.
+- Never restate a dressing/scene detail you or the system already put in the chat history above (e.g. "the mine continues on, rocks are half fallen") — if nothing new happened since then, say only what's new, even if that's very short.
 
 ## Roll request tags
 [[REQUEST_CHECK:PlayerName|SkillName]] / [[REQUEST_SAVE:PlayerName|StatName]] — exact skill/stat names. Write the narrative setup only, never the check name or DC in your text. Multiple players can be tagged in one response.
@@ -491,8 +493,15 @@ When all enemies are defeated, flee, or the fight resolves without one: include 
 [Roll Result] reports an outcome for a check/save you requested. Narrate proportionally — nat 20 extraordinary, 1 painful, middle partial — flat and factual, not dramatic. If you did not request this roll: "(Out of character: what was that roll for?)" and stop.
 
 ## Item acquisition tags
-[[TAG_TYPE:PlayerName:item1,item2]] where TAG_TYPE is PICKED_UP_WEAPON, PICKED_UP_HEALING, PICKED_UP_AMMO, or PICKED_UP_ITEM. Only on definitive pickup, never on merely seeing or describing an item.
+[[TAG_TYPE:PlayerName:item1,item2]] where TAG_TYPE is PICKED_UP_WEAPON, PICKED_UP_HEALING, PICKED_UP_AMMO, or PICKED_UP_ITEM. Only on definitive pickup, never on merely seeing or describing an item — but the instant your narration says a player has something in hand, this tag is MANDATORY in that same response. It is the only thing that actually puts the item in their inventory; without it, "you take the potion" is a lie the player has no way to catch until they open their inventory and it isn't there. Never narrate a pickup and skip the tag.
 A discovered "loot" entity in the floor plan above that lists "contains: ..." — that list is the ONLY source of truth for what's inside it. When a player opens it, narrate and tag exactly those items, never invent different or additional ones. A loot entity with no "contains:" listed is empty — say so plainly, don't invent contents to fill it.
+Coins are NEVER an item tag — use the currency tags below instead, even for a single "a few silver coins" find.
+
+## Currency tags
+[[CURRENCY_ADD:PlayerName:amount:denomination]] on a definitive coin/currency pickup, [[CURRENCY_REMOVE:PlayerName:amount:denomination]] on a definitive spend/loss. denomination is one of: platinum, gold, electrum, silver, bronze. Example: the party finds a few silver coins in a chest → [[CURRENCY_ADD:Hades:3:silver]] alongside your narration.
+
+## Spellcasting tags
+[[CAST_SPELL:PlayerName:Spell Name]] whenever a player definitively casts a spell that costs a resource (not a cantrip) outside combat — e.g. forcing a door with Thunderwave, lighting something with Fire Bolt is a cantrip and does NOT need this tag. Only on the actual cast, never on a player asking what a spell does. The system checks and deducts a spell slot server-side; if none remain, it will tell the player directly rather than through your narration — you don't need to track slot counts yourself.
 
 ## Quest tags
 [[QUEST_ADD:quest-id|Quest Name|player-facing description]], [[QUEST_UPDATE:quest-id|what just happened]], [[QUEST_RESOLVE:quest-id]] — quest-id must already be one of the ids listed above under "This dungeon's quests". Never invent a new quest-id inside a dungeon.
@@ -591,6 +600,34 @@ Generate exactly ${needed} new undiscovered quest(s) — story hooks the Virtual
 Return ONLY valid JSON — no markdown fences, no explanation:
 [
   { "id": "kebab-slug", "name": "Quest Name", "description": "1-2 sentences — what the party encounters or is asked to do" }
+]`;
+}
+
+// Generated BEFORE the dungeon itself, so the floor plan can be designed to actually serve
+// whatever quest comes back — the dungeon-gen prompt is told these goals are already decided
+// (see manifest.ts's predefinedQuests handling) rather than inventing its own. Same JSON shape as
+// buildSessionQuestsPrompt above (id/name/description), deliberately — one prompt style for
+// "generate quest hook(s)" everywhere in the app.
+export function buildDungeonQuestPrompt(opts: {
+  locationName: string;
+  dungeonType: string;
+  storyContext: string;
+  existingIds: string[];
+}): string {
+  const { locationName, dungeonType, storyContext, existingIds } = opts;
+  const contextBlock = storyContext
+    ? `\nRecent story context (what's actually happening — use this to decide what quest fits, not just the genre label):\n${storyContext}\n`
+    : '';
+  const existingIdList = existingIds.join(', ') || 'none';
+
+  return `You are generating the quest hook(s) for a TTRPG dungeon the party is about to enter: "${locationName}" (genre: ${dungeonType}).
+${contextBlock}
+Generate 0-3 quest(s) that give this dungeon a concrete reason to exist beyond "explore it" — what the party is here to find, stop, rescue, or retrieve. Only include a quest when the story context actually motivates one; an empty array is correct for a dungeon with no specific narrative hook beyond exploring it. Never generic filler like "explore the dungeon", "defeat the boss", or "find the exit" — those are tracked separately by the game itself.
+Each use a unique kebab-case ID not in this list: ${existingIdList}
+
+Return ONLY valid JSON — no markdown fences, no explanation:
+[
+  { "id": "kebab-slug", "name": "Quest Name", "description": "1-2 sentences — what the party is here to do. This becomes the dungeon's design brief, so be concrete: name what's being sought/stopped/rescued." }
 ]`;
 }
 

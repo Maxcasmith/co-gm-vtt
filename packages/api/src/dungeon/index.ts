@@ -15,11 +15,20 @@ export async function generateDungeon(
   dungeonType: string,
   adapter: StoryProviderAdapter,
   storyContext = '',
-  opts?: { width?: number; height?: number; roomRange?: [number, number]; partySize?: number; partyLevel?: number },
+  opts?: {
+    width?: number; height?: number; roomRange?: [number, number]; partySize?: number; partyLevel?: number;
+    /** Use this id instead of generating a fresh one — lets a caller (dungeon_gen) generate quests
+     * tagged with the dungeon's id before the dungeon itself exists. */
+    id?: string;
+    /** Generated before this call — see session-processor's generateDungeonQuests. When present,
+     * these ARE dungeon.goals (set directly below, not whatever the manifest LLM call echoes back)
+     * — the floor plan is designed to serve them, not invent its own on top. */
+    predefinedQuests?: { name: string; description: string }[];
+  },
   onToken: (t: string) => void = () => {},
   config?: AppConfig,
 ): Promise<Dungeon> {
-  const manifest = await fetchManifest(name, dungeonType, adapter, storyContext, opts?.roomRange, opts?.partySize, opts?.partyLevel, onToken);
+  const manifest = await fetchManifest(name, dungeonType, adapter, storyContext, opts?.roomRange, opts?.partySize, opts?.partyLevel, onToken, opts?.predefinedQuests);
   // Man-made structures get a deterministic floor-plan layout driven by the manifest's adjacency
   // graph; natural/carved spaces (cave, crypt, tomb) go straight to the procedural row-packer —
   // no LLM geometry call, and no attempt to force building-shaped rooms onto a cave.
@@ -47,7 +56,7 @@ export async function generateDungeon(
   ]);
 
   const dungeon: Dungeon = {
-    id: randomUUID(),
+    id: opts?.id ?? randomUUID(),
     name,
     width: opts?.width ?? 50,
     height: opts?.height ?? 50,
@@ -65,19 +74,18 @@ export async function generateDungeon(
   return dungeon;
 }
 
-// Quests a freshly-generated dungeon should seed, merged into whatever quests already exist for
-// the campaign. Narrative goals come from the manifest (LLM-authored, may be empty). "Defeat
-// <boss>" and "Escape <dungeon>" are generated here in code, not by the LLM, so they carry a
-// deterministic id the mechanical systems (boss death, DUNGEON_EXIT) can resolve without any
+// The deterministic quests a freshly-generated dungeon should seed, merged into whatever quests
+// already exist for the campaign. Narrative goals are no longer derived here — they're generated
+// BEFORE the dungeon now (session-processor's generateDungeonQuests, called from effects.ts's
+// dungeon_gen handler) and already written with the dungeon's id by the time this runs; deriving
+// them again from dungeon.goals here would just duplicate them under a second, slug-based id.
+// "Defeat <boss>" and "Escape <dungeon>" are generated here in code, not by the LLM, so they carry
+// a deterministic id the mechanical systems (boss death, DUNGEON_EXIT) can resolve without any
 // narration having to remember to. No I/O here — deliberately pure, callers own read/write
 // (dungeon/index.ts has no storage.ts dependency, and storage.ts already depends on this file).
 export function buildDungeonQuests(dungeon: Dungeon, existingQuests: Quest[]): Quest[] {
   const today = new Date().toISOString().slice(0, 10);
   const toAdd: Quest[] = [];
-
-  for (const goal of dungeon.goals ?? []) {
-    toAdd.push({ id: goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), name: goal, description: goal, status: 'open', log: [], addedAt: today, sourceDungeonId: dungeon.id });
-  }
 
   const boss = dungeon.entities.find(e => e.type === 'creature' && e.statBlock?.isBoss);
   if (boss) {
@@ -155,7 +163,7 @@ export function roomAt(dungeon: Dungeon, gx: number, gy: number): DungeonRoom | 
 // Connector corridors between rooms are carved as raw floor cells (buildingLayout's corridorTo
 // repair) and never get their own DungeonRoom entry, so a position mid-corridor has no exact room
 // owner. Snap it to the nearest room by center distance instead of surfacing "an unmapped area".
-function resolveRoom(dungeon: Dungeon, gx: number, gy: number): { room?: DungeonRoom; label: string } {
+export function resolveRoom(dungeon: Dungeon, gx: number, gy: number): { room?: DungeonRoom; label: string } {
   const room = roomAt(dungeon, gx, gy);
   if (room) return { room, label: room.name };
   if (!dungeon.rooms.length) return { label: 'an unmapped area' };
@@ -170,9 +178,26 @@ function resolveRoom(dungeon: Dungeon, gx: number, gy: number): { room?: Dungeon
   return { room: nearest, label: `the passage toward ${nearest.name}` };
 }
 
+/**
+ * Ground-truth line anchoring a post-combat aftermath to where the fight actually happened (the
+ * defeated creatures' own positions — see combat/runtime.ts's victory handler), not wherever the
+ * player's token happens to be sitting. Dungeon-crawl combat triggers on aggro radius, so a
+ * ranged fight can end with the player never having walked into the room the kill happened in —
+ * without this, the aftermath narration falls back on whatever room the player's token resolves
+ * to, which can be a neighboring room entirely. Returns '' when there's nothing to anchor to.
+ */
+export function describeCombatLocation(dungeon: Dungeon, defeatedAt: { gx: number; gy: number }[]): string {
+  if (!defeatedAt.length) return '';
+  const rooms = [...new Set(defeatedAt.map(p => resolveRoom(dungeon, p.gx, p.gy).label))];
+  return `The fight that just ended happened in ${rooms.join(' / ')} — anchor the aftermath there, not wherever a player's token currently sits.`;
+}
+
 function entityStatus(e: DungeonEntity): string {
   if (!e.discovered) return `undiscovered, hideDC ${e.hideDC ?? '?'}`;
   if (e.type === 'loot' && e.contents?.length) return `discovered — contains: ${e.contents.join(', ')}`;
+  if (e.type === 'trap' && e.trap?.kind === 'seal' && e.trap.escapeDC) {
+    return `discovered — sealed shut (DM eyes only, NEVER state this: resolves on a DC ${e.trap.escapeDC} ${e.trap.escapeSkill ?? 'Athletics'} check when a player attempts something that would plausibly force/bypass it)`;
+  }
   return 'discovered';
 }
 
@@ -188,7 +213,7 @@ export function describeDungeonState(dungeon: Dungeon, positions: Record<string,
     names.push(name);
     byRoom.set(label, names);
   }
-  if (!byRoom.size) return '';
+  if (!byRoom.size) return `Currently exploring: ${dungeon.name}\nNo live player position is tracked — do not name a specific current room.`;
 
   const lines = [`Currently exploring: ${dungeon.name}`];
   for (const [roomName, players] of byRoom) {
@@ -234,6 +259,10 @@ export function describeDungeonGroundTruth(dungeon: Dungeon, positions: Record<s
         for (const e of there) lines.push(`    - ${e.name} (${e.type}) — ${entityStatus(e)}`);
       }
     }
+  } else {
+    // No live token position for anyone — do not let the model fall back to inferring
+    // location from chat history (that's how a stale room name survives a narrated move).
+    lines.push('Right now: no live player position is tracked. Do not name a specific current room — ask, or describe only what was just narrated.');
   }
 
   lines.push('Rooms:');

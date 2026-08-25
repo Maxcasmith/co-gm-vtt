@@ -59,10 +59,21 @@ export interface DungeonRoom {
  * dodgeable blast).
  */
 export interface TrapEffect {
+  /**
+   * 'damage' (default, omitted = 'damage') rolls `save` and applies `effects` as today.
+   * 'seal' has no save and no damage effects — it's an environmental consequence (a door
+   * slamming shut, an alarm) resolved later however the party attempts it, not by re-triggering
+   * this trap. `escapeSkill`/`escapeDC` carry the hidden resolution mechanics for that later
+   * REQUEST_CHECK — never surfaced in narration, same discipline as hideDC.
+   */
+  kind?: 'damage' | 'seal';
   save?: { ability: AbilityKey; dc: number; halfOnSave: boolean };
   effects: EffectSpec[];
   /** Chebyshev distance (feet) from the trap's cell that triggers it. Omitted/0 = exact-cell only. */
   radiusFt?: number;
+  /** kind === 'seal' only — the skill and DC needed to resolve it later. DM-eyes-only. */
+  escapeSkill?: string;
+  escapeDC?: number;
 }
 
 export interface DungeonEntity {

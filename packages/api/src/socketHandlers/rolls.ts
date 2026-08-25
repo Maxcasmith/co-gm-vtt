@@ -1,22 +1,26 @@
 import type { CharacterStats } from 'shared';
 import { statMod } from 'shared';
 import { getCharacter, appendChatLog } from '../storage.ts';
-import { io, ROOM, STAT_FULL, BG_SKILLS, SAVE_PROFS, getStateEngine } from '../state.ts';
+import { trySpendLuckForAdvantage, trySpendHeroicInspiration } from '../combat/runtime.ts';
+import { io, ROOM, STAT_FULL, BG_SKILLS, SAVE_PROFS, getStateEngine, combatState } from '../state.ts';
 import { D20Roll } from '../combat/dice.ts';
 import { rollModeFor } from '../combat/conditions/rollModeFor.ts';
 import { checkDungeonHiddenReveal } from '../dungeon/runtime.ts';
 import { templateSearchResult } from '../dungeon/narrateEvents.ts';
 import { dispatchDMResponse } from '../session.ts';
+import { resolveSpellCast } from '../effects.ts';
 import type { JoinContext } from './context.ts';
 import { sumAndConsumeRollMods, type RollModifierHook } from '../combat/stateEngine/hooks/RollModifierHook.ts';
 
 export function registerRollHandlers(ctx: JoinContext): void {
   const { socket } = ctx;
 
-  socket.on('roll:check', ({ campaignId, characterId, stat, skill }) => {
+  socket.on('roll:check', ({ campaignId, characterId, stat, skill, useLuckPoint, useInspiration }) => {
     void (async () => {
       const char = await getCharacter(campaignId, characterId);
       if (!char) return;
+      const luckSpent = await trySpendLuckForAdvantage(campaignId, characterId, char, useLuckPoint);
+      const inspirationSpent = await trySpendHeroicInspiration(campaignId, characterId, char, useInspiration);
       const statKey = stat as keyof CharacterStats;
       const base = statMod(char.stats[statKey]);
       const proficient = skill ? (
@@ -36,7 +40,7 @@ export function registerRollHandlers(ctx: JoinContext): void {
       const skillBonus = sumAndConsumeRollMods(engine, [...skillMods, ...unscopedMods]);
       const modifier = base + (expert ? 4 : proficient ? 2 : 0) + skillBonus;
       const mode = rollModeFor(char, 'check', statKey);
-      const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
+      const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 || luckSpent || inspirationSpent }).roll();
       const total = roll + modifier;
       const label = skill ?? (STAT_FULL[stat.toUpperCase()] ?? stat.toUpperCase());
       console.log(`[roll] ${char.name} rolls ${label}: ${total} | proficient=${proficient}`);
@@ -61,23 +65,43 @@ export function registerRollHandlers(ctx: JoinContext): void {
     })();
   });
 
-  socket.on('roll:save', ({ campaignId, characterId, stat }) => {
+  socket.on('roll:save', ({ campaignId, characterId, stat, useLuckPoint, useInspiration }) => {
     void (async () => {
       const char = await getCharacter(campaignId, characterId);
       if (!char) return;
+      const luckSpent = await trySpendLuckForAdvantage(campaignId, characterId, char, useLuckPoint);
+      const inspirationSpent = await trySpendHeroicInspiration(campaignId, characterId, char, useInspiration);
       const statKey = stat as keyof CharacterStats;
       const statUpper = stat.toUpperCase();
       const base = statMod(char.stats[statKey]);
       const proficient = (SAVE_PROFS[char.class] ?? []).includes(statUpper);
       const modifier = base + (proficient ? 2 : 0);
       const mode = rollModeFor(char, 'save', statKey);
-      const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
+      const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 || luckSpent || inspirationSpent }).roll();
       const total = roll + modifier;
       const statLabel = STAT_FULL[statUpper] ?? statUpper;
       console.log(`[roll] ${char.name} rolls ${statLabel} Save: ${total}`);
       const saveResult = { characterName: char.name, rollType: 'save' as const, stat: statUpper, d20: roll, modifier, total, description: `${char.name} rolls ${statLabel} Save: ${total}` };
       await appendChatLog(campaignId, { text: saveResult.description, senderName: 'System', timestamp: Date.now() });
       io.to(ROOM).emit('roll:result', saveResult);
+      dispatchDMResponse(campaignId);
+    })();
+  });
+
+  // Exploration-mode spell cast, triggered by the journal's cast-spell control — the deliberate,
+  // structured counterpart to the DM's own freeform [[CAST_SPELL:...]] tag. Both route through
+  // resolveSpellCast so a UI-triggered cast and a narration-triggered one cost the same thing.
+  // Combat has its own turn-based casting (combat:spell:cast) — this is exploration-only.
+  socket.on('spell:cast:exploration', ({ campaignId, characterId, spellName }) => {
+    void (async () => {
+      if (combatState.get(campaignId)) return;
+      const char = await getCharacter(campaignId, characterId);
+      if (!char) return;
+      const result = await resolveSpellCast(campaignId, char.name, spellName);
+      if (!result.ok) return;
+      const msg = { text: `${char.name} casts ${spellName}.`, senderName: 'System', timestamp: Date.now() };
+      await appendChatLog(campaignId, msg);
+      io.to(ROOM).emit('chat:message', msg);
       dispatchDMResponse(campaignId);
     })();
   });

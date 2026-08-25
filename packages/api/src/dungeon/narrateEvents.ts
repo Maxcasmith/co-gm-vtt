@@ -40,6 +40,13 @@ export function templateRoomEntry(dungeon: Dungeon, room: DungeonRoom): string |
 // lore is the LLM pathway's job (and only from seeded facts).
 const MISSES = ['finds nothing.', 'turns up nothing here.', 'searches, and finds only silence.'];
 
+// Belt-and-suspenders: the manifest prompt instructs traps' flavor "name" to never contain a DC
+// or skill (see dungeon/manifest.ts), but that's a model instruction, not a guarantee — strip a
+// leaked "(DC 14 Athletics ...)"-shaped aside before it ever reaches a player.
+function stripMechanics(text: string): string {
+  return text.replace(/\(?\bDC\s*\d+[^.()]*\)?/gi, '').replace(/\s{2,}/g, ' ').replace(/\s+([.,])/g, '$1').trim();
+}
+
 export function templateSearchResult(characterName: string, found: SearchFind): string {
   if (!found) return `${characterName} ${MISSES[Math.floor(Math.random() * MISSES.length)]}`;
   if (!isEntity(found)) return `${characterName} notices ${found.text}`;
@@ -47,7 +54,10 @@ export function templateSearchResult(characterName: string, found: SearchFind): 
   switch (found.type) {
     case 'creature': return `${characterName} spots ${found.name} — it has not been noticed before now.`;
     case 'loot': return `${characterName} finds ${found.name}.`;
-    case 'trap': return `${characterName} spots a trap: ${found.name}.`;
+    // Explicitly "before it triggers" — this is a Perception/Investigation spot, not a trigger.
+    // Read on its own ("spots a trap: the door slams shut") it sounded like the trap had already
+    // gone off, which then read as a second, unexplained trigger once the real one fired later.
+    case 'trap': return `${characterName} spots a trap before it triggers: ${stripMechanics(found.name)}.`;
     case 'object': return `${characterName} makes out ${found.name}.`;
   }
 }

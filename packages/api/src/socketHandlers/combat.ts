@@ -1,12 +1,12 @@
 import type { TurnOrderEntry, Weapon, Spell, SpellAttackResult, SpellSaveOutcome, SpellSaveResult, CreatureType, Character, ActionResource, AttackContext, DungeonEntity, EffectSpec, AbilityKey, HookSpec } from 'shared';
-import { CLASS_WEAPON_PROFS, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, isAmmunition, statMod, parseRangeFeet, resolveForcedMovement, findPath, effectApplies, actionCostFromCastingTime, requiresConcentration, resolveSpellDamageDice, hasOriginFeat, crossesObscuredArea, ABILITY_DEFS, trySpendResource } from 'shared';
+import { effectiveWeaponProfs, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, isAmmunition, isWeapon, statMod, parseRangeFeet, resolveForcedMovement, findPath, effectApplies, actionCostFromCastingTime, requiresConcentration, resolveSpellDamageDice, hasOriginFeat, crossesObscuredArea, ABILITY_DEFS, trySpendResource, trySpendResourceAmount, resourceCurrent } from 'shared';
 import { randomUUID } from 'crypto';
 import { getCharacter, updateCharacter, saveEncounter, listCharacters, getConfig, appendChatLog, saveDungeon } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateCombatFlavour, generateSpellSaveFlavour } from '../session-processor/imagePrompts.ts';
 import { Participant } from '../domain/encounter.ts';
 import { logError, logDebug } from '../logger.ts';
-import { io, ROOM, combatState, encounters, tokenPositions, dungeons, playerSocketIds, pendingWeaponBonuses, connected, getStateEngine, withLivePositions, STAT_FULL } from '../state.ts';
+import { io, ROOM, combatState, encounters, tokenPositions, dungeons, playerSocketIds, pendingWeaponBonuses, connected, getStateEngine, withLivePositions, STAT_FULL, HIT_DICE } from '../state.ts';
 import { toClientDungeon } from '../dungeon/index.ts';
 import { registerSpellHooks } from '../combat/stateEngine/registerSpellHooks.ts';
 import { RecurringDamageHook } from '../combat/stateEngine/hooks/RecurringDamageHook.ts';
@@ -14,9 +14,9 @@ import { sumAndConsumeRollMods, type RollModifierHook } from '../combat/stateEng
 import { dcBonusFor } from '../combat/stateEngine/hooks/DcModifierHook.ts';
 import type { WeaponAttackOverrideHook } from '../combat/stateEngine/hooks/WeaponAttackOverrideHook.ts';
 import { resolveReaction } from '../combat/stateEngine/reactionPrompt.ts';
-import { D20Roll, rollDice, fmtMod, rollApplicableDamage, rollApplicableHeal, rollChainableDamage } from '../combat/dice.ts';
+import { D20Roll, rollDice, rollDiceRerollLow, fmtMod, rollApplicableDamage, rollApplicableHeal, rollChainableDamage, resolveHit } from '../combat/dice.ts';
 import { rollModeFor, attackModeAgainstTarget } from '../combat/conditions/rollModeFor.ts';
-import { applyDamageToCreature, applyDamageToPlayer, applyHealingToPlayer, applyHealingToCreature, grantTempHpToPlayer, advanceTurn, trySpendSpellSlot, tryBeginCombat, emitResources, applyCondition, clearCondition, startConcentrating, isConcentratingOn, rollSavingThrow, checkTrapAt, canMove, breakSanctuaryOn, getWorldTimeSecs, applyElevationChange, investigateIllusion, checkMovementTriggers, bladeWardPenalty, stabilizeParticipant } from '../combat/runtime.ts';
+import { applyDamageToCreature, applyDamageToPlayer, applyHealingToPlayer, applyHealingToCreature, grantTempHpToPlayer, advanceTurn, trySpendSpellSlot, tryBeginCombat, emitResources, applyCondition, clearCondition, startConcentrating, isConcentratingOn, rollSavingThrow, checkTrapAt, canMove, breakSanctuaryOn, getWorldTimeSecs, applyElevationChange, investigateIllusion, checkMovementTriggers, bladeWardPenalty, stabilizeParticipant, trySpendLuckForAdvantage, trySpendHeroicInspiration, requestAlertSwap } from '../combat/runtime.ts';
 import { checkDungeonProximity } from '../dungeon/runtime.ts';
 import { applyEffects } from '../effects.ts';
 import type { JoinContext } from './context.ts';
@@ -372,8 +372,8 @@ function updateFollowingObjects(cid: string, tokenId: string, gx: number, gy: nu
 
 export async function resolvePlayerAttack(
   campaignId: string,
-  { attackerId, attackerName, targetId, weapon, bonusSpell }: {
-    attackerId: string; attackerName: string; targetId: string; weapon: Weapon; bonusSpell?: Spell;
+  { attackerId, attackerName, targetId, weapon, bonusSpell, isOffhand, useLuckPoint, useInspiration }: {
+    attackerId: string; attackerName: string; targetId: string; weapon: Weapon; bonusSpell?: Spell; isOffhand?: boolean; useLuckPoint?: boolean; useInspiration?: boolean;
   },
 ): Promise<{ hit: boolean } | undefined> {
       const cid = campaignId;
@@ -384,10 +384,13 @@ export async function resolvePlayerAttack(
       const char = await getCharacter(cid, attackerId);
       const creature = encounter.findCreature(targetId);
       if (!char || !creature || creature.isDead()) return;
+      const luckSpent = await trySpendLuckForAdvantage(cid, attackerId, char, useLuckPoint);
+      const inspirationSpent = await trySpendHeroicInspiration(cid, attackerId, char, useInspiration);
 
-      // An attack costs the action; a bundled smite costs the bonus action on top. Spent before
-      // ammunition is deducted so a blocked attack cannot silently eat an arrow.
-      if (!trySpendAction(cid, attackerId, 'action')) return;
+      // Two-Weapon Fighting: the off-hand attack costs the bonus action instead of the action.
+      // An ordinary attack costs the action; a bundled smite costs the bonus action on top.
+      // Spent before ammunition is deducted so a blocked attack cannot silently eat an arrow.
+      if (!trySpendAction(cid, attackerId, isOffhand ? 'bonusAction' : 'action')) return;
       if (bonusSpell && !trySpendAction(cid, attackerId, 'bonusAction')) return;
 
       if (weapon.ammoSlug) {
@@ -417,17 +420,23 @@ export async function resolvePlayerAttack(
       const dexMod = statMod(char.stats.dex);
       const isMelee = weapon.range <= 10; // covers reach weapons (e.g. Whip, range 10) — next tier up is bows at 80+
       const useDex = !isMelee || (weapon.isFinesse && dexMod > strMod);
+      // Dueling Fighting Style's "no other weapon" gate — a weapon (not shield/empty) in the
+      // off-hand disqualifies it regardless of which hand is actually attacking.
+      const offhandItem = char.inventory?.find(i => i.id === char.equipment?.offHand);
+      const hasOffhandWeapon = !!offhandItem && isWeapon(offhandItem);
       const spellAbilityKey = CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int';
       const statBonus = weaponOverride ? statMod(char.stats[spellAbilityKey]) : (useDex ? dexMod : strMod);
       const statName = weaponOverride ? (STAT_FULL[spellAbilityKey.toUpperCase()] ?? spellAbilityKey) : (useDex ? 'Dexterity' : 'Strength');
       const charProf = char.proficiencyBonus ?? 2;
-      const classWeaponProfs = CLASS_WEAPON_PROFS[char.class] ?? [];
+      const classWeaponProfs = effectiveWeaponProfs(char);
       const isProficient = weapon.properties?.some(p => classWeaponProfs.includes(p as 'simple' | 'martial'));
       const weaponBonus = (weapon.attackBonus ?? 0) + (isProficient ? charProf : 0);
       // Bless/Bane — rerolled fresh against every attack, not fixed at cast time (see RollModifierHook).
       // Bardic Inspiration's single die is unregistered the moment it's summed in (consumeOnUse).
       const rollMods = getStateEngine(cid).getHooksOwnedBy(attackerId, 'rollModifier') as RollModifierHook[];
-      const attackBonus = statBonus + weaponBonus + sumAndConsumeRollMods(getStateEngine(cid), rollMods) + bladeWardPenalty(cid, targetId);
+      // Archery Fighting Style: +2 to attack rolls with ranged weapons.
+      const archeryBonus = char.fightingStyle === 'Archery' && !isMelee ? 2 : 0;
+      const attackBonus = statBonus + weaponBonus + archeryBonus + sumAndConsumeRollMods(getStateEngine(cid), rollMods) + bladeWardPenalty(cid, targetId);
 
       const positions = tokenPositions.get(cid) ?? {};
       const attackerPos = positions[attackerName];
@@ -446,7 +455,7 @@ export async function resolvePlayerAttack(
       const attackerHasSelfDisadvantage = engine.hasHookOwnedBy(attackerId, 'grantDisadvantageSelf');
       const targetRestrained = attackModeAgainstTarget(creature) > 0;
       const obscured = !!(attackerPos && targetPos && isLineObscured(cid, attackerPos.gx, attackerPos.gy, targetPos.gx, targetPos.gy));
-      const roll = new D20Roll({ withDisadvantage: inExtendedRange || mode < 0 || obscured || attackerHasSelfDisadvantage, withAdvantage: mode > 0 || targetHasAdvantageGrant || attackerHasSelfAdvantage || targetRestrained }).roll();
+      const roll = new D20Roll({ withDisadvantage: inExtendedRange || mode < 0 || obscured || attackerHasSelfDisadvantage, withAdvantage: mode > 0 || targetHasAdvantageGrant || attackerHasSelfAdvantage || targetRestrained || luckSpent || inspirationSpent }).roll();
       const atkCtx = await engine.trigger('afterAttackRoll', await engine.trigger('beforeAttackRoll', {
         attackerId, attackerName,
         targetId, targetName: creature.name,
@@ -456,25 +465,43 @@ export async function resolvePlayerAttack(
         attackBonus,
         ac: creature.ac,
         total: roll + attackBonus,
-        hit: roll + attackBonus >= creature.ac,
+        hit: resolveHit(roll, attackBonus, creature.ac),
       }));
       if (!combatState.get(cid)) return;
 
       // Re-derived from the context rather than the pre-hook locals — see CONTEXT MUTATION in
       // shared/types/combat-hooks.ts.
       const total = atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
-      const hit = atkCtx.hit = total >= atkCtx.ac;
+      const hit = atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
+      const isCrit = atkCtx.d20 === 20;
 
       let damage: number | undefined;
       let damageRoll: number | undefined;
       let bonus: { spellName: string; damageType: string | undefined; total: number } | undefined;
       if (hit) {
         const damageFormula = weaponOverride?.damageDie ?? weapon.damage;
-        // Savage Attacker: roll the weapon's damage dice twice and keep the higher total.
-        damageRoll = hasOriginFeat(char, 'Savage Attacker')
-          ? Math.max(rollDice(damageFormula), rollDice(damageFormula))
+        // Great Weapon Fighting: reroll 1s and 2s once on two-handed/versatile melee weapons.
+        const usesGwf = isMelee && char.fightingStyle === 'Great Weapon Fighting' &&
+          (weapon.twoHanded || weapon.properties?.includes('versatile'));
+        // Tavern Brawler: the unarmed strike's damage die can be rerolled once if it comes up 1.
+        const usesTavernBrawlerReroll = weapon.id === 'unarmed-strike' && hasOriginFeat(char, 'Tavern Brawler');
+        const rollDamageDie = () => usesGwf ? rollDiceRerollLow(damageFormula)
+          : usesTavernBrawlerReroll ? rollDiceRerollLow(damageFormula, 1)
           : rollDice(damageFormula);
-        damage = damageRoll + statBonus;
+        // Savage Attacker: once per turn, roll the weapon's damage dice twice and keep the higher
+        // total — capped via the attacker's Participant flag, cleared at the start of their turn.
+        const attackerParticipant = encounter.findParticipant(attackerId);
+        const usesSavageAttacker = hasOriginFeat(char, 'Savage Attacker') && !attackerParticipant?.savageAttackerUsed;
+        // Crit: roll the (Savage-Attacker-adjusted) dice pool twice and sum — 5e doubles dice, not the flat bonus.
+        const rollPool = () => usesSavageAttacker
+          ? Math.max(rollDamageDie(), rollDamageDie())
+          : rollDamageDie();
+        damageRoll = isCrit ? rollPool() + rollPool() : rollPool();
+        if (usesSavageAttacker && attackerParticipant) attackerParticipant.savageAttackerUsed = true;
+        // Two-Weapon Fighting: the off-hand attack skips the ability-mod damage bonus unless the
+        // attacker has the Two-Weapon Fighting style.
+        const offhandStatBonus = !isOffhand || char.fightingStyle === 'Two-Weapon Fighting';
+        damage = damageRoll + (offhandStatBonus ? statBonus : 0);
 
         // Divine-Smite-style bonus damage, evaluated against this actual target so appliesIf
         // (vs Fiend/Undead, ...) can gate it. Either bundled directly onto this attack (the
@@ -628,13 +655,14 @@ export async function resolvePlayerAttack(
         const dmgCtx = await engine.trigger('beforeDamage', {
           sourceId: attackerId, targetId, targetName: creature.name,
           amount: damage, damageType: weapon.damageType, sourceName: weapon.name,
+          isMelee, weaponTwoHanded: weapon.twoHanded, hasOffhandWeapon,
         });
         damage = Math.max(0, dmgCtx.amount);
-        await applyDamageToCreature(cid, targetId, damage, { sourceId: attackerId });
+        await applyDamageToCreature(cid, targetId, damage, { sourceId: attackerId, isCrit });
         await engine.trigger('afterDamage', dmgCtx);
 
-        // Tavern Brawler: push the target 5 feet on an Unarmed Strike hit.
-        if (weapon.id === 'unarmed-strike' && hasOriginFeat(char, 'Tavern Brawler') && attackerPos && targetPos) {
+        // Tavern Brawler: once per turn, push the target 5 feet on an Unarmed Strike hit.
+        if (weapon.id === 'unarmed-strike' && hasOriginFeat(char, 'Tavern Brawler') && attackerPos && targetPos && !attackerParticipant?.tavernBrawlerPushUsed) {
           const dungeon = dungeons.get(cid);
           const occupied = new Set(
             Object.entries(positions).filter(([id]) => id !== targetId).map(([, p]) => `${p.gx},${p.gy}`),
@@ -647,6 +675,7 @@ export async function resolvePlayerAttack(
             tokenPositions.set(cid, positions);
             io.to(ROOM).emit('token:moved', { tokenId: targetId, gx: moved.gx, gy: moved.gy });
           }
+          if (attackerParticipant) attackerParticipant.tavernBrawlerPushUsed = true;
         }
       }
 
@@ -664,6 +693,7 @@ export async function resolvePlayerAttack(
         total,
         ac: atkCtx.ac,
         hit,
+        isCrit,
         damage,
         damageRoll,
         damageType: weapon.damageType,
@@ -794,17 +824,24 @@ export async function resolvePlayerSpellAttack(
             attackBonus,
             ac: creature.ac,
             total: roll + attackBonus,
-            hit: roll + attackBonus >= creature.ac,
+            hit: resolveHit(roll, attackBonus, creature.ac),
           }));
           if (!combatState.get(cid)) return;
 
           total = atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
-          hit = atkCtx.hit = total >= atkCtx.ac;
+          hit = atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
         }
 
-        const rolledDamage = chainable && primaryEffect
+        const isCrit = atkCtx.d20 === 20;
+        const rollSpellDamage = () => chainable && primaryEffect
           ? rollChainableDamage(primaryEffect, char.level ?? 1, slotLevel, { deriveTypeFromRoll: spell.name === 'Chaos Bolt', chosenDamageType })
           : rollApplicableDamage(spell.combat?.onHit, creature.creatureType, char.level ?? 1, slotLevel, chosenDamageType, abilityMod);
+        let rolledDamage = rollSpellDamage();
+        if (isCrit && rolledDamage) {
+          // Crit: roll the spell's damage dice a second time and sum — 5e doubles dice, not the flat total.
+          const second = rollSpellDamage();
+          if (second) rolledDamage = { ...rolledDamage, total: rolledDamage.total + second.total, formula: `${rolledDamage.formula} + ${second.formula}` };
+        }
 
         let damage: number | undefined;
         let damageRoll: number | undefined;
@@ -816,7 +853,7 @@ export async function resolvePlayerSpellAttack(
             damageType: rolledDamage.damageType, sourceName: spell.name,
           });
           damage = Math.max(0, dmgCtx.amount);
-          await applyDamageToCreature(cid, targetId, damage, { sourceId: casterId });
+          await applyDamageToCreature(cid, targetId, damage, { sourceId: casterId, isCrit });
           await engine.trigger('afterDamage', dmgCtx);
 
           if (chainable && chainJumps < chainCap && 'matchedDie' in rolledDamage && rolledDamage.matchedDie) {
@@ -880,6 +917,7 @@ export async function resolvePlayerSpellAttack(
           total,
           ac: atkCtx.ac,
           hit,
+          isCrit,
           damage,
           damageRoll,
           damageType: rolledDamage?.damageType,
@@ -1059,7 +1097,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
     void saveEncounter(cid, encounter);
   });
 
-  socket.on('combat:attack', (payload: { attackerId: string; attackerName: string; targetId: string; weapon: Weapon; bonusSpell?: Spell }) => {
+  socket.on('combat:attack', (payload: { attackerId: string; attackerName: string; targetId: string; weapon: Weapon; bonusSpell?: Spell; isOffhand?: boolean; useLuckPoint?: boolean; useInspiration?: boolean }) => {
     void resolvePlayerAttack(campaignId, payload);
   });
 
@@ -1597,7 +1635,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
   // RESOURCE_DEFS pool instead of a spell slot. Reuses the same dice/apply helpers the spell
   // pipeline above uses (rollApplicableHeal, applyHealingToPlayer, ...) against onUse's
   // EffectSpec list, rather than a parallel resolution path.
-  socket.on('combat:ability:use', ({ casterId, casterName, abilityKey, targetId }: { casterId: string; casterName: string; abilityKey: string; targetId?: string }) => {
+  socket.on('combat:ability:use', ({ casterId, casterName, abilityKey, targetId, chosenItem, chosenAmount }: { casterId: string; casterName: string; abilityKey: string; targetId?: string; chosenItem?: string; chosenAmount?: number }) => {
     void (async () => {
       const cid = campaignId;
       if (!combatState.get(cid)) return;
@@ -1614,15 +1652,26 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       if (!casterParticipant || casterParticipant.isDead()) return;
 
       // 'self' abilities (Rage, Second Wind) apply to the caster; 'ally' ones (Bardic
-      // Inspiration) need a real targetId naming who receives onUse/hooks.
-      const effectId = ability.target === 'self' ? casterId : targetId;
-      if (!effectId) return;
-      const effectParticipant = ability.target === 'self' ? casterParticipant : encounter.findParticipant(effectId);
+      // Inspiration, Lay on Hands) need a real targetId naming who receives onUse/hooks.
+      const rawTargetId = ability.target === 'self' ? casterId : targetId;
+      if (!rawTargetId) return;
+      const effectParticipant = ability.target === 'self' ? casterParticipant : encounter.findParticipant(rawTargetId);
       if (!effectParticipant || effectParticipant.isDead()) return;
+      // The client sends a player's display NAME for an ally pick (Canvas's targeting loop keys
+      // off `connected: Player[]`, which is names — see tokenPositions), not their character id.
+      // findParticipant resolves either, but everything past this point (persisting HP,
+      // registering a hook by owner) needs the real id, which only the resolved participant has.
+      const effectId = effectParticipant.id;
 
       if (!trySpendAction(cid, casterId, ability.actionCost)) return;
 
-      const nextResourceUses = trySpendResource(char, ability.resourceKey);
+      // Lay on Hands spends a chosen amount out of an HP pool rather than one fixed "use" —
+      // trySpendResourceAmount is the variable-amount counterpart to trySpendResource.
+      const pool = ability.amountChoice ? resourceCurrent(char, ability.resourceKey) : 0;
+      const spentAmount = ability.amountChoice ? Math.max(1, Math.min(chosenAmount ?? pool, pool)) : 1;
+      const nextResourceUses = ability.amountChoice
+        ? (pool > 0 ? trySpendResourceAmount(char, ability.resourceKey, spentAmount) : undefined)
+        : trySpendResource(char, ability.resourceKey);
       if (!nextResourceUses) {
         const sid = playerSocketIds.get(casterId);
         if (sid) io.to(sid).emit('combat:attack:blocked', { reason: `No uses of ${ability.label} left` });
@@ -1640,6 +1689,12 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         else if (effectParticipant.creature) applyHealingToCreature(cid, effectId, rolledHeal.total);
       }
 
+      // Lay on Hands: heal the chosen amount straight out of the pool — no dice, no scaling.
+      if (ability.amountChoice) {
+        if (effectParticipant.isPlayer) applyHealingToPlayer(cid, effectParticipant, effectId, spentAmount, ability.label);
+        else if (effectParticipant.creature) applyHealingToCreature(cid, effectId, spentAmount);
+      }
+
       // Self-buff or ally-buff hooks (Rage, Bardic Inspiration) — identical path a buff spell
       // (Mage Armor, Bless) already registers through; reactivating replaces rather than stacks.
       if (ability.hooks?.length) {
@@ -1651,7 +1706,22 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         });
       }
 
-      const msg = { text: `${casterName} uses ${ability.label}${ability.target === 'ally' ? ` on ${effectParticipant.name}` : ''}.`, senderName: 'System', timestamp: Date.now() };
+      // Tinker's Magic — a "pick a name from the list" ability grants that item to inventory
+      // instead of running onUse/hooks (which are empty for it). See AbilityDef.itemChoices.
+      let craftedItem: string | undefined;
+      if (ability.itemChoices?.length && chosenItem && ability.itemChoices.includes(chosenItem)) {
+        const item = {
+          id: randomUUID(), type: 'consumable' as const, name: chosenItem,
+          description: `Crafted with ${ability.label}. Vanishes at your next Long Rest.`,
+          quantity: 1, effect: '', actionCost: 'action' as const, expiresOnLongRest: true,
+        };
+        await updateCharacter(cid, casterId, c => ({ ...c, inventory: [...(c.inventory ?? []), item] }));
+        const sid = playerSocketIds.get(casterId);
+        if (sid) io.to(sid).emit('character:inventory:add', [item]);
+        craftedItem = chosenItem;
+      }
+
+      const msg = { text: `${casterName} uses ${ability.label}${craftedItem ? ` to craft a ${craftedItem}` : ability.amountChoice ? ` on ${effectParticipant.name}, restoring ${spentAmount} HP` : ability.target === 'ally' ? ` on ${effectParticipant.name}` : ''}.`, senderName: 'System', timestamp: Date.now() };
       void appendChatLog(cid, msg);
       io.to(ROOM).emit('chat:message', msg);
     })();
@@ -1659,6 +1729,62 @@ export function registerCombatHandlers(ctx: JoinContext): void {
 
   socket.on('combat:reaction:respond', ({ requestId, spellName }) => {
     resolveReaction(requestId, spellName);
+  });
+
+  socket.on('combat:alert:swap', ({ characterId, targetId }) => {
+    void requestAlertSwap(campaignId, characterId, targetId);
+  });
+
+  // Origin feat Healer: Utilize action, expend a Healer's Kit use to tend an ally within 5ft.
+  // That ally spends one of their own Hit Dice, rolled here (rerollable once on a 1) + the
+  // healer's Proficiency Bonus. Hit Dice only exist for player characters, so the target must be one.
+  socket.on('combat:healerKit:use', ({ casterId, casterName, targetId }) => {
+    void (async () => {
+      const cid = campaignId;
+      if (!combatState.get(cid)) return;
+      const encounter = encounters.get(cid);
+      if (!encounter) return;
+
+      const char = await getCharacter(cid, casterId);
+      if (!char || !hasOriginFeat(char, 'Healer')) return;
+      const kit = char.inventory?.find(i => i.name === "Healer's Kit" && i.quantity > 0);
+      if (!kit) return;
+
+      const casterParticipant = encounter.findParticipant(casterId);
+      const targetParticipant = encounter.findParticipant(targetId);
+      if (!casterParticipant || casterParticipant.isDead() || !targetParticipant || targetParticipant.isDead() || !targetParticipant.isPlayer) return;
+
+      const positions = tokenPositions.get(cid) ?? {};
+      const casterPos = positions[casterParticipant.name] ?? positions[casterId];
+      const targetPos = positions[targetParticipant.name] ?? positions[targetId];
+      if (!casterPos || !targetPos || Math.max(Math.abs(casterPos.gx - targetPos.gx), Math.abs(casterPos.gy - targetPos.gy)) > 1) return;
+
+      const targetChar = await getCharacter(cid, targetId);
+      if (!targetChar) return;
+      const hitDiceRemaining = Math.max(0, (targetChar.level ?? 1) - (targetChar.hitDiceUsed ?? 0));
+      if (hitDiceRemaining <= 0) return;
+
+      if (!trySpendAction(cid, casterId, 'action')) return;
+
+      const quantity = kit.quantity - 1;
+      await updateCharacter(cid, casterId, c => ({
+        ...c,
+        inventory: quantity > 0
+          ? (c.inventory ?? []).map(i => i.id === kit.id ? { ...i, quantity } : i)
+          : (c.inventory ?? []).filter(i => i.id !== kit.id),
+      }));
+      const casterSid = playerSocketIds.get(casterId);
+      if (casterSid) io.to(casterSid).emit('character:inventory:remove', { itemId: kit.id, quantity: Math.max(0, quantity) });
+
+      const dieSize = HIT_DICE[targetChar.class] ?? 8;
+      const healAmount = rollDiceRerollLow(`1d${dieSize}`, 1) + (char.proficiencyBonus ?? 2);
+      await updateCharacter(cid, targetId, c => ({ ...c, hitDiceUsed: (c.hitDiceUsed ?? 0) + 1 }));
+      applyHealingToPlayer(cid, targetParticipant, targetId, healAmount, 'Healer');
+
+      const msg = { text: `${casterName} tends to ${targetParticipant.name} with a Healer's Kit, restoring ${healAmount} HP.`, senderName: 'System', timestamp: Date.now() };
+      void appendChatLog(cid, msg);
+      io.to(ROOM).emit('chat:message', msg);
+    })();
   });
 
   socket.on('combat:turn:end', () => {

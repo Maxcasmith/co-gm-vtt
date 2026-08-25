@@ -350,7 +350,9 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
         // Targeting range highlights (drawn under tokens)
         const spellArea = targeting?.kind === 'spell' ? targeting.spell.combat?.area : undefined;
         if (targeting && playerPos && !spellArea) {
-          const range = targeting.kind === 'weapon' ? targeting.weapon.range : parseRangeFeet(targeting.spell.range);
+          const range = targeting.kind === 'weapon' ? targeting.weapon.range
+            : targeting.kind === 'ability' ? 60
+            : parseRangeFeet(targeting.spell.range);
           const extendedRange = targeting.kind === 'weapon' ? targeting.weapon.extendedRange : undefined;
           const rangeCells = Math.floor(range / 5);
           const extRangeCells = extendedRange ? Math.floor(extendedRange / 5) : 0;
@@ -435,10 +437,10 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
             if (spellArea && aoeOrigin && inArea(spellArea, aoeOrigin.originGx, aoeOrigin.originGy, aoeOrigin.dirGx, aoeOrigin.dirGy, pos.gx + 0.5, pos.gy + 0.5, aoeOrigin.isSelf)) {
               drawTargetRing(ctx, x, y, tokenR);
             }
-            // Ally in range of a non-attack point-target spell (Bless, Aid, ...) — same ring
-            // treatment as enemies get for weapon/attack-spell targeting.
-            if (!spellArea && targeting?.kind === 'spell' && targeting.spell.combat?.resolution !== 'attack' && playerPos) {
-              const range = parseRangeFeet(targeting.spell.range);
+            // Ally in range of a non-attack point-target spell (Bless, Aid, ...) or an ally-target
+            // ability (Bardic Inspiration) — same ring treatment as enemies get for weapon/attack-spell targeting.
+            if (!spellArea && playerPos && (targeting?.kind === 'ability' || (targeting?.kind === 'spell' && targeting.spell.combat?.resolution !== 'attack'))) {
+              const range = targeting.kind === 'ability' ? 60 : parseRangeFeet(targeting.spell.range);
               const dist = Math.max(Math.abs(pos.gx - playerPos.gx), Math.abs(pos.gy - playerPos.gy));
               if (dist <= Math.floor(range / 5)) drawTargetRing(ctx, x, y, tokenR);
             }
@@ -468,8 +470,9 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
 
           if (!inSight(pos.gx, pos.gy)) return;
           effectDraws.push(() => {
-            // Red targeting ring for enemies in weapon/single-target-spell range, or inside an AoE template
-            if (targeting && playerPos) {
+            // Red targeting ring for enemies in weapon/single-target-spell range, or inside an AoE
+            // template — abilities (Bardic Inspiration) target allies only, so enemies never ring for them.
+            if (targeting && targeting.kind !== 'ability' && playerPos) {
               if (spellArea && aoeOrigin) {
                 if (inArea(spellArea, aoeOrigin.originGx, aoeOrigin.originGy, aoeOrigin.dirGx, aoeOrigin.dirGy, pos.gx + 0.5, pos.gy + 0.5, aoeOrigin.isSelf)) {
                   drawTargetRing(ctx, x, y, tokenR);
@@ -632,7 +635,9 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           if (dungeon && visibleCells && !visibleCells.has(`${eff.gx},${eff.gy}`)) continue;
           const t = Math.min((now - eff.startTime) / FLOAT_DUR, 1);
           const scale   = t < 0.2 ? 0.3 + (t / 0.2) * 0.85 : 1.15 - t * 0.15; // pop up, slight shrink
-          const yOff    = -t * 55;
+          // The crit label rides the same rise as its damage number, just further up so the two
+          // never overlap.
+          const yOff    = -t * 55 - (eff.isCrit ? 26 : 0);
           const alpha   = t > 0.65 ? 1 - (t - 0.65) / 0.35 : 1;
           const rot     = Math.sin(t * Math.PI * 2.5) * 0.13;
           ctx.save();
@@ -650,7 +655,18 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           ctx.lineWidth = 3;
           ctx.strokeStyle = 'rgba(0,0,0,0.85)';
           ctx.strokeText(eff.text, 0, 0);
-          ctx.fillStyle = eff.isHeal ? '#32cd32' : eff.isHit ? '#ff4040' : '#ffffff';
+          if (eff.isCrit) {
+            const textWidth = ctx.measureText(eff.text).width;
+            const gradient = ctx.createLinearGradient(-textWidth / 2, 0, textWidth / 2, 0);
+            gradient.addColorStop(0, '#ff4040');
+            gradient.addColorStop(0.25, '#ffb020');
+            gradient.addColorStop(0.5, '#ffe020');
+            gradient.addColorStop(0.75, '#40ff70');
+            gradient.addColorStop(1, '#40c0ff');
+            ctx.fillStyle = gradient;
+          } else {
+            ctx.fillStyle = eff.isHeal ? '#32cd32' : eff.isHit ? '#ff4040' : '#ffffff';
+          }
           ctx.fillText(eff.text, 0, 0);
           ctx.restore();
         }

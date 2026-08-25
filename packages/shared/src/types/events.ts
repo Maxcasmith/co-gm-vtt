@@ -30,12 +30,21 @@ export interface ReactionOfferOption {
   /** 'defend' (Shield): boost AC against an incoming hit. 'retaliate' (Hellish Rebuke): cast
    * back at whoever just dealt damage, after the fact. 'opportunity': a plain Attack of
    * Opportunity, not spell-cast at all — spellName is a synthetic label ("Attack of
-   * Opportunity") for display, not a real spell lookup. Only 'defend' uses the AC fields below. */
-  kind: "defend" | "retaliate" | "opportunity";
+   * Opportunity") for display, not a real spell lookup. 'protect' (Protection Fighting Style):
+   * impose Disadvantage on an attack against a nearby ally, decided before the d20 is rolled —
+   * spellName is a synthetic label ("Protection") the same way 'opportunity' uses one. 'luck'
+   * (origin feat Lucky): impose Disadvantage on an attack against yourself, same pre-roll timing
+   * as 'protect' but self-targeted and spending a Luck Point instead of a reaction — spellName is
+   * a synthetic label ("Lucky"). 'swap' (origin feat Alert): the offer to swap rolled Initiative
+   * with the requester — attackerName repurposed as the requester's name, spellName a synthetic
+   * label ("Alert Swap"). Only 'defend' uses the AC fields below. */
+  kind: "defend" | "retaliate" | "opportunity" | "protect" | "luck" | "swap";
   attackTotal?: number;
   /** AC as it stands right now, and what it would become if the reaction is taken. */
   currentAc?: number;
   boostedAc?: number;
+  /** 'protect' only: who the incoming attack is actually aimed at. */
+  targetName?: string;
 }
 
 /**
@@ -147,6 +156,7 @@ export interface ServerToClientEvents {
     targetId: string;
     targetName: string;
     damage: number;
+    isCrit: boolean;
   }) => void;
   /** The acting player's remaining action economy, pushed on refill and after every spend. */
   "combat:player:resources": (data: {
@@ -165,6 +175,8 @@ export interface ServerToClientEvents {
     characterId: string;
     resourceUses: Record<string, number>;
   }) => void;
+  /** Origin feat Musician granted (or Lucky/roll spend consumed) this player's Heroic Inspiration — sent to their own socket only. */
+  "character:inspiration:update": (data: { heroicInspiration: boolean }) => void;
   "consumable:heal:result": (data: {
     characterId: string;
     characterName: string;
@@ -215,6 +227,7 @@ export interface ServerToClientEvents {
     itemId: string | null;
   }) => void;
   "character:tactics:update": (data: { characterId: string; tactics: Manoeuvre[]; aiControlled: boolean }) => void;
+  "character:currency:update": (data: { characterId: string }) => void;
   "dungeon:generating": () => void;
   "dungeon:loaded": (dungeon: Dungeon) => void;
   "dungeon:cleared": () => void;
@@ -236,11 +249,24 @@ export interface ClientToServerEvents {
     characterId: string;
     stat: string;
     skill?: string;
+    /** Origin feat Lucky — spend a Luck Point for Advantage on this roll. */
+    useLuckPoint?: boolean;
+    /** Spend Heroic Inspiration for Advantage on this roll. */
+    useInspiration?: boolean;
   }) => void;
   "roll:save": (payload: {
     campaignId: string;
     characterId: string;
     stat: string;
+    /** Origin feat Lucky — spend a Luck Point for Advantage on this roll. */
+    useLuckPoint?: boolean;
+    /** Spend Heroic Inspiration for Advantage on this roll. */
+    useInspiration?: boolean;
+  }) => void;
+  "spell:cast:exploration": (payload: {
+    campaignId: string;
+    characterId: string;
+    spellName: string;
   }) => void;
   "chat:message": (payload: { text: string; senderName: string }) => void;
   "session:start": (payload: { campaignId: string }) => void;
@@ -256,6 +282,10 @@ export interface ClientToServerEvents {
     // Present when bundling a one-shot self-buff smite spell (e.g. Divine Smite) into this
     // same attack — cast (bonus action) and attack (action) resolved together, one hit.
     bonusSpell?: Spell;
+    /** Origin feat Lucky — spend a Luck Point for Advantage on this roll. */
+    useLuckPoint?: boolean;
+    /** Spend Heroic Inspiration for Advantage on this roll. */
+    useInspiration?: boolean;
   }) => void;
   "combat:spell:attack": (payload: {
     casterId: string;
@@ -309,6 +339,10 @@ export interface ClientToServerEvents {
     /** Which option's spellName was picked, or null to decline/take the hit. */
     spellName: string | null;
   }) => void;
+  /** Origin feat Alert — request to swap your rolled Initiative with a willing ally's, once per combat. The ally is offered an accept/decline via combat:reaction:offer (kind 'swap'). */
+  "combat:alert:swap": (payload: { campaignId: string; characterId: string; targetId: string }) => void;
+  /** Origin feat Healer — Utilize action, expend a Healer's Kit use to tend an ally within 5ft. */
+  "combat:healerKit:use": (payload: { casterId: string; casterName: string; targetId: string }) => void;
   "combat:condition:add": (payload: { targetId: string; name: Condition }) => void;
   "combat:condition:remove": (payload: { targetId: string; name: Condition }) => void;
   /** Player-initiated escape attempt against a recurringDamage hook's escapeSkillCheck (Ensnaring Strike/Entangle's Restrained) — spends the actor's action. */
@@ -326,6 +360,10 @@ export interface ClientToServerEvents {
     resting: boolean;
     restType: "short" | "long";
     hitDiceSpent: number;
+    /** Origin feat Crafter — one FAST_CRAFTING_TABLE name, only honored on a Long Rest. */
+    craftedItem?: string;
+    /** Origin feat Musician — play an instrument to grant Heroic Inspiration to nearby allies. */
+    grantInspiration?: boolean;
   }) => void;
   "rest:cancel": (payload: { campaignId: string; characterId: string }) => void;
 }

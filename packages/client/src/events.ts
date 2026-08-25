@@ -30,7 +30,7 @@ export interface SheetOpenedPayload {
 export type SheetClosedPayload       = Record<string, never>;
 export type RestOpenPayload          = Record<string, never>;
 export type RestRequestPayload       = Record<string, never>;
-export interface RestChoicePayload { resting: boolean; restType: 'short' | 'long'; hitDiceSpent: number }
+export interface RestChoicePayload { resting: boolean; restType: 'short' | 'long'; hitDiceSpent: number; craftedItem?: string; grantInspiration?: boolean }
 export type RestCancelPayload         = Record<string, never>;
 export interface RestProgressPayload { allCommitted: boolean }
 export type EncounterGeneratingPayload = Record<string, never>;
@@ -38,10 +38,12 @@ export interface EncounterReadyPayload { enemies: EnemyStatBlock[] }
 
 export interface CombatStatePayload { active: boolean }
 export type TargetingStartPayload =
-  | { kind: 'weapon'; weapon: Weapon; actionType: 'action' | 'bonusAction' | 'reaction'; bonusSpell?: Spell }
-  | { kind: 'spell'; spell: Spell; casterId: string; actionType: 'action' | 'bonusAction' | 'reaction'; slotLevel?: number; chosenDamageType?: string; chosenCommand?: string; chosenSkill?: string; casterLevel?: number };
+  | { kind: 'weapon'; weapon: Weapon; actionType: 'action' | 'bonusAction' | 'reaction'; bonusSpell?: Spell; isOffhand?: boolean; useLuckPoint?: boolean; useInspiration?: boolean }
+  | { kind: 'spell'; spell: Spell; casterId: string; actionType: 'action' | 'bonusAction' | 'reaction'; slotLevel?: number; chosenDamageType?: string; chosenCommand?: string; chosenSkill?: string; casterLevel?: number }
+  | { kind: 'ability'; abilityKey: string; label: string; casterId: string; actionCost: 'action' | 'bonusAction' | 'reaction'; chosenAmount?: number };
 export type TargetingCancelPayload = Record<string, never>;
-export interface CombatAttackPayload { attackerName: string; attackerId: string; targetId: string; targetName: string; weapon: Weapon; bonusSpell?: Spell }
+export interface CombatAttackPayload { attackerName: string; attackerId: string; targetId: string; targetName: string; weapon: Weapon; bonusSpell?: Spell; isOffhand?: boolean; useLuckPoint?: boolean; useInspiration?: boolean }
+export interface CombatAbilityUsePayload { casterId: string; casterName: string; abilityKey: string; targetId?: string; chosenItem?: string; chosenAmount?: number }
 export interface CombatAttackResultPayload extends AttackResult {}
 export interface CombatSpellAttackPayload { casterName: string; casterId: string; targetIds: string[]; spell: Spell; slotLevel: number; chosenDamageType?: string }
 export interface CombatSpellAttackResultPayload extends SpellAttackResult {}
@@ -55,7 +57,7 @@ export interface CombatVictoryPayload extends CombatVictory {}
 export interface PlayerDamagePayload { characterId: string; characterName: string; damage: number; currentHp: number; maxHp: number; tempHp: number }
 export interface PlayerTempHpPayload { characterId: string; characterName: string; tempHp: number }
 export interface PlayerHealPayload { characterId: string; characterName: string; healAmount: number; currentHp: number; maxHp: number; sourceName: string }
-export interface DamageDealtPayload { targetId: string; targetName: string; damage: number }
+export interface DamageDealtPayload { targetId: string; targetName: string; damage: number; isCrit: boolean }
 export interface CombatConcentrationPayload { targetId: string; targetName: string; spellName: string | null }
 export interface PlayerSlotsPayload { characterId: string; currentSpellSlots1: number; maxSpellSlots1: number }
 export interface RestResultPayload { resting: boolean; restType: 'short' | 'long'; currentHp?: number; maxHp?: number; hpGained?: number; currentSpellSlots1?: number; maxSpellSlots1?: number; worldEvents?: string }
@@ -70,6 +72,8 @@ export interface TacticsUpdatePayload { characterId: string; tactics: Manoeuvre[
 export interface CombatTurnPayload { actorName: string; speedMultiplier?: number; speedBonusFt?: number; buffs?: string[] }
 export type CombatTurnEndPayload = Record<string, never>
 export interface ConditionEscapeAttemptPayload { targetId: string; name: Condition }
+export interface AlertSwapRequestPayload { characterId: string; targetId: string }
+export interface HealerKitUsePayload { casterId: string; casterName: string; targetId: string }
 export interface ElevationSetPayload { targetId: string; elevationFt: number }
 export interface DisengagePayload { actorId: string }
 export interface CombatInitiativePayload { entry: TurnOrderEntry }
@@ -147,6 +151,16 @@ export interface RollRequestPayload {
   stat: string;
   /** Specific skill name (e.g. 'Acrobatics') — present for skill checks, absent for raw stat checks */
   skill?: string;
+  /** Origin feat Lucky — spend a Luck Point for Advantage on this roll. */
+  useLuckPoint?: boolean;
+  /** Spend Heroic Inspiration for Advantage on this roll. */
+  useInspiration?: boolean;
+}
+
+export interface SpellCastExplorationPayload {
+  characterId: string;
+  campaignId: string;
+  spellName: string;
 }
 
 export interface ChatMessageReceivedPayload {
@@ -172,6 +186,7 @@ export interface VTTEventMap {
   'vtt:sheet:closed':           SheetClosedPayload;
   'vtt:roll:check':             RollRequestPayload;
   'vtt:roll:save':              RollRequestPayload;
+  'vtt:spell:cast:exploration': SpellCastExplorationPayload;
   'vtt:roll:result':            RollResultPayload;
   'vtt:rest:open':              RestOpenPayload;
   'vtt:rest:request':           RestRequestPayload;
@@ -187,6 +202,7 @@ export interface VTTEventMap {
   'vtt:targeting:cancel':       TargetingCancelPayload;
   'vtt:combat:attack':          CombatAttackPayload;
   'vtt:combat:attack:result':   CombatAttackResultPayload;
+  'vtt:combat:ability:use':     CombatAbilityUsePayload;
   'vtt:combat:spell:attack':        CombatSpellAttackPayload;
   'vtt:combat:spell:attack:result': CombatSpellAttackResultPayload;
   'vtt:combat:spell:cast':          CombatSpellCastPayload;
@@ -214,6 +230,8 @@ export interface VTTEventMap {
   'vtt:combat:turn':            CombatTurnPayload;
   'vtt:combat:turn:end':        CombatTurnEndPayload;
   'vtt:condition:escape:attempt': ConditionEscapeAttemptPayload;
+  'vtt:combat:alert:swap':      AlertSwapRequestPayload;
+  'vtt:combat:healerKit:use':   HealerKitUsePayload;
   'vtt:combat:elevation:set': ElevationSetPayload;
   'vtt:combat:disengage': DisengagePayload;
   'vtt:combat:initiative':      CombatInitiativePayload;

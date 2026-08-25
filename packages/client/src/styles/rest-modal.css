@@ -181,6 +181,30 @@
   color: var(--text-muted);
 }
 
+.rest-feat-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.rest-feat-option-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'Crimson Pro', Georgia, serif;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.rest-feat-select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
 .rest-member-status {
   font-size: 11px;
   color: var(--text-muted);

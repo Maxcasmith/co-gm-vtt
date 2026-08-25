@@ -1,6 +1,7 @@
 import { Hook } from './Hook.ts';
 import type { StateEngine } from './StateEngine.ts';
 import { OnHitBonusDamageHook } from './hooks/OnHitBonusDamageHook.ts';
+import { AcModifierHook } from './hooks/AcModifierHook.ts';
 
 /**
  * A class feature that's always "on" rather than player-triggered (Sneak Attack, Fighting
@@ -55,5 +56,57 @@ export function registerPassiveClassHooks(engine: StateEngine, ownerId: string, 
   for (const def of PASSIVE_HOOK_DEFS) {
     if (def.class !== className) continue;
     engine.register(def.build(ownerId, casterLevel));
+  }
+}
+
+export interface PassiveFightingStyleDef {
+  style: string;
+  source: string;
+  build: (ownerId: string) => Hook;
+}
+
+/**
+ * Defense and Dueling, the two Fighting Styles expressible with today's hooks. Archery (+2 to hit)
+ * and Great Weapon Fighting (reroll low damage dice) are resolved inline in resolvePlayerAttack
+ * instead — they modify a single roll rather than sitting passively on the participant. Protection
+ * and Two-Weapon Fighting aren't "always on" passives either (reaction offer / bonus-action attack).
+ */
+export const PASSIVE_FIGHTING_STYLE_HOOK_DEFS: PassiveFightingStyleDef[] = [
+  {
+    style: 'Defense',
+    source: 'Fighting Style: Defense',
+    build: ownerId => new AcModifierHook({
+      id: `passive:${ownerId}:defense`,
+      ownerId,
+      source: 'Fighting Style: Defense',
+      kind: 'acModifier',
+      value: 1,
+      requiresArmor: true,
+    }),
+  },
+  {
+    style: 'Dueling',
+    source: 'Fighting Style: Dueling',
+    // Gated to a one-handed Melee weapon hit with no other weapon equipped, per RAW — see
+    // DamageContext's isMelee/weaponTwoHanded/hasOffhandWeapon (set only by the weapon-attack
+    // path in resolvePlayerAttack) and OnHitBonusDamageHook's requiresOneHandedMeleeNoOffhand.
+    // No consumeOnUse: Dueling's +2 applies to every qualifying hit, not once per turn.
+    build: ownerId => new OnHitBonusDamageHook({
+      id: `passive:${ownerId}:dueling`,
+      ownerId,
+      source: 'Fighting Style: Dueling',
+      kind: 'onHitBonusDamage',
+      casterLevel: 1,
+      slotLevel: 0,
+      scaling: { mode: 'cantrip', base: '0d4+2', tiers: [] },
+      requiresOneHandedMeleeNoOffhand: true,
+    }),
+  },
+];
+
+export function registerPassiveFightingStyleHooks(engine: StateEngine, ownerId: string, fightingStyle: string): void {
+  for (const def of PASSIVE_FIGHTING_STYLE_HOOK_DEFS) {
+    if (def.style !== fightingStyle) continue;
+    engine.register(def.build(ownerId));
   }
 }

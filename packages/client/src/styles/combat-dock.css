@@ -288,10 +288,88 @@
   cursor: not-allowed;
 }
 
+.combat-dock-luck-toggle {
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.12s;
+}
+
+.combat-dock-luck-toggle--active {
+  border-color: var(--gold);
+  box-shadow: 0 0 12px #c9a84c66;
+}
+
+.combat-dock-alert-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
 .combat-dock-weapon-icon {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* Border color marks each icon's action-economy cost — same palette as the resource pips. */
+.combat-dock-weapon-btn[data-action-cost="action"],
+.combat-dock-ability-btn[data-action-cost="action"]      { border-color: #22c55e; }
+.combat-dock-weapon-btn[data-action-cost="bonusAction"],
+.combat-dock-ability-btn[data-action-cost="bonusAction"] { border-color: #f97316; }
+.combat-dock-weapon-btn[data-action-cost="reaction"],
+.combat-dock-ability-btn[data-action-cost="reaction"]    { border-color: #ec4899; }
+
+.combat-dock-ability-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.15s, box-shadow 0.12s, transform 0.1s;
+}
+
+.combat-dock-ability-btn:hover:not(.combat-dock-ability-btn--spent) {
+  transform: translateY(-1px);
+}
+
+.combat-dock-ability-btn--active {
+  box-shadow: 0 0 12px #c9a84c66;
+}
+
+.combat-dock-ability-btn--spent {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.combat-dock-ability-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.combat-dock-ability-select {
+  max-width: 40px;
+  font-size: 9px;
+  background: var(--surface);
+  color: inherit;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.combat-dock-ability-uses {
+  font-size: 9px;
+  opacity: 0.7;
 }
 
 .combat-dock {

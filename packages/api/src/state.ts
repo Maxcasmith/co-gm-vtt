@@ -79,7 +79,13 @@ export const pendingWeaponBonuses = new Map<string, Record<string, {
 }>>();
 export const microDungeons = new Set<string>(); // cids whose current dungeon is an ephemeral combat arena — discarded on victory instead of continued
 
-export interface RestChoice { resting: boolean; restType: 'short' | 'long'; hitDiceSpent: number }
+export interface RestChoice {
+  resting: boolean; restType: 'short' | 'long'; hitDiceSpent: number;
+  /** Origin feat Crafter — one FAST_CRAFTING_TABLE name, only honored on a Long Rest. */
+  craftedItem?: string;
+  /** Origin feat Musician — play an instrument to grant Heroic Inspiration, see grantMusicianInspiration. */
+  grantInspiration?: boolean;
+}
 export const pendingRests = new Map<string, Map<string, RestChoice>>(); // campaignId → charId → choice, cleared once every online charId has voted
 
 export const PLAYER_SIGHT_RADIUS = 20; // square (Chebyshev) radius, in cells

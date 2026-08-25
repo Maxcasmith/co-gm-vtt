@@ -1,5 +1,5 @@
 import type { Character, SenseKind } from "shared";
-import { CLASS_WEAPON_PROFS, CLASS_ARMOR_TRAINING, getSenses } from "shared";
+import { effectiveWeaponProfs, effectiveArmorTraining, getSenses } from "shared";
 import { useState } from "react";
 import { dispatch } from "../events.ts";
 import { STAT_NAMES, CLASS_SAVING_THROWS, BACKGROUND_SKILLS, SKILLS } from "../character-creation/srd.ts";
@@ -144,8 +144,8 @@ export function AbilitiesTab({ character }: { character: Character }) {
             <div className="sheet-proficiency-row">
               <span className="sheet-proficiency-label">Weapons</span>
               <span className="sheet-proficiency-value">
-                {(CLASS_WEAPON_PROFS[character.class] ?? []).length > 0
-                  ? (CLASS_WEAPON_PROFS[character.class] ?? [])
+                {effectiveWeaponProfs(character).length > 0
+                  ? effectiveWeaponProfs(character)
                     .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
                     .join(" & ") + " weapons"
                   : "None"}
@@ -154,8 +154,8 @@ export function AbilitiesTab({ character }: { character: Character }) {
             <div className="sheet-proficiency-row">
               <span className="sheet-proficiency-label">Armor</span>
               <span className="sheet-proficiency-value">
-                {(CLASS_ARMOR_TRAINING[character.class] ?? []).length > 0
-                  ? (CLASS_ARMOR_TRAINING[character.class] ?? [])
+                {effectiveArmorTraining(character).length > 0
+                  ? effectiveArmorTraining(character)
                     .map((a) => a.charAt(0).toUpperCase() + a.slice(1))
                     .join(", ")
                   : "None"}

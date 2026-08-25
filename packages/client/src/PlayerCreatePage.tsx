@@ -6,7 +6,10 @@ import BackstoryTab from './character-creation/BackstoryTab.tsx';
 import SpellsTab from './character-creation/SpellsTab.tsx';
 import ShopTab from './character-creation/ShopTab.tsx';
 import FinishedTab from './character-creation/FinishedTab.tsx';
-import { BACKGROUND_SKILLS } from './character-creation/srd.ts';
+import FightingStyleTab from './character-creation/FightingStyleTab.tsx';
+import OrderTab from './character-creation/OrderTab.tsx';
+import InvocationsTab from './character-creation/InvocationsTab.tsx';
+import { BACKGROUND_SKILLS, CLASS_FEATURES } from './character-creation/srd.ts';
 import './app.css';
 
 interface Props { campaignId: string }
@@ -26,6 +29,18 @@ function genId(): string {
 
 function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId: string; campaignName: string; isCampaign: boolean }) {
   const c = useCharacter();
+  const hasFightingStyle = c.characterClass
+    ? (CLASS_FEATURES[c.characterClass] ?? []).some(f => f.name === 'Fighting Style')
+    : false;
+  const hasClassOrder = c.characterClass
+    ? (CLASS_FEATURES[c.characterClass] ?? []).some(f => f.name === 'Divine Order' || f.name === 'Primal Order')
+    : false;
+  const hasInvocations = c.characterClass
+    ? (CLASS_FEATURES[c.characterClass] ?? []).some(f => f.name === 'Eldritch Invocations')
+    : false;
+  const hasSpellcasting = c.characterClass
+    ? (CLASS_FEATURES[c.characterClass] ?? []).some(f => f.name === 'Spellcasting' || f.name === 'Pact Magic')
+    : false;
   const backDialogRef = useRef<HTMLDialogElement>(null);
   const successDialogRef = useRef<HTMLDialogElement>(null);
   const [saving, setSaving] = useState(false);
@@ -64,6 +79,9 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
             ...Object.keys(c.skillProficiencies),
           ],
           expertiseSkills: c.expertiseSkills,
+          fightingStyle: c.fightingStyle,
+          classOrder: c.classOrder,
+          invocations: c.invocations,
           portraitPath: c.portraitPath,
           tokenPath: c.tokenPath,
           inventory: c.inventory,
@@ -123,12 +141,38 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
             Backstory
           </button>
         )}
-        <button
-          className={`tab-btn ${c.activeTab === 'spells' ? 'tab-btn--active' : ''}`}
-          onClick={() => c.set('activeTab', 'spells')}
-        >
-          Spells
-        </button>
+        {hasSpellcasting && (
+          <button
+            className={`tab-btn ${c.activeTab === 'spells' ? 'tab-btn--active' : ''}`}
+            onClick={() => c.set('activeTab', 'spells')}
+          >
+            Spells
+          </button>
+        )}
+        {hasFightingStyle && (
+          <button
+            className={`tab-btn ${c.activeTab === 'fightingStyle' ? 'tab-btn--active' : ''}`}
+            onClick={() => c.set('activeTab', 'fightingStyle')}
+          >
+            Fighting Style
+          </button>
+        )}
+        {hasClassOrder && (
+          <button
+            className={`tab-btn ${c.activeTab === 'classOrder' ? 'tab-btn--active' : ''}`}
+            onClick={() => c.set('activeTab', 'classOrder')}
+          >
+            {c.characterClass === 'Cleric' ? 'Divine Order' : 'Primal Order'}
+          </button>
+        )}
+        {hasInvocations && (
+          <button
+            className={`tab-btn ${c.activeTab === 'invocations' ? 'tab-btn--active' : ''}`}
+            onClick={() => c.set('activeTab', 'invocations')}
+          >
+            Invocations
+          </button>
+        )}
         <button
           className={`tab-btn ${c.activeTab === 'shop' ? 'tab-btn--active' : ''}`}
           onClick={() => c.set('activeTab', 'shop')}
@@ -145,7 +189,10 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
 
       <div className="create-body">
         {c.activeTab === 'backstory' && isCampaign ? <BackstoryTab campaignId={campaignId} />
-          : c.activeTab === 'spells' ? <SpellsTab />
+          : c.activeTab === 'spells' && hasSpellcasting ? <SpellsTab />
+          : c.activeTab === 'fightingStyle' && hasFightingStyle ? <FightingStyleTab />
+          : c.activeTab === 'classOrder' && hasClassOrder ? <OrderTab />
+          : c.activeTab === 'invocations' && hasInvocations ? <InvocationsTab />
           : c.activeTab === 'shop' ? <ShopTab />
           : c.activeTab === 'finished' ? <FinishedTab onCreate={handleCreate} canCreate={canCreate} saving={saving} error={error} />
           : <PlayerInfoTab campaignId={campaignId} />}

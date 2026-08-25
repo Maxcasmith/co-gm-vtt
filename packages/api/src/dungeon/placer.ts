@@ -1,6 +1,27 @@
 import { randomUUID } from 'crypto';
-import type { DungeonRoom, DungeonEntity, EnemyStatBlock } from 'shared';
-import type { DungeonManifest } from './manifest.ts';
+import type { DungeonRoom, DungeonEntity, EnemyStatBlock, TrapEffect } from 'shared';
+import type { DungeonManifest, ManifestTrap } from './manifest.ts';
+
+// Builds the mechanical TrapEffect from the manifest's flavor+mechanics split. 'seal' carries no
+// save/damage at all — it's an environmental consequence, not something to roll against. 'damage'
+// (and anything else the model might emit for kind) rolls a save if the model gave one; missing
+// save/damage data falls through to checkTrapAt's alert-only branch rather than guessing a formula.
+export function trapEffectFor(hint: ManifestTrap): TrapEffect {
+  if (hint.kind === 'seal') {
+    return {
+      kind: 'seal', effects: [],
+      ...(hint.escapeSkill ? { escapeSkill: hint.escapeSkill } : {}),
+      ...(hint.escapeDC ? { escapeDC: hint.escapeDC } : {}),
+    };
+  }
+  return {
+    kind: 'damage',
+    ...(hint.saveAbility && hint.dc ? { save: { ability: hint.saveAbility, dc: hint.dc, halfOnSave: true } } : {}),
+    effects: hint.damageFormula
+      ? [{ type: 'damage' as const, ...(hint.damageType ? { damageType: hint.damageType } : {}), scaling: { mode: 'spell-slot' as const, base: hint.damageFormula, tiers: [] } }]
+      : [],
+  };
+}
 
 function area(room: DungeonRoom): number {
   return room.width * room.height;
@@ -90,7 +111,7 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
       const cell = findFreeCell(room, cx - 1, cy, occupied, cells);
       if (cell) {
         occupied.add(key(cell.x, cell.y));
-        entities.push({ id: randomUUID(), type: 'trap', x: cell.x, y: cell.y, name: trapHint.name, discovered: false, hideDC: trapHint.hideDC });
+        entities.push({ id: randomUUID(), type: 'trap', x: cell.x, y: cell.y, name: trapHint.name, discovered: false, hideDC: trapHint.hideDC, trap: trapEffectFor(trapHint) });
       }
     }
 

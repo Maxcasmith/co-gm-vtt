@@ -53,7 +53,12 @@ export default function SpellsTab() {
     return featSources.find(fs => spell.classes.includes(fs.grant.forClass) && !spell.classes.includes(c.characterClass))?.name;
   }
 
-  const maxCantrips = allowance?.cantrips ?? 0;
+  // Thaumaturge (Divine Order) and Magician (Primal Order) each know one cantrip beyond the
+  // class's normal allowance — see OrderTab/effectiveWeaponProfs' sibling note in shared.
+  const orderCantripBonus =
+    (c.characterClass === 'Cleric' && c.classOrder === 'Thaumaturge') ||
+    (c.characterClass === 'Druid' && c.classOrder === 'Magician') ? 1 : 0;
+  const maxCantrips = (allowance?.cantrips ?? 0) + orderCantripBonus;
   const maxSpells   = allowance?.spells  ?? 0;
 
   const [allSpells, setAllSpells] = useState<Spell[]>([]);

@@ -1,9 +1,10 @@
 import type { EnemyStatBlock } from 'shared';
-import { statMod } from 'shared';
+import { statMod, addCurrency, removeCurrency } from 'shared';
 import { randomUUID } from 'crypto';
 import { updateCharacter, listCharacters, readEntity, writeEntity, readManifest, writeManifest, emptyManifest, parseEntityLinks, clearDungeon, getConfig, readChatLog, saveDungeon, saveDungeonAscii, readQuests, writeQuests, loadPartyAllies, savePartyAllies, appendChatLog, readNemeses, writeNemeses } from './storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
 import { generateDungeon, toClientDungeon, buildDungeonQuests } from './dungeon/index.ts';
+import { generateDungeonQuests } from './session-processor/index.ts';
 import { Encounter, Team, Participant } from './domain/encounter.ts';
 import { Creature } from './domain/creature.ts';
 import type { TagEffect, AcquiredItem } from './tag-processor.ts';
@@ -13,8 +14,9 @@ import {
   NEMESIS_COOLDOWN_SESSIONS, NEMESIS_CAP_PER_TARGET, NEMESIS_MAX_DEATHS, ALLY_XP_PER_LEVEL, withLivePositions,
 } from './state.ts';
 import { D20Roll, toSlug, escalateCr } from './combat/dice.ts';
-import { rollPlayerInitiatives, addToTurnOrder, resolveQuest, sweepGameTimeExpiries } from './combat/runtime.ts';
+import { rollPlayerInitiatives, addToTurnOrder, resolveQuest, sweepGameTimeExpiries, trySpendSpellSlot } from './combat/runtime.ts';
 import { generateAndBroadcastEnemies } from './dungeon/runtime.ts';
+import { findSpell } from './routes/spells.ts';
 
 export async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
   await Promise.all(consolidateEffects(effects).map(async effect => {
@@ -40,10 +42,24 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
     } else if (effect.type === 'inventory_add') {
       const chars = await listCharacters(cid);
       const char = chars.find(c => c.name === effect.player);
-      if (!char) return;
+      if (!char) { console.warn(`[inventory_add] no character named "${effect.player}" — item(s) dropped`); return; }
       await updateCharacter(cid, char.id, c => ({ ...c, inventory: [...(c.inventory ?? []), ...effect.items] }));
       const sid = playerSocketIds.get(char.id);
       if (sid) io.to(sid).emit('character:inventory:add', effect.items);
+    } else if (effect.type === 'currency_add' || effect.type === 'currency_remove') {
+      const chars = await listCharacters(cid);
+      const char = chars.find(c => c.name === effect.player);
+      if (!char) { console.warn(`[${effect.type}] no character named "${effect.player}" — ${effect.amount} ${effect.denom} dropped`); return; }
+      const next = effect.type === 'currency_add'
+        ? addCurrency(char, effect.denom, effect.amount)
+        : removeCurrency(char, effect.denom, effect.amount);
+      await updateCharacter(cid, char.id, c => ({ ...c, [effect.denom]: next }));
+      const sid = playerSocketIds.get(char.id);
+      // No piecemeal currency state on the client (gold was never live-updated before this) —
+      // same "refetch the whole character" pattern rest/combat-end already use.
+      if (sid) io.to(sid).emit('character:currency:update', { characterId: char.id });
+    } else if (effect.type === 'spell_cast') {
+      await resolveSpellCast(cid, effect.player, effect.spellName);
     } else if (effect.type === 'scene_build') {
       const locationSlug = effect.locationName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       const existing = await readEntity(cid, 'location', locationSlug);
@@ -90,13 +106,25 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
       const partyLevel = characters.length
         ? Math.round(characters.reduce((sum, c) => sum + (c.level ?? 1), 0) / characters.length)
         : 1;
-      const dungeon = await generateDungeon(effect.name, effect.dungeonType, getFeatureProvider(config, 'dungeonGeneration'), storyContext, { partySize, partyLevel }, undefined, config);
+      // Generated first so the floor plan can be designed to actually serve the quest, not the
+      // other way around — dungeonId is decided up front so these are tagged and written before
+      // the dungeon itself exists, never the untagged/orphaned quest ensureSessionQuests avoids.
+      const dungeonId = randomUUID();
+      const predefinedQuests = await generateDungeonQuests(cid, dungeonId, effect.name, effect.dungeonType, storyContext, config);
+      if (predefinedQuests.length) {
+        await writeQuests(cid, [...(await readQuests(cid)), ...predefinedQuests]);
+        io.to(ROOM).emit('quest:update', { quests: await readQuests(cid), act: (await readManifest(cid))?.act ?? 1 });
+      }
+
+      const dungeon = await generateDungeon(effect.name, effect.dungeonType, getFeatureProvider(config, 'dungeonGeneration'), storyContext, { partySize, partyLevel, id: dungeonId, predefinedQuests }, undefined, config);
       dungeons.set(cid, dungeon);
       await saveDungeon(cid, dungeon);
       await saveDungeonAscii(cid, dungeon);
       io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
       console.log(`[dungeon] generated and broadcast: ${dungeon.name} (${dungeon.rooms.length} rooms, ${dungeon.entities.length} entities)`);
 
+      // buildDungeonQuests only adds the deterministic boss/escape entries now — the goal-derived
+      // quest(s) already exist, generated before the dungeon and written above.
       const quests = buildDungeonQuests(dungeon, await readQuests(cid));
       await writeQuests(cid, quests);
       const questManifest = await readManifest(cid);
@@ -243,6 +271,30 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
       console.log(`[ally] ${ally.name} learned ${effect.attackName}`);
     }
   }));
+}
+
+/**
+ * The one place an exploration-mode spell cast resolves its resource cost — cantrips are free,
+ * anything else spends a real slot via the same trySpendSpellSlot combat uses, and blocks
+ * privately if none remain. Both the DM's own [[CAST_SPELL:...]] tag (a freeform journal message)
+ * and the journal's cast-spell UI control route through this exact function, so there's one
+ * source of truth for "did this cast actually cost anything" regardless of which one triggered it.
+ */
+export async function resolveSpellCast(cid: string, playerName: string, spellName: string): Promise<{ ok: boolean; charId?: string }> {
+  const chars = await listCharacters(cid);
+  const char = chars.find(c => c.name === playerName);
+  if (!char) { console.warn(`[spell_cast] no character named "${playerName}"`); return { ok: false }; }
+  const spell = findSpell(spellName);
+  const slotLevel = spell?.level ?? 0; // unknown spell name — treat as free rather than blocking a real cast over a lookup miss
+  const spent = slotLevel === 0 ? true : await trySpendSpellSlot(cid, char.id, char, slotLevel);
+  if (!spent) {
+    const sid = playerSocketIds.get(char.id);
+    // Private to the caster, not persisted — matches checkTrapAt's alert-only message, the
+    // one other "blocked" style notice outside combat's own combat:attack:blocked convention.
+    if (sid) io.to(sid).emit('chat:message', { text: `No spell slots left to cast ${spellName}.`, senderName: 'System', timestamp: Date.now() });
+    return { ok: false, charId: char.id };
+  }
+  return { ok: true, charId: char.id };
 }
 
 function buildAdminEffect(tagType: string, name: string, detail: string, player: string): TagEffect | null {

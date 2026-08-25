@@ -115,7 +115,7 @@ export async function generateCombatFlavour(result: AttackResult | SpellAttackRe
   return llmText([
     {
       role: 'system',
-      content: 'You are a punchy D&D combat narrator. Write ONE short sentence (max 15 words) describing the action. Style: visceral action verbs and impact sound effects — "looses an arrow, SMACK into the goblin\'s shoulder" — not flowery metaphor. No purple prose: no similes, no "light fading from eyes", no poetic mortality language, no internal feelings. Unless the target is slain, do NOT imply they are dying, fatally wounded, or near death — a hit is a hit, not a death scene. Never mention dice, numbers, or HP.',
+      content: 'You are a punchy D&D combat narrator. Write ONE short sentence (max 15 words) describing the action. Style: visceral action verbs and impact sound effects — "looses an arrow, SMACK into the goblin\'s shoulder" — not flowery metaphor. No purple prose: no similes, no "light fading from eyes", no poetic mortality language, no internal feelings. Unless the target is slain, do NOT imply they are dying, fatally wounded, or near death — a hit is a hit, not a death scene. Never mention dice, numbers, or HP. Never use a gendered pronoun (he/him/she/her) for a character — use their name instead.',
     },
     {
       role: 'user',
@@ -137,7 +137,7 @@ export async function generateSpellSaveFlavour(result: SpellSaveResult, adapter:
   return llmText([
     {
       role: 'system',
-      content: 'You are a punchy D&D combat narrator. Write ONE short sentence (max 20 words) describing a spell taking effect on its target(s). Style: visceral action verbs and impact — not flowery metaphor. No purple prose: no similes, no "light fading from eyes", no poetic mortality language, no internal feelings. Unless a target is slain, do NOT imply they are dying, fatally wounded, or near death. Never mention dice, numbers, DCs, or HP.',
+      content: 'You are a punchy D&D combat narrator. Write ONE short sentence (max 20 words) describing a spell taking effect on its target(s). Style: visceral action verbs and impact — not flowery metaphor. No purple prose: no similes, no "light fading from eyes", no poetic mortality language, no internal feelings. Unless a target is slain, do NOT imply they are dying, fatally wounded, or near death. Never mention dice, numbers, DCs, or HP. Never use a gendered pronoun (he/him/she/her) for a character — use their name instead.',
     },
     {
       role: 'user',

@@ -34,7 +34,7 @@ export interface TokenDim {
   opacity?: number;
 }
 
-export interface FloatEffect { id: number; gx: number; gy: number; text: string; isHit: boolean; isHeal?: boolean; startTime: number }
+export interface FloatEffect { id: number; gx: number; gy: number; text: string; isHit: boolean; isHeal?: boolean; isCrit?: boolean; startTime: number }
 export interface FlashEffect { tokenKey: string; startTime: number }
 
 /**
