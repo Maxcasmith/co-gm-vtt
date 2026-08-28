@@ -218,6 +218,12 @@ export interface ServerToClientEvents {
     spellName: string;
     active: boolean;
   }) => void;
+  /** Rage activating/ending on a creature — drives the "raging" token icon. */
+  "combat:raging": (data: {
+    targetId: string;
+    targetName: string;
+    active: boolean;
+  }) => void;
   "combat:defeat": () => void;
   "combat:player:dead": (data: {
     characterId: string;

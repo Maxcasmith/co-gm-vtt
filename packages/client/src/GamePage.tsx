@@ -25,6 +25,7 @@ import PartyHud from './PartyHud.tsx';
 import TurnOrderBar from './TurnOrderBar.tsx';
 import VictoryScreen from './VictoryScreen.tsx';
 import DefeatScreen from './DefeatScreen.tsx';
+import CongratsScreen from './CongratsScreen.tsx';
 import ReactionPrompt from './ReactionPrompt.tsx';
 import { dispatch, on } from './events.ts';
 import { initNarration, narrate } from './narration.ts';
@@ -116,6 +117,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const dungeonReady = useDungeonReady(dungeon ?? undefined, dungeonGenerating);
   const [questLogOpen, setQuestLogOpen] = useState(false);
   const [quests, setQuests] = useState<Quest[]>([]);
+  // Quest(s) that just flipped to 'resolved' this quest:update tick — surfaced as a congrats
+  // modal, then cleared on dismiss. Not derived from `quests` itself (which only holds the
+  // current snapshot), so it's set once, from the diff, inside the socket handler below.
+  const [congrats, setCongrats] = useState<Quest[] | null>(null);
   const [act, setAct] = useState(1);
   const [worldTimeSecs, setWorldTimeSecs] = useState(43200);
   // Reaction-sidebar display prefs — set on GameSettingsPage, fetched once here since they never
@@ -419,7 +424,19 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('dungeon:generating', () => setDungeonGenerating(true));
     socket.on('dungeon:loaded', dungeon => { setDungeonGenerating(false); setDungeon(dungeon); dispatch('vtt:dungeon:loaded', dungeon); loadRuntimeTilesets(); });
     socket.on('dungeon:cleared', () => setDungeon(null));
-    socket.on('quest:update', ({ quests: q, act: a }) => { setQuests(q); setAct(a); });
+    socket.on('quest:update', ({ quests: q, act: a }) => {
+      setQuests(prev => {
+        // prev.length === 0 means this is the first snapshot since mount/reconnect, not an
+        // actual resolution just now — diffing against it would pop the modal for every quest
+        // that was already resolved before this player ever loaded the page.
+        const newlyResolved = prev.length
+          ? q.filter((nq: Quest) => nq.status === 'resolved' && prev.find(pq => pq.id === nq.id)?.status !== 'resolved')
+          : [];
+        if (newlyResolved.length) setCongrats(newlyResolved);
+        return q;
+      });
+      setAct(a);
+    });
     socket.on('clock:update', ({ worldTimeSecs: t }) => { setWorldTimeSecs(t); });
 
     const unsubTokenMove = on('vtt:token:move', pos => {
@@ -717,6 +734,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       <QuickChat open={quickChatOpen} onClose={() => setQuickChatOpen(false)} senderName={character.name} sessionActive={sessionActive} disabled={combatActive && !isMyTurn} />
       {victory && <VictoryScreen data={victory} onDismiss={() => setVictory(null)} />}
       {defeated && <DefeatScreen onDismiss={() => setDefeated(false)} />}
+      {congrats && <CongratsScreen quests={congrats} onDismiss={() => setCongrats(null)} />}
       <ReactionPrompt
         onRespond={(requestId, spellName) => socketRef.current?.emit('combat:reaction:respond', { requestId, spellName })}
         showDetailsByDefault={houseRules.reactionShowDetailsByDefault}

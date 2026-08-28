@@ -1,6 +1,6 @@
 import type { Character, EffectSpec, CreatureType, Condition as ConditionName, ActiveCondition, AbilityKey, TrapEffect, SpellSaveResult, Weapon } from 'shared';
-import { statMod, calcAC, spellSlotsForCharacter, CLASS_SAVING_THROWS, effectiveWeaponProfs, findPath, hasOriginFeat, isWeapon, isArmor, SKILL_ABILITY, trySpendResource, resourceCurrent, magicInitiateResourceKey } from 'shared';
-import { getCharacter, updateCharacter, readChatLog, appendChatLog, saveEncounter, clearEncounter, clearDungeon, saveDungeon, listCharacters, loadPartyAllies, readQuests, writeQuests, readManifest, readNemeses, getConfig, getHouseRules } from '../storage.ts';
+import { statMod, calcAC, spellSlotsForCharacter, CLASS_SAVING_THROWS, effectiveWeaponProfs, findPath, hasOriginFeat, isWeapon, isArmor, SKILL_ABILITY, trySpendResource, resourceCurrent, magicInitiateResourceKey, closedDoorCells } from 'shared';
+import { getCharacter, updateCharacter, readChatLog, appendChatLog, saveEncounter, clearEncounter, clearDungeon, saveDungeon, listCharacters, loadPartyAllies, readManifest, readNemeses, getConfig, getHouseRules } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateCombatFlavour, evaluateNemesisCandidates } from '../session-processor/imagePrompts.ts';
 import { toClientDungeon } from '../dungeon/index.ts';
@@ -321,17 +321,20 @@ export async function walkParticipant(
     ? { gx: gx + Math.sign(gx - targetPos.gx) * maxSteps, gy: gy + Math.sign(gy - targetPos.gy) * maxSteps }
     : targetPos;
 
-  const cells = dungeons.get(cid)?.cells;
+  const dungeon = dungeons.get(cid);
+  const cells = dungeon?.cells;
+  const doorBlocked = dungeon ? closedDoorCells(dungeon, { forMovement: true }) : undefined;
   const startPositions = tokenPositions.get(cid) ?? {};
   const occupied = new Set(
     Object.entries(startPositions).filter(([k]) => k !== key).map(([, p]) => `${p.gx},${p.gy}`),
   );
   // If every detour is also blocked by other combatants, fall back to the wall-only route so
   // the actor still makes partial progress and stops at the first occupied cell (below), rather
-  // than not moving at all — same graceful degradation as the pre-occupancy-aware behavior.
+  // than not moving at all — same graceful degradation as the pre-occupancy-aware behavior. A
+  // shut door blocks either route the same as a wall.
   const path = cells
-    ? (findPath(cells, gx, gy, destination.gx, destination.gy, occupied) ??
-      findPath(cells, gx, gy, destination.gx, destination.gy))
+    ? (findPath(cells, gx, gy, destination.gx, destination.gy, occupied, doorBlocked) ??
+      findPath(cells, gx, gy, destination.gx, destination.gy, undefined, doorBlocked))
     : null;
 
   for (let step = 0; step < maxSteps; step++) {
@@ -1589,18 +1592,6 @@ export function endCombatDefeated(cid: string): void {
   }, 8000);
 }
 
-// Resolves a quest by id if it exists and isn't already resolved — shared by every mechanical
-// auto-resolve hook (boss death, dungeon exit) so none of them have to remember to emit quest:update.
-export async function resolveQuest(cid: string, questId: string): Promise<void> {
-  const quests = await readQuests(cid);
-  const quest = quests.find(q => q.id === questId);
-  if (!quest || quest.status === 'resolved') return;
-  quest.status = 'resolved';
-  await writeQuests(cid, quests);
-  const manifest = await readManifest(cid);
-  io.to(ROOM).emit('quest:update', { quests, act: manifest?.act ?? 1 });
-}
-
 export async function applyDamageToCreature(cid: string, targetId: string, damage: number, opts?: { sourceId?: string; isCrit?: boolean }): Promise<void> {
   const encounter = encounters.get(cid);
   if (!encounter) return;
@@ -1638,13 +1629,6 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
     });
     // A dead participant's lingering effects go with it — nothing should tick for a corpse.
     engine.unregisterByOwner(targetId);
-
-    // Creature.from() doesn't carry isBoss (combat participants only need combat-relevant fields),
-    // so check the dungeon entity itself rather than the live creature/encounter — it's the
-    // one place the flag survives the manifest -> entity -> Creature hop unmodified.
-    if (dungeons.get(cid)?.entities.find(e => e.id === targetId)?.statBlock?.isBoss) {
-      void resolveQuest(cid, `boss-${targetId}`);
-    }
 
     if (encounter.allEnemiesDead()) {
       const enemyStatBlocks = encounter.enemies

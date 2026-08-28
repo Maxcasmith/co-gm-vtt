@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { Dungeon, Player } from 'shared';
-import { findPath } from 'shared';
+import { findPath, closedDoorCells } from 'shared';
 import { dispatch } from '../events.ts';
 import { CELL, MIN_ZOOM, MAX_ZOOM } from './constants.ts';
 
@@ -27,6 +27,7 @@ export function useCanvasPointerControls(
   movementRef: RefObject<number>,
   dungeonRef: RefObject<Dungeon | undefined>,
   showBattleMapRef: RefObject<boolean | undefined>,
+  visibleCellsRef: RefObject<Set<string> | null>,
 ) {
   // Pan + zoom state for dungeon navigation
   const dungeonPanRef  = useRef({ x: 0, y: 0 });
@@ -137,9 +138,10 @@ export function useCanvasPointerControls(
         }
         if (oldPos) {
           const cells = dungeonRef.current?.cells;
-          const path = cells ? findPath(cells, oldPos.gx, oldPos.gy, gx, gy) : null;
+          const doorBlocked = dungeonRef.current ? closedDoorCells(dungeonRef.current, { forMovement: true }) : undefined;
+          const path = cells ? findPath(cells, oldPos.gx, oldPos.gy, gx, gy, undefined, doorBlocked) : null;
 
-          // Walled off (or off-grid) — no legal route at all, snap back rather than teleport through.
+          // Walled off, door-blocked (or off-grid) — no legal route at all, snap back rather than teleport through.
           if (cells && !path) {
             dispatch('vtt:token:move', { tokenId: drag.id, gx: oldPos.gx, gy: oldPos.gy });
             dragRef.current = null;
@@ -155,10 +157,14 @@ export function useCanvasPointerControls(
           // into route selection itself (a cheaper detour around a hazard isn't considered).
           const hazards = dungeonRef.current?.hazardCells;
           const costOf = (cx: number, cy: number) => 5 * (hazards?.find(h => h.gx === cx && h.gy === cy)?.multiplier ?? 1);
+          const visible = visibleCellsRef.current;
           let steps = 0;
           let spentFt = 0;
           if (path) {
             for (const cell of path) {
+              // A route can walk toward an unseen tile, but never past the edge of what's
+              // currently visible — same treatment as running out of movement budget below.
+              if (visible && !visible.has(`${cell.gx},${cell.gy}`)) break;
               const stepCost = costOf(cell.gx, cell.gy);
               if (spentFt + stepCost > movementRef.current) break;
               spentFt += stepCost;
@@ -183,7 +189,10 @@ export function useCanvasPointerControls(
       const cellsForDrop = dungeonRef.current?.cells;
       if (cellsForDrop) {
         const origin = tokenPositionsRef.current?.[drag.id];
-        const blocked = origin ? !findPath(cellsForDrop, origin.gx, origin.gy, gx, gy) : cellsForDrop[gy]?.[gx] !== 1;
+        const doorBlockedForDrop = dungeonRef.current ? closedDoorCells(dungeonRef.current, { forMovement: true }) : undefined;
+        const blocked = origin
+          ? !findPath(cellsForDrop, origin.gx, origin.gy, gx, gy, undefined, doorBlockedForDrop)
+          : cellsForDrop[gy]?.[gx] !== 1 || doorBlockedForDrop?.has(`${gx},${gy}`);
         if (blocked) {
           dragRef.current = null;
           if (canvasRef.current) canvasRef.current.style.cursor = 'default';

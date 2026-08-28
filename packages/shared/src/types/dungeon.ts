@@ -183,15 +183,20 @@ export interface Dungeon {
   lightSources?: Record<string, number>;
 }
 
-// Every cell a currently-shut, opaque door occupies — a floor cell (`1`) in the grid, so nothing
-// in `cells` alone marks it as blocking. Every hasLineOfSight/visibility-polygon caller that
-// wants a closed door to act like a wall passes this in; callers happy to ignore doors omit it.
+// Every cell a currently-shut door occupies — a floor cell (`1`) in the grid, so nothing in
+// `cells` alone marks it as blocking. Every hasLineOfSight/visibility-polygon caller that wants a
+// closed door to act like a wall passes this in; callers happy to ignore doors omit it.
 // Computed fresh from `dungeon.entities` rather than cached anywhere, since a door's state can
 // change any time a player clicks it (see toggleDoor).
-export function closedDoorCells(dungeon: Dungeon): Set<string> {
+//
+// `forMovement` drops the transparency check: a barred gate never blocks sight (that's what
+// transparency > 0 means), but the bars themselves still physically block movement while shut —
+// only an *open* door lets a token through. Sight-blocking callers (fog of war, light) omit it.
+export function closedDoorCells(dungeon: Dungeon, opts?: { forMovement?: boolean }): Set<string> {
   const blocked = new Set<string>();
   for (const e of dungeon.entities) {
-    if (e.type !== "door" || e.doorState === "open" || (e.transparency ?? 0) > 0) continue;
+    if (e.type !== "door" || e.doorState === "open") continue;
+    if (!opts?.forMovement && (e.transparency ?? 0) > 0) continue;
     const w = e.width ?? 1, h = e.height ?? 1;
     for (let dy = 0; dy < h; dy++) {
       for (let dx = 0; dx < w; dx++) blocked.add(`${e.x + dx},${e.y + dy}`);
@@ -277,7 +282,9 @@ export function crossesObscuredArea(
 // target (excluding start), or null if the target is off-grid, on a wall, or unreachable.
 // `occupied` (same "gx,gy" string-set idiom as resolveForcedMovement) treats other combatants'
 // cells as temporarily impassable, so a mover routes around them instead of queueing behind
-// them — the target cell itself is never blocked by `occupied`.
+// them — the target cell itself is never blocked by `occupied`. `wallBlocked` (closed doors, see
+// closedDoorCells with forMovement) acts like a wall instead — unlike `occupied`, it blocks the
+// target cell too, since you can't end your move standing inside a shut door.
 export function findPath(
   cells: number[][],
   startX: number,
@@ -285,11 +292,12 @@ export function findPath(
   targetX: number,
   targetY: number,
   occupied?: Set<string>,
+  wallBlocked?: Set<string>,
 ): { gx: number; gy: number }[] | null {
   const height = cells.length;
   const width = cells[0]?.length ?? 0;
   if (targetX < 0 || targetY < 0 || targetX >= width || targetY >= height) return null;
-  if (cells[targetY]?.[targetX] !== 1) return null;
+  if (cells[targetY]?.[targetX] !== 1 || wallBlocked?.has(`${targetX},${targetY}`)) return null;
   if (startX === targetX && startY === targetY) return [];
 
   const key = (x: number, y: number) => `${x},${y}`;
@@ -308,6 +316,7 @@ export function findPath(
         if (nx < 0 || ny < 0 || ny >= height || nx >= width) continue;
         if (cells[ny]?.[nx] !== 1) continue;
         const k = key(nx, ny);
+        if (wallBlocked?.has(k)) continue;
         if (visited.has(k)) continue;
         if (occupied?.has(k) && k !== targetKey) continue;
         visited.add(k);
@@ -339,6 +348,7 @@ export function resolveForcedMovement(
   originGy: number,
   distanceFeet: number,
   mode: "push" | "pull",
+  wallBlocked?: Set<string>,
 ): { gx: number; gy: number } {
   let gx = fromGx,
     gy = fromGy;
@@ -352,6 +362,7 @@ export function resolveForcedMovement(
       ny = gy + stepY;
     if (nx < 0 || ny < 0) break;
     if (cells && cells[ny]?.[nx] !== 1) break;
+    if (wallBlocked?.has(`${nx},${ny}`)) break;
     if (occupied.has(`${nx},${ny}`)) break;
     gx = nx;
     gy = ny;

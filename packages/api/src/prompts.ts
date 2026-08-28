@@ -290,5 +290,5 @@ Generate exactly ONE concrete, player-facing goal — what the party is here to 
 Use a kebab-case ID not in this list: ${existingIdList}
 
 Return ONLY a single valid JSON object — no markdown fences, no explanation:
-{ "id": "kebab-slug", "name": "Goal Name", "description": "1-2 sentences — what the party is here to do. This becomes the dungeon's design brief, so be concrete: name what's being sought/stopped/rescued." }`;
+{ "id": "kebab-slug", "name": "Short, evocative quest title (2-6 words) — not a restatement of the description, a proper name for it, e.g. 'The Missing Cartographer', 'Silence the Ritual'.", "description": "2-3 short bullet points, one per line, each starting with '- ' — concrete, distinct beats of what the party is here to do. This becomes the dungeon's design brief, so name what's being sought/stopped/rescued." }`;
 }

@@ -1,6 +1,9 @@
 // Wall-aware reachable cells within `maxSteps` (8-directional, uniform cost) — exploration movement
-// cap + highlight. Returns "gx,gy" keys, including the start cell.
-export function bfsReachable(cells: number[][], startX: number, startY: number, maxSteps: number): Set<string> {
+// cap + highlight. Returns "gx,gy" keys, including the start cell. `wallBlocked` (closed doors) and
+// `visible` (fog-of-war cells the mover can currently see, see useVision's visibleCells) each trim
+// the result further when passed — a shut door blocks like a wall, an unseen cell is never a legal
+// drag target even if a walkable route reaches it.
+export function bfsReachable(cells: number[][], startX: number, startY: number, maxSteps: number, wallBlocked?: Set<string>, visible?: Set<string>): Set<string> {
   const key = (x: number, y: number) => `${x},${y}`;
   const height = cells.length;
   const width = cells[0]?.length ?? 0;
@@ -16,13 +19,14 @@ export function bfsReachable(cells: number[][], startX: number, startY: number, 
         if (nx < 0 || ny < 0 || ny >= height || nx >= width) continue;
         if (cells[ny]?.[nx] !== 1) continue;
         const k = key(nx, ny);
+        if (wallBlocked?.has(k)) continue;
         if (visited.has(k)) continue;
-        visited.add(k);
         queue.push({ x: nx, y: ny, steps: steps + 1 });
+        visited.add(k);
       }
     }
   }
-  return visited;
+  return visible ? new Set([...visited].filter(k => visible.has(k))) : visited;
 }
 
 // Casts one ray from (ox,oy) in direction (dirX,dirY) — a unit vector — through the grid using

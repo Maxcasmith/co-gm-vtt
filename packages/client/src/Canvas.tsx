@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Player, EnemyStatBlock, Dungeon, Character, TurnOrderEntry } from 'shared';
-import { parseRangeFeet, spellTargetCount } from 'shared';
+import { parseRangeFeet, spellTargetCount, closedDoorCells } from 'shared';
 import { dispatch, on } from './events.ts';
 import type { TargetingStartPayload } from './events.ts';
 import { CELL, TOKEN_R, DOOR_BUTTON_R } from './canvas/constants.ts';
@@ -65,23 +65,28 @@ export default function Canvas({ player, characterId, character, connected, show
   const dungeonRef          = useRef(dungeon);
   const showBattleMapRef    = useRef(showBattleMap);
   const connectedRef        = useRef(connected);
+  // Fog-of-war cells the player can currently see — a drag can't commit to (or walk past) a tile
+  // outside this set, same as it can't cross a wall. Ref so the window-level drag handlers (empty
+  // deps) read the latest value without re-subscribing.
+  const visibleCellsRef     = useRef(visibleCells);
   useEffect(() => { playerRef.current = player; },               [player]);
   useEffect(() => { tokenPositionsRef.current = tokenPositions; }, [tokenPositions]);
   useEffect(() => { movementRef.current = movementRemaining; },   [movementRemaining]);
   useEffect(() => { dungeonRef.current = dungeon; },              [dungeon]);
   useEffect(() => { showBattleMapRef.current = showBattleMap; },  [showBattleMap]);
   useEffect(() => { connectedRef.current = connected; },          [connected]);
+  useEffect(() => { visibleCellsRef.current = visibleCells; },    [visibleCells]);
 
   const {
     dungeonPanRef, dungeonZoomRef, isPanningRef, panStartRef, dragRef, dragOffset, reachableRef, dragTick, sizeTick,
-  } = useCanvasPointerControls(ref, player, tokenPositions, dungeon, playerRef, tokenPositionsRef, movementRef, dungeonRef, showBattleMapRef);
+  } = useCanvasPointerControls(ref, player, tokenPositions, dungeon, playerRef, tokenPositionsRef, movementRef, dungeonRef, showBattleMapRef, visibleCellsRef);
 
   // Wall-aware combat move-reach highlight — computed once when the player's own token drag
   // starts (movementRemaining doesn't change mid-drag), not re-walked by drawScene every redraw.
   const combatReachableRef = useRef<Set<string> | null>(null);
 
   const {
-    floatEffectsRef, flashEffectsRef, tokenEffectsRef, swingEffectsRef, concentrating, marks, animTick,
+    floatEffectsRef, flashEffectsRef, tokenEffectsRef, swingEffectsRef, concentrating, marks, raging, animTick,
   } = useCombatEffects(tokenPositionsRef, connectedRef);
 
   // Targeting state — ref for window handlers, state for draw trigger
@@ -256,7 +261,7 @@ export default function Canvas({ player, characterId, character, connected, show
 
     latestDrawParamsRef.current = {
       showBattleMap, dungeon, encounter, hoveredTokenKey, tokenPositions, player, movementRemaining,
-      targeting, connected, deadPlayerNames, downPlayerNames, concentrating, marks, deadCreatureIds,
+      targeting, connected, deadPlayerNames, downPlayerNames, concentrating, marks, raging, deadCreatureIds,
       companions, visiblePolygon, litCells, lightSources, senses, elevations, visibleCells,
       hoverHitChance, multiTargetCursor, multiTargetsPicked,
       floorVariantRef, dungeonZoomRef, dungeonPanRef, dragRef, reachableRef, combatReachableRef, groundCacheRef, aoeMouseRef,
@@ -273,7 +278,7 @@ export default function Canvas({ player, characterId, character, connected, show
       const cx = c.getContext('2d');
       if (cx) drawScene(c, cx, params);
     });
-  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick, aoeTick, visibleCells, visiblePolygon, senses, hoverHitChance, hoveredTokenKey, multiTargetsPicked, multiTargetCursor, concentrating, marks]);
+  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick, aoeTick, visibleCells, visiblePolygon, senses, hoverHitChance, hoveredTokenKey, multiTargetsPicked, multiTargetCursor, concentrating, marks, raging]);
 
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!showBattleMap) return;
@@ -480,11 +485,14 @@ export default function Canvas({ player, characterId, character, connected, show
       const cx = pos.gx * hdCellSz + hdCellSz / 2;
       const cy = pos.gy * hdCellSz + hdCellSz / 2;
       if (Math.hypot(mx - cx, my - cy) <= TOKEN_R) {
+        // Closed doors block a walked route the same as a wall; the fog-of-war set (visibleCells)
+        // caps it further — a route can't cross into a tile the player hasn't actually seen yet.
+        const doorBlocked = dungeon ? closedDoorCells(dungeon, { forMovement: true }) : undefined;
         reachableRef.current = exploring && dungeon
-          ? bfsReachable(dungeon.cells, pos.gx, pos.gy, Math.max(1, Math.floor(speed / 5)))
+          ? bfsReachable(dungeon.cells, pos.gx, pos.gy, Math.max(1, Math.floor(speed / 5)), doorBlocked, visibleCells ?? undefined)
           : null;
         combatReachableRef.current = !exploring && dungeon && movementRemaining > 0
-          ? bfsReachable(dungeon.cells, pos.gx, pos.gy, Math.floor(movementRemaining / 5))
+          ? bfsReachable(dungeon.cells, pos.gx, pos.gy, Math.floor(movementRemaining / 5), doorBlocked, visibleCells ?? undefined)
           : null;
         // Store drag position in screen space (includes pan so drag line renders correctly)
         dragRef.current = { id: player, x: cx + panX, y: cy + panY };

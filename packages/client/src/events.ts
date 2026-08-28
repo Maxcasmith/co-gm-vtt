@@ -60,6 +60,7 @@ export interface PlayerHealPayload { characterId: string; characterName: string;
 export interface DamageDealtPayload { targetId: string; targetName: string; damage: number; isCrit: boolean }
 export interface CombatConcentrationPayload { targetId: string; targetName: string; spellName: string | null }
 export interface CombatMarkPayload { casterId: string; targetId: string; targetName: string; spellName: string; active: boolean }
+export interface CombatRagingPayload { targetId: string; targetName: string; active: boolean }
 export interface PlayerSlotsPayload { characterId: string; currentSpellSlots1: number; maxSpellSlots1: number }
 export interface RestResultPayload { resting: boolean; restType: 'short' | 'long'; currentHp?: number; maxHp?: number; hpGained?: number; currentSpellSlots1?: number; maxSpellSlots1?: number; worldEvents?: string }
 export interface DeathSavePayload { characterName: string; roll: number; isNatural20: boolean; isNatural1: boolean; success: boolean; successes: number; failures: number; stable: boolean; dead: boolean }
@@ -223,6 +224,7 @@ export interface VTTEventMap {
   'vtt:combat:damage:dealt':    DamageDealtPayload;
   'vtt:combat:concentration':   CombatConcentrationPayload;
   'vtt:combat:mark':            CombatMarkPayload;
+  'vtt:combat:raging':          CombatRagingPayload;
   'vtt:combat:player:slots':    PlayerSlotsPayload;
   'vtt:rest:result':            RestResultPayload;
   'vtt:combat:death:save':      DeathSavePayload;

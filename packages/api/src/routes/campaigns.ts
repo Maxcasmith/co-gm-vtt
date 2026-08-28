@@ -11,7 +11,7 @@ import {
   readCampaignFile, writeEntity,
   listEntitySlugs, readEntity, saveDungeon, saveDungeonAscii, writeManifest, readManifest, emptyManifest, readQuests, writeQuests,
 } from '../storage.ts';
-import { generateDungeon, buildDungeonQuests } from '../dungeon/index.ts';
+import { generateDungeon } from '../dungeon/index.ts';
 import { generateCharacterStoryboard, generateScenarioStoryboard, SLIDE_COUNT } from '../dungeon/storyboard.ts';
 import { calcMaxHp } from '../combat/dice.ts';
 import { getFeatureProvider } from '../providers/index.ts';
@@ -241,11 +241,19 @@ campaignsRouter.post('/generate', async (req, res) => {
       await saveDungeonAscii(slug, dungeon);
 
       const today = new Date().toISOString().slice(0, 10);
-      const goalQuests: Quest[] = (dungeon.goals ?? []).map(goal => ({
-        id: `goal-${slugify(goal)}`, name: goal, description: goal,
-        status: 'open' as const, log: [], addedAt: today, sourceDungeonId: dungeonId,
-      }));
-      await writeQuests(slug, buildDungeonQuests(dungeon, [...(await readQuests(slug)), ...goalQuests]));
+      // Prefer predefinedQuests' own name/description (the LLM-authored quest, distinct title
+      // from its bullet-point brief) — dungeon.goals is just its description text, flattened for
+      // the manifest prompt. Only falls back to goals when the goal call above failed outright.
+      const goalQuests: Quest[] = predefinedQuests.length
+        ? predefinedQuests.map(q => ({
+            id: `goal-${slugify(q.name)}`, name: q.name, description: q.description,
+            status: 'open' as const, log: [], addedAt: today, sourceDungeonId: dungeonId,
+          }))
+        : (dungeon.goals ?? []).map(goal => ({
+            id: `goal-${slugify(goal)}`, name: goal, description: goal,
+            status: 'open' as const, log: [], addedAt: today, sourceDungeonId: dungeonId,
+          }));
+      await writeQuests(slug, [...(await readQuests(slug)), ...goalQuests]);
 
       send({ type: 'progress', message: 'Finishing scenario storyboard…' });
       await storyboardDone;

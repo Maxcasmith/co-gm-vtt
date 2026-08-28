@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { Character } from 'shared';
+import type { Character, ScenarioStoryboard, StoryboardQueuePayload } from 'shared';
+import StoryboardOverlay from './StoryboardOverlay.tsx';
 import './app.css';
 
 interface Props { campaignId: string }
@@ -11,6 +12,10 @@ export default function GameLobbyPage({ campaignId }: Props) {
   // Dungeon-crawl worlds only — the rich scenario synopsis written before the dungeon itself (see
   // routes/campaigns.ts's dungeon-crawl branch). Absent for every other world type.
   const [synopsis, setSynopsis] = useState('');
+  // Also dungeon-crawl only, and only present once generation finished (see generateScenarioStoryboard) —
+  // its mere presence is the "was this generated" check, same as PartyMemberOverlay does for a character's own.
+  const [scenarioStoryboard, setScenarioStoryboard] = useState<ScenarioStoryboard | null>(null);
+  const [playingStoryboard, setPlayingStoryboard] = useState(false);
   const [party, setParty] = useState<Character[]>([]);
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -26,6 +31,10 @@ export default function GameLobbyPage({ campaignId }: Props) {
     fetch(`${API}/api/campaigns/${campaignId}/party`)
       .then(r => r.json())
       .then((chars: Character[]) => setParty(chars))
+      .catch(() => {});
+    fetch(`${API}/api/campaigns/${campaignId}/scenario-storyboard`)
+      .then(r => (r.ok ? r.json() : null))
+      .then((data: ScenarioStoryboard | null) => setScenarioStoryboard(data))
       .catch(() => {});
 
     const store = JSON.parse(localStorage.getItem('vtt-passwords') ?? '{}') as Record<string, string>;
@@ -53,6 +62,13 @@ export default function GameLobbyPage({ campaignId }: Props) {
     }
   }
 
+  if (playingStoryboard && scenarioStoryboard) {
+    const queue: StoryboardQueuePayload = {
+      entries: [{ characterId: 'scenario', characterName: '', slides: scenarioStoryboard.slides }],
+    };
+    return <StoryboardOverlay queue={queue} onDone={() => setPlayingStoryboard(false)} />;
+  }
+
   return (
     <div className="home">
       <div className="home-atmosphere" aria-hidden="true" />
@@ -64,6 +80,9 @@ export default function GameLobbyPage({ campaignId }: Props) {
 
         <div className="settings-body">
           {synopsis && <p className="lobby-synopsis">{synopsis}</p>}
+          {scenarioStoryboard && (
+            <button className="btn-play lobby-synopsis-play" onClick={() => setPlayingStoryboard(true)}>▶ Play Storyboard</button>
+          )}
           {party.length === 0 && (
             <p className="party-empty">There are currently no adventurers in the party.</p>
           )}

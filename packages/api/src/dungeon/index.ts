@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type { AppConfig, Dungeon, DungeonEntity, DungeonRoom, EnemyStatBlock, Quest } from 'shared';
+import type { AppConfig, Dungeon, DungeonEntity, DungeonRoom, EnemyStatBlock } from 'shared';
 import { slugifyTheme } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { fetchManifest } from './manifest.ts';
@@ -80,38 +80,6 @@ export async function generateDungeon(
   };
 
   return dungeon;
-}
-
-// The deterministic quests a freshly-generated dungeon should seed, merged into whatever quests
-// already exist for the campaign. Narrative goals are no longer derived here — they're generated
-// BEFORE the dungeon now (session-processor's generateDungeonQuests, called from effects.ts's
-// dungeon_gen handler) and already written with the dungeon's id by the time this runs; deriving
-// them again from dungeon.goals here would just duplicate them under a second, slug-based id.
-// "Defeat <boss>" and "Escape <dungeon>" are generated here in code, not by the LLM, so they carry
-// a deterministic id the mechanical systems (boss death, DUNGEON_EXIT) can resolve without any
-// narration having to remember to. No I/O here — deliberately pure, callers own read/write
-// (dungeon/index.ts has no storage.ts dependency, and storage.ts already depends on this file).
-export function buildDungeonQuests(dungeon: Dungeon, existingQuests: Quest[]): Quest[] {
-  const today = new Date().toISOString().slice(0, 10);
-  const toAdd: Quest[] = [];
-
-  // The boss is an undiscovered entity at generation time — naming it here would leak its
-  // identity into the quest log before the party has ever laid eyes on it (see prompts.ts's
-  // reveal discipline). Keep the quest generic; the narration names it once discovered.
-  const boss = dungeon.entities.find(e => e.type === 'creature' && e.statBlock?.isBoss);
-  if (boss) {
-    toAdd.push({ id: `boss-${boss.id}`, name: 'Defeat the boss', description: 'Defeat the boss lurking in this dungeon.', status: 'open', log: [], addedAt: today, sourceDungeonId: dungeon.id });
-  }
-
-  toAdd.push({ id: 'exit-dungeon', name: `Escape ${dungeon.name}`, description: `Find a way out of ${dungeon.name}.`, status: 'open', log: [], addedAt: today, sourceDungeonId: dungeon.id });
-
-  const merged = [...existingQuests];
-  for (const quest of toAdd) {
-    const existing = merged.find(q => q.id === quest.id);
-    if (existing) existing.status = 'open';
-    else merged.push(quest);
-  }
-  return merged;
 }
 
 // Combat-arena dungeon: one bare room sized for the encounter, no LLM calls — who spawns is

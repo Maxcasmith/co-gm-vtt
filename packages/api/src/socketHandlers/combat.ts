@@ -1,12 +1,12 @@
 import type { TurnOrderEntry, Weapon, Spell, SpellAttackResult, SpellSaveOutcome, SpellSaveResult, CreatureType, Character, ActionResource, AttackContext, DungeonEntity, EffectSpec, AbilityKey, HookSpec } from 'shared';
-import { effectiveWeaponProfs, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, isAmmunition, isWeapon, statMod, parseRangeFeet, resolveForcedMovement, findPath, effectApplies, actionCostFromCastingTime, requiresConcentration, resolveSpellDamageDice, hasOriginFeat, hasClassLevel, crossesObscuredArea, ABILITY_DEFS, trySpendResource, trySpendResourceAmount, resourceCurrent, getSenses } from 'shared';
+import { effectiveWeaponProfs, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, isAmmunition, isWeapon, statMod, parseRangeFeet, resolveForcedMovement, findPath, effectApplies, actionCostFromCastingTime, requiresConcentration, resolveSpellDamageDice, hasOriginFeat, hasClassLevel, crossesObscuredArea, ABILITY_DEFS, trySpendResource, trySpendResourceAmount, resourceCurrent, getSenses, hasLineOfSight, closedDoorCells } from 'shared';
 import { randomUUID } from 'crypto';
 import { getCharacter, updateCharacter, saveEncounter, listCharacters, getConfig, appendChatLog, saveDungeon, getHouseRules } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateCombatFlavour, generateSpellSaveFlavour } from '../session-processor/imagePrompts.ts';
 import { Participant } from '../domain/encounter.ts';
 import { logError, logDebug } from '../logger.ts';
-import { io, ROOM, combatState, encounters, tokenPositions, dungeons, playerSocketIds, pendingWeaponBonuses, activeMarks, connected, getStateEngine, withLivePositions, STAT_FULL, HIT_DICE } from '../state.ts';
+import { io, ROOM, combatState, encounters, tokenPositions, dungeons, playerSocketIds, pendingWeaponBonuses, activeMarks, connected, getStateEngine, withLivePositions, STAT_FULL, HIT_DICE, PLAYER_SIGHT_RADIUS } from '../state.ts';
 import { toClientDungeon } from '../dungeon/index.ts';
 import { registerSpellHooks } from '../combat/stateEngine/registerSpellHooks.ts';
 import { RecurringDamageHook } from '../combat/stateEngine/hooks/RecurringDamageHook.ts';
@@ -694,6 +694,7 @@ export async function resolvePlayerAttack(
                       const moved = resolveForcedMovement(
                         dungeon?.cells, occupied, targetPos2.gx, targetPos2.gy, casterPos.gx, casterPos.gy,
                         e.distance, e.type === 'pull' ? 'pull' : 'push',
+                        dungeon ? closedDoorCells(dungeon, { forMovement: true }) : undefined,
                       );
                       if (moved.gx !== targetPos2.gx || moved.gy !== targetPos2.gy) {
                         positions2[targetId] = moved;
@@ -758,6 +759,7 @@ export async function resolvePlayerAttack(
           );
           const moved = resolveForcedMovement(
             dungeon?.cells, occupied, targetPos.gx, targetPos.gy, attackerPos.gx, attackerPos.gy, 5, 'push',
+            dungeon ? closedDoorCells(dungeon, { forMovement: true }) : undefined,
           );
           if (moved.gx !== targetPos.gx || moved.gy !== targetPos.gy) {
             positions[targetId] = moved;
@@ -979,6 +981,7 @@ export async function resolvePlayerSpellAttack(
               const moved2 = resolveForcedMovement(
                 dungeon2?.cells, occupied2, targetPos2.gx, targetPos2.gy, casterPos2.gx, casterPos2.gy,
                 forcedMove.distance, forcedMove.type === 'pull' ? 'pull' : 'push',
+                dungeon2 ? closedDoorCells(dungeon2, { forMovement: true }) : undefined,
               );
               if (moved2.gx !== targetPos2.gx || moved2.gy !== targetPos2.gy) {
                 positions2[targetId] = moved2;
@@ -1066,11 +1069,25 @@ export function registerCombatHandlers(ctx: JoinContext): void {
 
       // Backstop for the client's own wall-aware drop gating — reject a destination no walkable
       // route reaches from the token's last known cell (or, with no known cell yet, that isn't
-      // floor at all), rather than trusting whatever gx/gy the socket message carries.
-      const cells = dungeons.get(campaignId)?.cells;
+      // floor at all), rather than trusting whatever gx/gy the socket message carries. A shut
+      // door blocks a route the same as a wall.
+      const dungeon = dungeons.get(campaignId);
+      const cells = dungeon?.cells;
       if (cells) {
-        const blocked = origin ? !findPath(cells, origin.gx, origin.gy, gx, gy) : cells[gy]?.[gx] !== 1;
+        const doorBlocked = dungeon ? closedDoorCells(dungeon, { forMovement: true }) : undefined;
+        const blocked = origin
+          ? !findPath(cells, origin.gx, origin.gy, gx, gy, undefined, doorBlocked)
+          : cells[gy]?.[gx] !== 1 || doorBlocked?.has(`${gx},${gy}`);
         if (blocked) return;
+
+        // A player can't drag their own token to a tile outside their own line of sight — a
+        // GM-dragged creature/ally isn't gated (the GM already sees the whole map).
+        if (connected.has(tokenId) && origin && dungeon) {
+          const sightBlocked = closedDoorCells(dungeon);
+          const dist = Math.max(Math.abs(gx - origin.gx), Math.abs(gy - origin.gy));
+          const visible = dist <= PLAYER_SIGHT_RADIUS && hasLineOfSight(cells, origin.gx, origin.gy, gx, gy, sightBlocked);
+          if (!visible) return;
+        }
       }
 
       positions[tokenId] = { gx, gy };
@@ -1646,6 +1663,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
             const dryMove = resolveForcedMovement(
               dungeon0?.cells, occupied0, targetPos0.gx, targetPos0.gy, casterPos0.gx, casterPos0.gy,
               forcedMove.distance, forcedMove.type === 'pull' ? 'pull' : 'push',
+              dungeon0 ? closedDoorCells(dungeon0, { forMovement: true }) : undefined,
             );
             const endDistFt = Math.max(Math.abs(dryMove.gx - casterPos0.gx), Math.abs(dryMove.gy - casterPos0.gy)) * 5;
             pullDamageGateOk = endDistFt <= forcedMove.requireEndWithinFt;
@@ -1717,6 +1735,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
             const moved = resolveForcedMovement(
               dungeon?.cells, occupied, targetPos.gx, targetPos.gy, casterPos.gx, casterPos.gy,
               forcedMove.distance, forcedMove.type === 'pull' ? 'pull' : 'push',
+              dungeon ? closedDoorCells(dungeon, { forMovement: true }) : undefined,
             );
             if (moved.gx !== targetPos.gx || moved.gy !== targetPos.gy) {
               positions[targetKey] = moved;
@@ -1846,6 +1865,12 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           currentRound: encounter.currentRound?.number ?? 1,
           currentWorldTimeSecs: needsWorldTime ? await getWorldTimeSecs(cid) : undefined,
         });
+      }
+
+      // Rage's damage-resistance hooks have no visible client state otherwise — drives the
+      // "raging" token icon the same way combat:mark drives the marked-creature icon.
+      if (abilityKey === 'rage') {
+        io.to(ROOM).emit('combat:raging', { targetId: effectId, targetName: effectParticipant.name, active: true });
       }
 
       // Tinker's Magic — a "pick a name from the list" ability grants that item to inventory

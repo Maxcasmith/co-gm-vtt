@@ -24,6 +24,14 @@ export default function QuestLog({ open, onClose, quests, act }: Props) {
 
   const visible = quests.filter(q => q.status !== 'undiscovered');
 
+  // Quest descriptions come as either a single sentence (older/hardcoded quests) or several
+  // "- " bullet lines (LLM-authored dungeon goals) — split into real list items only when there's
+  // more than one, so a plain one-liner still renders as an ordinary paragraph.
+  function descriptionBullets(description: string): string[] | null {
+    const lines = description.split('\n').map(l => l.replace(/^[-•*]\s*/, '').trim()).filter(Boolean);
+    return lines.length > 1 ? lines : null;
+  }
+
   function toggle(id: string) {
     setExpanded(prev => {
       const next = new Set(prev);
@@ -59,7 +67,16 @@ export default function QuestLog({ open, onClose, quests, act }: Props) {
                 </button>
                 {expanded.has(quest.id) && (
                   <div className="quest-detail">
-                    <p className="quest-description">{quest.description}</p>
+                    {(() => {
+                      const bullets = descriptionBullets(quest.description);
+                      return bullets ? (
+                        <ul className="quest-description-list">
+                          {bullets.map((line, i) => <li key={i} className="quest-description-item">{line}</li>)}
+                        </ul>
+                      ) : (
+                        <p className="quest-description">{quest.description}</p>
+                      );
+                    })()}
                     {quest.log.length > 0 && (
                       <ul className="quest-log-entries">
                         {quest.log.map((entry, i) => (

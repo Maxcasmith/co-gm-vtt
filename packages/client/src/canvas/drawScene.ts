@@ -6,7 +6,7 @@ import { getTextureLoadVersion } from '../dungeonThemes.ts';
 import { CELL, TOKEN_R, DUNGEON_ENTITY_R, FLOAT_DUR, DUNGEON_BG, FOG_OF_WAR_COLOR, DOOR_AWARENESS_RADIUS, DOOR_BUTTON_R } from './constants.ts';
 import { inArea, resolveAoeOrigin, drawAoeShape, nearestRingCell } from './aoe.ts';
 import { drawToken, drawHitFlash, drawTargetRing, drawDeadMarker, drawDeadSkull, drawTokenEffect, drawConcentrationBadge } from './drawToken.ts';
-import { drawTokenIconStack, markIconFor } from './tokenIcons.ts';
+import { drawTokenIconStack, markIconFor, type TokenIconKey } from './tokenIcons.ts';
 import { drawDoorMarker } from './drawDoor.ts';
 import { drawHazardCell } from './drawHazard.ts';
 import { drawSwing } from './drawSwing.ts';
@@ -100,6 +100,8 @@ export interface DrawSceneParams {
   concentrating: Record<string, string>;
   /** Keyed the same way as `concentrating` but by the MARKED creature, not the caster — a curse (Hunter's Mark, Hex) target-locked onto this token; see tokenIcons.ts. */
   marks: Record<string, string>;
+  /** Who's currently raging — drives the 'raging' token icon; see tokenIcons.ts. */
+  raging: Record<string, boolean>;
   deadCreatureIds?: Set<string>;
   companions: TurnOrderEntry[];
   visiblePolygon: { x: number; y: number }[] | null;
@@ -156,7 +158,7 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
   const __meta: Record<string, number | string> = {};
   const {
     showBattleMap, dungeon, encounter, hoveredTokenKey, tokenPositions, player, movementRemaining,
-    targeting, connected, deadPlayerNames, downPlayerNames, concentrating, marks, deadCreatureIds,
+    targeting, connected, deadPlayerNames, downPlayerNames, concentrating, marks, raging, deadCreatureIds,
     companions, visiblePolygon, litCells, lightSources, senses, elevations, visibleCells,
     hoverHitChance, multiTargetCursor, multiTargetsPicked,
     floorVariantRef, dungeonZoomRef, dungeonPanRef, dragRef, reachableRef, combatReachableRef, groundCacheRef, aoeMouseRef,
@@ -458,7 +460,8 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
             if (isDead) drawDeadMarker(ctx, x, y, tokenR);
             if (concentrating[name]) drawConcentrationBadge(ctx, x, y, tokenR);
             const markIcon = marks[name] && markIconFor(marks[name]);
-            if (markIcon) drawTokenIconStack(ctx, x, y, tokenR, [markIcon]);
+            const icons: TokenIconKey[] = [...(raging[name] ? ['raging' as const] : []), ...(markIcon ? [markIcon] : [])];
+            if (icons.length) drawTokenIconStack(ctx, x, y, tokenR, icons);
           });
         });
 
@@ -513,7 +516,8 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
             tokenEffectsRef.current.filter(e => e.tokenKey === enemy.id).forEach(e => drawTokenEffect(ctx, x, y, tokenR, e));
             if (concentrating[enemy.id]) drawConcentrationBadge(ctx, x, y, tokenR);
             const markIcon = marks[enemy.id] && markIconFor(marks[enemy.id]);
-            if (markIcon) drawTokenIconStack(ctx, x, y, tokenR, [markIcon]);
+            const icons: TokenIconKey[] = [...(raging[enemy.id] ? ['raging' as const] : []), ...(markIcon ? [markIcon] : [])];
+            if (icons.length) drawTokenIconStack(ctx, x, y, tokenR, icons);
           });
         });
 
@@ -616,7 +620,8 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
             if (isDead) drawDeadMarker(ctx, x, y, tokenR);
             if (concentrating[player]) drawConcentrationBadge(ctx, x, y, tokenR);
             const markIcon = marks[player] && markIconFor(marks[player]);
-            if (markIcon) drawTokenIconStack(ctx, x, y, tokenR, [markIcon]);
+            const icons: TokenIconKey[] = [...(raging[player] ? ['raging' as const] : []), ...(markIcon ? [markIcon] : [])];
+            if (icons.length) drawTokenIconStack(ctx, x, y, tokenR, icons);
           });
         }
 

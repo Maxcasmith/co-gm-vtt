@@ -29,6 +29,10 @@ export function useCombatEffects(
   // id/name (unlike `concentrating`, which is keyed by the caster) — feeds drawTokenIconStack via
   // markIconFor. See tokenIcons.ts for the icon-framework side of this.
   const [marks, setMarks] = useState<Record<string, string>>({});
+  // Who's currently raging, keyed by both id and name like `concentrating` — feeds
+  // drawTokenIconStack's 'raging' icon. Only ever set true (Rage's endOfCombat hooks have no
+  // early-end tracking, see abilities.ts) — cleared on combat end below.
+  const [raging, setRaging] = useState<Record<string, boolean>>({});
   const [animTick, setAnimTick] = useState(0);
   const animRafRef = useRef<number | null>(null);
 
@@ -178,7 +182,15 @@ export function useCombatEffects(
       return next;
     });
   }), []);
-  useEffect(() => on('vtt:combat:state', ({ active }) => { if (!active) { setConcentrating({}); setMarks({}); } }), []);
+  useEffect(() => on('vtt:combat:raging', ({ targetId, targetName, active }) => {
+    setRaging(prev => {
+      const next = { ...prev };
+      if (!active) { delete next[targetId]; delete next[targetName]; }
+      else { next[targetId] = true; next[targetName] = true; }
+      return next;
+    });
+  }), []);
+  useEffect(() => on('vtt:combat:state', ({ active }) => { if (!active) { setConcentrating({}); setMarks({}); setRaging({}); } }), []);
 
-  return { floatEffectsRef, flashEffectsRef, tokenEffectsRef, swingEffectsRef, concentrating, marks, animTick };
+  return { floatEffectsRef, flashEffectsRef, tokenEffectsRef, swingEffectsRef, concentrating, marks, raging, animTick };
 }

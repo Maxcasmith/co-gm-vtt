@@ -3,7 +3,7 @@ import { statMod, addCurrency, removeCurrency } from 'shared';
 import { randomUUID } from 'crypto';
 import { updateCharacter, listCharacters, readEntity, writeEntity, readManifest, writeManifest, emptyManifest, parseEntityLinks, clearDungeon, getConfig, readChatLog, saveDungeon, saveDungeonAscii, readQuests, writeQuests, loadPartyAllies, savePartyAllies, appendChatLog, readNemeses, writeNemeses } from './storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
-import { generateDungeon, toClientDungeon, buildDungeonQuests } from './dungeon/index.ts';
+import { generateDungeon, toClientDungeon } from './dungeon/index.ts';
 import { generateDungeonQuests } from './session-processor/index.ts';
 import { Encounter, Team, Participant } from './domain/encounter.ts';
 import { Creature } from './domain/creature.ts';
@@ -14,7 +14,7 @@ import {
   NEMESIS_COOLDOWN_SESSIONS, NEMESIS_CAP_PER_TARGET, NEMESIS_MAX_DEATHS, ALLY_XP_PER_LEVEL, withLivePositions,
 } from './state.ts';
 import { D20Roll, toSlug, escalateCr } from './combat/dice.ts';
-import { rollPlayerInitiatives, addToTurnOrder, resolveQuest, sweepGameTimeExpiries, trySpendSpellSlot } from './combat/runtime.ts';
+import { rollPlayerInitiatives, addToTurnOrder, sweepGameTimeExpiries, trySpendSpellSlot } from './combat/runtime.ts';
 import { generateAndBroadcastEnemies } from './dungeon/runtime.ts';
 import { findSpell } from './routes/spells.ts';
 
@@ -132,16 +132,8 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
       await saveDungeonAscii(cid, dungeon);
       io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
       console.log(`[dungeon] generated and broadcast: ${dungeon.name} (${dungeon.rooms.length} rooms, ${dungeon.entities.length} entities)`);
-
-      // buildDungeonQuests only adds the deterministic boss/escape entries now — the goal-derived
-      // quest(s) already exist, generated before the dungeon and written above.
-      const quests = buildDungeonQuests(dungeon, await readQuests(cid));
-      await writeQuests(cid, quests);
-      const questManifest = await readManifest(cid);
-      io.to(ROOM).emit('quest:update', { quests, act: questManifest?.act ?? 1 });
     } else if (effect.type === 'dungeon_exit') {
       if (combatState.get(cid) || !dungeons.has(cid)) return; // don't rip the map out from under an active fight, or if there's nothing loaded
-      await resolveQuest(cid, 'exit-dungeon');
       dungeons.delete(cid);
       microDungeons.delete(cid);
       await clearDungeon(cid);

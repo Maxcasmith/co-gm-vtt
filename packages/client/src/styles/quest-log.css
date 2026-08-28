@@ -69,6 +69,21 @@
   margin: 10px 0 8px;
 }
 
+.quest-description-list {
+  list-style: disc;
+  margin: 10px 0 8px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.quest-description-item {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
 .quest-log-entries {
   list-style: none;
   padding: 0;

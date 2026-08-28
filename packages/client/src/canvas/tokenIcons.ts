@@ -7,7 +7,7 @@
  * the one existing caller) had to.
  */
 
-export type TokenIconKey = 'marked';
+export type TokenIconKey = 'marked' | 'raging';
 
 /** Crosshair-in-a-circle — reads as "target-locked" at a glance. */
 function drawCrosshairIcon(ctx: CanvasRenderingContext2D, x: number, y: number, r: number): void {
@@ -31,8 +31,30 @@ function drawCrosshairIcon(ctx: CanvasRenderingContext2D, x: number, y: number, 
   ctx.stroke();
 }
 
+/** Flame-in-a-circle — reads as "raging" at a glance. */
+function drawFlameIcon(ctx: CanvasRenderingContext2D, x: number, y: number, r: number): void {
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(10,8,16,0.85)';
+  ctx.fill();
+  ctx.lineWidth = Math.max(1, r * 0.2);
+  ctx.strokeStyle = '#ff8c1a';
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(x, y + r * 0.6);
+  ctx.bezierCurveTo(x - r * 0.55, y + r * 0.15, x - r * 0.35, y - r * 0.35, x, y - r * 0.65);
+  ctx.bezierCurveTo(x + r * 0.15, y - r * 0.15, x + r * 0.4, y + r * 0.05, x + r * 0.15, y + r * 0.3);
+  ctx.bezierCurveTo(x + r * 0.35, y + r * 0.15, x + r * 0.45, y - r * 0.05, x + r * 0.4, y - r * 0.2);
+  ctx.bezierCurveTo(x + r * 0.6, y + r * 0.1, x + r * 0.4, y + r * 0.55, x, y + r * 0.6);
+  ctx.closePath();
+  ctx.fillStyle = '#ffb347';
+  ctx.fill();
+}
+
 const ICON_DRAWERS: Record<TokenIconKey, (ctx: CanvasRenderingContext2D, x: number, y: number, r: number) => void> = {
   marked: drawCrosshairIcon,
+  raging: drawFlameIcon,
 };
 
 /** Which icon (if any) a `combat:mark` spellName maps to — extend as more target-locking curses get registered. */

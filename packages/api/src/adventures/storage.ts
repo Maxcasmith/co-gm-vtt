@@ -41,10 +41,11 @@ export async function saveCampaignAsAdventure(campaignSlug: string, adventureSlu
   ]);
 
   // Quests/dungeon reset to a fresh starting state — a template is replayed from scratch every
-  // time, never resumed mid-progress. Deterministic dungeon quests (boss-*, exit-dungeon) are
-  // never discovery-gated — buildDungeonQuests seeds them straight to 'open' on generation — so
-  // they reset back to 'open', not 'undiscovered', or QuestLog's undiscovered filter would hide
-  // them forever since nothing ever fires a quest_add to un-hide them.
+  // time, never resumed mid-progress. Deterministic dungeon quests (boss-*, exit-dungeon — no
+  // longer generated for new dungeons, but may still exist in an older saved campaign) were never
+  // discovery-gated — seeded straight to 'open' on generation — so they reset back to 'open', not
+  // 'undiscovered', or QuestLog's undiscovered filter would hide them forever since nothing ever
+  // fires a quest_add to un-hide them.
   const questsPath = path.join(dstDir, 'quests.json');
   try {
     const quests = JSON.parse(await readFile(questsPath, 'utf-8')) as Quest[];

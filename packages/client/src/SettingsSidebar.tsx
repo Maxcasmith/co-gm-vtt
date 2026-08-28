@@ -286,11 +286,11 @@ export default function SettingsSidebar({ open, password, onClose, onPasswordCha
             </div>
             <div className="settings-toggle-row">
               <div className="settings-toggle-text">
-                <span className="settings-toggle-label">Generate character storyboards</span>
+                <span className="settings-toggle-label">Generate storyboards</span>
                 <span className="settings-toggle-desc">
                   {config.image.generateStoryboard
-                    ? 'When a character is finished, their backstory is turned into a 9-slide opening storyboard, played as a slideshow the first time anyone starts the session.'
-                    : 'No opening storyboard will be generated for new characters.'}
+                    ? 'When a character is finished, their backstory is turned into a 9-slide opening storyboard (dungeon-crawl campaigns also get one for the scenario itself), played as a slideshow the first time anyone starts the session.'
+                    : 'No opening storyboards will be generated for new characters or scenarios.'}
                 </span>
               </div>
               <button
