@@ -249,3 +249,46 @@ Return ONLY a single valid JSON object — no markdown fences, no explanation:
   "premise": "string — a single paragraph (3-5 sentences) covering who sent them or why they're going, what they're after or expect to find, and the tone/atmosphere the tags imply. Do not describe the dungeon's layout or contents — that's generated separately. Do not invent named NPCs, factions, or a wider world — this is scene-setting for the trip in, nothing more."
 }`;
 }
+
+// Runs AFTER buildDungeonCrawlPremisePrompt (that title/premise stay as the short campaign-record
+// blurb, untouched) and BEFORE the dungeon itself is generated. This is a separate, longer, more
+// dramatic piece with a different job: read in full by the player in the game lobby before they
+// ever click in, AND handed to the dungeon manifest as story context so the rooms/threats/loot the
+// generator invents actually serve this specific scenario instead of just the bare genre tags.
+export function buildDungeonScenarioSynopsisPrompt(tags: string[], title: string, shortPremise: string): string {
+  return `You are a tabletop RPG scenario writer opening a dungeon-crawl session. Write the scenario synopsis a player reads before the game begins — the "why are we here, what's actually going on" text.
+
+Adventure title: "${title}"
+Short premise (already established, do not contradict it — expand on it): ${shortPremise}
+Tags: ${tags.join(', ')}
+
+${LORE_INSTRUCTION}
+
+Write in second person plural, present tense — "you" and "your", speaking directly to the party as it's happening right now, not a past-tense summary. Ground it in specific, concrete stakes and a specific inciting moment: what just happened to force them here, what they've lost or are running from, what they need, and why turning back isn't an option. Vivid, dramatic, a little purple is fine and encouraged — but every sentence still has to carry a concrete fact (a place, an action, a threat), never float on pure mood with nothing underneath it. End on the tension that drives play forward, not a resolved feeling.
+
+Do not name any player character, companion, or specific NPC — the party doesn't exist yet. Do not describe the dungeon's rooms or layout — that's generated separately, from this text. Do not invent a wider world, factions, or lore beyond this one scenario.
+
+Return ONLY a single valid JSON object — no markdown fences, no explanation:
+{
+  "synopsis": "string — 1-2 flowing paragraphs, second person plural, present tense. This is read in full by players and also used to guide the dungeon's design, so be concrete about the immediate situation, not just atmosphere."
+}`;
+}
+
+// Fully replaces the manifest's own free-form goal invention (same "predefinedGoals... over the
+// ones it was explicitly told were already decided" precedent manifest.ts already applies for
+// mid-campaign dungeon entry — see fetchManifest's predefinedQuests handling) — deliberately ONE
+// goal, not the 0-3 buildDungeonQuestPrompt allows, so a fresh dungeon-crawl campaign opens on a
+// single strong thread pulled straight from the scenario instead of several disconnected hooks.
+export function buildDungeonScenarioGoalPrompt(synopsis: string, dungeonType: string, existingIds: string[]): string {
+  const existingIdList = existingIds.join(', ') || 'none';
+  return `You are generating the single goal that gives this tabletop RPG dungeon crawl (genre: ${dungeonType}) a reason to exist beyond "explore it."
+
+Scenario synopsis (the party's situation right now — the goal must follow directly from this, not invent a new thread):
+${synopsis}
+
+Generate exactly ONE concrete, player-facing goal — what the party is here to find, stop, rescue, or retrieve. It must be the single strongest, most direct throughline the synopsis already implies, not a generic "explore the dungeon", "defeat the boss", or "find the exit" (those are tracked separately by the game itself).
+Use a kebab-case ID not in this list: ${existingIdList}
+
+Return ONLY a single valid JSON object — no markdown fences, no explanation:
+{ "id": "kebab-slug", "name": "Goal Name", "description": "1-2 sentences — what the party is here to do. This becomes the dungeon's design brief, so be concrete: name what's being sought/stopped/rescued." }`;
+}

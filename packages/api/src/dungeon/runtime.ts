@@ -1,5 +1,5 @@
 import type { DungeonEntity, EnemyStatBlock } from 'shared';
-import { hasLineOfSight } from 'shared';
+import { hasLineOfSight, closedDoorCells } from 'shared';
 import { randomUUID } from 'crypto';
 import { saveDungeon, saveEncounter, getConfig, readChatLog, listCharacters, readNemeses, readManifest, appendChatLog } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
@@ -13,18 +13,39 @@ import { logError, logDebug } from '../logger.ts';
 import { io, ROOM, combatState, encounters, tokenPositions, dungeons, microDungeons, withLivePositions, PLAYER_SIGHT_RADIUS, ENEMY_AGGRO_RADIUS, enemiesReady, combatStartedAt } from '../state.ts';
 import { addToTurnOrder, rollPlayerInitiatives, rollEnemyInitiatives, checkTrapAt } from '../combat/runtime.ts';
 
+// Live cell positions of every participant currently in the fight — players keyed by name,
+// everyone else (creatures, allies) keyed by id, matching tokenPositions' own convention.
+function combatantPositions(cid: string, encounter: Encounter): { gx: number; gy: number }[] {
+  const positions = tokenPositions.get(cid) ?? {};
+  return encounter.turnOrder
+    .map(p => positions[p.isPlayer ? p.name : p.id])
+    .filter((pos): pos is { gx: number; gy: number } => !!pos);
+}
+
 // Runs on every player token move while a dungeon is loaded: reveals creatures within sight,
 // fires room_entered the first time a room is stepped into, and either starts combat (not
 // already fighting) or pulls newly-aggro'd creatures into the running fight (already fighting)
-// when one comes within its own aggro radius.
+// when one comes within aggro radius of ANY live combatant — not just the player who moved, so a
+// creature lurking near an already-engaged ally or enemy still gets pulled in even though it's
+// out of range of whoever happened to trigger this check.
 export async function checkDungeonProximity(cid: string, gx: number, gy: number, characterName: string): Promise<void> {
   const dungeon = dungeons.get(cid);
   if (!dungeon) return;
   const inCombat = combatState.get(cid);
   const encounter = inCombat ? encounters.get(cid) : undefined;
+  // The entrance room is the placement safe zone (see placer.ts's isEntranceRoom) — nothing hostile
+  // spawns inside it, but a creature can still be placed just past its threshold. Without this, that
+  // creature's aggro radius could still reach in and ambush a party that hasn't even left the room
+  // yet. A position still standing in the entrance can't trigger aggro; once it steps out, normal
+  // detection applies immediately, even right at the doorway.
+  const aggroSources = (encounter ? combatantPositions(cid, encounter) : [{ gx, gy }])
+    .filter(pos => roomAt(dungeon, pos.gx, pos.gy)?.role !== 'entrance');
 
   let changed = false;
   const aggro: DungeonEntity[] = [];
+  // A shut, opaque door blocks discovery/aggro sight the same as a wall — computed once per call
+  // rather than per entity, since it doesn't change mid-loop.
+  const blocked = closedDoorCells(dungeon);
 
   const room = roomAt(dungeon, gx, gy);
   if (room && !room.visited) {
@@ -38,10 +59,15 @@ export async function checkDungeonProximity(cid: string, gx: number, gy: number,
   for (const entity of dungeon.entities) {
     if (entity.type !== 'creature') continue;
     if (encounter?.findParticipant(entity.id)) continue; // already in this fight
+    // Discovery (fog of war) stays scoped to what the moving player themself can actually see.
     const dist = Math.max(Math.abs(gx - entity.x), Math.abs(gy - entity.y));
-    const seen = dist <= PLAYER_SIGHT_RADIUS && hasLineOfSight(dungeon.cells, gx, gy, entity.x, entity.y);
+    const seen = dist <= PLAYER_SIGHT_RADIUS && hasLineOfSight(dungeon.cells, gx, gy, entity.x, entity.y, blocked);
     if (!entity.discovered && seen) { entity.discovered = true; changed = true; }
-    if (dist <= ENEMY_AGGRO_RADIUS && seen) aggro.push(entity);
+
+    const aggroed = aggroSources.some(pos =>
+      Math.max(Math.abs(pos.gx - entity.x), Math.abs(pos.gy - entity.y)) <= ENEMY_AGGRO_RADIUS &&
+      hasLineOfSight(dungeon.cells, pos.gx, pos.gy, entity.x, entity.y, blocked));
+    if (aggroed) aggro.push(entity);
   }
 
   if (changed) {
@@ -72,11 +98,12 @@ export async function checkDungeonHiddenReveal(cid: string, characterName: strin
   // which let a search in one room turn up loot sitting in a room two doors down whenever the
   // corridor between them happened to have clear line of sight.
   const playerRoom = roomAt(dungeon, pos.gx, pos.gy);
+  const blocked = closedDoorCells(dungeon);
   for (const entity of dungeon.entities) {
     if (entity.type === 'creature' || entity.discovered || entity.hideDC === undefined) continue;
     const inRange = playerRoom
       ? roomAt(dungeon, entity.x, entity.y)?.id === playerRoom.id
-      : Math.max(Math.abs(pos.gx - entity.x), Math.abs(pos.gy - entity.y)) <= 2 && hasLineOfSight(dungeon.cells, pos.gx, pos.gy, entity.x, entity.y);
+      : Math.max(Math.abs(pos.gx - entity.x), Math.abs(pos.gy - entity.y)) <= 2 && hasLineOfSight(dungeon.cells, pos.gx, pos.gy, entity.x, entity.y, blocked);
     if (!inRange) continue;
     if (total < entity.hideDC) { nearbyUncleared = true; continue; }
     entity.discovered = true;
@@ -102,6 +129,28 @@ export async function checkDungeonHiddenReveal(cid: string, characterName: strin
   }
   if (!found.length && !nearbyUncleared) return null;
   return found;
+}
+
+// Player-clicked open/closed toggle — a no-op (not an error) if the door doesn't exist, is
+// locked (no unlock mechanic exists yet — see DungeonEntity.doorState's doc), or the requester
+// isn't within 5ft of any cell the door occupies. Authority lives here, not on the client: the
+// click only sends intent, this decides whether it actually happens.
+export async function toggleDoor(cid: string, doorId: string, characterName: string): Promise<void> {
+  const dungeon = dungeons.get(cid);
+  const door = dungeon?.entities.find(e => e.id === doorId && e.type === 'door');
+  if (!dungeon || !door || door.doorState === 'locked') return;
+
+  const pos = tokenPositions.get(cid)?.[characterName];
+  if (!pos) return;
+  const w = door.width ?? 1, h = door.height ?? 1;
+  const dx = Math.max(door.x - pos.gx, 0, pos.gx - (door.x + w - 1));
+  const dy = Math.max(door.y - pos.gy, 0, pos.gy - (door.y + h - 1));
+  if (Math.max(dx, dy) * 5 > 5) return;
+
+  door.doorState = door.doorState === 'open' ? 'closed' : 'open';
+  console.log(`[dungeon] ${characterName} ${door.doorState === 'open' ? 'opens' : 'closes'} a door`);
+  await saveDungeon(cid, dungeon);
+  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
 }
 
 export async function generateAndBroadcastEnemies(campaignId: string, combatants: string[] = []): Promise<void> {

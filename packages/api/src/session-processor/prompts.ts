@@ -440,10 +440,11 @@ export function buildDungeonNarrationPrompt(opts: {
   goals: string[];
   dungeonQuests: Quest[]; // pre-filtered to this dungeon (sourceDungeonId match) — never the full campaign quest list
   characterNames: string[];
+  characterSummaries: string; // per-character inventory/currency — grounds MANAGER MODE inventory questions so the model reports what's actually owned instead of improvising
   groundTruth: string;
   combatActive: boolean;
 }): string {
-  const { dungeonName, goals, dungeonQuests, characterNames, groundTruth, combatActive } = opts;
+  const { dungeonName, goals, dungeonQuests, characterNames, characterSummaries, groundTruth, combatActive } = opts;
 
   const goalsBlock = goals.length ? goals.map(g => `- ${g}`).join('\n') : '(none seeded for this dungeon)';
   const questsBlock = dungeonQuests.length
@@ -463,6 +464,9 @@ ${questsBlock}
 
 ## Manager mode
 Meta question, not in-fiction ("what's in my inventory", "recap what happened", "how does X work")? Answer directly and briefly, out of character. No narration. Stop.
+
+## Ability checks
+A player attempts something with a real chance of failure — searching, forcing something open, sneaking, persuading, recalling lore, a physical feat, anything against a hidden DC — MUST end in one of exactly three outcomes, never a response that trails off with no result: essential information they need to proceed stated outright (no roll), the described action clearly specific enough to auto-succeed narrated as a success, or a [[REQUEST_CHECK:PlayerName|SkillName]] / [[REQUEST_SAVE:PlayerName|StatName]] tag with the narrative setup only (no result yet — wait for the roll). "I search the desk" is never answered with a half-finished description and nothing else — resolve it one of these three ways every time.
 
 ## Unknown-lore questions
 A player asks about this place's history, origin, or purpose and nothing in the goals/quests above covers it? Respond out of character — e.g. "(Out of character: ${characterNames[0] ?? 'the character'} doesn't know the origins of this place.)" — never guess, never invent a lead. Only point to a specific lead (a book, an inscription, someone who'd know) if that lead is itself a seeded entity, dressing detail, or goal in this dungeon.
@@ -498,7 +502,8 @@ A discovered "loot" entity in the floor plan above that lists "contains: ..." �
 Coins are NEVER an item tag — use the currency tags below instead, even for a single "a few silver coins" find.
 
 ## Currency tags
-[[CURRENCY_ADD:PlayerName:amount:denomination]] on a definitive coin/currency pickup, [[CURRENCY_REMOVE:PlayerName:amount:denomination]] on a definitive spend/loss. denomination is one of: platinum, gold, electrum, silver, bronze. Example: the party finds a few silver coins in a chest → [[CURRENCY_ADD:Hades:3:silver]] alongside your narration.
+[[CURRENCY_ADD:PlayerName:amount:denomination]] on a definitive coin/currency pickup, [[CURRENCY_REMOVE:PlayerName:amount:denomination]] on a definitive spend/loss. denomination MUST be exactly one of: platinum, gold, electrum, silver, bronze — these are the only five buckets the system tracks, no others are recognized and the tag is silently dropped if you use anything else. Example: the party finds a few silver coins in a chest → [[CURRENCY_ADD:Hades:3:silver]] alongside your narration.
+In a non-fantasy setting (dollars, credits, or any currency that isn't literal coinage), narrate it in-fiction as whatever fits — dollars, credits, whatever the world calls it — but the tag itself still MUST use "gold" as the denomination (the system's general-purpose currency bucket). [[CURRENCY_ADD:Lee Kendy:80:gold]] is correct even when your narration says "80 dollars"; [[CURRENCY_ADD:Lee Kendy:80:dollars]] is not a valid denomination and will be silently dropped, so it never reaches the player's sheet.
 
 ## Spellcasting tags
 [[CAST_SPELL:PlayerName:Spell Name]] whenever a player definitively casts a spell that costs a resource (not a cantrip) outside combat — e.g. forcing a door with Thunderwave, lighting something with Fire Bolt is a cantrip and does NOT need this tag. Only on the actual cast, never on a player asking what a spell does. The system checks and deducts a spell slot server-side; if none remain, it will tell the player directly rather than through your narration — you don't need to track slot counts yourself.
@@ -514,6 +519,9 @@ Players clearly and deliberately leave this dungeon (exit to the surface, head b
 
 ## Active party
 ${characterNames.length ? characterNames.map(n => `- ${n}`).join('\n') : '(none)'}
+
+## Party inventory — the ONLY source of truth for what a character owns (MANAGER MODE inventory questions and any "you have X" narration must match this exactly)
+${characterSummaries}
 
 ## Floor plan — DM EYES ONLY
 ${groundTruth}`;
@@ -623,6 +631,7 @@ export function buildDungeonQuestPrompt(opts: {
   return `You are generating the quest hook(s) for a TTRPG dungeon the party is about to enter: "${locationName}" (genre: ${dungeonType}).
 ${contextBlock}
 Generate 0-3 quest(s) that give this dungeon a concrete reason to exist beyond "explore it" — what the party is here to find, stop, rescue, or retrieve. Only include a quest when the story context actually motivates one; an empty array is correct for a dungeon with no specific narrative hook beyond exploring it. Never generic filler like "explore the dungeon", "defeat the boss", or "find the exit" — those are tracked separately by the game itself.
+Name the target (the item, person, or threat), never the sub-location it's hidden in — "Find the parking garage keycard" not "Find the parking garage keycard in the Chief's Office". Which room holds it is for the party to discover through play; spelling it out in the quest text hands them the answer before they've searched anything.
 Each use a unique kebab-case ID not in this list: ${existingIdList}
 
 Return ONLY valid JSON — no markdown fences, no explanation:

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
-import type { Character, Player, EnemyStatBlock, TokenPosition, Dungeon, Quest, TurnOrderEntry, StoryboardQueuePayload } from 'shared';
+import type { Character, Player, EnemyStatBlock, TokenPosition, Dungeon, Quest, TurnOrderEntry, StoryboardQueuePayload, HouseRules } from 'shared';
+import { DEFAULT_HOUSE_RULES } from 'shared';
 import { HIT_DICE } from './character-creation/srd.ts';
 import Canvas from './Canvas.tsx';
 import EncounterLoadingOverlay from './EncounterLoadingOverlay.tsx';
@@ -117,6 +118,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [quests, setQuests] = useState<Quest[]>([]);
   const [act, setAct] = useState(1);
   const [worldTimeSecs, setWorldTimeSecs] = useState(43200);
+  // Reaction-sidebar display prefs — set on GameSettingsPage, fetched once here since they never
+  // change mid-session (a settings change means leaving this page and coming back).
+  const [houseRules, setHouseRules] = useState<HouseRules>(DEFAULT_HOUSE_RULES);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const lastSpaceRef = useRef<number>(0);
   const socketRef = useRef<ReturnType<typeof io> | null>(null);
@@ -178,6 +182,13 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       .catch(() => {});
   }, [character.campaignId]);
 
+  useEffect(() => {
+    fetch(`${API}/api/campaigns/${character.campaignId}`)
+      .then(r => r.json())
+      .then((c: { houseRules?: HouseRules }) => setHouseRules({ ...DEFAULT_HOUSE_RULES, ...c.houseRules }))
+      .catch(() => {});
+  }, [character.campaignId]);
+
   useEffect(() => on('vtt:chat:message-received', ({ text, senderName }) => {
     if (senderName === 'Virtual DM') narrate(text);
   }), []);
@@ -210,6 +221,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         fetch(`${API}/api/campaigns/${character.campaignId}/party/${charId}`)
           .then(r => r.json())
           .then((c: Character) => {
+            if (!c?.stats) return;
             const derivedMax = (HIT_DICE[c.class] ?? 8) + Math.floor((c.stats.con - 10) / 2);
             const max = c.maxHp ?? derivedMax;
             const current = c.currentHp ?? max;
@@ -327,6 +339,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('combat:effect:impact', data => dispatch('vtt:combat:effect:impact', data));
     socket.on('combat:damage:dealt', data => dispatch('vtt:combat:damage:dealt', data));
     socket.on('combat:concentration', data => dispatch('vtt:combat:concentration', data));
+    socket.on('combat:mark', data => dispatch('vtt:combat:mark', data));
     socket.on('combat:player:damage', data => {
       dispatch('vtt:combat:player:damage', data);
       if (data.characterId === character.id) setPlayerHpState({ current: data.currentHp, max: data.maxHp, temp: data.tempHp });
@@ -373,6 +386,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       if (data.resting && data.currentHp != null && data.maxHp != null) {
         setPlayerHpState(prev => ({ current: data.currentHp!, max: data.maxHp!, temp: prev?.temp }));
         if (data.maxSpellSlots1) setPlayerSlotsState({ current: data.currentSpellSlots1 ?? data.maxSpellSlots1, max: data.maxSpellSlots1 });
+        if (data.resourceUses) setResourceOverrides(data.resourceUses);
         fetch(`${API}/api/campaigns/${character.campaignId}/party/${character.id}`)
           .then(r => r.json())
           .then((c: Character) => onCharacterUpdateRef.current(c))
@@ -420,8 +434,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     const unsubEscape       = on('vtt:condition:escape:attempt', payload => socket.emit('combat:condition:escape', payload));
     const unsubElevation    = on('vtt:combat:elevation:set', payload => socket.emit('combat:elevation:set', payload));
     const unsubDisengage    = on('vtt:combat:disengage', payload => socket.emit('combat:disengage', payload));
+    const unsubStdAction    = on('vtt:combat:standardAction:used', payload => socket.emit('combat:standardAction:used', payload));
     const unsubAlertSwap    = on('vtt:combat:alert:swap', payload => socket.emit('combat:alert:swap', { ...payload, campaignId: character.campaignId }));
     const unsubHealerKit    = on('vtt:combat:healerKit:use', payload => socket.emit('combat:healerKit:use', payload));
+    const unsubDoorToggle   = on('vtt:door:toggle', ({ doorId }) => socket.emit('door:toggle', { campaignId: character.campaignId, doorId, characterName: character.name }));
 
     return () => {
       socketRef.current = null;
@@ -439,10 +455,12 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       unsubEscape();
       unsubElevation();
       unsubDisengage();
+      unsubStdAction();
       unsubAlertSwap();
       unsubHealerKit();
       unsubHeal();
       unsubConsumableUsed();
+      unsubDoorToggle();
     };
   }, [character.name]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -463,8 +481,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     setCompanions(entries.filter(e => e.teamId === 'players' && (!e.isPlayer || !connected.includes(e.name))));
   }), [connected]);
   useEffect(() => on('vtt:combat:turn', ({ actorName }) => setIsMyTurn(actorName === character.name)), [character.name]);
-  useEffect(() => on('vtt:combat:attack', ({ attackerId, attackerName, targetId, weapon, bonusSpell, isOffhand, useLuckPoint, useInspiration }) => {
-    socketRef.current?.emit('combat:attack', { attackerId, attackerName, targetId, weapon, ...(bonusSpell ? { bonusSpell } : {}), ...(isOffhand ? { isOffhand } : {}), ...(useLuckPoint ? { useLuckPoint } : {}), ...(useInspiration ? { useInspiration } : {}) });
+  useEffect(() => on('vtt:combat:attack', ({ attackerId, attackerName, targetId, weapon, bonusSpell, isOffhand, useInspiration }) => {
+    socketRef.current?.emit('combat:attack', { attackerId, attackerName, targetId, weapon, ...(bonusSpell ? { bonusSpell } : {}), ...(isOffhand ? { isOffhand } : {}), ...(useInspiration ? { useInspiration } : {}) });
   }), []);
   useEffect(() => on('vtt:combat:ability:use', ({ casterId, casterName, abilityKey, targetId, chosenItem, chosenAmount }) => {
     socketRef.current?.emit('combat:ability:use', { casterId, casterName, abilityKey, targetId, chosenItem, chosenAmount });
@@ -691,7 +709,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         currentSpellSlots1={playerSlotsState?.current} maxSpellSlots1={playerSlotsState?.max}
         sessionActive={sessionActive}
       />
-      <JournalOverlay open={journalOpen} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} combatActive={combatActive} />
+      <JournalOverlay open={journalOpen} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} />
       <QuestLog open={questLogOpen} onClose={() => setQuestLogOpen(false)} quests={quests} act={act} />
       <CombatLogOverlay open={combatLogOpen} onClose={() => setCombatLogOpen(false)} />
       <DevModal open={devModalOpen} onClose={() => setDevModalOpen(false)} />
@@ -699,7 +717,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       <QuickChat open={quickChatOpen} onClose={() => setQuickChatOpen(false)} senderName={character.name} sessionActive={sessionActive} disabled={combatActive && !isMyTurn} />
       {victory && <VictoryScreen data={victory} onDismiss={() => setVictory(null)} />}
       {defeated && <DefeatScreen onDismiss={() => setDefeated(false)} />}
-      <ReactionPrompt onRespond={(requestId, spellName) => socketRef.current?.emit('combat:reaction:respond', { requestId, spellName })} />
+      <ReactionPrompt
+        onRespond={(requestId, spellName) => socketRef.current?.emit('combat:reaction:respond', { requestId, spellName })}
+        showDetailsByDefault={houseRules.reactionShowDetailsByDefault}
+      />
       <ShortcutsOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <RestModal character={liveCharacter} />
       <BattleMapBackground worldMapUrl={worldMapUrl} />
@@ -781,6 +802,11 @@ export default function GamePage({ campaignId }: { campaignId: string }) {
     <GameCanvas
       character={character}
       onCharacterUpdate={c => {
+        // Every character refetch in GameCanvas lands here unchecked (no r.ok/shape guard at the
+        // call site) — an error body (404/500 JSON) would otherwise fully replace a good character
+        // with one missing `stats`, crashing every consumer that reads it (CharacterSheetOverlay,
+        // the HP-derivation effect, ...). This is the one place all of those updates funnel through.
+        if (!c?.stats) { console.error('[character] dropped update with no stats:', c); return; }
         sessionStorage.setItem(sessionKey(campaignId), JSON.stringify(c));
         setCharacter(c);
       }}

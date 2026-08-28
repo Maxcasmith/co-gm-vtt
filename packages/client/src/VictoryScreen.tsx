@@ -21,7 +21,7 @@ export default function VictoryScreen({ data, onDismiss }: Props) {
         <h1 className="victory-title">Victory</h1>
         <p className="victory-subtitle">Enemies defeated</p>
         <ul className="victory-kills">
-          {data.kills.map(name => <li key={name}>{name}</li>)}
+          {data.kills.map((name, i) => <li key={i}>{name}</li>)}
         </ul>
         <div className="victory-xp">
           <span className="victory-xp-value">+{data.xpPerPlayer} XP</span>

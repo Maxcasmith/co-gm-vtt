@@ -433,6 +433,16 @@
 .party-list-meta { font-size: 12px; color: var(--text-muted); margin-left: auto; }
 .party-empty { font-size: 13px; color: var(--text-muted); font-style: italic; margin: 0 0 20px; }
 
+.lobby-synopsis {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  border-left: 2px solid var(--gold);
+  padding: 4px 0 4px 14px;
+  margin: 0 0 24px;
+  white-space: pre-wrap;
+}
+
 .modal-form {
   display: flex;
   flex-direction: column;

@@ -1,14 +1,14 @@
 import type { Character, EffectSpec, CreatureType, Condition as ConditionName, ActiveCondition, AbilityKey, TrapEffect, SpellSaveResult, Weapon } from 'shared';
-import { statMod, calcAC, spellSlotsForClass, CLASS_SAVING_THROWS, effectiveWeaponProfs, findPath, hasOriginFeat, isWeapon, isArmor, SKILL_ABILITY, trySpendResource, resourceCurrent, magicInitiateResourceKey } from 'shared';
-import { getCharacter, updateCharacter, readChatLog, appendChatLog, saveEncounter, clearEncounter, clearDungeon, saveDungeon, listCharacters, loadPartyAllies, readQuests, writeQuests, readManifest, readNemeses, getConfig } from '../storage.ts';
+import { statMod, calcAC, spellSlotsForCharacter, CLASS_SAVING_THROWS, effectiveWeaponProfs, findPath, hasOriginFeat, isWeapon, isArmor, SKILL_ABILITY, trySpendResource, resourceCurrent, magicInitiateResourceKey } from 'shared';
+import { getCharacter, updateCharacter, readChatLog, appendChatLog, saveEncounter, clearEncounter, clearDungeon, saveDungeon, listCharacters, loadPartyAllies, readQuests, writeQuests, readManifest, readNemeses, getConfig, getHouseRules } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateCombatFlavour, evaluateNemesisCandidates } from '../session-processor/imagePrompts.ts';
 import { toClientDungeon } from '../dungeon/index.ts';
 import { Team, Participant } from '../domain/encounter.ts';
 import { Creature } from '../domain/creature.ts';
 import { logError, logDebug } from '../logger.ts';
-import { io, ROOM, combatState, encounters, tokenPositions, campaignPlayers, playerSocketIds, enemiesReady, combatStartedAt, combatScores, dungeons, pendingWeaponBonuses, microDungeons, connected, withLivePositions, getStateEngine, stateEngines } from '../state.ts';
-import { D20Roll, rollDice, fmtMod, calcMaxHp, crToXp, rollApplicableDamage, resolveHit } from './dice.ts';
+import { io, ROOM, combatState, encounters, tokenPositions, campaignPlayers, playerSocketIds, enemiesReady, combatStartedAt, combatScores, dungeons, pendingWeaponBonuses, activeMarks, microDungeons, connected, withLivePositions, getStateEngine, stateEngines } from '../state.ts';
+import { D20Roll, rollDice, fmtMod, calcMaxHp, crToXp, rollApplicableDamage, resolveHit, maxDiceValue } from './dice.ts';
 import { rollModeFor, addCondition, removeCondition, attackModeAgainstTarget, combineModes } from './conditions/rollModeFor.ts';
 import { ReactionOfferHook } from './stateEngine/hooks/ReactionOfferHook.ts';
 import { RetaliationOfferHook } from './stateEngine/hooks/RetaliationOfferHook.ts';
@@ -180,6 +180,7 @@ export function emitTurn(cid: string) {
   // future feat adds an `action` string and a table entry, nothing here changes.
   const buffs = (getStateEngine(cid).getHooksOwnedBy(actor.id, 'actionUnlock') as ActionUnlockHook[]).map(h => h.action);
   io.to(ROOM).emit('combat:turn', {
+    actorId: actor.id,
     actorName: actor.name,
     ...(speedMultiplier !== 1 ? { speedMultiplier } : {}),
     ...(speedBonusFt !== 0 ? { speedBonusFt } : {}),
@@ -247,6 +248,18 @@ export async function runDeathSave(cid: string, actor: Participant): Promise<voi
   const socketId = playerSocketIds.get(actor.id);
   if (socketId) io.to(socketId).emit('combat:death:save', saveData);
 
+  // Only the terminal outcomes below (stabilize/miracle/death) ever reached the journal — the
+  // roll-by-roll saves leading up to them (or a plain ongoing failure/success) had no record at
+  // all anywhere but the dying player's own private HUD event above.
+  if (!(isNat20 || (stable && !isNat20))) {
+    const saveMsg = {
+      text: `${actor.name} rolls a death save: ${roll}${isNat1 ? ' (natural 1, counts double)' : ''} — ${roll >= 10 ? 'SUCCESS' : 'FAILURE'} (${saves.successes}/3 successes, ${saves.failures}/3 failures).`,
+      senderName: 'System', timestamp: Date.now(),
+    };
+    io.to(ROOM).emit('chat:message', saveMsg);
+    void appendChatLog(cid, saveMsg);
+  }
+
   if (dead) {
     await markPlayerDead(cid, participant, actor.id);
   } else if (stable && !isNat20) {
@@ -309,7 +322,17 @@ export async function walkParticipant(
     : targetPos;
 
   const cells = dungeons.get(cid)?.cells;
-  const path = cells ? findPath(cells, gx, gy, destination.gx, destination.gy) : null;
+  const startPositions = tokenPositions.get(cid) ?? {};
+  const occupied = new Set(
+    Object.entries(startPositions).filter(([k]) => k !== key).map(([, p]) => `${p.gx},${p.gy}`),
+  );
+  // If every detour is also blocked by other combatants, fall back to the wall-only route so
+  // the actor still makes partial progress and stops at the first occupied cell (below), rather
+  // than not moving at all — same graceful degradation as the pre-occupancy-aware behavior.
+  const path = cells
+    ? (findPath(cells, gx, gy, destination.gx, destination.gy, occupied) ??
+      findPath(cells, gx, gy, destination.gx, destination.gy))
+    : null;
 
   for (let step = 0; step < maxSteps; step++) {
     if (intent === 'approach') {
@@ -385,7 +408,7 @@ async function offerProtectionReaction(
       .some(id => { const item = char.inventory?.find(i => i.id === id); return item && isArmor(item) && item.isShield; });
     if (!hasShield) continue;
 
-    const picked = await offerReaction(p.id, [{
+    const picked = await offerReaction(cid, p.id, [{
       spellName: 'Protection', kind: 'protect',
       attackerName, sourceName: 'Fighting Style: Protection', targetName,
     }]);
@@ -408,7 +431,7 @@ async function offerLuckDisadvantage(cid: string, targetId: string, targetName: 
   const char = await getCharacter(cid, targetId);
   if (!char || !hasOriginFeat(char, 'Lucky') || resourceCurrent(char, 'luckPoints') <= 0) return false;
 
-  const picked = await offerReaction(targetId, [{
+  const picked = await offerReaction(cid, targetId, [{
     spellName: 'Lucky', kind: 'luck', attackerName, sourceName: 'Feat: Lucky',
   }]);
   if (!picked) return false;
@@ -437,6 +460,34 @@ export async function trySpendLuckForAdvantage(cid: string, characterId: string,
   await updateCharacter(cid, characterId, c => ({ ...c, resourceUses: nextResourceUses }));
   io.to(ROOM).emit('combat:player:featureResources', { characterId, resourceUses: nextResourceUses });
   return true;
+}
+
+/**
+ * Origin feat Lucky, offensive half, retroactive: the player's own weapon attack just missed —
+ * offer a Luck Point spend to reroll the d20, now that the miss is known (replaces the old
+ * pre-roll "arm advantage before rolling" HUD toggle). Returns the fresh d20 if spent and
+ * accepted, null otherwise — a null means "carry on with the original roll unchanged".
+ */
+export async function offerLuckAttackReroll(
+  cid: string, attackerId: string, attackerName: string, weaponName: string, targetName: string, attackTotal: number, ac: number,
+): Promise<number | null> {
+  const char = await getCharacter(cid, attackerId);
+  if (!char || !hasOriginFeat(char, 'Lucky') || resourceCurrent(char, 'luckPoints') <= 0) return null;
+
+  const picked = await offerReaction(cid, attackerId, [{
+    spellName: 'Lucky', kind: 'luckReroll', attackerName, sourceName: weaponName, targetName, attackTotal, currentAc: ac,
+  }]);
+  if (!picked) return null;
+
+  // Re-check after the await — the point may already be gone (another prompt spent it).
+  const fresh = await getCharacter(cid, attackerId);
+  if (!combatState.get(cid) || !fresh) return null;
+  const nextResourceUses = trySpendResource(fresh, 'luckPoints');
+  if (!nextResourceUses) return null;
+  await updateCharacter(cid, attackerId, c => ({ ...c, resourceUses: nextResourceUses }));
+  io.to(ROOM).emit('combat:player:featureResources', { characterId: attackerId, resourceUses: nextResourceUses });
+  console.log(`[lucky] ${attackerName} spends a Luck Point to reroll a missed attack against ${targetName}`);
+  return new D20Roll().roll();
 }
 
 /**
@@ -564,6 +615,7 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
         atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
         atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
         const isCrit = atkCtx.d20 === 20;
+        const houseRules = await getHouseRules(cid);
 
         // Sanctuary — only worth checking on a roll that would otherwise land; a miss doesn't
         // need the save. ponytail: no retargeting (RAW lets the attacker pick a new target
@@ -577,15 +629,19 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
         const hit = atkCtx.hit;
         targetAc = atkCtx.ac;
         let damage: number | undefined;
+        let damageRoll: number | undefined;
         let remainingHp: number | undefined;
         let targetDead = false;
 
         if (hit) {
+          damageRoll = isCrit
+            ? rollDice(atk.damage) + (houseRules.perkinsCrit ? maxDiceValue(atk.damage) : rollDice(atk.damage))
+            : rollDice(atk.damage);
           const dmgCtx = await engine.trigger('beforeDamage', {
             sourceId: actor.id,
             targetId: targetKeyId,
             targetName: targetParticipant.name,
-            amount: isCrit ? rollDice(atk.damage) + rollDice(atk.damage) : rollDice(atk.damage),
+            amount: damageRoll,
             damageType: undefined,
             sourceName: atk.name,
           });
@@ -619,7 +675,7 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
         io.to(ROOM).emit('combat:attack:result', {
           attackerName: actor.name, targetName: targetParticipant.name, targetId,
           weaponName: atk.name, isMelee: true, d20: roll, attackBonus: atk.bonus, statBonus: atk.bonus, statName: 'Attack', weaponBonus: 0, total, ac: targetAc,
-          hit, isCrit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
+          hit, isCrit, damage, damageRoll, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
         });
 
         const cfg = await getConfig();
@@ -847,6 +903,7 @@ async function checkOpportunityAttacks(
   cid: string, mover: Participant, fromGx: number, fromGy: number, toGx: number, toGy: number,
 ): Promise<void> {
   if (mover.disengaging || mover.isDead()) return;
+  if ((await getHouseRules(cid)).noAttacksOfOpportunity) return;
   const encounter = encounters.get(cid);
   if (!encounter) return;
   const reactors = mover.teamId === 'players' ? encounter.enemies : encounter.players;
@@ -868,7 +925,7 @@ async function checkOpportunityAttacks(
     if (!wasInReach || stillInReach) continue;
 
     if (reactor.isPlayer) {
-      const picked = await offerReaction(reactor.id, [{
+      const picked = await offerReaction(cid, reactor.id, [{
         spellName: 'Attack of Opportunity', attackerName: reactor.name, sourceName: mover.name, kind: 'opportunity',
       }]);
       if (!picked || !combatState.get(cid) || !reactor.hasResource('reaction')) continue;
@@ -973,14 +1030,20 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
   atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
   atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
   const isCrit = atkCtx.d20 === 20;
+  const houseRules = await getHouseRules(cid);
 
   let damage: number | undefined;
+  let damageRoll: number | undefined;
   let remainingHp: number | undefined;
   let targetDead = false;
+  const damageStatBonus = reactor.isPlayer ? statBonus : undefined;
   if (atkCtx.hit) {
+    damageRoll = isCrit
+      ? rollDice(damageFormula) + (houseRules.perkinsCrit ? maxDiceValue(damageFormula) : rollDice(damageFormula))
+      : rollDice(damageFormula);
     const dmgCtx = await engine.trigger('beforeDamage', {
       sourceId: reactor.id, targetId: targetKeyId, targetName: target.name,
-      amount: (isCrit ? rollDice(damageFormula) + rollDice(damageFormula) : rollDice(damageFormula)) + (reactor.isPlayer ? statBonus : 0),
+      amount: damageRoll + (damageStatBonus ?? 0),
       damageType, sourceName: weaponName,
     });
     damage = Math.max(0, dmgCtx.amount);
@@ -1000,8 +1063,8 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
   io.to(ROOM).emit('combat:attack:result', {
     attackerName: reactor.name, targetName: target.name, targetId: targetKeyId,
     weaponName, isMelee: true, d20: roll, attackBonus, statBonus, statName, weaponBonus: attackBonus - statBonus,
-    total: atkCtx.total, ac: targetAc, hit: atkCtx.hit, isCrit, damage, damageFormula: atkCtx.hit ? damageFormula : undefined,
-    remainingHp, targetDead,
+    total: atkCtx.total, ac: targetAc, hit: atkCtx.hit, isCrit, damage, damageRoll, damageFormula: atkCtx.hit ? damageFormula : undefined,
+    damageStatBonus, remainingHp, targetDead,
   });
   const msg = { text: `${reactor.name} makes an Opportunity Attack on ${target.name}${atkCtx.hit ? ` — hit for ${damage}!` : ' — misses.'}`, senderName: 'System', timestamp: Date.now() };
   void appendChatLog(cid, msg);
@@ -1141,6 +1204,12 @@ export async function breakConcentration(cid: string, targetId: string): Promise
   const engine = getStateEngine(cid);
   for (const ownerId of link.targetIds) engine.unregisterBySource(ownerId, link.spellName);
   holder.write(removeCondition(holder.conditions, 'Concentrating'));
+
+  const mark = activeMarks.get(cid)?.get(targetId);
+  if (mark) {
+    activeMarks.get(cid)!.delete(targetId);
+    io.to(ROOM).emit('combat:mark', { casterId: targetId, targetId: mark.targetId, targetName: mark.targetName, spellName: mark.spellName, active: false });
+  }
 
   console.log(`[concentration] ${holder.label} loses concentration on ${link.spellName}`);
   const msg = { text: `${holder.label} loses concentration on ${link.spellName}.`, senderName: 'System', timestamp: Date.now() };
@@ -1344,10 +1413,28 @@ export async function applyDamageToPlayer(
     await checkConcentration(cid, charId, damage);
   }
 
-  // Exploration has no turn-cycle equivalent of emitTurn's allPlayersDown() check (combat's own
-  // TPK detection) — this is the one place both combat and exploration damage funnel through, so
-  // it's the right single spot to also catch a wipe that happens outside combat (a trap, ...).
-  if (!combatState.get(cid) && participant.isDown()) {
+  // Every player-damage source funnels through this one function, so it's the single right place
+  // to catch a wipe regardless of what caused it or whose turn it happened on.
+  if (combatState.get(cid)) {
+    const encounter = encounters.get(cid);
+    if (encounter?.allPlayersDown()) {
+      // Any damage that drops the last standing player is a TPK, full stop — don't wait for the
+      // turn cycle to notice (emitTurn's own allPlayersDown() check only runs on the *next* turn
+      // transition, which may never come: see the mid-turn case below).
+      endCombatDefeated(cid);
+    } else if (participant.isDown() && encounter?.currentActor?.id === participant.id) {
+      // 5e: falling unconscious immediately ends your turn. Matters when the blow lands mid-turn —
+      // an Opportunity Attack provoked by their own movement, a reaction, AoE damage mid-cast —
+      // rather than at the start of it: CombatDock drops the End Turn button the instant HP hits 0
+      // (see its isDown branch), and emitTurn's isDown()→runDeathSave dispatch only fires at
+      // turn-start, which already ran earlier this same turn while they were still up. Without
+      // this, nothing ever advances the encounter again — it just stalls here (not a TPK, since
+      // the branch above already caught that case; just this one player, party otherwise fine).
+      advanceTurn(cid);
+    }
+  } else if (participant.isDown()) {
+    // Exploration has no turn-cycle equivalent of emitTurn's allPlayersDown() check, so this is
+    // also the right spot to catch a wipe that happens outside combat entirely (a trap, ...).
     const chars = await listCharacters(cid);
     if (chars.length && chars.every(c => (c.currentHp ?? 0) <= 0)) endCombatDefeated(cid);
   }
@@ -1479,6 +1566,7 @@ export async function endCombat(cid: string): Promise<void> {
   stateEngines.delete(cid);
   combatStartedAt.delete(cid);
   pendingWeaponBonuses.delete(cid);
+  activeMarks.delete(cid);
   void clearEncounter(cid);
 }
 
@@ -1802,8 +1890,13 @@ export function advanceTurn(cid: string) {
         if (!combatState.get(cid)) return;
       }
 
+      // If afterTurn killed the outgoing actor (a DoT ticking on their own turn), applyDamageTo*
+      // already spliced them out of turnOrder — which, per removeFromTurnOrder, leaves _turnIndex
+      // pointing at whoever shifted into their old slot (the correct next actor). Advancing again
+      // here would double-increment and skip that participant entirely.
+      const outgoingGone = !!outgoing && !encounter.turnOrder.some(p => p.id === outgoing.id);
       const before = encounter.currentActor?.name ?? '?';
-      const { roundStarted } = encounter.advanceTurn();
+      const { roundStarted } = outgoingGone ? { roundStarted: false } : encounter.advanceTurn();
       const after = encounter.currentActor?.name ?? '?';
       console.log(`[turn] advanceTurn: ${before} → ${after} (order=[${encounter.turnOrder.map(p => p.name).join(',')}])`);
 
@@ -2017,7 +2110,7 @@ export async function requestAlertSwap(cid: string, characterId: string, targetI
   const char = await getCharacter(cid, characterId);
   if (!char || !hasOriginFeat(char, 'Alert')) return;
 
-  const picked = await offerReaction(targetId, [{
+  const picked = await offerReaction(cid, targetId, [{
     spellName: 'Alert Swap', kind: 'swap', attackerName: requester.name, sourceName: 'Alert',
   }]);
   if (!picked) return;
@@ -2037,14 +2130,14 @@ export async function requestAlertSwap(cid: string, characterId: string, targetI
 }
 
 // Only level-1 slots are tracked today (no spells-known growth past level 1 exists yet
-// either — see spellSlotsForClass). Cantrips (slotLevel 0) and any untracked tier are free.
+// either — see spellSlotsForCharacter). Cantrips (slotLevel 0) and any untracked tier are free.
 export async function trySpendSpellSlot(cid: string, charId: string, char: Character, slotLevel: number): Promise<boolean> {
   if (slotLevel !== 1) return true;
 
-  // A non-caster class (spellSlotsForClass 0) has no slot pool of its own to spend from — the
+  // A non-caster class (spellSlotsForCharacter 0) has no slot pool of its own to spend from — the
   // only 1st-level spell it could be casting is Magic Initiate's freebie, which comes out of its
   // own once-per-Long-Rest pool instead (see magicInitiateResourceKey/FEAT_SPELL_GRANTS).
-  if (spellSlotsForClass(char.class) === 0) {
+  if (spellSlotsForCharacter(char) === 0) {
     const key = magicInitiateResourceKey(char);
     if (!key) return false;
     const nextResourceUses = trySpendResource(char, key);
@@ -2054,10 +2147,10 @@ export async function trySpendSpellSlot(cid: string, charId: string, char: Chara
     return true;
   }
 
-  const current = char.currentSpellSlots1 ?? spellSlotsForClass(char.class);
+  const current = char.currentSpellSlots1 ?? spellSlotsForCharacter(char);
   if (current <= 0) return false;
   const next = current - 1;
   await updateCharacter(cid, charId, c => ({ ...c, currentSpellSlots1: next }));
-  io.to(ROOM).emit('combat:player:slots', { characterId: charId, currentSpellSlots1: next, maxSpellSlots1: char.maxSpellSlots1 ?? spellSlotsForClass(char.class) });
+  io.to(ROOM).emit('combat:player:slots', { characterId: charId, currentSpellSlots1: next, maxSpellSlots1: char.maxSpellSlots1 ?? spellSlotsForCharacter(char) });
   return true;
 }

@@ -12,12 +12,12 @@ interface Props {
 
 export default function TurnOrderBar({ campaignId, encounter, deadCreatureIds }: Props) {
   const [entries, setEntries]         = useState<TurnOrderEntry[]>([]);
-  const [actorName, setActorName]     = useState<string | null>(null);
+  const [actorId, setActorId]         = useState<string | null>(null);
   const [newIds, setNewIds]           = useState<Set<string>>(new Set());
   const [concentrating, setConcentrating] = useState<Record<string, string>>({});
 
   useEffect(() => on('vtt:combat:state', ({ active }) => {
-    if (!active) { setEntries([]); setActorName(null); setNewIds(new Set()); setConcentrating({}); }
+    if (!active) { setEntries([]); setActorId(null); setNewIds(new Set()); setConcentrating({}); }
   }), []);
 
   useEffect(() => on('vtt:combat:concentration', ({ targetId, spellName }) => {
@@ -49,14 +49,14 @@ export default function TurnOrderBar({ campaignId, encounter, deadCreatureIds }:
     setEntries(all);
   }), []);
 
-  useEffect(() => on('vtt:combat:turn', ({ actorName: name }) => setActorName(name)), []);
+  useEffect(() => on('vtt:combat:turn', ({ actorId: id }) => setActorId(id)), []);
 
   if (!entries.length) return null;
 
   return (
     <div className="turn-order-bar">
       {entries.map(entry => {
-        const isCurrent = entry.name === actorName;
+        const isCurrent = entry.id === actorId;
         const isNew     = newIds.has(entry.id);
         const creaturePortraitSrc = entry.isPlayer ? undefined : encounter?.find(e => e.id === entry.id)?.portraitSrc;
         const portrait  = entry.isPlayer

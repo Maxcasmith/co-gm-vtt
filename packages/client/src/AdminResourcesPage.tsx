@@ -17,10 +17,12 @@ function titleCase(s: string): string {
   return s.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-export default function AdminResourcesPage() {
-  const [password, setPassword] = useState('');
-  const [authed, setAuthed]     = useState(false);
-  const [error, setError]       = useState('');
+interface AdminResourcesPageProps {
+  password: string;
+  onBack: () => void;
+}
+
+export default function AdminResourcesPage({ password, onBack }: AdminResourcesPageProps) {
   const [tab, setTab]           = useState<ResourceTab>('tiles');
   const [manifest, setManifest] = useState<TilesetManifest>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -57,19 +59,9 @@ export default function AdminResourcesPage() {
       .catch(() => {});
   }
 
-  useEffect(() => { if (authed) fetchManifest(); }, [authed]);
-  useEffect(() => { if (authed) fetchPropsManifest(); }, [authed]);
-  useEffect(() => { if (authed) fetchStoryboardRecord(); }, [authed]);
-
-  async function handleAuth() {
-    const r = await fetch(`${API}/api/admin/auth`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password }),
-    });
-    if (r.ok && (await r.json() as { ok: boolean }).ok) setAuthed(true);
-    else setError('Invalid password');
-  }
+  useEffect(() => { fetchManifest(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchPropsManifest(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchStoryboardRecord(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggle(theme: string) {
     setExpanded(prev => {
@@ -112,31 +104,6 @@ export default function AdminResourcesPage() {
     }
   }
 
-  if (!authed) {
-    return (
-      <div className="admin-gate">
-        <div className="admin-gate-card">
-          <span className="admin-gate-icon" aria-hidden="true">🔒</span>
-          <span className="home-eyebrow">Restricted Chamber</span>
-          <h1 className="admin-title">Dungeon Master&apos;s Study</h1>
-          <p className="admin-gate-sub">Speak the password to enter.</p>
-          {error && <p className="admin-error">{error}</p>}
-          <input
-            className="modal-input admin-pw-input"
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAuth()}
-            autoFocus
-          />
-          <button className="btn-primary" onClick={handleAuth}>Enter</button>
-          <a className="admin-gate-back" href="/admin">← Back to Admin</a>
-        </div>
-      </div>
-    );
-  }
-
   const themes = Object.entries(manifest);
 
   return (
@@ -144,7 +111,7 @@ export default function AdminResourcesPage() {
       <div className="admin-panel">
         <div className="admin-atmosphere" aria-hidden="true" />
         <div className="admin-header">
-          <a className="btn-secondary admin-header-link admin-header-link--left" href="/admin">← Admin</a>
+          <button className="btn-secondary admin-header-link admin-header-link--left" onClick={onBack}>← Admin</button>
           <div className="admin-header-titles">
             <span className="home-eyebrow">Dungeon Master&apos;s Study</span>
             <h1 className="admin-title">

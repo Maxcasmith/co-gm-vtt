@@ -30,7 +30,6 @@ export default function HomePage() {
   const [password, setPassword] = useState('');
   const [games, setGames] = useState<Game[] | null>(null);
   const [sessions] = useState<Character[]>(readSessions);
-  const [party, setParty] = useState<Character[]>([]);
 
   function fetchCampaigns() {
     fetch(`${API}/api/campaigns`)
@@ -41,33 +40,36 @@ export default function HomePage() {
 
   useEffect(() => { fetchCampaigns(); }, []);
 
-  function openModal(game: Game) {
+  function closeModal() { dialogRef.current?.close(); }
+
+  async function tryJoin(gameId: string, pw: string): Promise<boolean> {
+    const r = await fetch(`${API}/api/campaigns/${gameId}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+    const data = await r.json() as { ok?: boolean; error?: string };
+    if (!r.ok || data.error) return false;
+    window.location.href = `/${gameId}/lobby`;
+    return true;
+  }
+
+  // A game with no password authenticates on an empty string server-side — try that silently
+  // first so a passwordless campaign skips straight to the lobby, and only fall back to the
+  // modal when the server actually rejects it (i.e. a password is required).
+  async function handleGameClick(game: Game) {
     setSelectedGame(game);
-    setParty([]);
-    const store = JSON.parse(localStorage.getItem('vtt-passwords') ?? '{}') as Record<string, string>;
-    const saved = Object.entries(store).find(([k]) => k.startsWith(`${game.id}:`));
-    setPassword(saved?.[1] ?? '');
-    fetch(`${API}/api/campaigns/${game.id}/party`)
-      .then(r => r.json())
-      .then((chars: Character[]) => setParty(chars))
-      .catch(() => {});
+    try {
+      if (await tryJoin(game.id, '')) return;
+    } catch { /* fall through to the modal — also covers a network error */ }
+    setPassword('');
     dialogRef.current?.showModal();
   }
 
-  function closeModal() { dialogRef.current?.close(); }
-
   async function handleJoin() {
-    if (!selectedGame || !password) return;
+    if (!selectedGame) return;
     try {
-      const r = await fetch(`${API}/api/campaigns/${selectedGame.id}/party/auth`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      });
-      const data = await r.json() as Character & { error?: string };
-      if (!r.ok || data.error) { alert(data.error ?? 'Invalid password'); return; }
-      sessionStorage.setItem(`vtt-session:${selectedGame.id}`, JSON.stringify(data));
-      window.location.href = `/${selectedGame.id}/game`;
+      if (!(await tryJoin(selectedGame.id, password))) alert('Invalid password');
     } catch {
       alert('Could not connect to server');
     }
@@ -115,7 +117,7 @@ export default function HomePage() {
         {games !== null && games.length > 0 && (
           <ul className="game-list">
             {games.map((game, i) => (
-              <li key={i} className="game-card" onClick={() => openModal(game)}>
+              <li key={i} className="game-card" onClick={() => void handleGameClick(game)}>
                 <span className="game-card-sigil">{game.name[0]?.toUpperCase()}</span>
                 <div className="game-card-info">
                   <span className="game-name">{game.name}</span>
@@ -158,26 +160,9 @@ export default function HomePage() {
         )}
 
         <dialog ref={dialogRef} className="modal">
-          <h2 className="modal-title">{selectedGame?.name}</h2>
-          {party.length === 0 && (
-            <p className="party-empty">There are currently no adventurers in the party.</p>
-          )}
-          {party.length > 0 && (
-            <ul className="party-list">
-              {party.map(char => (
-                <li key={char.id} className="party-list-item">
-                  <div className="party-list-portrait">
-                    {char.portraitPath
-                      ? <img src={`${API}/api/campaigns/${char.campaignId}/party/${char.id}/portrait`} alt={char.name} />
-                      : <span>{char.name[0]?.toUpperCase()}</span>
-                    }
-                  </div>
-                  <span className="party-list-name">{char.name}</span>
-                  {char.class && <span className="party-list-meta">{char.race} {char.class}</span>}
-                </li>
-              ))}
-            </ul>
-          )}
+          <div className="modal-header">
+            <h2 className="modal-title">{selectedGame?.name}</h2>
+          </div>
           <div className="modal-form">
             <label className="modal-label">
               Password
@@ -187,21 +172,14 @@ export default function HomePage() {
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') void handleJoin(); }}
-                placeholder="Your character password"
+                placeholder="Game password (leave blank if none)"
+                autoFocus
               />
             </label>
           </div>
-          <div className="modal-actions modal-actions--split">
-            <a
-              className="btn-create-player-link"
-              href={selectedGame ? `/${selectedGame.id}/player/create` : '#'}
-            >
-              New here? Create a character
-            </a>
-            <div className="modal-action-btns">
-              <button className="btn-secondary" onClick={closeModal}>Cancel</button>
-              <button className="btn-primary" onClick={() => void handleJoin()} disabled={!password}>Join</button>
-            </div>
+          <div className="modal-actions">
+            <button className="btn-secondary" onClick={closeModal}>Cancel</button>
+            <button className="btn-primary" onClick={() => void handleJoin()}>Enter</button>
           </div>
         </dialog>
       </div>

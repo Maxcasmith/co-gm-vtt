@@ -31,28 +31,32 @@ function uniqueAdventureSlug(base: string): string {
 
 export const adminRouter = Router();
 
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'admin';
+// Settings-configured password wins once set; env var / 'admin' is the pre-settings-UI fallback.
+export async function getAdminPassword(): Promise<string> {
+  const config = await getConfig();
+  return config.adminPassword || process.env.ADMIN_PASSWORD || 'admin';
+}
 
-export function requireAdmin(req: Request, res: Response): boolean {
-  if (req.headers['x-admin-password'] !== ADMIN_PASSWORD) {
+export async function requireAdmin(req: Request, res: Response): Promise<boolean> {
+  if (req.headers['x-admin-password'] !== await getAdminPassword()) {
     res.status(401).json({ error: 'Unauthorized' });
     return false;
   }
   return true;
 }
 
-adminRouter.post('/auth', (req, res) => {
+adminRouter.post('/auth', async (req, res) => {
   const { password } = req.body as { password?: string };
-  res.json({ ok: password === ADMIN_PASSWORD });
+  res.json({ ok: password === await getAdminPassword() });
 });
 
 adminRouter.get('/campaigns', async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!(await requireAdmin(req, res))) return;
   res.json(await listCampaigns());
 });
 
 adminRouter.delete('/campaigns/:id', async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!(await requireAdmin(req, res))) return;
   const campaignDir = path.join(CAMPAIGNS_DIR, req.params['id']!);
   try {
     if (existsSync(campaignDir)) await rm(campaignDir, { recursive: true });
@@ -64,7 +68,7 @@ adminRouter.delete('/campaigns/:id', async (req, res) => {
 });
 
 adminRouter.delete('/campaigns/:id/chat', async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!(await requireAdmin(req, res))) return;
   const chatPath = path.join(CAMPAIGNS_DIR, req.params['id']!, 'chat.json');
   try {
     if (existsSync(chatPath)) await rm(chatPath);
@@ -76,7 +80,7 @@ adminRouter.delete('/campaigns/:id/chat', async (req, res) => {
 });
 
 adminRouter.post('/campaigns/:id/save-adventure', async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!(await requireAdmin(req, res))) return;
   const campaignSlug = req.params['id']!;
   const { name } = req.body as { name?: string };
   try {
@@ -92,7 +96,7 @@ adminRouter.post('/campaigns/:id/save-adventure', async (req, res) => {
 });
 
 adminRouter.delete('/campaigns/:id/sessions', async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!(await requireAdmin(req, res))) return;
   const sessionsDir = path.join(CAMPAIGNS_DIR, req.params['id']!, 'sessions');
   try {
     if (existsSync(sessionsDir)) {
@@ -111,7 +115,7 @@ adminRouter.delete('/campaigns/:id/sessions', async (req, res) => {
 // the prompt text — see dungeon/tilesets.ts for why those are separate fields here. Always the
 // 16-tile 4x4 pipeline — the old 8-tile/2:1 mode-selection is retired, see tilesets.ts.
 adminRouter.post('/tilesets/generate', async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!(await requireAdmin(req, res))) return;
   const { title, theme, materials: rawMaterials } = req.body as { title?: string; theme?: string; materials?: DungeonMaterialSpec[] };
   const materials = (Array.isArray(rawMaterials) ? rawMaterials : [])
     .filter((m): m is DungeonMaterialSpec => !!m?.key?.trim() && !!m?.description?.trim())
@@ -145,7 +149,7 @@ adminRouter.post('/tilesets/generate', async (req, res) => {
 });
 
 adminRouter.delete('/tilesets/:theme', async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!(await requireAdmin(req, res))) return;
   const theme = req.params['theme']!;
   if (slugifyTheme(theme) !== theme) {
     res.status(400).json({ error: 'Invalid theme' });
@@ -176,7 +180,7 @@ function placeholderDescription(name: string): string {
 }
 
 adminRouter.get('/props/test-manifest', async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!(await requireAdmin(req, res))) return;
   try {
     const raw = await readFile(path.join(SAVED_ADVENTURES_DIR, PROP_TEST_ADVENTURE_SLUG, 'dungeon.json'), 'utf-8');
     const dungeon = JSON.parse(raw) as Dungeon;
@@ -200,7 +204,7 @@ adminRouter.get('/props/test-manifest', async (req, res) => {
 // list (bypassing generatePropSprites' skip-if-exists/chunking, which exist for the real dungeon
 // flow, not for repeatedly re-testing the same prompt tweak). Always overwrites existing sprites.
 adminRouter.post('/props/generate', async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!(await requireAdmin(req, res))) return;
   const { props: rawProps } = req.body as { props?: PendingProp[] };
   const props = (Array.isArray(rawProps) ? rawProps : [])
     .filter((p): p is PendingProp => !!p?.slug?.trim() && !!p?.name?.trim() && !!p?.description?.trim())
@@ -237,7 +241,7 @@ adminRouter.post('/props/generate', async (req, res) => {
 // prompt/crop tweaks can be checked for free against every atlas already paid for. `file` is a
 // _source filename only (never a path), same traversal guard as routes/props.ts.
 adminRouter.get('/props/preview-cells/:file', async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!(await requireAdmin(req, res))) return;
   const file = req.params['file']!;
   if (path.basename(file) !== file) {
     res.status(400).json({ error: 'Invalid file' });
@@ -258,14 +262,14 @@ adminRouter.get('/props/preview-cells/:file', async (req, res) => {
 // without spending a real character slot and without needing the settings toggle enabled.
 
 adminRouter.get('/storyboard-test', async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!(await requireAdmin(req, res))) return;
   res.json({ record: await getStoryboardTestRecord() });
 });
 
 // SSE, mirrors /tilesets/generate. Bypasses config.image.generateStoryboard — same as every other
 // admin generate route ignoring its equivalent settings toggle, this is an explicit on-demand test.
 adminRouter.post('/storyboard-test/generate', async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!(await requireAdmin(req, res))) return;
   const { name, backstory, portraitBase64 } = req.body as { name?: string; backstory?: string; portraitBase64?: string };
   if (!name?.trim() || !backstory?.trim()) {
     res.status(400).json({ error: 'name and backstory are required' });
@@ -348,7 +352,7 @@ adminRouter.get('/storyboard-test/slide/:n', (req, res) => {
 });
 
 adminRouter.delete('/storyboard-test', async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!(await requireAdmin(req, res))) return;
   try {
     if (existsSync(STORYBOARD_TEST_DIR)) await rm(STORYBOARD_TEST_DIR, { recursive: true });
     res.json({ ok: true });

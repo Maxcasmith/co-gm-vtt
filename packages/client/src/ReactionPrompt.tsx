@@ -6,6 +6,8 @@ import './styles/reaction-prompt.css';
 interface Props {
   /** Answers the server with the chosen option's spellName, or null to decline. */
   onRespond: (requestId: string, spellName: string | null) => void;
+  /** House rule (Game Settings → Reaction Sidebar) — shows each option's roll/AC detail panel. */
+  showDetailsByDefault: boolean;
 }
 
 /**
@@ -16,7 +18,7 @@ interface Props {
  * The countdown is real: when it reaches zero the server has already auto-declined, so the
  * panel closes itself rather than sending a response that would arrive too late.
  */
-export default function ReactionPrompt({ onRespond }: Props) {
+export default function ReactionPrompt({ onRespond, showDetailsByDefault }: Props) {
   const [offer, setOffer] = useState<ReactionOffer | null>(null);
   const [msLeft, setMsLeft] = useState(0);
 
@@ -86,6 +88,10 @@ export default function ReactionPrompt({ onRespond }: Props) {
               <p className="reaction-detail">
                 {option.attackerName}&apos;s {option.sourceName} is attacking you. Spend a Luck Point to impose Disadvantage on the attack?
               </p>
+            ) : option.kind === 'luckReroll' ? (
+              <p className="reaction-detail">
+                Your {option.sourceName} attack against {option.targetName} missed AC {option.currentAc} with {option.attackTotal}. Spend a Luck Point to reroll?
+              </p>
             ) : option.kind === 'swap' ? (
               <p className="reaction-detail">
                 {option.attackerName} wants to swap their rolled Initiative with yours. Accept?
@@ -95,15 +101,24 @@ export default function ReactionPrompt({ onRespond }: Props) {
                 {option.attackerName}&apos;s {option.sourceName} just hit you. Strike back?
               </p>
             )}
+            {showDetailsByDefault && (
+              <dl className="reaction-info">
+                <dt>Source</dt><dd>{option.attackerName} — {option.sourceName}</dd>
+                {option.targetName !== undefined && (<><dt>Target</dt><dd>{option.targetName}</dd></>)}
+                {option.attackTotal !== undefined && (<><dt>Roll total</dt><dd>{option.attackTotal}</dd></>)}
+                {option.currentAc !== undefined && (<><dt>AC</dt><dd>{option.currentAc}</dd></>)}
+                {option.boostedAc !== undefined && (<><dt>Boosted AC</dt><dd>{option.boostedAc}</dd></>)}
+              </dl>
+            )}
             <button className="reaction-accept" onClick={() => respond(option.spellName)}>
-              {option.kind === 'opportunity' ? 'Attack' : option.kind === 'protect' ? 'Protect' : option.kind === 'luck' ? 'Spend Luck Point' : option.kind === 'swap' ? 'Swap' : `Cast ${option.spellName}`}
+              {option.kind === 'opportunity' ? 'Attack' : option.kind === 'protect' ? 'Protect' : option.kind === 'luck' || option.kind === 'luckReroll' ? 'Spend Luck Point' : option.kind === 'swap' ? 'Swap' : `Cast ${option.spellName}`}
             </button>
           </div>
         ))}
       </div>
 
       <button className="reaction-decline" onClick={() => respond(null)}>
-        Take the hit
+        {offer.options[0]?.kind === 'luckReroll' ? 'Accept the miss' : 'Take the hit'}
       </button>
     </div>
   );

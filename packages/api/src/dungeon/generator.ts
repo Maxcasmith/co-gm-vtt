@@ -15,6 +15,8 @@ export const SIZE_RANGE: Record<'small' | 'medium' | 'large', [number, number]> 
 export interface GeneratorResult {
   cells: number[][];
   rooms: DungeonRoom[];
+  /** Carved doorway rects (building layouts only — see buildingLayout.ts's carveDoorway) that generateDungeon turns into Door entities. Omitted/empty for organic layouts, which carve plain gaps instead of literal doors. */
+  doors?: { x: number; y: number; width: number; height: number }[];
 }
 
 export function randInt(min: number, max: number): number {

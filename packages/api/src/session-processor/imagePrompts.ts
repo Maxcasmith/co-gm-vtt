@@ -1,5 +1,5 @@
 import { calcAC, CREATURE_TYPES, ENEMY_ROLES } from 'shared';
-import type { ChatPayload, Character, EnemyStatBlock, CreatureType, EnemyRole, AttackResult, SpellAttackResult, SpellSaveResult, WorldState, NemesisRecord, DungeonMaterialSpec } from 'shared';
+import type { ChatPayload, Character, EnemyStatBlock, CreatureType, EnemyRole, AttackResult, SpellAttackResult, SpellSaveResult, WorldState, NemesisRecord, DungeonMaterialSpec, AbilityKey } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { logError } from '../logger.ts';
 import { renderRoleTemplatesForPrompt } from '../combat/ai/roleTemplates.ts';
@@ -106,11 +106,18 @@ async function llmText(messages: { role: string; content: string }[], adapter: S
   } catch (err) { logError('session-processor/imagePrompts:llmText', err); return null; }
 }
 
-export async function generateCombatFlavour(result: AttackResult | SpellAttackResult, adapter: StoryProviderAdapter): Promise<string | null> {
+// improvisedAction: the player's own words for a freeform attack (e.g. chat.ts's
+// "improvised action" stub weapon carries no real prop, so the flavour LLM would otherwise
+// invent one out of thin air — grounding it in what was actually typed stops it hallucinating
+// gear the character doesn't own, like a bottle when their weapon is a dagger).
+export async function generateCombatFlavour(result: AttackResult | SpellAttackResult, adapter: StoryProviderAdapter, improvisedAction?: string): Promise<string | null> {
   const actionName = 'weaponName' in result ? result.weaponName : result.spellName;
   const outcome = result.hit
     ? `HIT for ${result.damage} ${result.damageFormula ? `(${result.damageFormula})` : ''} damage.${result.targetDead ? ' Target is slain.' : ` ${result.targetName} has ${result.remainingHp} HP remaining.`}`
     : `MISS — the blow fails to land (rolled ${result.total} vs AC ${result.ac}).`;
+  const actionLine = improvisedAction
+    ? `${result.attackerName} attacks ${result.targetName}, described as: "${improvisedAction}". Base the narration on exactly what's described — do not invent a different weapon or prop.`
+    : `${result.attackerName} attacks ${result.targetName} with their ${actionName}.`;
 
   return llmText([
     {
@@ -119,7 +126,7 @@ export async function generateCombatFlavour(result: AttackResult | SpellAttackRe
     },
     {
       role: 'user',
-      content: `${result.attackerName} attacks ${result.targetName} with their ${actionName}. ${outcome}`,
+      content: `${actionLine} ${outcome}`,
     },
   ], adapter);
 }
@@ -147,32 +154,55 @@ export async function generateSpellSaveFlavour(result: SpellSaveResult, adapter:
 }
 
 export interface ImprovisedActionResult {
-  type: 'attack' | 'question';
+  type: 'attack' | 'use_item' | 'aoe_damage' | 'question';
   answer: string;
   dc?: number;
   stat?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
   damageFormula?: string;
   damageType?: string;
   targetId?: string;
+  itemId?: string;
+  radiusFt?: number;
+  originObjectId?: string;
+  originGx?: number;
+  originGy?: number;
+  saveAbility?: AbilityKey;
 }
 
 export async function resolveImprovisedAction(
-  context: { playerName: string; playerClass: string; message: string; enemies: EnemyStatBlock[]; recentChat: string },
+  context: {
+    playerName: string; playerClass: string; message: string; enemies: EnemyStatBlock[]; recentChat: string;
+    inventory: { id: string; name: string; quantity: number }[];
+    knownSpells: string[];
+    objects: { id: string; name: string }[];
+    roomBounds?: { x: number; y: number; width: number; height: number };
+  },
   adapter: StoryProviderAdapter,
 ): Promise<ImprovisedActionResult | null> {
   const enemyList = context.enemies.map(e => `${e.name} (id: ${e.id}, HP: ${e.hp}, AC: ${e.ac})`).join(', ');
+  const inventoryList = context.inventory.map(i => `${i.name} (id: ${i.id}, qty: ${i.quantity})`).join(', ') || 'none';
+  const knownSpellsList = context.knownSpells.join(', ') || 'none';
+  const objectList = context.objects.map(o => `${o.name} (id: ${o.id})`).join(', ') || 'none';
+  const roomBoundsLine = context.roomBounds
+    ? `Room grid bounds (only relevant if targeting something NOT in the Objects list): x ${context.roomBounds.x}-${context.roomBounds.x + context.roomBounds.width}, y ${context.roomBounds.y}-${context.roomBounds.y + context.roomBounds.height}`
+    : '';
+
   return llmJson<ImprovisedActionResult>([
     {
       role: 'system',
       content: `You are a D&D 5e DM running a live combat encounter. A player says something during their turn.
-Determine if it is: (A) an improvised attack/environmental action, or (B) a question or statement requiring a DM response.
+Determine if it is: (A) an improvised attack on a creature, (B) using/consuming an item from their inventory, (C) an area-of-effect action against a location or object (igniting something explosive, burning a structure, etc.), or (D) a question or statement requiring a DM response.
 
 Enemies present: ${enemyList}
+Inventory: ${inventoryList}
+Known spells: ${knownSpellsList}
+Objects in the room: ${objectList}
+${roomBoundsLine}
 
 Respond with JSON only:
-{ "type": "attack"|"question", "answer": "narrative text (always required)", "dc": <number if attack>, "stat": "str|dex|con|int|wis|cha", "damageFormula": "XdY+Z", "damageType": "bludgeoning|piercing|slashing|fire|...", "targetId": "<enemy id if attack>" }
+{ "type": "attack"|"use_item"|"aoe_damage"|"question", "answer": "narrative text (always required)", "dc": <save/attack DC>, "stat": "str|dex|con|int|wis|cha", "damageFormula": "XdY+Z", "damageType": "bludgeoning|piercing|slashing|fire|...", "targetId": "<enemy id if attack>", "itemId": "<inventory id if use_item>", "radiusFt": <blast radius if aoe_damage>, "originObjectId": "<object id if aoe_damage targets something in Objects list>", "originGx": <grid x if aoe_damage has no matching object>, "originGy": <grid y if aoe_damage has no matching object>, "saveAbility": "str|dex|con|int|wis|cha" }
 
-If type is "question", only "type" and "answer" are needed. Be fair but decisive on DCs.`,
+If type is "use_item", only use an id that appears in Inventory above — never invent one. If type is "aoe_damage" and the target matches something in Objects, set originObjectId to its id and do NOT invent originGx/originGy. Only fall back to originGx/originGy (within Room grid bounds) when nothing in Objects matches. If the player names a specific spell by name (e.g. "I cast firebolt") that does NOT appear in Known spells above, this is invalid — return type "question" with an answer explaining they don't know that spell, and do not resolve any attack/damage for it. Improvised (non-spell) actions are unaffected by this check. If type is "question", only "type" and "answer" are needed. Be fair but decisive on DCs.`,
     },
     { role: 'user', content: `Recent events:\n${context.recentChat}\n\n${context.playerName} (${context.playerClass}) says: "${context.message}"` },
   ], adapter);
@@ -695,8 +725,106 @@ Dark, painterly, moody illustration — heavy shadow, restrained desaturated pal
 * Panels progress in a clear visual chronology from the character's past toward the present moment the game begins`;
 }
 
-export function buildWorldMapPrompt(worldMd: string, locationsSummary: string, tags: string[]): string {
+// Dungeon-crawl worlds only — the opening cold-open cutscene for the SCENARIO itself, not any one
+// character (the party doesn't exist yet when this generates). Same COLS/ROWS/atlas math and same
+// beats-then-image two-pass pipeline as the character pair above (see runScenarioStoryboardPipeline
+// in dungeon/storyboard.ts) — deliberately mirrored, just without a character to describe or keep
+// consistent, and with an explicit ban on drawing anyone meant to represent the party.
+export interface ScenarioStoryboardSubject {
+  title: string;
+  synopsis: string;
+}
+
+export function buildScenarioStoryboardBeatsPrompt(subject: ScenarioStoryboardSubject, count: number): string {
+  return `You are breaking a tabletop RPG dungeon-crawl scenario into exactly ${count} key moments for a cold-open cutscene storyboard (Resident Evil 2/3 style) — a sequence of panels with a second-person voiceover.
+
+SCENARIO: ${subject.title}
+
+SYNOPSIS:
+${subject.synopsis.slice(0, 2400)}
+
+Identify the ${count} MOST IMPORTANT, VISUALLY DISTINCT moments this synopsis implies, in chronological order — the turning points that lead up to the party arriving at the dungeon's threshold, right before the game begins.
+
+Each moment must:
+* Depict a clearly different scene, action, or turning point than every other moment — never split one real beat into two
+* Together cover the arc implied by the synopsis, ending on the moment of arrival at the dungeon
+* Be something that can be drawn as ONE concrete scene — a specific action, place, and moment, not an abstract feeling
+* NEVER depict a figure meant to represent the party or any player character — no protagonist, no silhouette standing in for "you". Show environment, threats/monsters, objects, wreckage, POV-style framing (hands, a door, a weapon) instead. The party is never on screen.
+
+For each moment, produce a matched pair:
+* "visual": a concrete scene description for an image generator — subject, action, setting, mood, 1-2 sentences, no dialogue, no text-in-image, no protagonist figure
+* "narration": a second-person voiceover line describing EXACTLY what's shown in that same "visual" — "you" and "your", present or immediate-past tense, never narrating something the image doesn't depict. 1-3 short sentences, never a full paragraph.
+
+Narration style — grounded and dramatic, not a police report and not a poem. Concrete events, real stakes, some natural rhythm and weight — but every line still has to sound like something that could be said out loud, not a novelist reaching for effect. A plain image tied directly to something actually in the scene (a locked gate, a burning street, a name on a sign) is fine and often stronger than the bare fact alone. Vary sentence length for rhythm.
+
+Respond with ONLY a JSON array of exactly ${count} objects, no other text:
+[{ "visual": "...", "narration": "..." }, ...]`;
+}
+
+export function buildScenarioStoryboardPrompt(
+  subject: ScenarioStoryboardSubject,
+  beats: string[], // one "visual" description per panel, already condensed — see buildScenarioStoryboardBeatsPrompt
+  cols: number,
+  rows: number,
+  atlasW: number,
+  atlasH: number,
+  tileW: number,
+  tileH: number,
+): string {
+  const count = cols * rows;
+  const panelTable = beats.map((b, i) => `Panel ${i + 1}: ${b}`).join('\n');
+  return `Create a **cinematic opening storyboard** for a tabletop RPG dungeon-crawl scenario, in the style of a survival-horror game's cold-open cutscene (like Resident Evil 2/3's title sequence) — a grid of moody, painterly panels that tell the lead-up to the party's arrival.
+
+# SCENARIO
+
+Title: ${subject.title}
+
+# PANELS (exact position — this is a literal map of the atlas, not a loose ordering)
+
+Each cell below MUST depict exactly the moment described at that position, and nothing else. Do not reorder, merge, split, or drop any panel; do not add a moment that isn't listed.
+
+${panelTable}
+
+# OUTPUT
+
+Create a single storyboard atlas:
+
+* **${cols} columns, ${rows} rows** (${count} panels total, read left-to-right then top-to-bottom, in the order listed above)
+* Every cell is exactly the same size as every other cell
+* Complete atlas size: **${atlasW} × ${atlasH}** pixels, exactly — this is the actual canvas you are rendering, not a suggestion
+* Individual cell size: **${tileW} × ${tileH}** pixels, exactly — ${atlasW} ÷ ${cols} = ${tileW}, ${atlasH} ÷ ${rows} = ${tileH}
+* Each panel is a self-contained cinematic scene depicting exactly its own listed moment, composed to fill its own ${tileW}×${tileH} cell — never composed as if the cell were square or a different shape than stated
+
+# RULE — NO PROTAGONIST
+
+No panel may depict a figure meant to represent the party or a player character — not a silhouette, not a faceless shape, nothing standing in for "you". The party's appearance isn't decided yet. Show environment, threats/monsters, objects, wreckage, and POV-style framing (a hand on a door, a weapon held up) instead — every panel is something the party could be seeing or the aftermath of something that happened to them, never a picture of them.
+
+# STYLE
+
+Dark, painterly, moody illustration — heavy shadow, restrained desaturated palette, dramatic single-source lighting. Same rendering technique, same level of detail, same color grade across all ${count} panels, so they read as one cohesive sequence rather than unrelated images.
+
+# RULES
+
+* NO text, lettering, numbers, or captions anywhere in the image — the story is told entirely through the imagery, captions are added separately afterward
+* NO frame or border around the outer edge of the atlas
+* A thin dark divider line between panels is fine but not required
+* Every panel fits entirely within its own ${tileW}×${tileH} cell — nothing overflows into a neighboring panel, nothing composed for a different aspect ratio than the cell actually is
+* Panels progress in a clear visual chronology, ending on the moment of arrival at the dungeon`;
+}
+
+export interface WorldMapLocation {
+  name: string;
+  description: string;
+}
+
+// Per-entry cap (not a whole-blob slice) — so the list scales with however many locations the
+// world actually has instead of silently dropping entries once the joined text got long, the way
+// a single slice(0, N) over the whole blob used to (same failure buildCreaturePortraitPrompt /
+// buildPropSpritePrompt avoid by enumerating fixed entries instead of a free-text summary).
+export function buildWorldMapPrompt(worldMd: string, locations: WorldMapLocation[], tags: string[]): string {
   const tagLine = tags.length ? tags.join(', ') : 'dark fantasy';
+  const locationLines = locations.map((l, i) => `${i + 1}. **${l.name}** — ${l.description.slice(0, 200) || 'no further detail given'}`);
+
   return `Create a FANTASY WORLD MAP in the style of classic RPG cartography. This map must be scoped exclusively to the world described below — no generic fantasy tropes that contradict the setting. Every visual choice (palette, terrain, iconography, atmosphere) must reflect the specific tone and themes of this campaign.
 
 CAMPAIGN TAGS (these define the mood, genre, and visual identity of this world — the map must embody them):
@@ -705,7 +833,6 @@ ${tagLine}
 STYLE RULES (MANDATORY):
 - Hand-drawn or painterly top-down world map aesthetic (like classic D&D sourcebook maps)
 - Illustrated terrain features: mountains, forests, coastlines, rivers, deserts — styled to match the campaign tags above
-- Every named location listed below MUST appear on the map as a marked landmark or settlement with a small illustrative icon
 - Colour palette, linework, and overall aesthetic derived from the campaign tags — not generic parchment if the setting doesn't call for it
 - Decorative compass rose in a style matching the world's tone
 - Rich, dense detail — no empty areas
@@ -713,9 +840,14 @@ STYLE RULES (MANDATORY):
 
 WORLD CONTEXT
 
-${worldMd.slice(0, 1200)}
+${worldMd.slice(0, 1500)}
 
-LOCATIONS (each must be visually represented on the map)
+LOCATIONS (exactly ${locations.length} total — every single one below MUST appear on the map as its own marked landmark or settlement with a small illustrative icon matching its description. Do not omit, merge, or substitute any entry, and do not add a location that isn't listed.)
 
-${locationsSummary.slice(0, 1200)}`;
+${locationLines.join('\n')}
+
+PRIORITIES
+1. Every one of the ${locations.length} listed locations is present and individually identifiable on the map — completeness beats density
+2. Palette, terrain, and iconography faithfully reflect the campaign tags and world context above
+3. Rich, cohesive, hand-drawn cartography aesthetic with no empty/dead space`;
 }

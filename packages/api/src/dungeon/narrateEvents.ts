@@ -30,7 +30,15 @@ export function templateRoomEntry(dungeon: Dungeon, room: DungeonRoom): string |
     e.x >= room.x && e.x < room.x + room.width &&
     e.y >= room.y && e.y < room.y + room.height,
   );
-  if (here.length) lines.push(`Here: ${here.map(e => e.name).join(', ')}.`);
+  // Natural sentence, not a "Here: X, Y." label — this line is posted verbatim to players (see
+  // runtime.ts's room_entered handler), and that ground-truth-style listing syntax is meant to
+  // stay DM-eyes-only (describeDungeonGroundTruth/describeDungeonState use it internally); posting
+  // it straight to chat read as a debug readout bleeding into the narration.
+  if (here.length) {
+    const names = here.map(e => e.name);
+    const subject = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    lines.push(`${subject} ${names.length === 1 ? 'is' : 'are'} here.`);
+  }
 
   return lines.length ? lines.join('\n') : null;
 }
@@ -59,5 +67,8 @@ export function templateSearchResult(characterName: string, found: SearchFind): 
     // gone off, which then read as a second, unexplained trigger once the real one fired later.
     case 'trap': return `${characterName} spots a trap before it triggers: ${stripMechanics(found.name)}.`;
     case 'object': return `${characterName} makes out ${found.name}.`;
+    // Doors are never hidden (discovered: true, no hideDC — see toggleDoor's doc), so this never
+    // actually fires; here only to keep the switch exhaustive.
+    case 'door': return `${characterName} makes out a door.`;
   }
 }

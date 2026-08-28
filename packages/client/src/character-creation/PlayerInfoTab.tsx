@@ -8,6 +8,7 @@ import {
 } from './srd.ts';
 import CharacterSheet from './CharacterSheet.tsx';
 import SkillPicker from './SkillPicker.tsx';
+import ImageCropModal from './ImageCropModal.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
 
@@ -39,33 +40,31 @@ export default function PlayerInfoTab({ campaignId }: { campaignId: string }) {
   const [featOpen, setFeatOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  const [tokenVersion, setTokenVersion] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const processImage = useCallback(async (file: File) => {
+  const uploadCroppedImage = useCallback(async (base64image: string) => {
+    setCropFile(null);
     setUploading(true);
     setUploadError('');
-    const reader = new FileReader();
-    reader.onload = async e => {
-      const dataUrl = e.target?.result as string;
-      const base64image = dataUrl.split(',')[1] ?? '';
-      c.set('portraitBase64', base64image);
-      try {
-        const r = await fetch(`${API}/api/campaigns/${campaignId}/party/portrait`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ charId: c.id, base64image }),
-        });
-        const data = await r.json() as { portraitPath?: string; tokenPath?: string; error?: string };
-        if (data.error) throw new Error(data.error);
-        c.set('portraitPath', data.portraitPath ?? '');
-        c.set('tokenPath', data.tokenPath ?? '');
-      } catch (err) {
-        setUploadError(err instanceof Error ? err.message : 'Upload failed');
-      } finally {
-        setUploading(false);
-      }
-    };
-    reader.readAsDataURL(file);
+    c.set('portraitBase64', base64image);
+    try {
+      const r = await fetch(`${API}/api/campaigns/${campaignId}/party/portrait`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ charId: c.id, base64image }),
+      });
+      const data = await r.json() as { portraitPath?: string; tokenPath?: string; error?: string };
+      if (data.error) throw new Error(data.error);
+      c.set('portraitPath', data.portraitPath ?? '');
+      c.set('tokenPath', data.tokenPath ?? '');
+      setTokenVersion(v => v + 1);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
   }, [campaignId, c]);
 
   // ── stat roller ────────────────────────────────────────────────────────────
@@ -140,7 +139,7 @@ export default function PlayerInfoTab({ campaignId }: { campaignId: string }) {
             className={`inline-portrait-drop inline-portrait-drop--compact ${uploading ? 'inline-portrait-drop--loading' : ''}`}
             onClick={() => !uploading && fileInputRef.current?.click()}
             onDragOver={e => e.preventDefault()}
-            onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f && !uploading) void processImage(f); }}
+            onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f && !uploading) setCropFile(f); }}
           >
             {c.portraitBase64
               ? <img src={`data:image/jpeg;base64,${c.portraitBase64}`} className="inline-portrait-preview" alt="Portrait" />
@@ -151,7 +150,7 @@ export default function PlayerInfoTab({ campaignId }: { campaignId: string }) {
               type="file"
               accept="image/*"
               className="portrait-file-input"
-              onChange={e => { const f = e.target.files?.[0]; if (f) void processImage(f); }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) setCropFile(f); e.target.value = ''; }}
             />
           </div>
 
@@ -167,7 +166,7 @@ export default function PlayerInfoTab({ campaignId }: { campaignId: string }) {
             {uploadError && <p className="modal-error">{uploadError}</p>}
             {c.tokenPath && (
               <div className="inline-token-badge">
-                <img src={`${API}/api/campaigns/${campaignId}/party/${c.id}/token`} className="inline-token-img" alt="Token" />
+                <img src={`${API}/api/campaigns/${campaignId}/party/${c.id}/token?v=${tokenVersion}`} className="inline-token-img" alt="Token" />
                 <span className="portrait-result-label">Token ready</span>
               </div>
             )}
@@ -324,6 +323,11 @@ export default function PlayerInfoTab({ campaignId }: { campaignId: string }) {
 
       </div>
       <CharacterSheet />
+      <ImageCropModal
+        file={cropFile}
+        onCancel={() => setCropFile(null)}
+        onConfirm={base64 => void uploadCroppedImage(base64)}
+      />
     </div>
   );
 }

@@ -5,7 +5,9 @@ import ConfigureAiWorkflowsModal from './ConfigureAiWorkflowsModal.tsx';
 
 interface Props {
   open: boolean;
+  password: string;
   onClose: () => void;
+  onPasswordChanged: (password: string) => void;
 }
 
 export const STORY_PROVIDERS: { id: StoryProvider; label: string; models: { id: string; label: string; supportsEffort?: boolean }[] }[] = [
@@ -86,20 +88,23 @@ const DEFAULT_CONFIG: AppConfig = {
   apiKeys: { openai: '', anthropic: '', deepseek: '', kimi: '' },
   image: { model: 'gpt-image-1', generateWorldMap: false, generateTilesets: false, generateStoryboard: false },
   narration: { model: 'none', voice: 'onyx' },
+  adminPassword: '',
 };
 
 const API = `http://${window.location.hostname}:3001`;
 
-export default function SettingsSidebar({ open, onClose }: Props) {
+export default function SettingsSidebar({ open, password, onClose, onPasswordChanged }: Props) {
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
   const [saved, setSaved] = useState<AppConfig>(DEFAULT_CONFIG);
   const [imageStatus, setImageStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [narrationPreviewing, setNarrationPreviewing] = useState(false);
   const [workflowsModalOpen, setWorkflowsModalOpen] = useState(false);
+  const [applyError, setApplyError] = useState('');
   const discardRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     if (!open) return;
+    setApplyError('');
     fetch(`${API}/api/config`)
       .then(r => r.json())
       .then((c: AppConfig) => { setConfig(c); setSaved(c); })
@@ -120,11 +125,17 @@ export default function SettingsSidebar({ open, onClose }: Props) {
   }
 
   async function handleApply() {
-    await fetch(`${API}/api/config`, {
+    const r = await fetch(`${API}/api/config`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
       body: JSON.stringify(config),
     });
+    if (!r.ok) {
+      setApplyError(r.status === 401 ? 'Incorrect admin password — changes were not saved.' : 'Failed to save settings.');
+      return;
+    }
+    setApplyError('');
+    if (config.adminPassword.trim()) onPasswordChanged(config.adminPassword);
     setSaved(config);
     onClose();
   }
@@ -206,6 +217,23 @@ export default function SettingsSidebar({ open, onClose }: Props) {
                 value={config.apiKeys.kimi}
                 onChange={e => setConfig(c => ({ ...c, apiKeys: { ...c.apiKeys, kimi: e.target.value } }))}
                 placeholder="sk-..."
+              />
+            </label>
+          </section>
+
+          <div className="settings-divider" />
+
+          <section className="settings-section">
+            <h3 className="settings-section-title">Admin Password</h3>
+            <label className="modal-label">
+              New Password
+              <input
+                className="modal-input"
+                type="password"
+                value={config.adminPassword}
+                onChange={e => setConfig(c => ({ ...c, adminPassword: e.target.value }))}
+                placeholder="Leave blank to keep the current password"
+                autoComplete="new-password"
               />
             </label>
           </section>
@@ -335,9 +363,12 @@ export default function SettingsSidebar({ open, onClose }: Props) {
           </section>
         </div>
 
-        <div className="settings-footer">
-          <button className="btn-secondary" onClick={handleCancel}>Cancel</button>
-          <button className="btn-primary" onClick={handleApply}>Apply</button>
+        <div className={`settings-footer${applyError ? ' modal-actions--split' : ''}`}>
+          {applyError && <p className="admin-error">{applyError}</p>}
+          <div className="modal-action-btns">
+            <button className="btn-secondary" onClick={handleCancel}>Cancel</button>
+            <button className="btn-primary" onClick={() => void handleApply()}>Apply</button>
+          </div>
         </div>
       </aside>
 

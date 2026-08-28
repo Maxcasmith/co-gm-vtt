@@ -22,6 +22,10 @@ const AI_FEATURES: { id: AiFeature; label: string; description: string; group: s
     description: 'Writes the short premise for a dungeon-crawl campaign (no full world, just a hook). Runs once at creation.',
   },
   {
+    id: 'dungeonScenarioSynopsis', label: 'Dungeon Scenario Synopsis', group: 'Narrative',
+    description: 'Writes the rich scenario synopsis for a dungeon-crawl campaign — shown in the game lobby and used to guide the dungeon itself (rooms, goal, storyboard). Runs once at creation, before the dungeon is generated.',
+  },
+  {
     id: 'backstoryGeneration', label: 'Backstory Generation', group: 'Narrative',
     description: 'Drafts a character backstory during character creation. Player is waiting on this — balance speed and quality.',
   },

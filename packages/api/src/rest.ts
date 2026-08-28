@@ -1,5 +1,5 @@
 import type { Character, InventoryItem } from 'shared';
-import { spellSlotsForClass, statMod, applyResourceRestRegain, resourceCurrent, trySpendResource } from 'shared';
+import { spellSlotsForCharacter, hasClassLevel, statMod, applyResourceRestRegain, resourceCurrent, trySpendResource } from 'shared';
 import { HIT_DICE } from './state.ts';
 import { calcMaxHp } from './combat/dice.ts';
 
@@ -23,7 +23,7 @@ export interface RestOutcome {
 
 export function applyLongRest(char: Character): RestOutcome {
   const maxHp = calcMaxHp(char);
-  const maxSpellSlots1 = spellSlotsForClass(char.class);
+  const maxSpellSlots1 = spellSlotsForCharacter(char);
   // RAW: HP fully restored, but Hit Dice only regain half your total (min 1), not all of them.
   const totalHitDice = char.level ?? 1;
   const restored = Math.max(1, Math.floor(totalHitDice / 2));
@@ -49,14 +49,14 @@ export function applyShortRest(char: Character, hitDiceSpent: number): RestOutco
   const currentHp = Math.min(maxHp, current + hpGained);
 
   // Pact Magic uniquely recovers on a short rest; other casters' slots don't.
-  const maxSpellSlots1 = spellSlotsForClass(char.class);
-  let currentSpellSlots1 = char.class === 'Warlock' ? maxSpellSlots1 : (char.currentSpellSlots1 ?? maxSpellSlots1);
+  const maxSpellSlots1 = spellSlotsForCharacter(char);
+  let currentSpellSlots1 = hasClassLevel(char, 'Warlock') ? maxSpellSlots1 : (char.currentSpellSlots1 ?? maxSpellSlots1);
   let resourceUses = applyResourceRestRegain(char, 'short');
 
   // Arcane Recovery: once per Long Rest, finishing a Short Rest recovers spell slots totaling
   // up to half the Wizard's level (rounded up) — this app tracks only level-1 slots, so that
   // slot-level cap and "slot count" are the same number for a level-1 Wizard.
-  if (char.class === 'Wizard' && resourceCurrent(char, 'arcaneRecovery') > 0 && currentSpellSlots1 < maxSpellSlots1) {
+  if (hasClassLevel(char, 'Wizard') && resourceCurrent(char, 'arcaneRecovery') > 0 && currentSpellSlots1 < maxSpellSlots1) {
     const recoverable = Math.ceil((char.level ?? 1) / 2);
     currentSpellSlots1 = Math.min(maxSpellSlots1, currentSpellSlots1 + recoverable);
     resourceUses = trySpendResource({ ...char, resourceUses }, 'arcaneRecovery') ?? resourceUses;

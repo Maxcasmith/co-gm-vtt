@@ -1,5 +1,5 @@
 import type { EffectSpec, CreatureType, Character } from 'shared';
-import { resolveSpellDamageDice, effectApplies, statMod, hasOriginFeat } from 'shared';
+import { resolveSpellDamageDice, effectApplies, statMod, hpBonusPerLevel } from 'shared';
 import { HIT_DICE, CR_XP, CR_STEPS } from '../state.ts';
 
 export class D20Roll {
@@ -37,6 +37,13 @@ export function rollDice(formula: string): number {
   let total = parseInt(m[3] ?? '0');
   for (let i = 0; i < parseInt(m[1]!); i++) total += Math.floor(Math.random() * parseInt(m[2]!)) + 1;
   return Math.max(1, total);
+}
+
+/** Perkins Crit house rule: sum of every die's max face value in a formula (e.g. "2d8+3" → 16), ignoring flat modifiers. */
+export function maxDiceValue(formula: string): number {
+  let total = 0;
+  for (const m of formula.matchAll(/(\d+)d(\d+)/gi)) total += parseInt(m[1]!) * parseInt(m[2]!);
+  return total;
 }
 
 /** Great Weapon Fighting: reroll each damage die that comes up at or below `threshold` once, keeping the reroll. */
@@ -155,8 +162,8 @@ export function rollChainableDamage(
 }
 
 export function calcMaxHp(char: Character): number {
-  const toughBonus = hasOriginFeat(char, 'Tough') ? 2 * (char.level ?? 1) : 0;
-  return (char.maxHp ?? ((HIT_DICE[char.class] ?? 8) + statMod(char.stats.con) + toughBonus));
+  const levelBonus = hpBonusPerLevel(char) * (char.level ?? 1);
+  return (char.maxHp ?? ((HIT_DICE[char.class] ?? 8) + statMod(char.stats.con) + levelBonus));
 }
 
 export function crToXp(cr: number): number { return CR_XP.find(([c]) => c === cr)?.[1] ?? Math.round(cr * 200); }

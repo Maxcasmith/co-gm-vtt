@@ -29,7 +29,7 @@ export function bfsReachable(cells: number[][], startX: number, startY: number, 
 // standard DDA, stopping at the exact (fractional) point it crosses into a wall or leaves bounds,
 // capped at `radius`. Exact crossing points (rather than cell centers) are what let the fog
 // boundary follow natural angled/diagonal lines instead of a cell-square staircase.
-function castVisibilityRay(cells: number[][], ox: number, oy: number, dirX: number, dirY: number, radius: number, width: number, height: number): { x: number; y: number } {
+function castVisibilityRay(cells: number[][], ox: number, oy: number, dirX: number, dirY: number, radius: number, width: number, height: number, blocked?: Set<string>): { x: number; y: number } {
   let mapX = Math.floor(ox), mapY = Math.floor(oy);
   const deltaDistX = dirX === 0 ? Infinity : Math.abs(1 / dirX);
   const deltaDistY = dirY === 0 ? Infinity : Math.abs(1 / dirY);
@@ -48,7 +48,7 @@ function castVisibilityRay(cells: number[][], ox: number, oy: number, dirX: numb
       sideDistY += deltaDistY;
       mapY += stepY;
     }
-    if (mapX < 0 || mapY < 0 || mapX >= width || mapY >= height || cells[mapY]?.[mapX] !== 1) break;
+    if (mapX < 0 || mapY < 0 || mapX >= width || mapY >= height || cells[mapY]?.[mapX] !== 1 || blocked?.has(`${mapX},${mapY}`)) break;
   }
   const hitDist = Math.min(dist, radius);
   return { x: ox + dirX * hitDist, y: oy + dirY * hitDist };
@@ -58,13 +58,13 @@ const VISIBILITY_RAYS = 240; // ~1.5° apart — smooth enough at SIGHT_RADIUS w
 
 // Sweeps a full circle of rays from (ox,oy) to build the fog-of-war sight boundary as a polygon
 // of exact wall-crossing points, instead of a set of whole visible/hidden cells.
-export function computeVisibilityPolygon(cells: number[][], ox: number, oy: number, radius: number): { x: number; y: number }[] {
+export function computeVisibilityPolygon(cells: number[][], ox: number, oy: number, radius: number, blocked?: Set<string>): { x: number; y: number }[] {
   const height = cells.length;
   const width = cells[0]?.length ?? 0;
   const points: { x: number; y: number }[] = [];
   for (let i = 0; i < VISIBILITY_RAYS; i++) {
     const angle = (i / VISIBILITY_RAYS) * Math.PI * 2;
-    points.push(castVisibilityRay(cells, ox, oy, Math.cos(angle), Math.sin(angle), radius, width, height));
+    points.push(castVisibilityRay(cells, ox, oy, Math.cos(angle), Math.sin(angle), radius, width, height, blocked));
   }
   return points;
 }

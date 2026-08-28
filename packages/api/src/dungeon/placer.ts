@@ -27,17 +27,8 @@ function area(room: DungeonRoom): number {
   return room.width * room.height;
 }
 
-const MIN_DIST_FROM_START = 15; // cells, every direction — no enemy/trap/loot may spawn closer than this to the start room
-
 function key(x: number, y: number): string {
   return `${x},${y}`;
-}
-
-// Chebyshev distance from a point to a room's nearest edge — 0 while inside the room.
-function distToRoom(room: DungeonRoom, x: number, y: number): number {
-  const dx = x < room.x ? room.x - x : x > room.x + room.width - 1 ? x - (room.x + room.width - 1) : 0;
-  const dy = y < room.y ? room.y - y : y > room.y + room.height - 1 ? y - (room.y + room.height - 1) : 0;
-  return Math.max(dx, dy);
 }
 
 // Nearest free FLOOR cell to (targetX, targetY), searched outward ring by ring, never leaving the
@@ -82,13 +73,17 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
     const cx = room.x + Math.floor(room.width / 2);
     const cy = room.y + Math.floor(room.height / 2);
 
-    // Nothing hostile or valuable spawns within MIN_DIST_FROM_START of the room the party starts in.
-    // +1 buffer: loot/trap land up to 1 cell off room-center, so the room itself must clear by that much.
-    if (distToRoom(startRoom, cx, cy) < MIN_DIST_FROM_START + 1) continue;
+    // Safe zone is the entrance room itself, nothing wider — a raw-distance buffer used to also
+    // swallow whichever rooms happened to sit nearby, discarding manifest-authored content (see
+    // fetchManifest's predefinedQuests handling) along with it, which silently broke quests the
+    // dungeon was built to serve. checkDungeonProximity (runtime.ts) backs this up: aggro itself
+    // is suppressed while a player is standing in the entrance room, so a creature placed right
+    // outside it still can't ambush someone who hasn't stepped out yet.
+    const isEntranceRoom = room.id === startRoom.id;
 
-    const isLoot = lootRooms.has(room.id);
+    const isLoot = !isEntranceRoom && lootRooms.has(room.id);
 
-    for (const creatureHint of hints?.creatures ?? []) {
+    for (const creatureHint of isEntranceRoom ? [] : hints?.creatures ?? []) {
       const cell = findFreeCell(room, cx, cy, occupied, cells);
       if (cell) {
         occupied.add(key(cell.x, cell.y));
@@ -98,7 +93,7 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
     }
 
     // No manifest loot hints but this room's in the smallest-area third: fall back to one auto chest.
-    const lootHints = hints?.loot?.length ? hints.loot : isLoot ? [{ name: 'Chest', hideDC: 10, contents: ['a few silver coins'] }] : [];
+    const lootHints = isEntranceRoom ? [] : hints?.loot?.length ? hints.loot : isLoot ? [{ name: 'Chest', hideDC: 10, contents: ['a few silver coins'] }] : [];
     for (const lootHint of lootHints) {
       const cell = findFreeCell(room, cx + 1, cy, occupied, cells);
       if (cell) {
@@ -107,7 +102,7 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
       }
     }
 
-    for (const trapHint of hints?.traps ?? []) {
+    for (const trapHint of isEntranceRoom ? [] : hints?.traps ?? []) {
       const cell = findFreeCell(room, cx - 1, cy, occupied, cells);
       if (cell) {
         occupied.add(key(cell.x, cell.y));

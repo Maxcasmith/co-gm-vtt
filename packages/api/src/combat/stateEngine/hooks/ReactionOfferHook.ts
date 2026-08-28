@@ -60,6 +60,7 @@ export class ReactionOfferHook extends Hook<'afterAttackRoll'> {
     if (!candidates.length) return;
 
     const picked = await offerReaction(
+      cid,
       this.ownerId,
       candidates.map(c => ({
         spellName: c.spell.name, kind: 'defend' as const,

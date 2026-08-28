@@ -25,6 +25,10 @@ export function useCombatEffects(
   // Who's concentrating on what, keyed by both id and name since tokens are looked up either
   // way depending on kind (enemies/companions by id, players by name — see Canvas.tsx's draw loop).
   const [concentrating, setConcentrating] = useState<Record<string, string>>({});
+  // Who's target-locked by a curse (Hunter's Mark, Hex) right now, keyed by the MARKED creature's
+  // id/name (unlike `concentrating`, which is keyed by the caster) — feeds drawTokenIconStack via
+  // markIconFor. See tokenIcons.ts for the icon-framework side of this.
+  const [marks, setMarks] = useState<Record<string, string>>({});
   const [animTick, setAnimTick] = useState(0);
   const animRafRef = useRef<number | null>(null);
 
@@ -98,6 +102,12 @@ export function useCombatEffects(
     pushHealFloat(result.characterId, result.characterName, result.healAmount);
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Ability/spell healing (Second Wind, Cure Wounds, ...) — applyHealingToPlayer's broadcast,
+  // same float as a consumable heal so no heal source skips the display.
+  useEffect(() => on('vtt:combat:player:heal', result => {
+    pushHealFloat(result.characterId, result.characterName, result.healAmount);
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // The one place damage floats come from — fired by applyDamageToPlayer/applyDamageToCreature
   // server-side, so every damage source (weapon hit, spell hit, spell-save damage, recurring
   // ticks) draws the same way without each attack-result handler needing its own float call.
@@ -160,7 +170,15 @@ export function useCombatEffects(
       return next;
     });
   }), []);
-  useEffect(() => on('vtt:combat:state', ({ active }) => { if (!active) setConcentrating({}); }), []);
+  useEffect(() => on('vtt:combat:mark', ({ targetId, targetName, spellName, active }) => {
+    setMarks(prev => {
+      const next = { ...prev };
+      if (!active) { delete next[targetId]; delete next[targetName]; }
+      else { next[targetId] = spellName; next[targetName] = spellName; }
+      return next;
+    });
+  }), []);
+  useEffect(() => on('vtt:combat:state', ({ active }) => { if (!active) { setConcentrating({}); setMarks({}); } }), []);
 
-  return { floatEffectsRef, flashEffectsRef, tokenEffectsRef, swingEffectsRef, concentrating, animTick };
+  return { floatEffectsRef, flashEffectsRef, tokenEffectsRef, swingEffectsRef, concentrating, marks, animTick };
 }

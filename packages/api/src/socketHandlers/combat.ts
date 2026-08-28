@@ -1,12 +1,12 @@
 import type { TurnOrderEntry, Weapon, Spell, SpellAttackResult, SpellSaveOutcome, SpellSaveResult, CreatureType, Character, ActionResource, AttackContext, DungeonEntity, EffectSpec, AbilityKey, HookSpec } from 'shared';
-import { effectiveWeaponProfs, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, isAmmunition, isWeapon, statMod, parseRangeFeet, resolveForcedMovement, findPath, effectApplies, actionCostFromCastingTime, requiresConcentration, resolveSpellDamageDice, hasOriginFeat, crossesObscuredArea, ABILITY_DEFS, trySpendResource, trySpendResourceAmount, resourceCurrent } from 'shared';
+import { effectiveWeaponProfs, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, isAmmunition, isWeapon, statMod, parseRangeFeet, resolveForcedMovement, findPath, effectApplies, actionCostFromCastingTime, requiresConcentration, resolveSpellDamageDice, hasOriginFeat, hasClassLevel, crossesObscuredArea, ABILITY_DEFS, trySpendResource, trySpendResourceAmount, resourceCurrent, getSenses } from 'shared';
 import { randomUUID } from 'crypto';
-import { getCharacter, updateCharacter, saveEncounter, listCharacters, getConfig, appendChatLog, saveDungeon } from '../storage.ts';
+import { getCharacter, updateCharacter, saveEncounter, listCharacters, getConfig, appendChatLog, saveDungeon, getHouseRules } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateCombatFlavour, generateSpellSaveFlavour } from '../session-processor/imagePrompts.ts';
 import { Participant } from '../domain/encounter.ts';
 import { logError, logDebug } from '../logger.ts';
-import { io, ROOM, combatState, encounters, tokenPositions, dungeons, playerSocketIds, pendingWeaponBonuses, connected, getStateEngine, withLivePositions, STAT_FULL, HIT_DICE } from '../state.ts';
+import { io, ROOM, combatState, encounters, tokenPositions, dungeons, playerSocketIds, pendingWeaponBonuses, activeMarks, connected, getStateEngine, withLivePositions, STAT_FULL, HIT_DICE } from '../state.ts';
 import { toClientDungeon } from '../dungeon/index.ts';
 import { registerSpellHooks } from '../combat/stateEngine/registerSpellHooks.ts';
 import { RecurringDamageHook } from '../combat/stateEngine/hooks/RecurringDamageHook.ts';
@@ -14,10 +14,10 @@ import { sumAndConsumeRollMods, type RollModifierHook } from '../combat/stateEng
 import { dcBonusFor } from '../combat/stateEngine/hooks/DcModifierHook.ts';
 import type { WeaponAttackOverrideHook } from '../combat/stateEngine/hooks/WeaponAttackOverrideHook.ts';
 import { resolveReaction } from '../combat/stateEngine/reactionPrompt.ts';
-import { D20Roll, rollDice, rollDiceRerollLow, fmtMod, rollApplicableDamage, rollApplicableHeal, rollChainableDamage, resolveHit } from '../combat/dice.ts';
+import { D20Roll, rollDice, rollDiceRerollLow, fmtMod, rollApplicableDamage, rollApplicableHeal, rollChainableDamage, resolveHit, maxDiceValue } from '../combat/dice.ts';
 import { rollModeFor, attackModeAgainstTarget } from '../combat/conditions/rollModeFor.ts';
-import { applyDamageToCreature, applyDamageToPlayer, applyHealingToPlayer, applyHealingToCreature, grantTempHpToPlayer, advanceTurn, trySpendSpellSlot, tryBeginCombat, emitResources, applyCondition, clearCondition, startConcentrating, isConcentratingOn, rollSavingThrow, checkTrapAt, canMove, breakSanctuaryOn, getWorldTimeSecs, applyElevationChange, investigateIllusion, checkMovementTriggers, bladeWardPenalty, stabilizeParticipant, trySpendLuckForAdvantage, trySpendHeroicInspiration, requestAlertSwap } from '../combat/runtime.ts';
-import { checkDungeonProximity } from '../dungeon/runtime.ts';
+import { applyDamageToCreature, applyDamageToPlayer, applyHealingToPlayer, applyHealingToCreature, grantTempHpToPlayer, advanceTurn, trySpendSpellSlot, tryBeginCombat, emitResources, applyCondition, clearCondition, startConcentrating, isConcentratingOn, rollSavingThrow, checkTrapAt, canMove, breakSanctuaryOn, getWorldTimeSecs, applyElevationChange, investigateIllusion, checkMovementTriggers, bladeWardPenalty, stabilizeParticipant, offerLuckAttackReroll, trySpendHeroicInspiration, requestAlertSwap, breakConcentration } from '../combat/runtime.ts';
+import { checkDungeonProximity, toggleDoor } from '../dungeon/runtime.ts';
 import { applyEffects } from '../effects.ts';
 import type { JoinContext } from './context.ts';
 
@@ -26,7 +26,38 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/** Every living participant within radiusFt (Chebyshev, 5ft/cell — same convention as checkTrapAt/RetaliationOfferHook's range check) of centerId's token, centerId included. Positions are best-effort; a participant with no placed token is skipped rather than assumed in range. */
+/** Every living participant within radiusFt (Chebyshev, 5ft/cell — same convention as checkTrapAt/RetaliationOfferHook's range check) of a grid point. Positions are best-effort; a participant with no placed token is skipped rather than assumed in range. Exported for origin points that aren't an existing participant (e.g. an environmental blast). */
+export function participantsNearPoint(cid: string, gx: number, gy: number, radiusFt: number, excludeIds: Set<string> = new Set()): string[] {
+  const encounter = encounters.get(cid);
+  if (!encounter) return [];
+  const positions = tokenPositions.get(cid) ?? {};
+  const all = [...encounter.players, ...encounter.enemies];
+  return all
+    .filter(p => !p.isDead() && !excludeIds.has(p.id))
+    .filter(p => {
+      const pos = positions[p.id] ?? positions[p.name];
+      if (!pos) return false;
+      return Math.max(Math.abs(pos.gx - gx), Math.abs(pos.gy - gy)) * 5 <= radiusFt;
+    })
+    .map(p => p.id);
+}
+
+/**
+ * True if a living creature on the opposing team is within 5ft of (gx,gy) — the "hostile creature
+ * within reach" condition a ranged weapon/spell attack imposes Disadvantage under (PHB: "you have
+ * Disadvantage on an attack roll with a ranged weapon if a hostile creature is within 5 feet of
+ * you"). ponytail: skips the "unless that creature is Incapacitated" carve-out — no cheap sync
+ * access to an arbitrary nearby participant's conditions from here; add if it matters in practice.
+ */
+function hasHostileWithinMeleeRange(cid: string, actorId: string, gx: number, gy: number): boolean {
+  const encounter = encounters.get(cid);
+  const actor = encounter?.findParticipant(actorId);
+  if (!encounter || !actor) return false;
+  return participantsNearPoint(cid, gx, gy, 5, new Set([actorId]))
+    .some(id => encounter.findParticipant(id)?.teamId !== actor.teamId);
+}
+
+/** Every living participant within radiusFt of centerId's own token, centerId included — see participantsNearPoint for the underlying distance rule. */
 function nearbyParticipantIds(cid: string, centerId: string, radiusFt: number): string[] {
   const encounter = encounters.get(cid);
   if (!encounter) return [];
@@ -35,15 +66,8 @@ function nearbyParticipantIds(cid: string, centerId: string, radiusFt: number): 
   const center = all.find(p => p.id === centerId);
   const centerPos = center ? (positions[center.id] ?? positions[center.name]) : undefined;
   if (!centerPos) return center && !center.isDead() ? [centerId] : [];
-  return all
-    .filter(p => !p.isDead())
-    .filter(p => {
-      if (p.id === centerId) return true;
-      const pos = positions[p.id] ?? positions[p.name];
-      if (!pos) return false;
-      return Math.max(Math.abs(pos.gx - centerPos.gx), Math.abs(pos.gy - centerPos.gy)) * 5 <= radiusFt;
-    })
-    .map(p => p.id);
+  const rest = participantsNearPoint(cid, centerPos.gx, centerPos.gy, radiusFt, new Set([centerId]));
+  return center?.isDead() ? rest : [centerId, ...rest];
 }
 
 /**
@@ -137,7 +161,7 @@ async function grantCompanion(cid: string, casterId: string, casterName: string,
  * Only gates the participant whose turn it is — a reaction spent on someone else's turn goes
  * through ReactionOfferHook, which does its own check against the same budget.
  */
-function trySpendAction(cid: string, actorId: string, kind: ActionResource): boolean {
+export function trySpendAction(cid: string, actorId: string, kind: ActionResource): boolean {
   const participant = encounters.get(cid)?.findParticipant(actorId);
   if (!participant) return true; // not tracked in this encounter — don't block on missing state
   if (participant.trySpend(kind)) {
@@ -304,6 +328,39 @@ function isLineObscured(cid: string, x0: number, y0: number, x1: number, y1: num
   return crossesObscuredArea(obscured, x0, y0, x1, y1);
 }
 
+// Matches the canvas's DARKVISION_THRESHOLD (client/canvas/constants.ts) — illumination at/below
+// this counts as actual darkness, where seeing clearly needs darkvision (or better); merely dim
+// light (above this) needs no special sense at all, per PHB.
+const DARKVISION_THRESHOLD = 0.5;
+
+/**
+ * True when the target is standing somewhere dark enough that seeing it clearly needs a sense
+ * that works in darkness (PHB: no light + no darkvision imposes Disadvantage on the attack roll)
+ * — false if a light source reaches the target's own cell (that always mitigates it, regardless
+ * of the attacker's vision) or the attacker's senses reach that far. No wall-blocked line of
+ * sight for either the light radius or the sense range — same distance-only simplification the
+ * other range checks in this file already make (see hasHostileWithinMeleeRange).
+ */
+function targetBeyondAttackerVisionInDarkness(
+  cid: string, char: Character,
+  attackerGx: number, attackerGy: number, targetGx: number, targetGy: number,
+): boolean {
+  const dungeon = dungeons.get(cid);
+  if ((dungeon?.illumination ?? 1) > DARKVISION_THRESHOLD) return false;
+
+  const positions = tokenPositions.get(cid) ?? {};
+  const targetLit = (dungeon?.pointLights ?? []).some(l =>
+    Math.max(Math.abs(l.gx - targetGx), Math.abs(l.gy - targetGy)) * 5 <= l.rangeFt
+  ) || Object.entries(dungeon?.lightSources ?? {}).some(([key, rangeFt]) => {
+    const pos = positions[key];
+    return !!pos && Math.max(Math.abs(pos.gx - targetGx), Math.abs(pos.gy - targetGy)) * 5 <= rangeFt;
+  });
+  if (targetLit) return false;
+
+  const distFt = Math.max(Math.abs(attackerGx - targetGx), Math.abs(attackerGy - targetGy)) * 5;
+  return !getSenses(char.species).some(s => s.rangeFt >= distFt);
+}
+
 /**
  * What Command's onHit/hooks actually are depends on which one-word command was chosen at cast
  * time — the spell's own JSON only carries commandOptions (the button labels), not per-word
@@ -372,8 +429,8 @@ function updateFollowingObjects(cid: string, tokenId: string, gx: number, gy: nu
 
 export async function resolvePlayerAttack(
   campaignId: string,
-  { attackerId, attackerName, targetId, weapon, bonusSpell, isOffhand, useLuckPoint, useInspiration }: {
-    attackerId: string; attackerName: string; targetId: string; weapon: Weapon; bonusSpell?: Spell; isOffhand?: boolean; useLuckPoint?: boolean; useInspiration?: boolean;
+  { attackerId, attackerName, targetId, weapon, bonusSpell, isOffhand, useInspiration }: {
+    attackerId: string; attackerName: string; targetId: string; weapon: Weapon; bonusSpell?: Spell; isOffhand?: boolean; useInspiration?: boolean;
   },
 ): Promise<{ hit: boolean } | undefined> {
       const cid = campaignId;
@@ -384,7 +441,6 @@ export async function resolvePlayerAttack(
       const char = await getCharacter(cid, attackerId);
       const creature = encounter.findCreature(targetId);
       if (!char || !creature || creature.isDead()) return;
-      const luckSpent = await trySpendLuckForAdvantage(cid, attackerId, char, useLuckPoint);
       const inspirationSpent = await trySpendHeroicInspiration(cid, attackerId, char, useInspiration);
 
       // Two-Weapon Fighting: the off-hand attack costs the bonus action instead of the action.
@@ -455,7 +511,13 @@ export async function resolvePlayerAttack(
       const attackerHasSelfDisadvantage = engine.hasHookOwnedBy(attackerId, 'grantDisadvantageSelf');
       const targetRestrained = attackModeAgainstTarget(creature) > 0;
       const obscured = !!(attackerPos && targetPos && isLineObscured(cid, attackerPos.gx, attackerPos.gy, targetPos.gx, targetPos.gy));
-      const roll = new D20Roll({ withDisadvantage: inExtendedRange || mode < 0 || obscured || attackerHasSelfDisadvantage, withAdvantage: mode > 0 || targetHasAdvantageGrant || attackerHasSelfAdvantage || targetRestrained || luckSpent || inspirationSpent }).roll();
+      // Ranged weapon, hostile breathing down your neck — PHB Disadvantage rule, not a melee-only concern.
+      const rangedThreatened = !isMelee && !!attackerPos && hasHostileWithinMeleeRange(cid, attackerId, attackerPos.gx, attackerPos.gy);
+      // Can't see the target clearly — dark, no light reaching them, and no sense that works in
+      // darkness reaches that far. Monster attackers aren't checked here — EnemyStatBlock carries
+      // no senses data, so there's nothing to gate on (see targetBeyondAttackerVisionInDarkness).
+      const inDarkness = !!attackerPos && !!targetPos && targetBeyondAttackerVisionInDarkness(cid, char, attackerPos.gx, attackerPos.gy, targetPos.gx, targetPos.gy);
+      let roll = new D20Roll({ withDisadvantage: inExtendedRange || mode < 0 || obscured || attackerHasSelfDisadvantage || rangedThreatened || inDarkness, withAdvantage: mode > 0 || targetHasAdvantageGrant || attackerHasSelfAdvantage || targetRestrained || inspirationSpent }).roll();
       const atkCtx = await engine.trigger('afterAttackRoll', await engine.trigger('beforeAttackRoll', {
         attackerId, attackerName,
         targetId, targetName: creature.name,
@@ -471,12 +533,25 @@ export async function resolvePlayerAttack(
 
       // Re-derived from the context rather than the pre-hook locals — see CONTEXT MUTATION in
       // shared/types/combat-hooks.ts.
-      const total = atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
-      const hit = atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
-      const isCrit = atkCtx.d20 === 20;
+      let total = atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
+      let hit = atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
+      let isCrit = atkCtx.d20 === 20;
+
+      // Origin feat Lucky, retroactive: the miss is known now — offer a Luck Point spend to
+      // reroll before damage/narration commit to it (replaces the old pre-roll HUD toggle).
+      if (!hit) {
+        const rerolled = await offerLuckAttackReroll(cid, attackerId, attackerName, weapon.name, creature.name, atkCtx.total, atkCtx.ac);
+        if (rerolled !== null && combatState.get(cid)) {
+          roll = atkCtx.d20 = rerolled;
+          total = atkCtx.total = rerolled + atkCtx.attackBonus;
+          hit = atkCtx.hit = resolveHit(rerolled, atkCtx.attackBonus, atkCtx.ac);
+          isCrit = rerolled === 20;
+        }
+      }
 
       let damage: number | undefined;
       let damageRoll: number | undefined;
+      let damageStatBonus: number | undefined;
       let bonus: { spellName: string; damageType: string | undefined; total: number } | undefined;
       if (hit) {
         const damageFormula = weaponOverride?.damageDie ?? weapon.damage;
@@ -496,12 +571,16 @@ export async function resolvePlayerAttack(
         const rollPool = () => usesSavageAttacker
           ? Math.max(rollDamageDie(), rollDamageDie())
           : rollDamageDie();
-        damageRoll = isCrit ? rollPool() + rollPool() : rollPool();
+        const houseRules = await getHouseRules(cid);
+        damageRoll = isCrit
+          ? rollPool() + (houseRules.perkinsCrit ? maxDiceValue(damageFormula) : rollPool())
+          : rollPool();
         if (usesSavageAttacker && attackerParticipant) attackerParticipant.savageAttackerUsed = true;
         // Two-Weapon Fighting: the off-hand attack skips the ability-mod damage bonus unless the
         // attacker has the Two-Weapon Fighting style.
         const offhandStatBonus = !isOffhand || char.fightingStyle === 'Two-Weapon Fighting';
-        damage = damageRoll + (offhandStatBonus ? statBonus : 0);
+        damageStatBonus = offhandStatBonus ? statBonus : 0;
+        damage = damageRoll + damageStatBonus;
 
         // Divine-Smite-style bonus damage, evaluated against this actual target so appliesIf
         // (vs Fiend/Undead, ...) can gate it. Either bundled directly onto this attack (the
@@ -658,6 +737,16 @@ export async function resolvePlayerAttack(
           isMelee, weaponTwoHanded: weapon.twoHanded, hasOffhandWeapon,
         });
         damage = Math.max(0, dmgCtx.amount);
+        // Hunter's Mark, Divine Favor, ... — OnHitBonusDamageHook already folded these into
+        // `damage` above; itemized here too so the combat log shows them as their own line
+        // instead of the total silently growing past weapon-die + stat-bonus with no explanation.
+        if (dmgCtx.bonusSources?.length) {
+          const hookTotal = dmgCtx.bonusSources.reduce((sum, s) => sum + s.amount, 0);
+          const hookNames = dmgCtx.bonusSources.map(s => s.sourceName).join(' + ');
+          bonus = bonus
+            ? { spellName: `${bonus.spellName} + ${hookNames}`, damageType: bonus.damageType, total: bonus.total + hookTotal }
+            : { spellName: hookNames, damageType: dmgCtx.bonusSources[0]?.damageType, total: hookTotal };
+        }
         await applyDamageToCreature(cid, targetId, damage, { sourceId: attackerId, isCrit });
         await engine.trigger('afterDamage', dmgCtx);
 
@@ -698,6 +787,7 @@ export async function resolvePlayerAttack(
         damageRoll,
         damageType: weapon.damageType,
         damageFormula: weapon.damage,
+        damageStatBonus,
         bonusSpellName: bonus?.spellName,
         bonusDamage: bonus?.total,
         bonusDamageType: bonus?.damageType,
@@ -838,9 +928,14 @@ export async function resolvePlayerSpellAttack(
           : rollApplicableDamage(spell.combat?.onHit, creature.creatureType, char.level ?? 1, slotLevel, chosenDamageType, abilityMod);
         let rolledDamage = rollSpellDamage();
         if (isCrit && rolledDamage) {
-          // Crit: roll the spell's damage dice a second time and sum — 5e doubles dice, not the flat total.
-          const second = rollSpellDamage();
-          if (second) rolledDamage = { ...rolledDamage, total: rolledDamage.total + second.total, formula: `${rolledDamage.formula} + ${second.formula}` };
+          if ((await getHouseRules(cid)).perkinsCrit) {
+            const bonus = maxDiceValue(rolledDamage.formula);
+            rolledDamage = { ...rolledDamage, total: rolledDamage.total + bonus, formula: `${rolledDamage.formula} + ${bonus} (crit)` };
+          } else {
+            // Crit: roll the spell's damage dice a second time and sum — 5e doubles dice, not the flat total.
+            const second = rollSpellDamage();
+            if (second) rolledDamage = { ...rolledDamage, total: rolledDamage.total + second.total, formula: `${rolledDamage.formula} + ${second.formula}` };
+          }
         }
 
         let damage: number | undefined;
@@ -996,6 +1091,10 @@ export function registerCombatHandlers(ctx: JoinContext): void {
     })();
   });
 
+  socket.on('door:toggle', ({ doorId, characterName }) => {
+    void toggleDoor(campaignId, doorId, characterName);
+  });
+
   // Manual GM-driven condition control — traps, cures, anything outside the spell-save path
   // that already applies conditions on a failed save. Works on players and creatures, in or
   // out of combat (see applyCondition/clearCondition in runtime.ts for target resolution).
@@ -1057,6 +1156,18 @@ export function registerCombatHandlers(ctx: JoinContext): void {
     if (participant) participant.disengaging = true;
   });
 
+  // Dash/Dodge/Disengage/Hide — CombatDock's handleStandardAction marks its own action pip spent
+  // immediately for every one of these (all four cost the same action), but that's local-only
+  // unless this also spends the action here: the server is the resource authority (see
+  // emitResources), and the next thing that queries it (e.g. a bonus-action offhand attack) would
+  // otherwise report the action as still available and stomp the client's spend, making it look
+  // like it "returned". Disengage/Dash additionally dispatch their own follow-up event for the
+  // side effect that's actually theirs (disengaging flag / bonus movement) — this only owns the
+  // shared action spend.
+  socket.on('combat:standardAction:used', ({ actorId }: { actorId: string }) => {
+    trySpendAction(campaignId, actorId, 'action');
+  });
+
   // Illusion detection (Disguise Self) — works with or without active combat, same as casting
   // the spell itself does. Results go only to the investigator's own socket: RAW's "you see
   // through it" is knowledge specific to them, not a public reveal to the whole table.
@@ -1097,7 +1208,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
     void saveEncounter(cid, encounter);
   });
 
-  socket.on('combat:attack', (payload: { attackerId: string; attackerName: string; targetId: string; weapon: Weapon; bonusSpell?: Spell; isOffhand?: boolean; useLuckPoint?: boolean; useInspiration?: boolean }) => {
+  socket.on('combat:attack', (payload: { attackerId: string; attackerName: string; targetId: string; weapon: Weapon; bonusSpell?: Spell; isOffhand?: boolean; useInspiration?: boolean }) => {
     void resolvePlayerAttack(campaignId, payload);
   });
 
@@ -1185,11 +1296,16 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const castCost = spell.combat?.actionCostOverride ?? actionCostFromCastingTime(spell.castingTime);
       if (castCost && castCost !== 'reaction' && !trySpendAction(cid, casterId, castCost)) return;
 
+      // Redirecting an already-sustained spell (Hunter's Mark, Witch Bolt) is free — no slot, per
+      // RAW — checked first so it wins over Favored Enemy below: retargeting a mark you're
+      // already concentrating on costs neither a slot nor a Favored Enemy use.
+      const alreadySustaining = await isConcentratingOn(cid, casterId, spell.name);
+
       // Ranger's Favored Enemy: Hunter's Mark twice per Long Rest with no slot spent, per 2024
       // PHB — the resource is spent here instead of the slot below, same shape as Redirecting an
       // already-sustained spell being free, just costing a different pool instead of nothing.
       let spentFavoredEnemy = false;
-      if (spell.name === "Hunter's Mark" && char.class === 'Ranger') {
+      if (!alreadySustaining && spell.name === "Hunter's Mark" && hasClassLevel(char, 'Ranger')) {
         const nextResourceUses = trySpendResource(char, 'favoredEnemy');
         if (nextResourceUses) {
           spentFavoredEnemy = true;
@@ -1198,8 +1314,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         }
       }
 
-      // Redirecting an already-sustained spell (Hunter's Mark, Witch Bolt) is free — no slot, per RAW.
-      const free = spentFavoredEnemy || await isConcentratingOn(cid, casterId, spell.name);
+      const free = spentFavoredEnemy || alreadySustaining;
       if (!free && !(await trySpendSpellSlot(cid, casterId, char, slotLevel))) {
         const sid = playerSocketIds.get(casterId);
         if (sid) io.to(sid).emit('combat:attack:blocked', { reason: 'No spell slots left' });
@@ -1228,6 +1343,12 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       // ponytail: curse-style buffs that mark an enemy target over a duration (Hex, Hunter's
       // Mark) need target-lock + duration tracking, a different shape — not handled here yet.
       if (parseRangeFeet(spell.range) === 0 && targetIds.length === 1 && targetIds[0] === casterId) {
+        // Tear down whatever this caster was concentrating on BEFORE the hooks below register —
+        // same reasoning as the autoHit/curse branch above: these hooks are also caster-owned, so
+        // registering them first and breaking after would unregister the ones just added right
+        // along with the old cast.
+        if (requiresConcentration(spell)) await breakConcentration(cid, casterId);
+
         // tempHp effects (Armor of Agathys) apply immediately on cast rather than arming on the
         // next weapon hit like a smite's onHit damage does — there's no "hit" involved in
         // granting your own buff, and any hooks riding along (its retaliation damage) are the
@@ -1330,6 +1451,18 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         // same as recurringDamage's saveToEnd), frozen at the caster's stats now same as any DC.
         const dc = 8 + (char.proficiencyBonus ?? 2) + statMod(char.stats[CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int']) + dcBonusFor(engine, casterId);
         const currentWorldTimeSecs = combat?.hooks?.length ? await getWorldTimeSecs(cid) : undefined;
+        // Tear down whatever this caster was concentrating on BEFORE registering this cast's
+        // hooks below — startConcentrating does this too, but only after the loop, by which point
+        // a caster-owned hook (Hunter's Mark, Hex) just registered for a NEW target would already
+        // be unregistered right along with the old one: unregisterBySource can't tell "the hook
+        // this redirect just created" apart from "the hook this redirect is replacing" since both
+        // share the same ownerId+spellName. Breaking first makes the loop's registerSpellHooks
+        // calls below the only ones left standing.
+        if (requiresConcentration(spell)) await breakConcentration(cid, casterId);
+
+        // Curses that target-lock via a caster-owned hook (Hunter's Mark, Hex) — captured here so
+        // the "marked" token icon can be raised once concentration is confirmed below.
+        let markedTarget: { targetId: string; targetName: string } | undefined;
         let first = true;
         for (const targetId of targetIds) {
           if (!first) await sleep(500);
@@ -1353,6 +1486,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
               chosenDamageType,
               chosenSkill,
             });
+            if (hookOwnerIsCaster) markedTarget = { targetId, targetName: participant.name };
           }
 
           // Instant auto-hit damage on the spot (Witch Bolt redirects, Magic Missile darts) — no
@@ -1393,7 +1527,15 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         }
 
         if (requiresConcentration(spell)) {
+          // The old concentration (if any) already came down before the loop above — this just
+          // records the new one. startConcentrating's own breakConcentration call is a no-op here.
           await startConcentrating(cid, casterId, spell.name, hookOwnerIsCaster ? [casterId] : targetIds);
+          if (markedTarget) {
+            const marks = activeMarks.get(cid) ?? new Map();
+            marks.set(casterId, { ...markedTarget, spellName: spell.name });
+            activeMarks.set(cid, marks);
+            io.to(ROOM).emit('combat:mark', { casterId, ...markedTarget, spellName: spell.name, active: true });
+          }
         }
         return;
       }

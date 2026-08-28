@@ -40,12 +40,16 @@ export async function saveCampaignAsAdventure(campaignSlug: string, adventureSlu
     ...PLAY_STATE_DIRS.map(d => rm(path.join(dstDir, d), { recursive: true, force: true })),
   ]);
 
-  // Quests/dungeon reset to a fresh, undiscovered starting state — a template is replayed from
-  // scratch every time, never resumed mid-progress.
+  // Quests/dungeon reset to a fresh starting state — a template is replayed from scratch every
+  // time, never resumed mid-progress. Deterministic dungeon quests (boss-*, exit-dungeon) are
+  // never discovery-gated — buildDungeonQuests seeds them straight to 'open' on generation — so
+  // they reset back to 'open', not 'undiscovered', or QuestLog's undiscovered filter would hide
+  // them forever since nothing ever fires a quest_add to un-hide them.
   const questsPath = path.join(dstDir, 'quests.json');
   try {
     const quests = JSON.parse(await readFile(questsPath, 'utf-8')) as Quest[];
-    const reset = quests.map(q => ({ ...q, status: 'undiscovered' as const, log: [] }));
+    const isDeterministic = (id: string) => id === 'exit-dungeon' || id.startsWith('boss-');
+    const reset = quests.map(q => ({ ...q, status: isDeterministic(q.id) ? 'open' as const : 'undiscovered' as const, log: [] }));
     await writeFile(questsPath, JSON.stringify(reset, null, 2), 'utf-8');
   } catch (err) { logError('adventures/storage:saveCampaignAsAdventure:quests', err); }
 
@@ -69,9 +73,14 @@ export async function saveCampaignAsAdventure(campaignSlug: string, adventureSlu
     await writeFile(manifestPath, JSON.stringify(fresh, null, 2), 'utf-8');
   } catch (err) { logError('adventures/storage:saveCampaignAsAdventure:manifest', err); }
 
+  // A template is reused across many campaigns — never carry the source game's password along.
   const worldMeta = await (async () => {
-    try { return JSON.parse(await readFile(path.join(dstDir, 'world.json'), 'utf-8')) as WorldMeta; }
-    catch (err) { logError('adventures/storage:saveCampaignAsAdventure:worldMeta', err); return null; }
+    try {
+      const parsed = JSON.parse(await readFile(path.join(dstDir, 'world.json'), 'utf-8')) as WorldMeta;
+      const { gamePassword: _pw, ...stripped } = parsed;
+      await writeFile(path.join(dstDir, 'world.json'), JSON.stringify(stripped, null, 2), 'utf-8');
+      return stripped;
+    } catch (err) { logError('adventures/storage:saveCampaignAsAdventure:worldMeta', err); return null; }
   })();
 
   const meta: SavedAdventureMeta = {

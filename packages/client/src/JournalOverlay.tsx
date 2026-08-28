@@ -1,11 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { Character, CheckRequest, Spell } from 'shared';
+import type { Character, CheckRequest } from 'shared';
 import { hasOriginFeat, resourceCurrent } from 'shared';
 import type { ChatMessageReceivedPayload } from './events.ts';
 import { on, dispatch } from './events.ts';
 import { SKILLS } from './character-creation/srd.ts';
-
-const API = `http://${window.location.hostname}:3001`;
 
 const SAVE_STAT: Record<string, string> = {
   strength: 'STR', str: 'STR',
@@ -31,7 +29,6 @@ interface Props {
   character: Character;
   sessionActive: boolean;
   dmThinking: boolean;
-  combatActive: boolean;
 }
 
 function formatSender(name: string): React.ReactNode {
@@ -40,37 +37,10 @@ function formatSender(name: string): React.ReactNode {
   return <>{match[1]} <span className="vdm-tag">(Virtual DM)</span></>;
 }
 
-export default function JournalOverlay({ open, onClose, character, sessionActive, dmThinking, combatActive }: Props) {
+export default function JournalOverlay({ open, onClose, character, sessionActive, dmThinking }: Props) {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Exploration-only casting — combat has its own turn-based spell UI. Only non-cantrip spells:
-  // a cantrip costs nothing, so there's no resource check for it to route through here.
-  const [castableSpells, setCastableSpells] = useState<Spell[]>([]);
-  const [selectedSpell, setSelectedSpell] = useState('');
-  const [casting, setCasting] = useState(false);
-  const learnedNames = character.spells ?? [];
-
-  useEffect(() => {
-    if (!learnedNames.length) { setCastableSpells([]); return; }
-    fetch(`${API}/api/spells?class=${encodeURIComponent(character.class)}`)
-      .then(r => r.json())
-      .then((all: Spell[]) => setCastableSpells(all.filter(s => s.level > 0 && learnedNames.includes(s.name))))
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [character.class, learnedNames.join(',')]);
-
-  useEffect(() => {
-    if (!selectedSpell && castableSpells.length) setSelectedSpell(castableSpells[0]!.name);
-  }, [castableSpells, selectedSpell]);
-
-  function castSpell() {
-    if (!selectedSpell || casting) return;
-    setCasting(true);
-    dispatch('vtt:spell:cast:exploration', { characterId: character.id, campaignId: character.campaignId, spellName: selectedSpell });
-    setTimeout(() => setCasting(false), 2000);
-  }
 
   // Messages live above the open-guard so they survive close/reopen
   const [messages, setMessages] = useState<ChatMessageReceivedPayload[]>([]);
@@ -233,22 +203,6 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
             <div className="journal-msg-text">
               <span className="journal-thinking-dots"><span>.</span><span>.</span><span>.</span></span>
             </div>
-          </div>
-        )}
-
-        {sessionActive && !combatActive && castableSpells.length > 0 && (
-          <div className="journal-cast-row">
-            <select
-              className="journal-cast-select"
-              value={selectedSpell}
-              onChange={e => setSelectedSpell(e.target.value)}
-              disabled={casting}
-            >
-              {castableSpells.map(s => <option key={s.name} value={s.name}>{s.name} (lvl {s.level})</option>)}
-            </select>
-            <button className="btn-secondary" onClick={castSpell} disabled={casting}>
-              {casting ? 'Casting…' : 'Cast'}
-            </button>
           </div>
         )}
 

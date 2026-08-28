@@ -2,13 +2,14 @@ import { readFile, writeFile, mkdir, readdir, rm } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, WorldState, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord, CharacterStoryboard, StoryboardTestRecord } from 'shared';
+import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, WorldState, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord, CharacterStoryboard, ScenarioStoryboard, StoryboardTestRecord, HouseRules } from 'shared';
+import { DEFAULT_HOUSE_RULES } from 'shared';
 import { Encounter } from './domain/encounter.ts';
 import { renderDungeonAscii } from './dungeon/index.ts';
 import { logError } from './logger.ts';
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
-const STORAGE_DIR = path.resolve(__dir, '../storage');
+export const STORAGE_DIR = path.resolve(__dir, '../storage');
 const CONFIG_PATH = path.join(STORAGE_DIR, 'config.json');
 
 export const CAMPAIGNS_DIR = path.join(STORAGE_DIR, 'campaigns');
@@ -19,7 +20,7 @@ export const PROPS_DIR      = path.join(STORAGE_DIR, 'props');
 export const STORYBOARD_TEST_DIR = path.join(STORAGE_DIR, 'storyboard-test');
 
 const NARRATIVE_FEATURES: AppConfig['workflows'][number]['features'] = [
-  'campaignConcepts', 'dungeonPremise', 'backstoryGeneration', 'backstoryCheck', 'worldLoreSync', 'storyboardCaptions',
+  'campaignConcepts', 'dungeonPremise', 'dungeonScenarioSynopsis', 'backstoryGeneration', 'backstoryCheck', 'worldLoreSync', 'storyboardCaptions',
   'nemesisGeneration', 'dmBrief', 'questGeneration', 'dmChatResponse', 'sessionTriage', 'sessionRecap', 'tagEffectProcessing',
 ];
 const WORLD_AND_COMBAT_FEATURES: AppConfig['workflows'][number]['features'] = [
@@ -36,6 +37,7 @@ const DEFAULT_CONFIG: AppConfig = {
   apiKeys:  { openai: '', anthropic: '', deepseek: '', kimi: '' },
   image:    { model: 'gpt-image-1', generateWorldMap: false, generateTilesets: false, generateStoryboard: false },
   narration: { model: 'none', voice: 'onyx' },
+  adminPassword: '',
 };
 
 // Legacy config.json (pre-workflows) used `tiers`/`tasks` instead of `workflows`.
@@ -87,6 +89,11 @@ export async function getWorldMeta(slug: string): Promise<WorldMeta | null> {
 
 export async function writeWorldMeta(slug: string, meta: WorldMeta): Promise<void> {
   await writeCampaignFile(slug, 'world.json', JSON.stringify(meta, null, 2));
+}
+
+export async function getHouseRules(slug: string): Promise<HouseRules> {
+  const meta = await getWorldMeta(slug);
+  return meta?.houseRules ?? DEFAULT_HOUSE_RULES;
 }
 
 export async function listCampaigns(): Promise<Campaign[]> {
@@ -193,6 +200,23 @@ export async function getCharacterStoryboard(slug: string, charId: string): Prom
   try {
     const raw = await readFile(path.join(partyDir(slug, charId), 'storyboard.json'), 'utf-8');
     return JSON.parse(raw) as CharacterStoryboard;
+  } catch {
+    return null;
+  }
+}
+
+// Campaign-root equivalent of writeCharacterImage — for images that belong to the campaign itself
+// rather than any one character (currently just the scenario storyboard's atlas slides).
+export async function writeCampaignImage(slug: string, filename: string, data: Buffer): Promise<void> {
+  const dir = campaignDir(slug);
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, filename), data);
+}
+
+export async function getScenarioStoryboard(slug: string): Promise<ScenarioStoryboard | null> {
+  try {
+    const raw = await readFile(path.join(campaignDir(slug), 'scenario-storyboard.json'), 'utf-8');
+    return JSON.parse(raw) as ScenarioStoryboard;
   } catch {
     return null;
   }

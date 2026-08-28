@@ -88,6 +88,12 @@ export interface DamageContext {
   isMelee?: boolean | undefined;
   weaponTwoHanded?: boolean | undefined;
   hasOffhandWeapon?: boolean | undefined;
+  /**
+   * Bonus damage folded into `amount` by a hook this stage (OnHitBonusDamageHook — Hunter's
+   * Mark, Divine Favor, ...), kept itemized here too so a caller building a combat-log breakdown
+   * can show it as its own line instead of it silently vanishing into the opaque total.
+   */
+  bonusSources?: { sourceName: string; amount: number; damageType?: string | undefined }[] | undefined;
 }
 
 export interface SaveContext {

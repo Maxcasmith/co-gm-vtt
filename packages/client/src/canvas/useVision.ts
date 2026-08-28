@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { Character, Dungeon } from 'shared';
-import { hasLineOfSight, getSenses } from 'shared';
+import { hasLineOfSight, getSenses, closedDoorCells } from 'shared';
 import { SIGHT_RADIUS, LIGHT_PENUMBRA_FT } from './constants.ts';
 import { computeVisibilityPolygon } from './geometry.ts';
 import type { SenseCells, LightSourceCells } from './types.ts';
@@ -20,6 +20,10 @@ export function useVision(
 ) {
   const myPos = tokenPositions?.[player];
 
+  // Shut, opaque doors block sight the same as a wall — recomputed whenever the dungeon reference
+  // changes (a door toggle re-broadcasts the whole dungeon, same as any other entity mutation).
+  const blockedDoors = useMemo(() => dungeon ? closedDoorCells(dungeon) : undefined, [dungeon]);
+
   // Fog-of-war: cells visible to my own token — square radius + wall-blocked line-of-sight.
   const visibleCells = useMemo(() => {
     if (!dungeon || !myPos) return null;
@@ -28,12 +32,12 @@ export function useVision(
       for (let dx = -SIGHT_RADIUS; dx <= SIGHT_RADIUS; dx++) {
         const tx = myPos.gx + dx, ty = myPos.gy + dy;
         if (tx < 0 || ty < 0 || tx >= dungeon.width || ty >= dungeon.height) continue;
-        if (hasLineOfSight(dungeon.cells, myPos.gx, myPos.gy, tx, ty)) set.add(`${tx},${ty}`);
+        if (hasLineOfSight(dungeon.cells, myPos.gx, myPos.gy, tx, ty, blockedDoors)) set.add(`${tx},${ty}`);
       }
     }
     return set;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dungeon, myPos?.gx, myPos?.gy]);
+  }, [dungeon, myPos?.gx, myPos?.gy, blockedDoors]);
 
   // Light sources (torches, point lights) — hard-cutoff radius, wall-blocked (same
   // hasLineOfSight walk fog uses), 5ft/cell Chebyshev distance (same convention as
@@ -74,7 +78,7 @@ export function useVision(
           if (distFt > glowRangeFt) continue;
           const tx = src.gx + dx, ty = src.gy + dy;
           if (tx < 0 || ty < 0 || tx >= dungeon.width || ty >= dungeon.height) continue;
-          if (!hasLineOfSight(dungeon.cells, src.gx, src.gy, tx, ty)) continue;
+          if (!hasLineOfSight(dungeon.cells, src.gx, src.gy, tx, ty, blockedDoors)) continue;
           glowCells.add(`${tx},${ty}`);
           if (distFt <= src.rangeFt) { cells.add(`${tx},${ty}`); merged.add(`${tx},${ty}`); }
         }
@@ -83,7 +87,7 @@ export function useVision(
     }
     return { litCells: merged, lightSources: perSource };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dungeon, lightCarrierPosKey]);
+  }, [dungeon, lightCarrierPosKey, blockedDoors]);
 
   // Senses — one wall-blocked radius per sense the character's species grants (darkvision today;
   // blindsight/truesight/devilsSight/tremorsense once something actually grants them — see
@@ -105,23 +109,23 @@ export function useVision(
           if (Math.max(Math.abs(dx), Math.abs(dy)) * 5 > sense.rangeFt) continue;
           const tx = myPos.gx + dx, ty = myPos.gy + dy;
           if (tx < 0 || ty < 0 || tx >= dungeon.width || ty >= dungeon.height) continue;
-          if (sense.kind === 'tremorsense' || hasLineOfSight(dungeon.cells, myPos.gx, myPos.gy, tx, ty)) set.add(`${tx},${ty}`);
+          if (sense.kind === 'tremorsense' || hasLineOfSight(dungeon.cells, myPos.gx, myPos.gy, tx, ty, blockedDoors)) set.add(`${tx},${ty}`);
         }
       }
       result[sense.kind] = set;
     }
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dungeon, myPos?.gx, myPos?.gy, character?.species]);
+  }, [dungeon, myPos?.gx, myPos?.gy, character?.species, blockedDoors]);
 
   // Fog boundary for rendering — a ray-swept polygon so the drawn edge follows natural angled
   // lines off walls/corners rather than a cell-square staircase. `visibleCells` above stays the
   // grid-based source of truth for per-cell logic (token hover, floating-text gating).
   const visiblePolygon = useMemo(() => {
     if (!dungeon || !myPos) return null;
-    return computeVisibilityPolygon(dungeon.cells, myPos.gx + 0.5, myPos.gy + 0.5, SIGHT_RADIUS);
+    return computeVisibilityPolygon(dungeon.cells, myPos.gx + 0.5, myPos.gy + 0.5, SIGHT_RADIUS, blockedDoors);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dungeon, myPos?.gx, myPos?.gy]);
+  }, [dungeon, myPos?.gx, myPos?.gy, blockedDoors]);
 
   return { visibleCells, litCells, lightSources, senses, visiblePolygon };
 }

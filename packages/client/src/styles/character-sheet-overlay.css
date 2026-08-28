@@ -229,6 +229,25 @@
   margin: 0;
 }
 
+.level-up-hp-gain {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 18px;
+  color: var(--gold);
+  margin: 0 0 4px;
+}
+
+.level-up-hp-detail {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.level-up-hp-total {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
 .level-up-actions {
   display: flex;
   justify-content: flex-end;
@@ -419,6 +438,16 @@ button.sheet-save-row {
 .sheet-feature:last-child { margin-bottom: 0; }
 .sheet-feature-name { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
 .sheet-feature-desc { font-size: 12px; color: var(--text-muted); line-height: 1.55; }
+.sheet-feature-uses {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 7px;
+}
 
 .sheet-info-header {
   display: flex;

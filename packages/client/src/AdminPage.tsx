@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Campaign, CompendiumMeta, SavedAdventureMeta } from 'shared';
 import SettingsSidebar from './SettingsSidebar.tsx';
 import UploadModuleModal from './UploadModuleModal.tsx';
@@ -14,10 +14,13 @@ function adminHeaders(password: string) {
   return { 'Content-Type': 'application/json', 'x-admin-password': password };
 }
 
-export default function AdminPage() {
-  const [password, setPassword]     = useState('');
-  const [authed, setAuthed]         = useState(false);
-  const [error, setError]           = useState('');
+interface AdminPageProps {
+  password: string;
+  onOpenResources: () => void;
+  onPasswordChanged: (password: string) => void;
+}
+
+export default function AdminPage({ password, onOpenResources, onPasswordChanged }: AdminPageProps) {
   const [campaigns, setCampaigns]   = useState<Campaign[]>([]);
   const [adventures, setAdventures] = useState<CompendiumMeta[]>([]);
   const [savedAdventures, setSavedAdventures] = useState<SavedAdventureMeta[]>([]);
@@ -51,22 +54,11 @@ export default function AdminPage() {
       .catch(() => setSavedAdventures([]));
   }
 
-  async function handleAuth() {
-    const r = await fetch(`${API}/api/admin/auth`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password }),
-    });
-    if (r.ok) {
-      const list = await fetch(`${API}/api/admin/campaigns`, { headers: adminHeaders(password) });
-      setCampaigns(await list.json() as Campaign[]);
-      fetchAdventures();
-      fetchSavedAdventures();
-      setAuthed(true);
-    } else {
-      setError('Invalid password');
-    }
-  }
+  useEffect(() => {
+    fetchCampaigns();
+    fetchAdventures();
+    fetchSavedAdventures();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function deleteCampaign(campaignId: string, campaignName: string) {
     if (!window.confirm(`Permanently delete the entire campaign "${campaignName}"? This cannot be undone.`)) return;
@@ -118,31 +110,6 @@ export default function AdminPage() {
     setTimeout(() => setFeedback(f => { const n = { ...f }; delete n[key]; return n; }), 2500);
   }
 
-  if (!authed) {
-    return (
-      <div className="admin-gate">
-        <div className="admin-gate-card">
-          <span className="admin-gate-icon" aria-hidden="true">🔒</span>
-          <span className="home-eyebrow">Restricted Chamber</span>
-          <h1 className="admin-title">Dungeon Master&apos;s Study</h1>
-          <p className="admin-gate-sub">Speak the password to enter.</p>
-          {error && <p className="admin-error">{error}</p>}
-          <input
-            className="modal-input admin-pw-input"
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAuth()}
-            autoFocus
-          />
-          <button className="btn-primary" onClick={handleAuth}>Enter</button>
-          <a className="admin-gate-back" href="/">← Back home</a>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <>
     <div className="admin-panel">
@@ -158,7 +125,7 @@ export default function AdminPage() {
           </h1>
         </div>
         <div className="admin-header-link admin-header-link--right admin-header-link-group">
-          <a className="btn-secondary" href="/admin/resources">Resources</a>
+          <button className="btn-secondary" onClick={onOpenResources}>Resources</button>
           <button className="btn-secondary" onClick={() => setSettingsOpen(true)}>Settings</button>
         </div>
       </div>
@@ -296,7 +263,7 @@ export default function AdminPage() {
       </div>
     </div>
 
-    <SettingsSidebar open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+    <SettingsSidebar open={settingsOpen} password={password} onClose={() => setSettingsOpen(false)} onPasswordChanged={onPasswordChanged} />
     <UploadModuleModal
       open={uploadOpen}
       onClose={() => { setUploadOpen(false); setResumeAdventure(null); }}

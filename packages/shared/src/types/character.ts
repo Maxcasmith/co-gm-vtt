@@ -35,6 +35,11 @@ export const SKILL_ABILITY: Record<string, AbilityKey> = {
   Persuasion: "cha",
 };
 
+export interface CharacterClassLevel {
+  class: string;
+  level: number;
+}
+
 export interface Character {
   id: string;
   campaignId: string;
@@ -42,6 +47,8 @@ export interface Character {
   species: string;
   background: string;
   class: string;
+  /** Full multiclass breakdown. Undefined for a single-class character — see characterClasses, which falls back to `[{ class, level }]` so untouched consumers reading `class`/`level` (primary class / total level) keep working unchanged. */
+  classes?: CharacterClassLevel[];
   backstory?: string;
   stats: CharacterStats;
   skillProficiencies: string[];
@@ -117,12 +124,65 @@ export function setTempHp(current: number | undefined, granted: number): number 
   return Math.max(current ?? 0, granted);
 }
 
-// Level-1 max spell slots: Warlock's Pact Magic starts with 1, every other spellcasting
-// class with the Spellcasting feat starts with 2. No slots beyond level 1 tracked yet —
-// no class has spells-known growth past level 1 in this app either (see CLASS_SPELL_ALLOWANCE).
-export function spellSlotsForClass(className: string): number {
-  if (className === "Warlock") return 1;
-  return className in CLASS_SPELLCASTING_ABILITY ? 2 : 0;
+/** Every class the character has levels in — falls back to a single-class breakdown from `class`/`level` for characters with no `classes` array yet (i.e. every character predating multiclassing). */
+export function characterClasses(character: Pick<Character, "class" | "level" | "classes">): CharacterClassLevel[] {
+  return character.classes ?? [{ class: character.class, level: character.level ?? 1 }];
+}
+
+export function hasClassLevel(character: Pick<Character, "class" | "level" | "classes">, className: string): boolean {
+  return characterClasses(character).some(c => c.class === className);
+}
+
+// Multiclass Spell Slots table (2014/2024 PHB), 1st-level-slot column only — this app tracks no
+// slot beyond 1st level for anyone, single- or multiclass, so the rest of the table's columns
+// (2nd-9th level slots) are irrelevant here. A single full caster's own level-1 slot count
+// follows this exact same progression, so it doubles as the single-class case.
+function level1SlotsForCasterLevel(casterLevel: number): number {
+  if (casterLevel <= 0) return 0;
+  if (casterLevel === 1) return 2;
+  if (casterLevel === 2) return 3;
+  return 4; // caps at 4 from caster level 3 onward, permanently
+}
+
+// Each class's contribution to combined multiclass caster level, per the Multiclass Spellcaster
+// rule: full casters (Bard/Cleric/Druid/Sorcerer/Wizard) add their whole level; Paladin/Ranger
+// (half casters) add half rounded down; Artificer is the one official exception, adding half
+// rounded UP. Warlock never contributes — Pact Magic is an entirely separate pool (see
+// warlockSlotsForLevel). Eldritch Knight/Arcane Trickster third-caster subclasses would add a
+// third of their Fighter/Rogue level, but this app tracks no subclasses, so Fighter/Rogue always
+// contribute 0 here regardless of what a player might narratively be playing.
+function casterLevelContribution(className: string, level: number): number {
+  if (className === "Warlock") return 0;
+  if (className === "Paladin" || className === "Ranger") return Math.floor(level / 2);
+  if (className === "Artificer") return Math.ceil(level / 2);
+  return className in CLASS_SPELLCASTING_ABILITY ? level : 0;
+}
+
+// Pact Magic (Warlock's own level, not combined caster level) — count only; this app doesn't
+// track which spell level those slots actually are (2nd from Warlock level 3, up to 5th from
+// level 9), same simplification as everywhere else that treats "spell slots" as one flat count.
+function warlockSlotsForLevel(level: number): number {
+  if (level <= 0) return 0;
+  if (level === 1) return 1;
+  if (level <= 10) return 2;
+  if (level <= 16) return 3;
+  return 4;
+}
+
+/**
+ * Max level-1 spell slots for the whole character, real multiclass accumulation rules applied:
+ * each non-Warlock caster class's level is converted to its caster-level contribution and summed,
+ * then run through the same table a single full caster's own level already used. Warlock's Pact
+ * Magic is computed separately off the Warlock's own level and added on top — RAW keeps the two
+ * pools entirely separate, but this app has only one `maxSpellSlots1` field to put a count in
+ * (true of a single-class Warlock/Wizard already, this just carries the same simplification into
+ * multiclass rather than introducing a new one).
+ */
+export function spellSlotsForCharacter(character: Pick<Character, "class" | "level" | "classes">): number {
+  const classes = characterClasses(character);
+  const casterLevel = classes.reduce((sum, c) => sum + casterLevelContribution(c.class, c.level), 0);
+  const warlockLevel = classes.find(c => c.class === "Warlock")?.level ?? 0;
+  return level1SlotsForCasterLevel(casterLevel) + warlockSlotsForLevel(warlockLevel);
 }
 
 /**
@@ -168,6 +228,19 @@ export function hasOriginFeat(char: Pick<Character, 'background' | 'species' | '
 }
 
 /**
+ * Flat extra max HP per character level, from sources with the same "some bonus every level"
+ * shape: the Tough origin feat (+2) and a Dwarf's Dwarven Toughness trait (+1, 2024 PHB) — both
+ * stack if a character has both. Callers multiply by total level for a from-scratch max HP calc,
+ * or add once per level gained on level-up.
+ */
+export function hpBonusPerLevel(char: Pick<Character, 'background' | 'species' | 'speciesOriginFeat'>): number {
+  let bonus = 0;
+  if (hasOriginFeat(char, 'Tough')) bonus += 2;
+  if (char.species === 'Dwarf') bonus += 1;
+  return bonus;
+}
+
+/**
  * Every passive perception-adjacent sense the canvas lighting pipeline needs to reason about —
  * darkvision is just the one kind with real data today. Blindsight/truesight/devilsSight/
  * tremorsense exist in the type so a future feature (monster stat blocks, invocation tracking,
@@ -183,8 +256,6 @@ export const SPECIES_SENSES: Record<string, Sense[]> = {
   Dwarf: [{ kind: "darkvision", rangeFt: 120 }],
   Elf: [{ kind: "darkvision", rangeFt: 60 }],
   Gnome: [{ kind: "darkvision", rangeFt: 60 }],
-  "Half-Elf": [{ kind: "darkvision", rangeFt: 60 }],
-  "Half-Orc": [{ kind: "darkvision", rangeFt: 60 }],
   Orc: [{ kind: "darkvision", rangeFt: 120 }],
   Tiefling: [{ kind: "darkvision", rangeFt: 60 }],
 };
@@ -333,8 +404,10 @@ export function calcACBreakdown(character: Character): ACBreakdown {
   if (shield) parts.push({ label: `Shield (${shield.name})`, value: shieldAc });
 
   if (!bodyArmor) {
-    // Unarmored — class special cases
-    if (character.class === "Barbarian") {
+    // Unarmored — class special cases. Checked against every class the character has levels
+    // in, not just their primary one — Unarmored Defense is a passive feature you keep from
+    // any class it came from.
+    if (hasClassLevel(character, "Barbarian")) {
       const con = statMod(character.stats.con);
       parts.unshift(
         { label: "Con modifier (Unarmored Defense)", value: con },
@@ -343,7 +416,7 @@ export function calcACBreakdown(character: Character): ACBreakdown {
       );
       return { total: 10 + dex + con + shieldAc, parts };
     }
-    if (character.class === "Monk") {
+    if (hasClassLevel(character, "Monk")) {
       const wis = statMod(character.stats.wis);
       parts.unshift(
         { label: "Wis modifier (Unarmored Defense)", value: wis },
@@ -422,7 +495,7 @@ export const RESOURCE_DEFS: Record<string, ResourceDef> = {
   },
   // 2024 PHB Barbarian Rage uses table: 2 (1-2), 3 (3-5), 4 (6-11), 5 (12-16), 6 (17-19),
   // Unlimited at 20 — capped here rather than modeled as Infinity, since nothing in this app
-  // reaches level 20 yet (see spellSlotsForClass's same "level 1 only" scope note above).
+  // reaches level 20 yet.
   // No Short Rest regain — Rage only comes back on a Long Rest.
   rage: {
     key: "rage",
@@ -530,7 +603,7 @@ export function magicInitiateResourceKey(character: Pick<Character, "background"
 }
 
 function ownsResource(character: Character, def: ResourceDef): boolean {
-  if (def.class) return def.class === character.class;
+  if (def.class) return hasClassLevel(character, def.class);
   if (def.featGate) return hasOriginFeat(character, def.featGate);
   return false;
 }

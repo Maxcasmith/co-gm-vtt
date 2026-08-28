@@ -483,6 +483,46 @@
   object-fit: cover;
 }
 
+/* ── portrait crop modal ── */
+.crop-modal {
+  width: 380px;
+}
+
+.crop-canvas-wrap {
+  position: relative;
+  width: 320px;
+  height: 320px;
+  margin: 0 auto;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.crop-canvas {
+  display: block;
+  width: 320px;
+  height: 320px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.crop-canvas:active { cursor: grabbing; }
+
+.crop-token-guide {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  border: 1px dashed rgba(255, 255, 255, 0.6);
+  pointer-events: none;
+}
+
+.crop-zoom-slider {
+  display: block;
+  width: 320px;
+  margin: 16px auto 0;
+  accent-color: var(--gold);
+}
+
 /* ── success modal ── */
 .password-reveal {
   display: flex;

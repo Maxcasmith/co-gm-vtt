@@ -79,6 +79,7 @@ export class RetaliationOfferHook extends Hook<'afterDamage'> {
     if (!candidates.length) return;
 
     const picked = await offerReaction(
+      cid,
       this.ownerId,
       candidates.map(spell => ({
         spellName: spell.name, kind: 'retaliate' as const,

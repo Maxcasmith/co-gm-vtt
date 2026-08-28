@@ -3,7 +3,7 @@ import type { Player, EnemyStatBlock, Dungeon, Character, TurnOrderEntry } from 
 import { parseRangeFeet, spellTargetCount } from 'shared';
 import { dispatch, on } from './events.ts';
 import type { TargetingStartPayload } from './events.ts';
-import { CELL, TOKEN_R } from './canvas/constants.ts';
+import { CELL, TOKEN_R, DOOR_BUTTON_R } from './canvas/constants.ts';
 import { bfsReachable } from './canvas/geometry.ts';
 import { inArea, resolveAoeOrigin, nearestRingCell } from './canvas/aoe.ts';
 import { attackBonusFor, hitChancePercent } from './canvas/combatMath.ts';
@@ -81,7 +81,7 @@ export default function Canvas({ player, characterId, character, connected, show
   const combatReachableRef = useRef<Set<string> | null>(null);
 
   const {
-    floatEffectsRef, flashEffectsRef, tokenEffectsRef, swingEffectsRef, concentrating, animTick,
+    floatEffectsRef, flashEffectsRef, tokenEffectsRef, swingEffectsRef, concentrating, marks, animTick,
   } = useCombatEffects(tokenPositionsRef, connectedRef);
 
   // Targeting state — ref for window handlers, state for draw trigger
@@ -256,7 +256,7 @@ export default function Canvas({ player, characterId, character, connected, show
 
     latestDrawParamsRef.current = {
       showBattleMap, dungeon, encounter, hoveredTokenKey, tokenPositions, player, movementRemaining,
-      targeting, connected, deadPlayerNames, downPlayerNames, concentrating, deadCreatureIds,
+      targeting, connected, deadPlayerNames, downPlayerNames, concentrating, marks, deadCreatureIds,
       companions, visiblePolygon, litCells, lightSources, senses, elevations, visibleCells,
       hoverHitChance, multiTargetCursor, multiTargetsPicked,
       floorVariantRef, dungeonZoomRef, dungeonPanRef, dragRef, reachableRef, combatReachableRef, groundCacheRef, aoeMouseRef,
@@ -273,7 +273,7 @@ export default function Canvas({ player, characterId, character, connected, show
       const cx = c.getContext('2d');
       if (cx) drawScene(c, cx, params);
     });
-  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick, aoeTick, visibleCells, visiblePolygon, senses, hoverHitChance, hoveredTokenKey, multiTargetsPicked, multiTargetCursor, concentrating]);
+  }, [player, connected, showBattleMap, encounter, tokenCacheVer, tokenPositions, dragTick, targeting, movementRemaining, downPlayerNames, deadPlayerNames, animTick, dungeon, sizeTick, aoeTick, visibleCells, visiblePolygon, senses, hoverHitChance, hoveredTokenKey, multiTargetsPicked, multiTargetCursor, concentrating, marks]);
 
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!showBattleMap) return;
@@ -323,6 +323,28 @@ export default function Canvas({ player, characterId, character, connected, show
       }
       e.preventDefault();
       return;
+    }
+
+    // Door click — toggle open/closed. Works regardless of turn/combat state (not gated by
+    // exploring or isMyTurn — an environment interaction, not an action-economy one), but not
+    // while actively targeting a spell/attack, so a click meant to cancel targeting doesn't also
+    // fire a door. Reach/locked-state validation is server-side (see toggleDoor) — this only
+    // sends intent.
+    if (!targetingRef.current && dungeon) {
+      const doorButtonR = DOOR_BUTTON_R * dungeonZoomRef.current;
+      const doorHit = dungeon.entities.find(en => {
+        if (en.type !== 'door') return false;
+        // Same fractional-center math drawDoorMarker's caller (drawScene.ts) uses — the click
+        // target is the drawn button, not the door's full (possibly multi-cell) footprint.
+        const cx = (en.x + (en.width ?? 1) / 2) * hdCellSz;
+        const cy = (en.y + (en.height ?? 1) / 2) * hdCellSz;
+        return Math.hypot(mx - cx, my - cy) <= doorButtonR;
+      });
+      if (doorHit) {
+        dispatch('vtt:door:toggle', { doorId: doorHit.id });
+        e.preventDefault();
+        return;
+      }
     }
 
     if (!exploring) {
@@ -409,7 +431,7 @@ export default function Canvas({ player, characterId, character, connected, show
             const ey = epos.gy * hdCellSz + hdCellSz / 2;
             if (Math.hypot(mx - ex, my - ey) <= TOKEN_R) {
               if (targetingNow.kind === 'weapon') {
-                dispatch('vtt:combat:attack', { attackerName: player, attackerId: characterId, targetId: enemy.id, targetName: enemy.name, weapon: targetingNow.weapon, ...(targetingNow.bonusSpell ? { bonusSpell: targetingNow.bonusSpell } : {}), ...(targetingNow.isOffhand ? { isOffhand: true } : {}), ...(targetingNow.useLuckPoint ? { useLuckPoint: true } : {}), ...(targetingNow.useInspiration ? { useInspiration: true } : {}) });
+                dispatch('vtt:combat:attack', { attackerName: player, attackerId: characterId, targetId: enemy.id, targetName: enemy.name, weapon: targetingNow.weapon, ...(targetingNow.bonusSpell ? { bonusSpell: targetingNow.bonusSpell } : {}), ...(targetingNow.isOffhand ? { isOffhand: true } : {}), ...(targetingNow.useInspiration ? { useInspiration: true } : {}) });
               } else {
                 tryCastOnTarget(enemy.id);
               }
@@ -608,6 +630,15 @@ export default function Canvas({ player, characterId, character, connected, show
         const tx = entity.x * grabCellSz + grabCellSz / 2;
         const ty = entity.y * grabCellSz + grabCellSz / 2;
         if (Math.hypot(mx - tx, my - ty) <= TOKEN_R) { hovered = entity.id; break; }
+      }
+    }
+    if (!hovered && dungeon) {
+      const doorButtonR = DOOR_BUTTON_R * dungeonZoomRef.current;
+      for (const entity of dungeon.entities) {
+        if (entity.type !== 'door') continue;
+        const cx = (entity.x + (entity.width ?? 1) / 2) * grabCellSz;
+        const cy = (entity.y + (entity.height ?? 1) / 2) * grabCellSz;
+        if (Math.hypot(mx - cx, my - cy) <= doorButtonR) { hovered = entity.id; break; }
       }
     }
     if (hovered !== hoveredTokenKey) setHoveredTokenKey(hovered);

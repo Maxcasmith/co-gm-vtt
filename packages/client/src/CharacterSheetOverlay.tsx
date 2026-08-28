@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { Character, CharacterStoryboard, StoryboardQueuePayload, WorldMeta } from "shared";
-import { calcACBreakdown, spellSlotsForClass } from "shared";
+import type { Character, CharacterClassLevel, CharacterStoryboard, HouseRules, StoryboardQueuePayload, WorldMeta } from "shared";
+import { calcACBreakdown, characterClasses, DEFAULT_HOUSE_RULES, spellSlotsForCharacter } from "shared";
 import { on, dispatch } from "./events.ts";
 import { HIT_DICE } from "./character-creation/srd.ts";
 import { API, modNum, profBonusForLevel } from "./characterSheet/helpers.tsx";
@@ -12,7 +12,7 @@ import { ScoresTab } from "./characterSheet/ScoresTab.tsx";
 import { AITab } from "./characterSheet/AITab.tsx";
 import { InfoTab } from "./characterSheet/InfoTab.tsx";
 import StoryboardOverlay from "./StoryboardOverlay.tsx";
-import { LevelUpScreen } from "./characterSheet/LevelUpScreen.tsx";
+import { LevelUpScreen, bumpClass } from "./characterSheet/LevelUpScreen.tsx";
 
 type SheetTab = "abilities" | "features" | "inventory" | "spells" | "ai" | "scores" | "info";
 
@@ -60,10 +60,14 @@ export default function CharacterSheetOverlay({
   // and dungeon-crawls don't carry a character arc the same way) and pointless with no backstory
   // to show, so it doesn't exist at all rather than existing empty.
   const [worldType, setWorldType] = useState<WorldMeta["type"] | null>(null);
+  const [houseRules, setHouseRules] = useState<HouseRules>(DEFAULT_HOUSE_RULES);
   useEffect(() => {
     fetch(`${API}/api/campaigns/${character.campaignId}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((m: WorldMeta | null) => setWorldType(m?.type ?? null))
+      .then((m: WorldMeta | null) => {
+        setWorldType(m?.type ?? null);
+        setHouseRules({ ...DEFAULT_HOUSE_RULES, ...m?.houseRules });
+      })
       .catch(() => setWorldType(null));
   }, [character.campaignId]);
   const hasBackstory = !!character.backstory?.trim();
@@ -118,6 +122,17 @@ export default function CharacterSheetOverlay({
   const [profBonus, setProfBonus] = useState(
     character.proficiencyBonus ?? profBonusForLevel(character.level ?? 1),
   );
+  const hitDie = HIT_DICE[character.class] ?? 8;
+  const conMod = modNum(character.stats.con);
+  const [currentMaxHp, setCurrentMaxHp] = useState(
+    character.maxHp ?? hitDie + conMod,
+  );
+  const [currentClasses, setCurrentClasses] = useState<CharacterClassLevel[]>(() =>
+    characterClasses(character),
+  );
+  const [currentMaxSlots1, setCurrentMaxSlots1] = useState(
+    character.maxSpellSlots1 ?? spellSlotsForCharacter(character),
+  );
   useEffect(() => {
     setCurrentXp(character.xp ?? 0);
   }, [character.xp]);
@@ -127,18 +142,45 @@ export default function CharacterSheetOverlay({
       character.proficiencyBonus ?? profBonusForLevel(character.level ?? 1),
     );
   }, [character.level, character.proficiencyBonus]);
+  useEffect(() => {
+    setCurrentMaxHp(character.maxHp ?? hitDie + conMod);
+  }, [character.maxHp, hitDie, conMod]);
+  useEffect(() => {
+    setCurrentClasses(characterClasses(character));
+  }, [character.classes, character.class, character.level]);
+  useEffect(() => {
+    setCurrentMaxSlots1(character.maxSpellSlots1 ?? spellSlotsForCharacter(character));
+  }, [character.maxSpellSlots1, character.classes, character.class, character.level]);
 
-  async function handleLevelUp() {
-    const newLevel = currentLevel + 1;
+  async function handleLevelUp(chosenClass: string, hpGain: number) {
+    const newClasses = bumpClass(currentClasses, chosenClass);
+    const newLevel = newClasses.reduce((sum, c) => sum + c.level, 0);
     const newProf = profBonusForLevel(newLevel);
+    const newMaxHp = currentMaxHp + hpGain;
+    const newMaxSlots1 = spellSlotsForCharacter({ ...character, classes: newClasses });
+    const newCurrentSlots1 = Math.max(
+      0,
+      (character.currentSpellSlots1 ?? currentMaxSlots1) + (newMaxSlots1 - currentMaxSlots1),
+    );
+    setCurrentClasses(newClasses);
     setCurrentLevel(newLevel);
     setProfBonus(newProf);
+    setCurrentMaxHp(newMaxHp);
+    setCurrentMaxSlots1(newMaxSlots1);
     await fetch(
       `${API}/api/campaigns/${character.campaignId}/party/${character.id}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ level: newLevel, proficiencyBonus: newProf }),
+        body: JSON.stringify({
+          classes: newClasses,
+          level: newLevel,
+          proficiencyBonus: newProf,
+          maxHp: newMaxHp,
+          currentHp: (character.currentHp ?? newMaxHp - hpGain) + hpGain,
+          maxSpellSlots1: newMaxSlots1,
+          currentSpellSlots1: newCurrentSlots1,
+        }),
       },
     );
   }
@@ -181,10 +223,15 @@ export default function CharacterSheetOverlay({
     return (
       <LevelUpScreen
         character={character}
+        classes={currentClasses}
         fromLevel={currentLevel}
         toLevel={currentLevel + 1}
-        onConfirm={() => {
-          void handleLevelUp();
+        currentMaxHp={currentMaxHp}
+        currentMaxSlots1={currentMaxSlots1}
+        conMod={conMod}
+        levelUpHpMode={houseRules.levelUpHp}
+        onConfirm={(chosenClass, hpGain) => {
+          void handleLevelUp(chosenClass, hpGain);
           setLevelingUp(false);
         }}
         onClose={() => setLevelingUp(false)}
@@ -192,14 +239,11 @@ export default function CharacterSheetOverlay({
     );
   }
 
-  const hitDie = HIT_DICE[character.class] ?? 8;
-  const derivedMaxHp = hitDie + modNum(character.stats.con);
-  const displayMax = maxHp ?? character.maxHp ?? derivedMaxHp;
+  const displayMax = maxHp ?? currentMaxHp;
   const displayCurrent = currentHp ?? character.currentHp ?? displayMax;
   const displayTempHp = tempHp ?? character.tempHp ?? 0;
 
-  const derivedMaxSlots1 = spellSlotsForClass(character.class);
-  const displayMaxSlots1 = maxSpellSlots1 ?? character.maxSpellSlots1 ?? derivedMaxSlots1;
+  const displayMaxSlots1 = maxSpellSlots1 ?? currentMaxSlots1;
   const displayCurrentSlots1 = currentSpellSlots1 ?? character.currentSpellSlots1 ?? displayMaxSlots1;
 
   const acBreakdown = calcACBreakdown(character);
@@ -232,7 +276,10 @@ export default function CharacterSheetOverlay({
           <div className="sheet-identity">
             <p className="sheet-name">{character.name}</p>
             <p className="sheet-subtitle">
-              {character.class} · {character.species} · {character.background}
+              {currentClasses.length > 1
+                ? currentClasses.map((c) => `${c.class} ${c.level}`).join(" / ")
+                : character.class}{" "}
+              · {character.species} · {character.background}
             </p>
           </div>
           <button

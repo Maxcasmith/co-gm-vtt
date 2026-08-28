@@ -32,10 +32,18 @@ export async function generateDungeon(
   // Man-made structures get a deterministic floor-plan layout driven by the manifest's adjacency
   // graph; natural/carved spaces (cave, crypt, tomb) go straight to the procedural row-packer —
   // no LLM geometry call, and no attempt to force building-shaped rooms onto a cave.
-  const { cells, rooms } = manifest.structureType === 'building'
+  const { cells, rooms, doors } = manifest.structureType === 'building'
     ? generateBuildingLayout(manifest, opts)
     : generateGrid(manifest, opts);
   const entities = placeEntities(rooms, manifest, cells);
+  // Every carved doorway (building layouts only — organic spaces carve plain gaps, no literal
+  // door fits the genre) becomes its own Door entity: closed, opaque, unlocked by default.
+  for (const door of doors ?? []) {
+    entities.push({
+      id: randomUUID(), type: 'door', x: door.x, y: door.y, width: door.width, height: door.height,
+      name: 'Door', discovered: true, doorState: 'closed', transparency: 0,
+    });
+  }
   // Synchronous/deterministic — every creature entity gets a portraitSrc before this function
   // returns, regardless of whether the file exists yet (see creaturePortraits.ts).
   assignPortraitSrcs(entities);
@@ -87,9 +95,12 @@ export function buildDungeonQuests(dungeon: Dungeon, existingQuests: Quest[]): Q
   const today = new Date().toISOString().slice(0, 10);
   const toAdd: Quest[] = [];
 
+  // The boss is an undiscovered entity at generation time — naming it here would leak its
+  // identity into the quest log before the party has ever laid eyes on it (see prompts.ts's
+  // reveal discipline). Keep the quest generic; the narration names it once discovered.
   const boss = dungeon.entities.find(e => e.type === 'creature' && e.statBlock?.isBoss);
   if (boss) {
-    toAdd.push({ id: `boss-${boss.id}`, name: `Defeat ${boss.name}`, description: `Defeat ${boss.name}.`, status: 'open', log: [], addedAt: today, sourceDungeonId: dungeon.id });
+    toAdd.push({ id: `boss-${boss.id}`, name: 'Defeat the boss', description: 'Defeat the boss lurking in this dungeon.', status: 'open', log: [], addedAt: today, sourceDungeonId: dungeon.id });
   }
 
   toAdd.push({ id: 'exit-dungeon', name: `Escape ${dungeon.name}`, description: `Find a way out of ${dungeon.name}.`, status: 'open', log: [], addedAt: today, sourceDungeonId: dungeon.id });
@@ -137,12 +148,19 @@ export function renderDungeonAscii(dungeon: Dungeon): string {
     }
   });
 
-  const legend = dungeon.rooms.map((r, i) => `${String.fromCharCode(65 + (i % 26))} = ${r.name}`).join('\n');
+  // '#' for connector corridors (raw floor cells carved between rooms — see resolveRoom's doc —
+  // that never got their own DungeonRoom entry), keyed in the legend like every room letter
+  // instead of a bare, unexplained '.'. Never a letter itself, so it can't collide with a room's
+  // A-Z key the way picking the "next" letter after the room count could once rooms wrap past Z.
+  const legend = [
+    ...dungeon.rooms.map((r, i) => `${String.fromCharCode(65 + (i % 26))} = ${r.name}`),
+    '# = Corridor',
+  ].join('\n');
   const rows = dungeon.cells.map((row, y) =>
     row.map((cell, x) => {
       if (cell !== 1) return '-';
       const owner = ownerOf[y]![x]!;
-      return owner === -1 ? '.' : String.fromCharCode(65 + (owner % 26));
+      return owner === -1 ? '#' : String.fromCharCode(65 + (owner % 26));
     }).join('')
   );
 
@@ -158,6 +176,19 @@ export function toClientDungeon(dungeon: Dungeon): Dungeon {
 
 export function roomAt(dungeon: Dungeon, gx: number, gy: number): DungeonRoom | undefined {
   return dungeon.rooms.find(r => gx >= r.x && gx < r.x + r.width && gy >= r.y && gy < r.y + r.height);
+}
+
+// Decorative props (type 'object', no followsId — a followed object like Mage Hand's disk isn't
+// a real scene fixture) within radiusFt of a point, same Chebyshev/5ft-per-cell distance rule as
+// combat's participantsNearPoint. Named improvised targets (e.g. "the barrels") resolve through
+// this rather than asking an LLM to invent coordinates for something that's already placed.
+export function nearbyObjects(
+  dungeon: Dungeon, gx: number, gy: number, radiusFt: number,
+): { id: string; name: string; gx: number; gy: number }[] {
+  return dungeon.entities
+    .filter(e => e.type === 'object' && !e.followsId && e.discovered)
+    .filter(e => Math.max(Math.abs(e.x - gx), Math.abs(e.y - gy)) * 5 <= radiusFt)
+    .map(e => ({ id: e.id, name: e.name, gx: e.x, gy: e.y }));
 }
 
 // Connector corridors between rooms are carved as raw floor cells (buildingLayout's corridorTo
@@ -194,6 +225,7 @@ export function describeCombatLocation(dungeon: Dungeon, defeatedAt: { gx: numbe
 
 function entityStatus(e: DungeonEntity): string {
   if (!e.discovered) return `undiscovered, hideDC ${e.hideDC ?? '?'}`;
+  if (e.type === 'door') return `discovered — ${e.doorState ?? 'closed'}`;
   if (e.type === 'loot' && e.contents?.length) return `discovered — contains: ${e.contents.join(', ')}`;
   if (e.type === 'trap' && e.trap?.kind === 'seal' && e.trap.escapeDC) {
     return `discovered — sealed shut (DM eyes only, NEVER state this: resolves on a DC ${e.trap.escapeDC} ${e.trap.escapeSkill ?? 'Athletics'} check when a player attempts something that would plausibly force/bypass it)`;
@@ -221,7 +253,7 @@ export function describeDungeonState(dungeon: Dungeon, positions: Record<string,
     const room = dungeon.rooms.find(r => r.name === roomName);
     if (!room) continue;
     const here = dungeon.entities.filter(e => e.discovered && e.x >= room.x && e.x < room.x + room.width && e.y >= room.y && e.y < room.y + room.height);
-    for (const e of here) lines.push(`  - already discovered here: ${e.name}`);
+    for (const e of here) lines.push(`  - already discovered here: ${e.name}${e.type === 'door' ? ` (${e.doorState ?? 'closed'})` : ''}`);
     for (const d of room.dressing ?? []) lines.push(`  - ${d}`);
     for (const hd of room.hiddenDressing ?? []) if (hd.discovered) lines.push(`  - already discovered here: ${hd.text}`);
   }

@@ -51,7 +51,7 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
 
   function handleBack() {
     if (c.isDirty) { backDialogRef.current?.showModal(); return; }
-    window.location.href = '/';
+    window.location.href = `/${campaignId}/lobby`;
   }
 
   const canCreate = c.name.trim() !== '' && c.password.trim() !== '' && c.rolled && c.pool.length === 0;
@@ -204,7 +204,7 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
         <p className="modal-body-text">Your progress will be lost.</p>
         <div className="modal-actions">
           <button className="btn-secondary" onClick={() => backDialogRef.current?.close()}>Keep editing</button>
-          <button className="btn-primary" onClick={() => { window.location.href = '/'; }}>Discard</button>
+          <button className="btn-primary" onClick={() => { window.location.href = `/${campaignId}/lobby`; }}>Discard</button>
         </div>
       </dialog>
 
@@ -219,7 +219,7 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
           </button>
         </div>
         <div className="modal-actions">
-          <button className="btn-primary" onClick={() => { window.location.href = '/'; }}>Done</button>
+          <button className="btn-primary" onClick={() => { window.location.href = `/${campaignId}/lobby`; }}>Done</button>
         </div>
       </dialog>
     </div>

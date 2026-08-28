@@ -111,8 +111,10 @@ function placeAnywhere(size: { w: number; h: number }, placed: (Rect | undefined
   return best;
 }
 
-// If a and b sit either side of a single wall line, punch a 1-2 cell door through it.
-function carveDoorway(cells: number[][], a: Rect, b: Rect): boolean {
+// If a and b sit either side of a single wall line, punch a 1-2 cell door through it — returning
+// the carved rect (for the caller to turn into a Door entity), or null if they don't actually
+// share a wall.
+function carveDoorway(cells: number[][], a: Rect, b: Rect): { x: number; y: number; width: number; height: number } | null {
   const span = (aStart: number, aLen: number, bStart: number, bLen: number) => {
     const from = Math.max(aStart, bStart);
     const to = Math.min(aStart + aLen, bStart + bLen);
@@ -122,24 +124,24 @@ function carveDoorway(cells: number[][], a: Rect, b: Rect): boolean {
   const vertical = b.x === a.x + a.w + 1 ? a.x + a.w : a.x === b.x + b.w + 1 ? b.x + b.w : null;
   if (vertical !== null) {
     const s = span(a.y, a.h, b.y, b.h);
-    if (!s) return false;
+    if (!s) return null;
     const doorLen = Math.min(2, s.len);
     const y0 = s.from + Math.floor((s.len - doorLen) / 2);
     for (let y = y0; y < y0 + doorLen; y++) cells[y]![vertical] = 1;
-    return true;
+    return { x: vertical, y: y0, width: 1, height: doorLen };
   }
 
   const horizontal = b.y === a.y + a.h + 1 ? a.y + a.h : a.y === b.y + b.h + 1 ? b.y + b.h : null;
   if (horizontal !== null) {
     const s = span(a.x, a.w, b.x, b.w);
-    if (!s) return false;
+    if (!s) return null;
     const doorLen = Math.min(2, s.len);
     const x0 = s.from + Math.floor((s.len - doorLen) / 2);
     for (let x = x0; x < x0 + doorLen; x++) cells[horizontal]![x] = 1;
-    return true;
+    return { x: x0, y: horizontal, width: doorLen, height: 1 };
   }
 
-  return false;
+  return null;
 }
 
 const center = (r: Rect) => ({ x: r.x + Math.floor(r.w / 2), y: r.y + Math.floor(r.h / 2) });
@@ -248,13 +250,22 @@ export function generateBuildingLayout(manifest: DungeonManifest, opts?: { width
   });
 
   // Every graph edge whose rooms ended up wall-to-wall becomes a door — including edges the BFS
-  // tree didn't use, which is what gives a floor plan its loops.
+  // tree didn't use, which is what gives a floor plan its loops. `graph` is undirected but stores
+  // both directions of each edge, so carveDoorway(a,b) and carveDoorway(b,a) would otherwise both
+  // fire for the same wall — carvedPairs keeps that down to one Door entity per edge.
+  const doors: { x: number; y: number; width: number; height: number }[] = [];
+  const carvedPairs = new Set<string>();
   for (const [name, neighbors] of graph) {
     const a = rects[indexOf.get(name)!];
     if (!a) continue;
     for (const neighborName of neighbors) {
+      const pairKey = [name, neighborName].sort().join('|');
+      if (carvedPairs.has(pairKey)) continue;
+      carvedPairs.add(pairKey);
       const b = rects[indexOf.get(neighborName)!];
-      if (b) carveDoorway(cells, a, b);
+      if (!b) continue;
+      const door = carveDoorway(cells, a, b);
+      if (door) doors.push(door);
     }
   }
 
@@ -272,5 +283,5 @@ export function generateBuildingLayout(manifest: DungeonManifest, opts?: { width
   }
   fixDiagonalPinches(cells, width, height);
 
-  return { cells, rooms };
+  return { cells, rooms, doors };
 }

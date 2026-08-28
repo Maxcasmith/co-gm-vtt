@@ -1,23 +1,24 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import type { WorldConcept, Character, Quest } from 'shared';
-import { spellSlotsForClass } from 'shared';
+import type { WorldConcept, Character, Quest, HouseRules } from 'shared';
+import { spellSlotsForCharacter, DEFAULT_HOUSE_RULES } from 'shared';
 import {
   CAMPAIGNS_DIR,
   getConfig, writeCampaignFile, listCampaigns,
   getWorldMeta, writeWorldMeta,
   writeCharacter, updateCharacter, getCharacter, listCharacters, findCharacterByPassword, writeCharacterImage, getCharacterStoryboard,
+  getScenarioStoryboard,
   readCampaignFile, writeEntity,
   listEntitySlugs, readEntity, saveDungeon, saveDungeonAscii, writeManifest, readManifest, emptyManifest, readQuests, writeQuests,
 } from '../storage.ts';
 import { generateDungeon, buildDungeonQuests } from '../dungeon/index.ts';
-import { generateCharacterStoryboard, SLIDE_COUNT } from '../dungeon/storyboard.ts';
+import { generateCharacterStoryboard, generateScenarioStoryboard, SLIDE_COUNT } from '../dungeon/storyboard.ts';
 import { calcMaxHp } from '../combat/dice.ts';
 import { getFeatureProvider } from '../providers/index.ts';
 import { copyCompendiumToCampaign } from '../compendium/storage.ts';
 import { copyAdventureToCampaign } from '../adventures/storage.ts';
-import { buildConceptsPrompt, buildWorldGenPrompt, buildDungeonCrawlPremisePrompt, buildBackstoryCheckPrompt, buildBackstoryGeneratePrompt, buildBackstoryExtractPrompt } from '../prompts.ts';
-import { processSession, generateDmBrief, generateDungeonQuests } from '../session-processor/index.ts';
+import { buildConceptsPrompt, buildWorldGenPrompt, buildDungeonCrawlPremisePrompt, buildDungeonScenarioSynopsisPrompt, buildDungeonScenarioGoalPrompt, buildBackstoryCheckPrompt, buildBackstoryGeneratePrompt, buildBackstoryExtractPrompt } from '../prompts.ts';
+import { processSession, generateDmBrief } from '../session-processor/index.ts';
 import { processPortrait } from '../utils/image.ts';
 import { buildWorldMapPrompt } from '../session-processor/imagePrompts.ts';
 import { generateBattleMap } from '../providers/openai.ts';
@@ -82,16 +83,55 @@ campaignsRouter.get('/:id', async (req, res) => {
   const slug = req.params.id ?? '';
   const meta = await getWorldMeta(slug);
   if (!meta) { res.status(404).json({ error: 'Campaign not found' }); return; }
+  const { gamePassword: _pw, ...safeMeta } = meta;
   // merge tags from meta.json if present
   try {
     const { readFile } = await import('fs/promises');
     const raw = await readFile(`${CAMPAIGNS_DIR}/${slug}/meta.json`, 'utf-8');
     const campaign = JSON.parse(raw) as { tags?: string[] };
-    res.json({ ...meta, tags: campaign.tags ?? [] });
+    res.json({ ...safeMeta, tags: campaign.tags ?? [], houseRules: meta.houseRules ?? DEFAULT_HOUSE_RULES });
   } catch (err) {
     logError('routes/campaigns:getById', err);
-    res.json(meta);
+    res.json({ ...safeMeta, houseRules: meta.houseRules ?? DEFAULT_HOUSE_RULES });
   }
+});
+
+// ── game password auth ────────────────────────────────────────────────────────
+// Empty/unset gamePassword means the game has no password — anyone gets in.
+
+campaignsRouter.post('/:id/auth', async (req, res) => {
+  const { password } = req.body as { password: string };
+  const meta = await getWorldMeta(req.params.id ?? '');
+  if (!meta) { res.status(404).json({ error: 'Campaign not found' }); return; }
+  if (meta.gamePassword && meta.gamePassword !== password) { res.status(401).json({ error: 'Invalid password' }); return; }
+  res.json({ ok: true });
+});
+
+campaignsRouter.get('/:id/game-password', async (req, res) => {
+  const meta = await getWorldMeta(req.params.id ?? '');
+  if (!meta) { res.status(404).json({ error: 'Campaign not found' }); return; }
+  res.json({ gamePassword: meta.gamePassword ?? '' });
+});
+
+campaignsRouter.put('/:id/game-password', async (req, res) => {
+  const slug = req.params.id ?? '';
+  const meta = await getWorldMeta(slug);
+  if (!meta) { res.status(404).json({ error: 'Campaign not found' }); return; }
+  const { gamePassword } = req.body as { gamePassword?: string };
+  const { gamePassword: _old, ...rest } = meta;
+  await writeWorldMeta(slug, gamePassword ? { ...rest, gamePassword } : rest);
+  res.json({ gamePassword: gamePassword ?? '' });
+});
+
+// ── house rules ───────────────────────────────────────────────────────────────
+
+campaignsRouter.put('/:id/house-rules', async (req, res) => {
+  const slug = req.params.id ?? '';
+  const meta = await getWorldMeta(slug);
+  if (!meta) { res.status(404).json({ error: 'Campaign not found' }); return; }
+  const houseRules = req.body as HouseRules;
+  await writeWorldMeta(slug, { ...meta, houseRules });
+  res.json(houseRules);
 });
 
 // ── concept generation ────────────────────────────────────────────────────────
@@ -144,6 +184,23 @@ campaignsRouter.post('/generate', async (req, res) => {
       const slug = uniqueSlug(slugify(title));
       await writeCampaignFile(slug, 'world.md', `# ${title}\n\n${premise.trim()}`);
 
+      // Separate from the short premise above (that one stays a campaign-record blurb, untouched)
+      // — this is the richer, dramatic scenario synopsis: read in full by the player in the game
+      // lobby, AND handed to the manifest below as story context so the dungeon it invents actually
+      // serves this specific scenario rather than just the bare genre tags.
+      send({ type: 'progress', message: 'Writing scenario synopsis…' });
+      let synopsis = premise;
+      try {
+        // Streamed like the premise above, and awaited the same way — everything after this block
+        // (storyboard kickoff, goal derivation, dungeon generation) only starts once this resolves.
+        const synopsisRaw = await getFeatureProvider(config, 'dungeonScenarioSynopsis').stream(
+          buildDungeonScenarioSynopsisPrompt(tags, title, premise),
+          token => send({ type: 'token', text: token }),
+        );
+        const parsed = parseLlmJson<{ synopsis?: string }>(synopsisRaw);
+        if (parsed.synopsis) synopsis = parsed.synopsis;
+      } catch (err) { logError('routes/campaigns:generate:dungeonScenarioSynopsis', err); }
+
       const campaignName = title;
       await writeWorldMeta(slug, {
         id: randomUUID(),
@@ -151,26 +208,47 @@ campaignsRouter.post('/generate', async (req, res) => {
         campaignDir: slug,
         type,
         concept: { name: concept.name, description: concept.description },
+        scenarioSynopsis: synopsis,
       });
 
-      send({ type: 'progress', message: 'Generating quest…' });
-      // Same quest-first pattern as effects.ts's dungeon_gen handler (mid-campaign dungeons) —
-      // generated before the floor plan so it can be designed to serve the quest, id decided up
-      // front so the quest is tagged and written before the dungeon itself exists.
-      const dungeonId = randomUUID();
-      const predefinedQuests = await generateDungeonQuests(slug, dungeonId, title, 'dungeon-crawl', tags.join(', '), config);
-      if (predefinedQuests.length) await writeQuests(slug, [...(await readQuests(slug)), ...predefinedQuests]);
+      // Started here, awaited only right before `complete` below — runs the whole time the goal
+      // and dungeon are being generated instead of after, and never throws out (see
+      // generateScenarioStoryboard's own try/catch), so it's safe to await plainly.
+      const storyboardDone = generateScenarioStoryboard(slug, title, synopsis, config);
+
+      // One strong goal derived from the synopsis, not the manifest's own free-form invention —
+      // same predefinedQuests mechanism effects.ts's mid-campaign dungeon_gen handler already uses
+      // to override manifest goals, just constrained to exactly one here instead of that path's 0-3.
+      send({ type: 'progress', message: 'Determining the dungeon\'s goal…' });
+      let predefinedQuests: { name: string; description: string }[] = [];
+      try {
+        const goalRaw = await getFeatureProvider(config, 'questGeneration').complete(
+          buildDungeonScenarioGoalPrompt(synopsis, 'dungeon-crawl', []),
+        );
+        const goal = parseLlmJson<{ id?: string; name?: string; description?: string }>(goalRaw);
+        if (goal.name && goal.description) predefinedQuests = [{ name: goal.name, description: goal.description }];
+      } catch (err) { logError('routes/campaigns:generate:dungeonScenarioGoal', err); }
 
       send({ type: 'progress', message: 'Generating dungeon…' });
+      const dungeonId = randomUUID();
       const dungeon = await generateDungeon(
-        title, 'dungeon-crawl', getFeatureProvider(config, 'dungeonGeneration'), tags.join(', '),
+        title, 'dungeon-crawl', getFeatureProvider(config, 'dungeonGeneration'), synopsis,
         { width: 100, height: 100, roomRange: [14, 20], partySize, id: dungeonId, predefinedQuests },
         token => send({ type: 'token', text: token }),
         config,
       );
       await saveDungeon(slug, dungeon);
       await saveDungeonAscii(slug, dungeon);
-      await writeQuests(slug, buildDungeonQuests(dungeon, await readQuests(slug)));
+
+      const today = new Date().toISOString().slice(0, 10);
+      const goalQuests: Quest[] = (dungeon.goals ?? []).map(goal => ({
+        id: `goal-${slugify(goal)}`, name: goal, description: goal,
+        status: 'open' as const, log: [], addedAt: today, sourceDungeonId: dungeonId,
+      }));
+      await writeQuests(slug, buildDungeonQuests(dungeon, [...(await readQuests(slug)), ...goalQuests]));
+
+      send({ type: 'progress', message: 'Finishing scenario storyboard…' });
+      await storyboardDone;
 
       send({ type: 'complete', id: slug, name: campaignName });
       return;
@@ -211,13 +289,19 @@ campaignsRouter.post('/generate', async (req, res) => {
           const worldMd = await readCampaignFile(slug, 'world.md') ?? '';
           const locationSlugs = await listEntitySlugs(slug, 'location');
           const locationContents = await Promise.all(locationSlugs.map(s => readEntity(slug, 'location', s)));
-          const locationsSummary = locationContents.filter(Boolean).map(c => {
-            // Extract name + description only (stop before ## Scene Notes)
-            const text = c!;
+          const locations = locationContents.filter(Boolean).map(c => {
+            // Written by writeVault as "# Name\n\n<description>\n\n## Scene Notes\n..." — split
+            // off the heading for the map's name field and everything up to Scene Notes as description.
+            const text = c!.trim();
             const cutoff = text.indexOf('\n## ');
-            return cutoff === -1 ? text.trim() : text.slice(0, cutoff).trim();
-          }).join('\n\n');
-          const prompt = buildWorldMapPrompt(worldMd, locationsSummary, tags);
+            const body = (cutoff === -1 ? text : text.slice(0, cutoff)).trim();
+            const nameMatch = body.match(/^#\s*(.+)/);
+            return {
+              name: nameMatch?.[1]?.trim() || 'Unnamed Location',
+              description: body.replace(/^#.*\n?/, '').trim(),
+            };
+          });
+          const prompt = buildWorldMapPrompt(worldMd, locations, tags);
           const buffer = await generateBattleMap(prompt, apiKey, config.image.model);
           await writeFile(path.join(CAMPAIGNS_DIR, slug, 'world-map.jpg'), buffer);
           console.log('[world-map] generated for:', slug);
@@ -454,7 +538,7 @@ campaignsRouter.get('/:id/party/:charId', async (req, res) => {
   const char = await getCharacter(req.params.id ?? '', req.params.charId ?? '');
   if (!char) { res.status(404).json({ error: 'Character not found' }); return; }
   const maxHp = calcMaxHp(char);
-  const maxSpellSlots1 = spellSlotsForClass(char.class);
+  const maxSpellSlots1 = spellSlotsForCharacter(char);
   res.json({
     ...char,
     maxHp, currentHp: char.currentHp ?? maxHp,
@@ -464,7 +548,7 @@ campaignsRouter.get('/:id/party/:charId', async (req, res) => {
 
 campaignsRouter.patch('/:id/party/:charId', async (req, res) => {
   const { id, charId } = req.params as { id: string; charId: string };
-  const allowed = ['xp', 'level', 'proficiencyBonus'] as const;
+  const allowed = ['xp', 'level', 'proficiencyBonus', 'maxHp', 'currentHp', 'classes', 'maxSpellSlots1', 'currentSpellSlots1'] as const;
   const patch = Object.fromEntries(allowed.filter(k => k in req.body).map(k => [k, (req.body as Record<string, unknown>)[k]]));
   const updated = await updateCharacter(id, charId, char => ({ ...char, ...patch }));
   if (!updated) { res.status(404).json({ error: 'Character not found' }); return; }
@@ -502,6 +586,23 @@ campaignsRouter.get('/:id/party/:charId/storyboard/:n', (req, res) => {
   if (!new RegExp(`^[1-${SLIDE_COUNT}]$`).test(n)) { res.status(400).json({ error: 'Invalid slide number' }); return; }
   res.sendFile(`${id}/party/${charId}/storyboard_slide_${n}.jpg`, { root: CAMPAIGNS_DIR }, err => {
     if (err) res.status(404).json({ error: 'Storyboard slide not found' });
+  });
+});
+
+// Dungeon-crawl worlds only — campaign-root equivalent of the two routes above, for the scenario
+// storyboard rather than any one character's.
+campaignsRouter.get('/:id/scenario-storyboard', async (req, res) => {
+  const { id } = req.params as { id: string };
+  const storyboard = await getScenarioStoryboard(id);
+  if (!storyboard) { res.status(404).json({ error: 'No scenario storyboard generated for this campaign' }); return; }
+  res.json(storyboard);
+});
+
+campaignsRouter.get('/:id/scenario-storyboard/:n', (req, res) => {
+  const { id, n } = req.params as { id: string; n: string };
+  if (!new RegExp(`^[1-${SLIDE_COUNT}]$`).test(n)) { res.status(400).json({ error: 'Invalid slide number' }); return; }
+  res.sendFile(`${id}/scenario-storyboard_slide_${n}.jpg`, { root: CAMPAIGNS_DIR }, err => {
+    if (err) res.status(404).json({ error: 'Scenario storyboard slide not found' });
   });
 });
 

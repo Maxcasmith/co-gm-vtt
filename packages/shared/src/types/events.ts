@@ -37,8 +37,12 @@ export interface ReactionOfferOption {
    * as 'protect' but self-targeted and spending a Luck Point instead of a reaction — spellName is
    * a synthetic label ("Lucky"). 'swap' (origin feat Alert): the offer to swap rolled Initiative
    * with the requester — attackerName repurposed as the requester's name, spellName a synthetic
-   * label ("Alert Swap"). Only 'defend' uses the AC fields below. */
-  kind: "defend" | "retaliate" | "opportunity" | "protect" | "luck" | "swap";
+   * label ("Alert Swap"). 'luckReroll' (origin feat Lucky, offensive half): the player's own
+   * attack just missed — spend a Luck Point to reroll the d20, after the outcome is known.
+   * attackerName repurposed as the player's own name, targetName the creature they attacked,
+   * attackTotal/currentAc the missed roll and the AC it fell short of. Only 'defend' uses the AC
+   * fields below. */
+  kind: "defend" | "retaliate" | "opportunity" | "protect" | "luck" | "swap" | "luckReroll";
   attackTotal?: number;
   /** AC as it stands right now, and what it would become if the reaction is taken. */
   currentAc?: number;
@@ -92,7 +96,7 @@ export interface ServerToClientEvents {
   "encounter:ready": (enemies: EnemyStatBlock[]) => void;
   "token:moved": (pos: TokenPosition) => void;
   /** speedMultiplier is only present when reduced below 1 (Wardaway) — omitted means full/normal speed. */
-  "combat:turn": (data: { actorName: string; speedMultiplier?: number; speedBonusFt?: number; buffs?: string[] }) => void;
+  "combat:turn": (data: { actorId: string; actorName: string; speedMultiplier?: number; speedBonusFt?: number; buffs?: string[] }) => void;
   "combat:initiative": (entry: TurnOrderEntry) => void;
   "combat:turn:order": (entries: TurnOrderEntry[]) => void;
   "combat:attack:result": (result: AttackResult) => void;
@@ -201,6 +205,19 @@ export interface ServerToClientEvents {
     targetName: string;
     spellName: string | null;
   }) => void;
+  /**
+   * A concentration-sustained curse (Hunter's Mark, Hex) target-locking or releasing one
+   * creature — drives the "marked" token icon. `active: false` fires from the same
+   * breakConcentration teardown that clears the caster's Concentrating condition, so a redirect
+   * (recasting on a new target) always clears the old icon before the new one is offered.
+   */
+  "combat:mark": (data: {
+    casterId: string;
+    targetId: string;
+    targetName: string;
+    spellName: string;
+    active: boolean;
+  }) => void;
   "combat:defeat": () => void;
   "combat:player:dead": (data: {
     characterId: string;
@@ -272,6 +289,8 @@ export interface ClientToServerEvents {
   "session:start": (payload: { campaignId: string }) => void;
   "session:end": (payload: { campaignId: string }) => void;
   "token:move": (pos: TokenPosition) => void;
+  /** Toggles a door open/closed — a no-op server-side if it's locked or the requester isn't within 5ft of it. See toggleDoor. */
+  "door:toggle": (payload: { campaignId: string; doorId: string; characterName: string }) => void;
   "combat:turn:end": () => void;
   "combat:initiative:roll": (entry: TurnOrderEntry) => void;
   "combat:attack": (payload: {

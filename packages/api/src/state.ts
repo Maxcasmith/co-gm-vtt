@@ -78,6 +78,10 @@ export const pendingWeaponBonuses = new Map<string, Record<string, {
   casterAbilityMod?: number | undefined;
 }>>();
 export const microDungeons = new Set<string>(); // cids whose current dungeon is an ephemeral combat arena — discarded on victory instead of continued
+// cid → casterId → the single creature a concentration-sustained curse (Hunter's Mark, Hex) has
+// target-locked, so breakConcentration can find and clear it without having to search every
+// hook. Drives the client's "marked" token icon (combat:mark) — see resolvePlayerCast.
+export const activeMarks = new Map<string, Map<string, { targetId: string; targetName: string; spellName: string }>>();
 
 export interface RestChoice {
   resting: boolean; restType: 'short' | 'long'; hitDiceSpent: number;

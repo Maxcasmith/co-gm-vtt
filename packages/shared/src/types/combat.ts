@@ -110,11 +110,21 @@ export interface AttackResult {
   hit: boolean;
   isCrit: boolean;
   damage?: number | undefined;
+  /** Raw weapon/attack-die roll only, excluding damageStatBonus and any bonusDamage — the first line of the log's damage breakdown. */
   damageRoll?: number | undefined;
   damageType?: string | undefined;
   damageFormula?: string | undefined;
   remainingHp?: number | undefined;
   targetDead: boolean;
+  /**
+   * The ability modifier actually folded into `damage` on top of damageRoll — NOT the same
+   * thing as `statBonus` above, which is the attack roll's to-hit bonus (for a player weapon
+   * attack these happen to be the same ability mod, but a monster's flat to-hit bonus is
+   * unrelated to its damage, which is already fully baked into damageFormula/damageRoll — so
+   * this stays undefined for monster and creature-reactor opportunity attacks rather than
+   * reusing statBonus and fabricating a damage line that doesn't actually exist).
+   */
+  damageStatBonus?: number | undefined;
   // Present when a pending on-hit spell buff (e.g. Divine Smite) triggered on this attack.
   bonusSpellName?: string | undefined;
   bonusDamage?: number | undefined;

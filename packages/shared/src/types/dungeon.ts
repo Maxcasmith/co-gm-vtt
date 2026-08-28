@@ -78,7 +78,7 @@ export interface TrapEffect {
 
 export interface DungeonEntity {
   id: string;
-  type: "creature" | "loot" | "trap" | "object";
+  type: "creature" | "loot" | "trap" | "object" | "door";
   x: number;
   y: number;
   name: string;
@@ -108,9 +108,19 @@ export interface DungeonEntity {
   leashFt?: number;
   /** type === 'object' decorative props only (no followsId) — server-relative path to the generated sprite, same pattern as statBlock.portraitSrc. Unset while generation is still pending. */
   spriteSrc?: string;
-  /** type === 'object' decorative props only — footprint in grid cells, anchored at (x,y) as the top-left corner (same convention as DungeonRoom). Omitted = 1x1. */
+  /** type === 'object' decorative props only, or type === 'door' — footprint in grid cells, anchored at (x,y) as the top-left corner (same convention as DungeonRoom). Omitted = 1x1. */
   width?: number;
   height?: number;
+  /** type === 'door' only. Toggled by a click (see toggleDoor) unless 'locked', which no click can change yet — no unlock mechanic exists. */
+  doorState?: "open" | "closed" | "locked";
+  /**
+   * type === 'door' only — whether this door blocks line of sight while shut (closed or locked).
+   * 0 = opaque, blocks sight same as a wall. Above 0 = never blocks (a barred gate, a window).
+   * Irrelevant while 'open' — an open door never blocks sight regardless of this value. See
+   * closedDoorCells, which every hasLineOfSight/visibility-polygon caller that cares about doors
+   * threads through.
+   */
+  transparency?: number;
 }
 
 export interface Dungeon {
@@ -173,15 +183,34 @@ export interface Dungeon {
   lightSources?: Record<string, number>;
 }
 
+// Every cell a currently-shut, opaque door occupies — a floor cell (`1`) in the grid, so nothing
+// in `cells` alone marks it as blocking. Every hasLineOfSight/visibility-polygon caller that
+// wants a closed door to act like a wall passes this in; callers happy to ignore doors omit it.
+// Computed fresh from `dungeon.entities` rather than cached anywhere, since a door's state can
+// change any time a player clicks it (see toggleDoor).
+export function closedDoorCells(dungeon: Dungeon): Set<string> {
+  const blocked = new Set<string>();
+  for (const e of dungeon.entities) {
+    if (e.type !== "door" || e.doorState === "open" || (e.transparency ?? 0) > 0) continue;
+    const w = e.width ?? 1, h = e.height ?? 1;
+    for (let dy = 0; dy < h; dy++) {
+      for (let dx = 0; dx < w; dx++) blocked.add(`${e.x + dx},${e.y + dy}`);
+    }
+  }
+  return blocked;
+}
+
 // Bresenham line-of-sight — a wall cell (anything but floor, `1`) anywhere between viewer and
-// target blocks the target. The wall cell itself stays visible: you can see the wall you're
-// looking at, not through it.
+// target blocks the target, and so does any cell in `blocked` (see closedDoorCells) if passed.
+// The blocking cell itself stays visible either way: you can see the wall/door you're looking
+// at, not through it.
 export function hasLineOfSight(
   cells: number[][],
   x0: number,
   y0: number,
   x1: number,
   y1: number,
+  blocked?: Set<string>,
 ): boolean {
   const dx = Math.abs(x1 - x0),
     dy = Math.abs(y1 - y0);
@@ -201,7 +230,7 @@ export function hasLineOfSight(
       y += sy;
     }
     if (x === x1 && y === y1) break;
-    if (cells[y]?.[x] !== 1) return false;
+    if (cells[y]?.[x] !== 1 || blocked?.has(`${x},${y}`)) return false;
   }
   return true;
 }
@@ -246,12 +275,16 @@ export function crossesObscuredArea(
 // region before giving up, so it never reports "stuck" on a route that a longer detour would
 // clear — only a genuinely walled-off target returns null. Returns the steps from start to
 // target (excluding start), or null if the target is off-grid, on a wall, or unreachable.
+// `occupied` (same "gx,gy" string-set idiom as resolveForcedMovement) treats other combatants'
+// cells as temporarily impassable, so a mover routes around them instead of queueing behind
+// them — the target cell itself is never blocked by `occupied`.
 export function findPath(
   cells: number[][],
   startX: number,
   startY: number,
   targetX: number,
   targetY: number,
+  occupied?: Set<string>,
 ): { gx: number; gy: number }[] | null {
   const height = cells.length;
   const width = cells[0]?.length ?? 0;
@@ -276,6 +309,7 @@ export function findPath(
         if (cells[ny]?.[nx] !== 1) continue;
         const k = key(nx, ny);
         if (visited.has(k)) continue;
+        if (occupied?.has(k) && k !== targetKey) continue;
         visited.add(k);
         parent.set(k, key(x, y));
         queue.push({ x: nx, y: ny });

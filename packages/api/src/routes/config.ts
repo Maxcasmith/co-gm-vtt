@@ -2,17 +2,28 @@ import { Router } from 'express';
 import type { AppConfig, ModelTier } from 'shared';
 import { getConfig, saveConfig } from '../storage.ts';
 import { getImageProvider, buildAdapter, getTierApiKey } from '../providers/index.ts';
+import { requireAdmin } from './admin.ts';
 import { logError } from '../logger.ts';
 
 export const configRouter = Router();
 
+// GamePage reads this unauthenticated to pick up narration settings, so the endpoint itself must
+// stay open — but the password is write-only from here on, never echoed back to any caller.
 configRouter.get('/', async (_req, res) => {
   const config = await getConfig();
-  res.json(config);
+  res.json({ ...config, adminPassword: '' });
 });
 
+// Only the admin Settings UI issues PUTs, so gate the write side on the current admin password —
+// otherwise an unauthenticated PUT could hand over admin access by setting a new one.
 configRouter.put('/', async (req, res) => {
+  if (!await requireAdmin(req, res)) return;
   const incoming = req.body as AppConfig;
+  // Blank adminPassword field means "leave it as-is" (the current one is never sent back to the client to prefill).
+  if (!incoming.adminPassword?.trim()) {
+    const current = await getConfig();
+    incoming.adminPassword = current.adminPassword;
+  }
   await saveConfig(incoming);
   res.json({ ok: true });
 });

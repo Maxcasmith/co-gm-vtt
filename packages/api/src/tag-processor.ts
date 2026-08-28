@@ -260,24 +260,32 @@ export async function processVdmResponse(
   }
 
   const CURRENCY_DENOMS = new Set(['platinum', 'gold', 'electrum', 'silver', 'bronze']);
-  const CURRENCY_ADD_RE = /\[\[CURRENCY_ADD:([^:[\]]+):(\d+):([a-z]+)\]\]/g;
+  // A non-fantasy setting narrates "dollars" or "credits" even though the prompt tells the model
+  // to still tag with one of the five fixed denominations (see prompts.ts's Currency tags section)
+  // — that's an instruction, not a guarantee. Falling back to 'gold' (the general-purpose bucket)
+  // for anything unrecognized beats silently dropping the pickup the player was just told they got.
+  // Case-insensitive too: a capitalized "Dollars"/"Gold" used to fail the match entirely and leak
+  // the raw [[CURRENCY_ADD:...]] tag straight into the chat.
+  const CURRENCY_ADD_RE = /\[\[CURRENCY_ADD:([^:[\]]+):(\d+):([a-z]+)\]\]/gi;
   for (const match of [...text.matchAll(CURRENCY_ADD_RE)]) {
     const player = match[1]?.trim();
     const amount = parseInt(match[2] ?? '', 10);
-    const denom = match[3]?.trim().toLowerCase();
-    if (player && !isNaN(amount) && amount > 0 && denom && CURRENCY_DENOMS.has(denom)) {
-      console.log(`[tag] CURRENCY_ADD: ${player} +${amount} ${denom}`);
+    const rawDenom = match[3]?.trim().toLowerCase();
+    const denom = rawDenom && CURRENCY_DENOMS.has(rawDenom) ? rawDenom : 'gold';
+    if (player && !isNaN(amount) && amount > 0) {
+      console.log(`[tag] CURRENCY_ADD: ${player} +${amount} ${denom}${rawDenom !== denom ? ` (unrecognized denomination "${rawDenom}", defaulted)` : ''}`);
       effects.push({ type: 'currency_add', player, denom: denom as CurrencyDenomination, amount });
     }
   }
 
-  const CURRENCY_REMOVE_RE = /\[\[CURRENCY_REMOVE:([^:[\]]+):(\d+):([a-z]+)\]\]/g;
+  const CURRENCY_REMOVE_RE = /\[\[CURRENCY_REMOVE:([^:[\]]+):(\d+):([a-z]+)\]\]/gi;
   for (const match of [...text.matchAll(CURRENCY_REMOVE_RE)]) {
     const player = match[1]?.trim();
     const amount = parseInt(match[2] ?? '', 10);
-    const denom = match[3]?.trim().toLowerCase();
-    if (player && !isNaN(amount) && amount > 0 && denom && CURRENCY_DENOMS.has(denom)) {
-      console.log(`[tag] CURRENCY_REMOVE: ${player} -${amount} ${denom}`);
+    const rawDenom = match[3]?.trim().toLowerCase();
+    const denom = rawDenom && CURRENCY_DENOMS.has(rawDenom) ? rawDenom : 'gold';
+    if (player && !isNaN(amount) && amount > 0) {
+      console.log(`[tag] CURRENCY_REMOVE: ${player} -${amount} ${denom}${rawDenom !== denom ? ` (unrecognized denomination "${rawDenom}", defaulted)` : ''}`);
       effects.push({ type: 'currency_remove', player, denom: denom as CurrencyDenomination, amount });
     }
   }
@@ -351,6 +359,10 @@ export async function processVdmResponse(
     }),
   ]);
 
-  const strippedText = text.replace(TAG_RE, '').replace(PARTY_JOIN_RE, '').replace(SCENE_BUILD_RE, '').replace(NPC_BUILD_RE, '').replace(COMBAT_INIT_RE, '').replace(DUNGEON_EXIT_RE, '').replace(SPEAKING_AS_RE, '').replace(CHECK_RE, '').replace(SAVE_RE, '').replace(DUNGEON_GEN_RE, '').replace(QUEST_ADD_RE, '').replace(QUEST_UPDATE_RE, '').replace(QUEST_RESOLVE_RE, '').replace(CLOCK_RE, '').replace(NEMESIS_RETIRE_RE, '').replace(ALLY_XP_RE, '').replace(ALLY_LEARN_RE, '').replace(CURRENCY_ADD_RE, '').replace(CURRENCY_REMOVE_RE, '').replace(CAST_SPELL_RE, '').replace(/\s{2,}/g, ' ').trim();
+  let strippedText = text.replace(TAG_RE, '').replace(PARTY_JOIN_RE, '').replace(SCENE_BUILD_RE, '').replace(NPC_BUILD_RE, '').replace(COMBAT_INIT_RE, '').replace(DUNGEON_EXIT_RE, '').replace(SPEAKING_AS_RE, '').replace(CHECK_RE, '').replace(SAVE_RE, '').replace(DUNGEON_GEN_RE, '').replace(QUEST_ADD_RE, '').replace(QUEST_UPDATE_RE, '').replace(QUEST_RESOLVE_RE, '').replace(CLOCK_RE, '').replace(NEMESIS_RETIRE_RE, '').replace(ALLY_XP_RE, '').replace(ALLY_LEARN_RE, '').replace(CURRENCY_ADD_RE, '').replace(CURRENCY_REMOVE_RE, '').replace(CAST_SPELL_RE, '').replace(/\s{2,}/g, ' ').trim();
+  // A tag sitting at the end of a sentence (the common case — models emit it after the prose it
+  // corresponds to) gets eaten above along with the punctuation the model tucked inside it, e.g.
+  // "...picks up a med kit[[PICKED_UP_HEALING:...]]" leaves "...picks up a med kit" with no period.
+  if (strippedText && !/[.!?'"]$/.test(strippedText)) strippedText += '.';
   return { text: strippedText, effects, checkRequests, ...(speakingAs !== undefined ? { speakingAs } : {}) };
 }

@@ -56,6 +56,7 @@ export class OnHitBonusDamageHook extends Hook<'beforeDamage'> {
     if (!dice) return;
     const bonus = rollDice(dice);
     ctx.amount += bonus;
+    ctx.bonusSources = [...(ctx.bonusSources ?? []), { sourceName: this.source, amount: bonus, damageType: this.damageType }];
     console.log(`[hook] ${ctx.targetName} takes +${bonus} ${this.damageType ?? ''} bonus damage from ${this.source}`.replace('  ', ' '));
     if (this.consumeOnUse) engine.unregister(this.id);
   }

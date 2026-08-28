@@ -1,4 +1,4 @@
-import type { EnemyStatBlock } from 'shared';
+import type { Character, EnemyStatBlock } from 'shared';
 import { statMod, addCurrency, removeCurrency } from 'shared';
 import { randomUUID } from 'crypto';
 import { updateCharacter, listCharacters, readEntity, writeEntity, readManifest, writeManifest, emptyManifest, parseEntityLinks, clearDungeon, getConfig, readChatLog, saveDungeon, saveDungeonAscii, readQuests, writeQuests, loadPartyAllies, savePartyAllies, appendChatLog, readNemeses, writeNemeses } from './storage.ts';
@@ -17,6 +17,16 @@ import { D20Roll, toSlug, escalateCr } from './combat/dice.ts';
 import { rollPlayerInitiatives, addToTurnOrder, resolveQuest, sweepGameTimeExpiries, trySpendSpellSlot } from './combat/runtime.ts';
 import { generateAndBroadcastEnemies } from './dungeon/runtime.ts';
 import { findSpell } from './routes/spells.ts';
+
+// A player name in a tag comes from the model's narration, not a dropdown — it's never going to
+// reproduce a stored name's exact casing/whitespace byte-for-byte (a character sheet with a
+// trailing-space name is real data in this app, e.g. "Ken-doll Ride-man "). The ally-name lookups
+// below already compare case-insensitively; this brings player-character lookups up to the same
+// standard instead of silently dropping the item/currency/spell-slot spend on a whitespace mismatch.
+function findCharByName(chars: Character[], name: string): Character | undefined {
+  const norm = name.trim().toLowerCase();
+  return chars.find(c => c.name.trim().toLowerCase() === norm);
+}
 
 export async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
   await Promise.all(consolidateEffects(effects).map(async effect => {
@@ -41,14 +51,14 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
       void generateAndBroadcastEnemies(cid, effect.combatants);
     } else if (effect.type === 'inventory_add') {
       const chars = await listCharacters(cid);
-      const char = chars.find(c => c.name === effect.player);
+      const char = findCharByName(chars, effect.player);
       if (!char) { console.warn(`[inventory_add] no character named "${effect.player}" — item(s) dropped`); return; }
       await updateCharacter(cid, char.id, c => ({ ...c, inventory: [...(c.inventory ?? []), ...effect.items] }));
       const sid = playerSocketIds.get(char.id);
       if (sid) io.to(sid).emit('character:inventory:add', effect.items);
     } else if (effect.type === 'currency_add' || effect.type === 'currency_remove') {
       const chars = await listCharacters(cid);
-      const char = chars.find(c => c.name === effect.player);
+      const char = findCharByName(chars, effect.player);
       if (!char) { console.warn(`[${effect.type}] no character named "${effect.player}" — ${effect.amount} ${effect.denom} dropped`); return; }
       const next = effect.type === 'currency_add'
         ? addCurrency(char, effect.denom, effect.amount)
@@ -282,7 +292,7 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
  */
 export async function resolveSpellCast(cid: string, playerName: string, spellName: string): Promise<{ ok: boolean; charId?: string }> {
   const chars = await listCharacters(cid);
-  const char = chars.find(c => c.name === playerName);
+  const char = findCharByName(chars, playerName);
   if (!char) { console.warn(`[spell_cast] no character named "${playerName}"`); return { ok: false }; }
   const spell = findSpell(spellName);
   const slotLevel = spell?.level ?? 0; // unknown spell name — treat as free rather than blocking a real cast over a lookup miss

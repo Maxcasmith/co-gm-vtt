@@ -85,7 +85,7 @@ export function registerJoin(ctx: JoinContext): void {
       if (encounter.turnOrder.length) {
         socket.emit('combat:turn:order', encounter.turnOrder.map(p => p.toTurnOrderEntry()));
         const actor = encounter.currentActor;
-        if (actor) socket.emit('combat:turn', { actorName: actor.name });
+        if (actor) socket.emit('combat:turn', { actorId: actor.id, actorName: actor.name });
 
         // Re-sync any concentration badges a reconnecting client would otherwise have missed
         // (combat:concentration only fires at the moment it starts/breaks).

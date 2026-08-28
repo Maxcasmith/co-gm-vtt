@@ -18,7 +18,34 @@ export interface WorldMeta {
   concept?: { name: string; description: string };
   tags?: string[];
   adventureSlug?: string;
+  houseRules?: HouseRules;
+  gamePassword?: string;
+  /** Dungeon-crawl worlds only — the rich scenario synopsis generated before the dungeon itself,
+   * shown in full in the game lobby and fed into manifest generation as story context. */
+  scenarioSynopsis?: string;
 }
+
+/** Optional per-campaign rule toggles, off by default. */
+export interface HouseRules {
+  /** On a crit, add the die's max value instead of rolling a second time. */
+  perkinsCrit: boolean;
+  /** Disables Opportunity Attacks entirely. */
+  noAttacksOfOpportunity: boolean;
+  /** How HP is determined on level-up. */
+  levelUpHp: "roll" | "average" | "max" | "min";
+  /** How long (seconds) a reaction offer stays open before auto-declining. */
+  reactionTimeoutSecs: number;
+  /** Shows each reaction option's roll/AC detail panel by default, instead of just the prompt sentence. */
+  reactionShowDetailsByDefault: boolean;
+}
+
+export const DEFAULT_HOUSE_RULES: HouseRules = {
+  perkinsCrit: false,
+  noAttacksOfOpportunity: false,
+  levelUpHp: "roll",
+  reactionTimeoutSecs: 15,
+  reactionShowDetailsByDefault: false,
+};
 
 export interface Quest {
   id: string;

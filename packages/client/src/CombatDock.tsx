@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
-import type { Character, Weapon } from 'shared';
-import { actionCostFromCastingTime, isWeapon, hasOriginFeat, ABILITY_DEFS, resourceCurrent, resourceMax } from 'shared';
+import type { Character, Spell, Weapon } from 'shared';
+import { actionCostFromCastingTime, isWeapon, hasOriginFeat, ABILITY_DEFS, RESOURCE_DEFS, resourceCurrent, resourceMax } from 'shared';
 import { dispatch, on } from './events.ts';
 import type { TargetingStartPayload } from './events.ts';
 import emptyFrameIcon from './assets/icons/Icon-Frame-Blue.jpg';
 import fistIcon from './assets/icons/Icon-Frame-Fist.jpg';
+import healerKitIcon from './assets/icons/Icon-Frame-potion-of-healing.jpg';
 import './app.css';
+
+const API = `http://${window.location.hostname}:3001`;
 
 interface Props {
   character: Character;
@@ -84,8 +87,6 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   const [chosenItems, setChosenItems] = useState<Record<string, string>>({});
   // Selected HP amount for a "spend up to what's left" ability (Lay on Hands) — keyed by ability key.
   const [chosenAmounts, setChosenAmounts] = useState<Record<string, number>>({});
-  // Armed by the player before clicking a weapon — spent on that attack roll for Advantage.
-  const [luckArmed, setLuckArmed] = useState(false);
   const [inspirationArmed, setInspirationArmed] = useState(false);
   // Origin feat Alert's swap clause — once per combat; the server is the real gate (Participant.alertSwapUsed),
   // this is just an optimistic lockout so the picker doesn't stay offered after a request is sent.
@@ -93,6 +94,30 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   const [allyPicker, setAllyPicker] = useState(false);
   // Origin feat Healer — which ally (or self) to tend with a Healer's Kit charge.
   const [healerPicker, setHealerPicker] = useState(false);
+  // Favored Enemy has no ABILITY_DEFS entry — it's spent inside the normal spell-cast flow when
+  // casting Hunter's Mark (see combat.ts), so this button just fetches that one Spell and fires
+  // the same targeting:start SpellsTab uses, rather than a whole spell list on the combat HUD.
+  const [huntersMark, setHuntersMark] = useState<Spell | null>(null);
+  // Favored Enemy grants Hunter's Mark automatically — "prepared... doesn't count against your
+  // prepared spells" (srd.ts) — so it's never in character.spells; gate on the class feature only.
+  const favoredEnemyRanger = resourceMax(character, 'favoredEnemy') > 0;
+  // Whether THIS character is currently concentrating on their own Hunter's Mark — redirecting an
+  // active mark to a new target is a free recast (see combat.ts), so the button reads "More
+  // Favored Enemy" rather than implying it'll spend another of the limited uses below.
+  const [huntersMarkActive, setHuntersMarkActive] = useState(false);
+
+  useEffect(() => {
+    if (!favoredEnemyRanger) { setHuntersMark(null); return; }
+    fetch(`${API}/api/spells?class=Ranger`)
+      .then(r => r.json())
+      .then((all: Spell[]) => setHuntersMark(all.find(s => s.name === "Hunter's Mark") ?? null))
+      .catch(() => {});
+  }, [favoredEnemyRanger]);
+
+  useEffect(() => on('vtt:combat:concentration', ({ targetId, targetName, spellName }) => {
+    if (targetId !== character.id && targetName !== character.name) return;
+    setHuntersMarkActive(spellName === "Hunter's Mark");
+  }), [character.id, character.name]);
 
   // When combat ends, clear storage and reset
   useEffect(() => {
@@ -101,11 +126,11 @@ export default function CombatDock({ character, combatActive, movementRemaining,
       targetingRef.current = null;
       setTargeting(null);
       setIsMyTurn(false);
-      setLuckArmed(false);
       setInspirationArmed(false);
       setAlertSwapRequested(false);
       setAllyPicker(false);
       setHealerPicker(false);
+      setHuntersMarkActive(false);
     }
   }, [combatActive, character.id]);
 
@@ -126,7 +151,6 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     // Bundled smite (e.g. Divine Smite) spends its own bonus action on top of the attack's action.
     if (t?.kind === 'weapon' && t.bonusSpell) spendResource('bonusAction');
     setTargeting(null);
-    setLuckArmed(false);
     setInspirationArmed(false);
   }), [character.id]);
 
@@ -179,12 +203,6 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   const baseSpeed = character.speed ?? 30;
   const actionsDisabled = !isMyTurn || isDown;
 
-  const equippedWeapons = [character.equipment?.mainHand, character.equipment?.offHand]
-    .filter((id, i, arr): id is string => !!id && arr.indexOf(id) === i)
-    .map(id => character.inventory?.find(item => item.id === id))
-    .filter((item): item is Weapon => !!item && isWeapon(item));
-  equippedWeapons.push(unarmedStrikeFor(character));
-
   // Two-Weapon Fighting: both hands hold a weapon, neither two-handed — offers a bonus-action
   // attack with the off-hand weapon. The Two-Weapon Fighting style (added to damage) is checked
   // server-side; every dual-wielder gets the extra attack regardless of style, per RAW.
@@ -193,18 +211,36 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   const offhandWeapon = (mainHandItem && offHandItem && isWeapon(mainHandItem) && isWeapon(offHandItem)
     && !mainHandItem.twoHanded && !offHandItem.twoHanded) ? offHandItem : undefined;
 
+  // The off-hand weapon only ever gets its own bonus-action button (above) — never also listed
+  // as an action-attack option, or it'd render twice (once as an action button, once as bonus).
+  const equippedWeapons = [character.equipment?.mainHand, character.equipment?.offHand]
+    .filter((id, i, arr): id is string => !!id && arr.indexOf(id) === i && id !== offhandWeapon?.id)
+    .map(id => character.inventory?.find(item => item.id === id))
+    .filter((item): item is Weapon => !!item && isWeapon(item));
+  equippedWeapons.push(unarmedStrikeFor(character));
+
   const availableAbilities = Object.entries(ABILITY_DEFS).filter(([, a]) => a.class === character.class);
+  // Every RESOURCE_DEFS pool the character owns (Second Wind, Rage, Favored Enemy, ...) — not
+  // just the ones with an ABILITY_DEFS button, so silently-spent pools (Favored Enemy's free
+  // Hunter's Mark) get HUD representation too.
+  const ownedResources = Object.values(RESOURCE_DEFS).filter(def => resourceMax(character, def.key) > 0);
+  const huntersMarkCost = huntersMark ? (actionCostFromCastingTime(huntersMark.castingTime) ?? 'action') : undefined;
+  // Which resource pool the current targeting flow is about to spend — pulses that resource's
+  // pips the same way the actionType pip already pulses (see the PIPS.map data-active check).
+  const activeResourceKey = targeting?.kind === 'ability'
+    ? ABILITY_DEFS[targeting.abilityKey]?.resourceKey
+    : (targeting?.kind === 'spell' && huntersMark && targeting.spell.name === huntersMark.name ? 'favoredEnemy' : undefined);
 
   function handleWeaponClick(weapon: Weapon) {
     if (actionsDisabled || !resources.action) return;
     dispatch('vtt:sheet:closed', {});
-    dispatch('vtt:targeting:start', { kind: 'weapon', weapon, actionType: 'action', ...(luckArmed ? { useLuckPoint: true } : {}), ...(inspirationArmed ? { useInspiration: true } : {}) });
+    dispatch('vtt:targeting:start', { kind: 'weapon', weapon, actionType: 'action', ...(inspirationArmed ? { useInspiration: true } : {}) });
   }
 
   function handleOffhandClick(weapon: Weapon) {
     if (actionsDisabled || !resources.bonusAction) return;
     dispatch('vtt:sheet:closed', {});
-    dispatch('vtt:targeting:start', { kind: 'weapon', weapon, actionType: 'bonusAction', isOffhand: true, ...(luckArmed ? { useLuckPoint: true } : {}), ...(inspirationArmed ? { useInspiration: true } : {}) });
+    dispatch('vtt:targeting:start', { kind: 'weapon', weapon, actionType: 'bonusAction', isOffhand: true, ...(inspirationArmed ? { useInspiration: true } : {}) });
   }
 
   function handleAbilityClick(key: string, ability: (typeof ABILITY_DEFS)[string]) {
@@ -234,6 +270,13 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   function handleStandardAction(action: typeof STANDARD_ACTIONS[number]) {
     if (actionsDisabled || !resources.action) return;
     spendResource('action');
+    // Every standard action (Dash, Dodge, Disengage, Hide) costs the same action — the client
+    // spends its own pip above for instant feedback, but the server is the resource authority
+    // (see emitResources) and never heard about any of these. The next thing that queries it
+    // (e.g. a bonus-action offhand attack) would report the action as still available and stomp
+    // the local spend, making it look like the action "came back". One shared notification for
+    // all four instead of a one-off per action, since they all spend the same resource.
+    dispatch('vtt:combat:standardAction:used', { actorId: character.id });
     if (action.key === 'dash') {
       dispatch('vtt:movement:gained', { ft: baseSpeed });
     } else if ('effect' in action && action.effect) {
@@ -286,6 +329,16 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     setHealerPicker(false);
   }
 
+  // No resourceCurrent('favoredEnemy') <= 0 gate here — unlike an ABILITY_DEFS pool, running out
+  // of free Favored Enemy casts doesn't block Hunter's Mark, it just spends a spell slot instead
+  // (see combat.ts's fall-through to trySpendSpellSlot).
+  function handleCastHuntersMark() {
+    if (!huntersMark || !huntersMarkCost) return;
+    if (actionsDisabled || !resources[huntersMarkCost]) return;
+    dispatch('vtt:sheet:closed', {});
+    dispatch('vtt:targeting:start', { kind: 'spell', spell: huntersMark, casterId: character.id, actionType: huntersMarkCost, casterLevel: character.level });
+  }
+
   if (isDown) {
     return (
       <div className="combat-dock-wrapper">
@@ -301,7 +354,6 @@ export default function CombatDock({ character, combatActive, movementRemaining,
 
   const weaponsUsable = !actionsDisabled && resources.action;
 
-  const luckPoints = hasOriginFeat(character, 'Lucky') ? resourceCurrent(character, 'luckPoints') : 0;
   const alertAllies = connectedAllies.filter(name => name !== character.name && allyCharacterIds[name]);
   const canOfferAlertSwap = hasOriginFeat(character, 'Alert') && !alertSwapRequested && alertAllies.length > 0;
   const healersKit = character.inventory?.find(i => i.name === "Healer's Kit" && i.quantity > 0);
@@ -346,22 +398,14 @@ export default function CombatDock({ character, combatActive, movementRemaining,
           </div>
         ) : (
           <button
-            className="combat-dock-luck-toggle"
-            title="Expend a Healer's Kit use to tend a creature within 5ft"
+            data-action-cost="action"
+            className="combat-dock-weapon-btn"
+            title={`Healer's Kit (${healersKit?.quantity}) — expend a use to tend a creature within 5ft`}
             onClick={() => setHealerPicker(true)}
           >
-            Healer's Kit ({healersKit?.quantity})
+            <img className="combat-dock-weapon-icon" src={healerKitIcon} alt="Healer's Kit" />
           </button>
         )
-      )}
-      {luckPoints > 0 && (
-        <button
-          className={`combat-dock-luck-toggle${luckArmed ? ' combat-dock-luck-toggle--active' : ''}`}
-          title="Spend a Luck Point on your next attack roll for Advantage"
-          onClick={() => setLuckArmed(prev => !prev)}
-        >
-          Luck ({luckPoints}){luckArmed ? ' — armed' : ''}
-        </button>
       )}
       {character.heroicInspiration && (
         <button
@@ -372,7 +416,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
           Inspiration{inspirationArmed ? ' — armed' : ''}
         </button>
       )}
-      {(equippedWeapons.length > 0 || offhandWeapon || availableAbilities.length > 0) && (
+      {(equippedWeapons.length > 0 || offhandWeapon || availableAbilities.length > 0 || huntersMark) && (
         <div className="combat-dock-weapons">
           {equippedWeapons.map(weapon => (
             <button
@@ -428,6 +472,19 @@ export default function CombatDock({ character, combatActive, movementRemaining,
               <span className="combat-dock-ability-uses">{resourceCurrent(character, ability.resourceKey)}/{resourceMax(character, ability.resourceKey)}</span>
             </div>
           ))}
+          {huntersMark && (
+            <div className="combat-dock-ability-group">
+              <button
+                data-action-cost={huntersMarkCost}
+                className={`combat-dock-ability-btn${(actionsDisabled || !resources[huntersMarkCost!]) ? ' combat-dock-ability-btn--spent' : ''}${targeting?.kind === 'spell' && targeting.spell.name === huntersMark.name ? ' combat-dock-ability-btn--active' : ''}`}
+                title={huntersMarkActive ? 'More Favored Enemy' : "Hunter's Mark (Favored Enemy)"}
+                onClick={handleCastHuntersMark}
+              >
+                <img className="combat-dock-weapon-icon" src={emptyFrameIcon} alt="Hunter's Mark" />
+              </button>
+              <span className="combat-dock-ability-uses">{resourceCurrent(character, 'favoredEnemy')}/{resourceMax(character, 'favoredEnemy')}</span>
+            </div>
+          )}
         </div>
       )}
     <div className="combat-dock">
@@ -450,6 +507,32 @@ export default function CombatDock({ character, combatActive, movementRemaining,
           </span>
         )}
       </div>
+
+      {ownedResources.length > 0 && (
+        <div className="combat-dock-resource-pips">
+          {ownedResources.map(def => {
+            const max = resourceMax(character, def.key);
+            const current = resourceCurrent(character, def.key);
+            return (
+              <div
+                className="combat-resource-group"
+                data-pip-color={def.key}
+                data-active={def.key === activeResourceKey ? 'true' : undefined}
+                key={def.key}
+                title={def.label}
+              >
+                {Array.from({ length: max }, (_, n) => (
+                  <div
+                    key={n}
+                    data-pip-color={def.key}
+                    className={`combat-resource-pip${n >= current ? ' combat-resource-pip--spent' : ''}`}
+                  />
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className={`combat-dock-actions${actionsDisabled ? ' combat-dock-actions--disabled' : ''}`}>
         {STANDARD_ACTIONS.map(action => (

@@ -3,9 +3,11 @@ import type { Dungeon, EnemyStatBlock, Player, TurnOrderEntry } from 'shared';
 import { parseRangeFeet, spellTargetCount } from 'shared';
 import type { TargetingStartPayload } from '../events.ts';
 import { getTextureLoadVersion } from '../dungeonThemes.ts';
-import { CELL, TOKEN_R, DUNGEON_ENTITY_R, FLOAT_DUR, DUNGEON_BG, FOG_OF_WAR_COLOR } from './constants.ts';
+import { CELL, TOKEN_R, DUNGEON_ENTITY_R, FLOAT_DUR, DUNGEON_BG, FOG_OF_WAR_COLOR, DOOR_AWARENESS_RADIUS, DOOR_BUTTON_R } from './constants.ts';
 import { inArea, resolveAoeOrigin, drawAoeShape, nearestRingCell } from './aoe.ts';
 import { drawToken, drawHitFlash, drawTargetRing, drawDeadMarker, drawDeadSkull, drawTokenEffect, drawConcentrationBadge } from './drawToken.ts';
+import { drawTokenIconStack, markIconFor } from './tokenIcons.ts';
+import { drawDoorMarker } from './drawDoor.ts';
 import { drawHazardCell } from './drawHazard.ts';
 import { drawSwing } from './drawSwing.ts';
 import { computeLighting, applyGroundLighting, tokenLightFilter } from './lighting.ts';
@@ -96,6 +98,8 @@ export interface DrawSceneParams {
   deadPlayerNames?: Set<string>;
   downPlayerNames?: Set<string>;
   concentrating: Record<string, string>;
+  /** Keyed the same way as `concentrating` but by the MARKED creature, not the caster — a curse (Hunter's Mark, Hex) target-locked onto this token; see tokenIcons.ts. */
+  marks: Record<string, string>;
   deadCreatureIds?: Set<string>;
   companions: TurnOrderEntry[];
   visiblePolygon: { x: number; y: number }[] | null;
@@ -152,7 +156,7 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
   const __meta: Record<string, number | string> = {};
   const {
     showBattleMap, dungeon, encounter, hoveredTokenKey, tokenPositions, player, movementRemaining,
-    targeting, connected, deadPlayerNames, downPlayerNames, concentrating, deadCreatureIds,
+    targeting, connected, deadPlayerNames, downPlayerNames, concentrating, marks, deadCreatureIds,
     companions, visiblePolygon, litCells, lightSources, senses, elevations, visibleCells,
     hoverHitChance, multiTargetCursor, multiTargetsPicked,
     floorVariantRef, dungeonZoomRef, dungeonPanRef, dragRef, reachableRef, combatReachableRef, groundCacheRef, aoeMouseRef,
@@ -235,8 +239,10 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
         // Entity markers
         const entityR = DUNGEON_ENTITY_R * dungeonZoomRef.current;
         for (const entity of dungeon.entities) {
-          // Combat token (drawn below) replaces the marker for any creature in the active encounter
-          if (entity.type === 'creature' && encounter) continue;
+          // Combat token (drawn below) replaces the marker only for a creature actually in the
+          // active encounter — a creature that hasn't joined the fight yet (not yet aggro'd, e.g.
+          // a second monster in the same room) still needs its own marker or it renders as nothing.
+          if (entity.type === 'creature' && encounter?.some(e => e.id === entity.id)) continue;
           const ex = entity.x * cellSz + cellSz / 2 + panX;
           const ey = entity.y * cellSz + cellSz / 2 + panY;
           // Party-placed traps (Snare, ...) get their own pip + "X's Snare" hover nameplate,
@@ -254,6 +260,9 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
             drawToken(ctx, ex, ey, (entity.name[0] ?? '?').toUpperCase(), entity.name, 'rgba(192,57,43,0.8)', tokenR, hoveredTokenKey === entity.id, zoom, portraitImg);
             continue;
           }
+          // Doors are drawn later, in their own passive-awareness pass (see below) — a flat
+          // radius, not the wall-blocked fog polygon every other marker here uses.
+          if (entity.type === 'door') continue;
           // Decorative props (not Tenser's Floating Disk, which also uses type 'object' but always
           // sets followsId and has no sprite) — drawn at their authored footprint, anchored at their
           // top-left cell, same convention DungeonRoom uses. Falls back to the plain dot below while
@@ -448,6 +457,8 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
             tokenEffectsRef.current.filter(e => e.tokenKey === name).forEach(e => drawTokenEffect(ctx, x, y, tokenR, e));
             if (isDead) drawDeadMarker(ctx, x, y, tokenR);
             if (concentrating[name]) drawConcentrationBadge(ctx, x, y, tokenR);
+            const markIcon = marks[name] && markIconFor(marks[name]);
+            if (markIcon) drawTokenIconStack(ctx, x, y, tokenR, [markIcon]);
           });
         });
 
@@ -501,6 +512,8 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
             // Impact burst (enemies never carry an aura — only players arm self-buffs)
             tokenEffectsRef.current.filter(e => e.tokenKey === enemy.id).forEach(e => drawTokenEffect(ctx, x, y, tokenR, e));
             if (concentrating[enemy.id]) drawConcentrationBadge(ctx, x, y, tokenR);
+            const markIcon = marks[enemy.id] && markIconFor(marks[enemy.id]);
+            if (markIcon) drawTokenIconStack(ctx, x, y, tokenR, [markIcon]);
           });
         });
 
@@ -544,6 +557,24 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           ctx.restore();
         }
 
+        // Doors — passive-awareness radius around the player's own token (see DOOR_AWARENESS_RADIUS),
+        // not the strict wall-blocked fog polygon every other marker uses above. Drawn on top of
+        // fog so a door within range never gets swallowed by it regardless of the exact sight-ray geometry.
+        if (dungeon && playerPos) {
+          for (const entity of dungeon.entities) {
+            if (entity.type !== 'door') continue;
+            const w = entity.width ?? 1, h = entity.height ?? 1;
+            const dx = Math.max(entity.x - playerPos.gx, 0, playerPos.gx - (entity.x + w - 1));
+            const dy = Math.max(entity.y - playerPos.gy, 0, playerPos.gy - (entity.y + h - 1));
+            if (Math.max(dx, dy) > DOOR_AWARENESS_RADIUS) continue;
+            // True center of the footprint, not a cell-snapped position — a 1x2 doorway's center
+            // sits half a cell into its span, same math Canvas.tsx's click hit-test uses.
+            const cx = (entity.x + w / 2) * cellSz + panX;
+            const cy = (entity.y + h / 2) * cellSz + panY;
+            drawDoorMarker(ctx, cx, cy, DOOR_BUTTON_R * zoom, entity.doorState, hoveredTokenKey === entity.id);
+          }
+        }
+
         // AoE spell template shape — drawn on top of fog so it always renders in full
         if (spellArea && aoeOrigin) {
           drawAoeShape(ctx, spellArea, aoeOrigin.originGx, aoeOrigin.originGy, aoeOrigin.dirGx, aoeOrigin.dirGy, aoeOrigin.isSelf, cellSz, panX, panY);
@@ -584,6 +615,8 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
             tokenEffectsRef.current.filter(e => e.tokenKey === player).forEach(e => drawTokenEffect(ctx, x, y, tokenR, e));
             if (isDead) drawDeadMarker(ctx, x, y, tokenR);
             if (concentrating[player]) drawConcentrationBadge(ctx, x, y, tokenR);
+            const markIcon = marks[player] && markIconFor(marks[player]);
+            if (markIcon) drawTokenIconStack(ctx, x, y, tokenR, [markIcon]);
           });
         }
 

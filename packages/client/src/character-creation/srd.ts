@@ -1,3 +1,4 @@
+import type { AbilityKey } from 'shared';
 import { CLASS_SAVING_THROWS as CLASS_SAVING_THROWS_SHARED } from 'shared';
 import swordIcon from '../assets/icons/Icon-Sword-Common.jpg';
 import shieldIcon from '../assets/icons/Icon-Frame-shield.jpg';
@@ -11,7 +12,7 @@ import chainMailIcon from '../assets/icons/Icon-Frame-Chain-Mail.jpg';
 
 export const SPECIES = [
   'Aasimar', 'Dragonborn', 'Dwarf', 'Elf', 'Gnome', 'Goliath',
-  'Half-Elf', 'Half-Orc', 'Halfling', 'Human', 'Orc', 'Tiefling',
+  'Halfling', 'Human', 'Orc', 'Tiefling',
 ];
 
 export const BACKGROUNDS = [
@@ -108,17 +109,6 @@ export const SPECIES_FEATURES: Record<string, SpeciesFeature[]> = {
     { name: "Powerful Build", description: "You count as one size larger when determining your carrying capacity and the weight you can push, drag, or lift." },
     { name: "Stone's Endurance", description: "When you take damage, you can use your Reaction to roll a d12. Add your Constitution modifier to the number rolled and reduce the damage by that total. Once used, you must finish a Short or Long Rest." },
   ],
-  "Half-Elf": [
-    { name: "Darkvision", description: "You can see in dim light within 60 feet as if it were bright light." },
-    { name: "Fey Ancestry", description: "You have Advantage on saving throws against the Charmed condition." },
-    { name: "Skill Versatility", description: "You gain proficiency in two skills of your choice." },
-  ],
-  "Half-Orc": [
-    { name: "Darkvision", description: "You can see in dim light within 60 feet as if it were bright light." },
-    { name: "Menacing", description: "You gain proficiency in the Intimidation skill." },
-    { name: "Relentless Endurance", description: "When you are reduced to 0 Hit Points but not killed outright, you can drop to 1 Hit Point instead. Once you use this trait you can't do so again until you finish a Long Rest." },
-    { name: "Savage Attacks", description: "When you score a critical hit with a melee weapon attack, you can roll one of the weapon's damage dice one additional time and add it to the extra damage of the critical hit." },
-  ],
   Halfling: [
     { name: "Brave", description: "You have Advantage on saving throws you make to avoid or end the Frightened condition." },
     { name: "Halfling Nimbleness", description: "You can move through the space of any creature that is of a size larger than yours." },
@@ -181,6 +171,30 @@ export const HIT_DICE: Record<string, number> = {
   Fighter: 10,   Monk: 8,       Paladin: 10,   Ranger: 10, Rogue: 8,
   Sorcerer: 6,   Warlock: 8,    Wizard: 6,
 };
+
+/** 2024 PHB multiclass prerequisites — the ability score(s) needed in a class you don't already have levels in before you can take your first level in it. 'all' = every listed stat needs 13+, 'any' = just one of them (Fighter's Str-or-Dex). No prereq is checked against classes you already have levels in — only the new one. */
+export const MULTICLASS_PREREQS: Record<string, { stats: AbilityKey[]; mode: 'all' | 'any' }> = {
+  Artificer: { stats: ['int'], mode: 'all' },
+  Barbarian: { stats: ['str'], mode: 'all' },
+  Bard:      { stats: ['cha'], mode: 'all' },
+  Cleric:    { stats: ['wis'], mode: 'all' },
+  Druid:     { stats: ['wis'], mode: 'all' },
+  Fighter:   { stats: ['str', 'dex'], mode: 'any' },
+  Monk:      { stats: ['dex', 'wis'], mode: 'all' },
+  Paladin:   { stats: ['str', 'cha'], mode: 'all' },
+  Ranger:    { stats: ['dex', 'wis'], mode: 'all' },
+  Rogue:     { stats: ['dex'], mode: 'all' },
+  Sorcerer:  { stats: ['cha'], mode: 'all' },
+  Warlock:   { stats: ['cha'], mode: 'all' },
+  Wizard:    { stats: ['int'], mode: 'all' },
+};
+
+export function meetsMulticlassPrereq(className: string, stats: Record<AbilityKey, number>): boolean {
+  const req = MULTICLASS_PREREQS[className];
+  if (!req) return true;
+  const scores = req.stats.map(s => stats[s]);
+  return req.mode === 'any' ? scores.some(v => v >= 13) : scores.every(v => v >= 13);
+}
 
 export interface ClassFeature { name: string; description: string }
 

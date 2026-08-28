@@ -33,8 +33,9 @@ if (result.filter(q => q.name === 'Rescue the Cartographer').length !== 1) {
 }
 if (result.some(q => q.id === 'rescue-the-cartographer-')) throw new Error('goal text should never be re-slugified into a second quest id');
 
-// Boss-defeat and escape-dungeon entries are still generated in code.
-if (!result.some(q => q.id === 'boss-boss-1' && q.name === 'Defeat The Rot King')) throw new Error(`missing boss quest: ${JSON.stringify(result)}`);
+// Boss-defeat and escape-dungeon entries are still generated in code. The boss quest must stay
+// generic — the boss is undiscovered at this point, naming it here would leak its identity.
+if (!result.some(q => q.id === 'boss-boss-1' && q.name === 'Defeat the boss')) throw new Error(`missing boss quest: ${JSON.stringify(result)}`);
 if (!result.some(q => q.id === 'exit-dungeon')) throw new Error(`missing escape-dungeon quest: ${JSON.stringify(result)}`);
 
 // Total count: the 1 pre-existing quest + boss + exit = 3, not 4 (no goal-derived duplicate).

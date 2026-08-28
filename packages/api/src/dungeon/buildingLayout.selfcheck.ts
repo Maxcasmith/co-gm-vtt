@@ -48,7 +48,25 @@ const manifest = schoolManifest();
 const expectedNames = new Set(manifest.rooms.map(r => r.name)); // every room, including the dangling-ref one, must be placed via fallback
 
 for (let i = 0; i < ITERATIONS; i++) {
-  const { cells, rooms } = generateBuildingLayout(manifest, { width: 50, height: 50 });
+  const { cells, rooms, doors } = generateBuildingLayout(manifest, { width: 50, height: 50 });
+
+  // Every door rect must sit on carved floor, in bounds, and no two doors may share a cell —
+  // a dedup failure (the undirected graph edge counted from both sides) would double up exactly
+  // one of these.
+  const doorCells = new Set<string>();
+  for (const door of doors ?? []) {
+    for (let dy = 0; dy < door.height; dy++) {
+      for (let dx = 0; dx < door.width; dx++) {
+        const x = door.x + dx, y = door.y + dy;
+        if (x < 0 || y < 0 || x >= 50 || y >= 50 || cells[y]?.[x] !== 1) {
+          throw new Error(`iteration ${i}: door at (${x},${y}) isn't carved floor`);
+        }
+        const key = `${x},${y}`;
+        if (doorCells.has(key)) throw new Error(`iteration ${i}: two doors both claim (${x},${y})`);
+        doorCells.add(key);
+      }
+    }
+  }
 
   const gotNames = new Set(rooms.map(r => r.name));
   for (const name of expectedNames) {

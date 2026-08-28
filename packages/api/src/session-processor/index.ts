@@ -9,7 +9,7 @@ import {
 import { getConfig } from '../storage.ts';
 import { getFeatureProvider, type ChatMessage } from '../providers/index.ts';
 import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDungeonNarrationPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, buildDungeonQuestPrompt, type EntityType } from './prompts.ts';
-import type { AppConfig, ChatPayload, Dungeon, Quest } from 'shared';
+import type { AppConfig, ChatPayload, Character, CurrencyDenomination, Dungeon, Quest } from 'shared';
 import { logError } from '../logger.ts';
 
 const ENTITY_TYPES: EntityType[] = ['npc', 'faction', 'location', 'character', 'nemesis'];
@@ -63,17 +63,36 @@ function parseCascadeYaml(raw: string): TriageEntity[] {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-async function getCharacterNames(campaignSlug: string): Promise<string[]> {
+async function getPartyCharacters(campaignSlug: string): Promise<Character[]> {
   const partyPath = path.join(CAMPAIGNS_DIR, campaignSlug, 'party');
   if (!existsSync(partyPath)) return [];
   const entries = await readdir(partyPath, { withFileTypes: true });
-  const names = await Promise.all(
-    entries.filter(e => e.isDirectory()).map(async e => {
-      const char = await getCharacter(campaignSlug, e.name);
-      return char?.name ?? null;
-    }),
+  const chars = await Promise.all(
+    entries.filter(e => e.isDirectory()).map(e => getCharacter(campaignSlug, e.name)),
   );
-  return names.filter((n): n is string => n !== null);
+  return chars.filter((c): c is Character => c !== null);
+}
+
+async function getCharacterNames(campaignSlug: string): Promise<string[]> {
+  return (await getPartyCharacters(campaignSlug)).map(c => c.name);
+}
+
+const CURRENCY_DENOMS: CurrencyDenomination[] = ['platinum', 'gold', 'electrum', 'silver', 'bronze'];
+
+// So MANAGER MODE ("what's in my inventory") answers from what the character actually has,
+// not whatever the model improvises — the prompt used to receive only bare names.
+function formatCharacterSummary(char: Character): string {
+  const items = (char.inventory ?? []).map(i => i.quantity && i.quantity > 1 ? `${i.name} (x${i.quantity})` : i.name);
+  const coins = CURRENCY_DENOMS
+    .map(d => [d, char[d] ?? 0] as const)
+    .filter(([, amount]) => amount > 0)
+    .map(([d, amount]) => `${amount} ${d}`);
+  return `- ${char.name}: inventory — ${items.length ? items.join(', ') : 'nothing'}; currency — ${coins.length ? coins.join(', ') : 'none'}`;
+}
+
+async function getCharacterSummaries(campaignSlug: string): Promise<string> {
+  const chars = await getPartyCharacters(campaignSlug);
+  return chars.length ? chars.map(formatCharacterSummary).join('\n') : '(no party members yet)';
 }
 
 function excerpts(log: ChatPayload[], entitySlug: string): string {
@@ -357,8 +376,7 @@ export async function getDMResponse(campaignSlug: string): Promise<string> {
   ]);
 
   const entitySummaries = await buildEntitySummaries(campaignSlug);
-  const characters = await getCharacterNames(campaignSlug);
-  const characterSummaries = characters.map(n => `- ${n}`).join('\n');
+  const characterSummaries = await getCharacterSummaries(campaignSlug);
 
   const messages = buildChatMessages(log);
   if (messages.length === 0) return '';
@@ -385,11 +403,12 @@ export async function getDungeonNarrationResponse(
   groundTruth: string,
   combatActive: boolean,
 ): Promise<string> {
-  const [config, quests, log, characterNames] = await Promise.all([
+  const [config, quests, log, characterNames, characterSummaries] = await Promise.all([
     getConfig(),
     readQuests(campaignSlug),
     readChatLog(campaignSlug),
     getCharacterNames(campaignSlug),
+    getCharacterSummaries(campaignSlug),
   ]);
 
   const messages = buildChatMessages(log);
@@ -401,6 +420,7 @@ export async function getDungeonNarrationResponse(
     goals: dungeon.goals ?? [],
     dungeonQuests,
     characterNames,
+    characterSummaries,
     groundTruth,
     combatActive,
   });

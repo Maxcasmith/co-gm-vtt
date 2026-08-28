@@ -9,8 +9,11 @@ import { tilesetsRouter } from './routes/tilesets.ts';
 import { creaturesRouter } from './routes/creatures.ts';
 import { propsRouter } from './routes/props.ts';
 import { debugPerfRouter } from './routes/debugPerf.ts';
+import { licensesRouter } from './routes/licenses.ts';
+import { initLicensesTable } from './licenses/db.ts';
 import { app, httpServer } from './state.ts';
 import { registerSocketHandlers } from './socketHandlers/index.ts';
+import { logError } from './logger.ts';
 
 app.use('/api/config', configRouter);
 app.use('/api/campaigns', campaignsRouter);
@@ -23,10 +26,13 @@ app.use('/api/tilesets', tilesetsRouter);
 app.use('/api/creatures', creaturesRouter);
 app.use('/api/props', propsRouter);
 app.use('/api/debug/perf-log', debugPerfRouter);
+app.use('/api/licenses', licensesRouter);
 
 registerSocketHandlers();
 
 const PORT = 3001;
+// The app-wide unlock gate runs off the licenses.json file check, not this table — don't block boot on MySQL.
+initLicensesTable().catch(err => logError('index:initLicensesTable', err));
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`api listening on :${PORT}`);
 });

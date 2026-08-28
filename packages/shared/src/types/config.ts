@@ -11,7 +11,7 @@ export interface ModelTier {
 }
 
 export type AiFeature =
-  | "campaignConcepts" | "dungeonPremise" | "backstoryGeneration" | "backstoryCheck" | "worldLoreSync" | "storyboardCaptions"
+  | "campaignConcepts" | "dungeonPremise" | "dungeonScenarioSynopsis" | "backstoryGeneration" | "backstoryCheck" | "worldLoreSync" | "storyboardCaptions"
   | "nemesisGeneration" | "dmBrief" | "questGeneration" | "dmChatResponse" | "sessionTriage" | "sessionRecap" | "tagEffectProcessing"
   | "worldGeneration" | "dungeonGeneration" | "worldStateAdvance"
   | "combatNarration" | "encounterGeneration" | "improvisedResolution"
@@ -51,4 +51,5 @@ export interface AppConfig {
   apiKeys: ApiKeys;
   image: ImageConfig;
   narration: NarrationConfig;
+  adminPassword: string;
 }
