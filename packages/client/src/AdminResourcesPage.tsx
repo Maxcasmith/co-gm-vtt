@@ -1,20 +1,56 @@
 import { useEffect, useState } from 'react';
 import type { StoryboardTestRecord, StoryboardQueuePayload } from 'shared';
+import { ABILITY_DEFS } from 'shared';
 import GenerateTilesetModal from './GenerateTilesetModal.tsx';
 import GeneratePropsSidebar from './GeneratePropsSidebar.tsx';
 import PreviewCellsModal from './PreviewCellsModal.tsx';
 import BestiaryTab from './BestiaryTab.tsx';
 import StoryboardTestModal from './StoryboardTestModal.tsx';
 import StoryboardOverlay from './StoryboardOverlay.tsx';
+import { iconSrcFor } from './ItemIcon.tsx';
+import emptyFrameIcon from './assets/icons/Icon-Frame-Blue.jpg';
+import { SHOP_ITEMS } from './character-creation/srd.ts';
+import CreateIconsModal, { type IconCandidate } from './CreateIconsModal.tsx';
+import ItemDetailSidebar, { type DetailSubject } from './ItemDetailSidebar.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
 
 type TilesetManifest = Record<string, Record<string, string[]>>;
 type PropsManifest = { props: Record<string, string>; sources: string[] };
-type ResourceTab = 'tiles' | 'props' | 'bestiary' | 'storyboard';
+type IconsManifest = { icons: Record<string, string>; sources: string[] };
+type ResourceTab = 'tiles' | 'props' | 'icons' | 'items' | 'bestiary' | 'storyboard';
+
+const ICON_MODULES = import.meta.glob('./assets/icons/*', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
+const ICONS = Object.entries(ICON_MODULES)
+  .map(([path, url]) => ({ name: path.split('/').pop() ?? path, url }))
+  .sort((a, b) => a.name.localeCompare(b.name));
 
 function titleCase(s: string): string {
   return s.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// Same resolution ItemIcon uses everywhere else, plus the red "still needs an icon" audit
+// highlight this admin view wants — tracked locally since ItemIcon itself is stateless. A freshly
+// generated icon just starts resolving on the next mount (see `key={refreshKey}` at the call sites).
+function IconCell({ name, iconPath, onClick }: { name: string; iconPath?: string; onClick: () => void }) {
+  const [broken, setBroken] = useState(false);
+  return (
+    <div
+      className={`item-cell${(iconPath || !broken) ? '' : ' item-cell--no-icon'}`}
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') onClick(); }}
+    >
+      <img
+        src={iconSrcFor(name, iconPath)}
+        alt=""
+        className="item-cell-icon"
+        onError={e => { setBroken(true); e.currentTarget.onerror = null; e.currentTarget.src = emptyFrameIcon; }}
+      />
+      <span className="item-cell-name" title={name}>{name}</span>
+    </div>
+  );
 }
 
 interface AdminResourcesPageProps {
@@ -37,6 +73,10 @@ export default function AdminResourcesPage({ password, onBack }: AdminResourcesP
   const [storyboardPlaying, setStoryboardPlaying] = useState(false);
   const [storyboardEraseConfirm, setStoryboardEraseConfirm] = useState(false);
   const [storyboardErasing, setStoryboardErasing] = useState(false);
+  const [createIconsOpen, setCreateIconsOpen] = useState(false);
+  const [iconsRefreshKey, setIconsRefreshKey] = useState(0);
+  const [detailSubject, setDetailSubject] = useState<DetailSubject | null>(null);
+  const [iconsManifest, setIconsManifest] = useState<IconsManifest>({ icons: {}, sources: [] });
 
   function fetchStoryboardRecord() {
     fetch(`${API}/api/admin/storyboard-test`, { headers: { 'x-admin-password': password } })
@@ -59,9 +99,18 @@ export default function AdminResourcesPage({ password, onBack }: AdminResourcesP
       .catch(() => {});
   }
 
+  function fetchIconsManifest() {
+    fetch(`${API}/api/icons/manifest`)
+      .then(r => r.json())
+      .then((data: IconsManifest) => setIconsManifest(data))
+      .catch(() => {});
+  }
+
   useEffect(() => { fetchManifest(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { fetchPropsManifest(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { fetchStoryboardRecord(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Refetch whenever Create Icons / the detail sidebar's generate-or-remove bumps the refresh key.
+  useEffect(() => { fetchIconsManifest(); }, [iconsRefreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggle(theme: string) {
     setExpanded(prev => {
@@ -106,6 +155,11 @@ export default function AdminResourcesPage({ password, onBack }: AdminResourcesP
 
   const themes = Object.entries(manifest);
 
+  const iconCandidates: IconCandidate[] = [
+    ...SHOP_ITEMS.filter(item => !item.iconPath).map(item => ({ name: item.name, description: item.description })),
+    ...Object.values(ABILITY_DEFS).map(ability => ({ name: ability.label, description: `${ability.label}, a ${ability.class} class combat ability icon.` })),
+  ];
+
   return (
     <>
       <div className="admin-panel">
@@ -125,11 +179,13 @@ export default function AdminResourcesPage({ password, onBack }: AdminResourcesP
         <div className="sheet-tabs admin-resource-tabs">
           <button className={`sheet-tab${tab === 'tiles' ? ' sheet-tab--active' : ''}`} onClick={() => setTab('tiles')}>Tiles</button>
           <button className={`sheet-tab${tab === 'props' ? ' sheet-tab--active' : ''}`} onClick={() => setTab('props')}>Props</button>
+          <button className={`sheet-tab${tab === 'icons' ? ' sheet-tab--active' : ''}`} onClick={() => setTab('icons')}>Icons</button>
+          <button className={`sheet-tab${tab === 'items' ? ' sheet-tab--active' : ''}`} onClick={() => setTab('items')}>Items</button>
           <button className={`sheet-tab${tab === 'bestiary' ? ' sheet-tab--active' : ''}`} onClick={() => setTab('bestiary')}>Bestiary</button>
           <button className={`sheet-tab${tab === 'storyboard' ? ' sheet-tab--active' : ''}`} onClick={() => setTab('storyboard')}>Storyboard</button>
         </div>
 
-        {tab === 'bestiary' && <BestiaryTab />}
+        {tab === 'bestiary' && <BestiaryTab password={password} />}
 
         {tab === 'storyboard' && <>
         <div className="admin-modules-header">
@@ -212,6 +268,82 @@ export default function AdminResourcesPage({ password, onBack }: AdminResourcesP
         </div>
         </>}
 
+        {tab === 'icons' && <>
+        <div className="admin-modules-header">
+          <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">🖼️</span>Default Frame</h2>
+        </div>
+        <p className="modal-hint">The bundled base frame every generated icon reuses — everything else here is generative (see Items tab).</p>
+
+        <div className="tile-grid">
+          {ICONS.map(icon => (
+            <div key={icon.name} className="tile-card">
+              <img src={icon.url} alt={icon.name} title={icon.name} className="tile-img" />
+              <span className="tile-label">{icon.name}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="admin-modules-header">
+          <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">✨</span>Generated Icons</h2>
+        </div>
+
+        {iconsManifest.sources.length > 0 && (
+          <div className="tile-grid">
+            {iconsManifest.sources.map(url => (
+              <div key={url} className="tile-source">
+                <img src={`${API}${url}`} alt="Icon source atlas" className="tile-source-img" />
+                <span className="tile-label">Source Atlas (unmodified AI output)</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {Object.keys(iconsManifest.icons).length === 0 && (
+          <div className="admin-table-card"><p className="admin-empty">No icons generated yet — use the Items tab's Create Icons button.</p></div>
+        )}
+
+        <div className="tile-grid">
+          {Object.entries(iconsManifest.icons).map(([slug, url]) => (
+            <div key={slug} className="tile-card">
+              <img src={`${API}${url}`} alt={titleCase(slug)} title={titleCase(slug)} className="tile-img" />
+              <span className="tile-label">{titleCase(slug)}</span>
+            </div>
+          ))}
+        </div>
+        </>}
+
+        {tab === 'items' && <>
+        <div className="admin-modules-header">
+          <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">🎒</span>Items</h2>
+          <button className="btn-primary" onClick={() => setCreateIconsOpen(true)}>Create Icons</button>
+        </div>
+
+        <div className="item-grid" key={`items-${iconsRefreshKey}`}>
+          {SHOP_ITEMS.map(item => (
+            <IconCell
+              key={item.id}
+              name={item.name}
+              iconPath={item.iconPath}
+              onClick={() => setDetailSubject({ name: item.name, description: item.description, iconPath: item.iconPath, raw: item as unknown as Record<string, unknown> })}
+            />
+          ))}
+        </div>
+
+        <div className="admin-modules-header">
+          <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">✨</span>Combat Abilities</h2>
+        </div>
+
+        <div className="item-grid" key={`abilities-${iconsRefreshKey}`}>
+          {Object.values(ABILITY_DEFS).map(ability => (
+            <IconCell
+              key={ability.key}
+              name={ability.label}
+              onClick={() => setDetailSubject({ name: ability.label, description: `${ability.label}, a ${ability.class} class combat ability icon.`, raw: ability as unknown as Record<string, unknown> })}
+            />
+          ))}
+        </div>
+        </>}
+
         {tab === 'tiles' && <>
         <div className="admin-modules-header">
           <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">🧱</span>Dungeon Tilesets</h2>
@@ -288,6 +420,21 @@ export default function AdminResourcesPage({ password, onBack }: AdminResourcesP
         password={password}
         onClose={() => setGenerateOpen(false)}
         onGenerated={fetchManifest}
+      />
+
+      <CreateIconsModal
+        open={createIconsOpen}
+        password={password}
+        candidates={iconCandidates}
+        onClose={() => setCreateIconsOpen(false)}
+        onGenerated={() => setIconsRefreshKey(k => k + 1)}
+      />
+
+      <ItemDetailSidebar
+        subject={detailSubject}
+        password={password}
+        onClose={() => setDetailSubject(null)}
+        onIconChanged={() => setIconsRefreshKey(k => k + 1)}
       />
 
       <GeneratePropsSidebar

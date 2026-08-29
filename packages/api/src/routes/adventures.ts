@@ -1,5 +1,9 @@
 import { Router } from 'express';
-import { listSavedAdventures, deleteSavedAdventure } from '../adventures/storage.ts';
+import { readFile } from 'fs/promises';
+import path from 'path';
+import type { Dungeon } from 'shared';
+import { listSavedAdventures, deleteSavedAdventure, SAVED_ADVENTURES_DIR } from '../adventures/storage.ts';
+import { deleteUnusedResources, type ResourceCleanupRequest } from '../resourceUsage.ts';
 import { logError } from '../logger.ts';
 
 export const adventuresRouter = Router();
@@ -14,9 +18,21 @@ adventuresRouter.get('/', async (_req, res) => {
 });
 
 adventuresRouter.delete('/:slug', async (req, res) => {
+  const slug = req.params.slug;
   try {
-    await deleteSavedAdventure(req.params.slug);
-    res.json({ ok: true });
+    const { resources } = req.body as { resources?: ResourceCleanupRequest };
+    let messages: string[] = [];
+    if (resources && (resources.tiles || resources.creatures || resources.props)) {
+      try {
+        const raw = await readFile(path.join(SAVED_ADVENTURES_DIR, slug, 'dungeon.json'), 'utf-8');
+        const dungeon = JSON.parse(raw) as Dungeon;
+        messages = await deleteUnusedResources(dungeon, resources, { excludeId: slug, excludeKind: 'saved-adventure' });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') logError('routes/adventures:delete:resources', err);
+      }
+    }
+    await deleteSavedAdventure(slug);
+    res.json({ ok: true, messages });
   } catch (err) {
     logError('routes/adventures:delete', err);
     res.status(500).json({ error: (err as Error).message });

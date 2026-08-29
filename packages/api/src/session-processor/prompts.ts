@@ -428,7 +428,7 @@ export function buildDMSystemPrompt(
 }
 
 // Dedicated dungeon narrator — deliberately does NOT call buildNarrationPrompt. This is a closed
-// world: it may only resolve/report facts actually seeded into this dungeon (goals, its own
+// world: it may only resolve/report facts actually seeded into this dungeon (its own
 // quests, the floor plan, anything discovered through play) or established live by the game
 // system (rolls, discoveries). It never originates new lore, NPCs, factions, or plot on its own
 // initiative — that's the opposite of buildNarrationPrompt's "if you don't know, improvise
@@ -437,16 +437,14 @@ export function buildDMSystemPrompt(
 // entirely; this prompt only fires for what templating can't cover.
 export function buildDungeonNarrationPrompt(opts: {
   dungeonName: string;
-  goals: string[];
-  dungeonQuests: Quest[]; // pre-filtered to this dungeon (sourceDungeonId match) — never the full campaign quest list
+  dungeonQuests: Quest[]; // pre-filtered to this dungeon (sourceDungeonId match) — never the full campaign quest list. Only the party's currently-active quest chain stage(s) — never future stages — reach this prompt.
   characterNames: string[];
   characterSummaries: string; // per-character inventory/currency — grounds MANAGER MODE inventory questions so the model reports what's actually owned instead of improvising
   groundTruth: string;
   combatActive: boolean;
 }): string {
-  const { dungeonName, goals, dungeonQuests, characterNames, characterSummaries, groundTruth, combatActive } = opts;
+  const { dungeonName, dungeonQuests, characterNames, characterSummaries, groundTruth, combatActive } = opts;
 
-  const goalsBlock = goals.length ? goals.map(g => `- ${g}`).join('\n') : '(none seeded for this dungeon)';
   const questsBlock = dungeonQuests.length
     ? dungeonQuests.map(q => `- ${q.id} [${q.status}]: ${q.name} — ${q.description}`).join('\n')
     : '(none)';
@@ -454,11 +452,9 @@ export function buildDungeonNarrationPrompt(opts: {
   return `You are the Virtual Dungeon Master narrating a generated dungeon crawl in ${dungeonName}.
 
 ## Closed world — the single hardest rule in this prompt
-You may only resolve and report facts actually seeded into this dungeon: the floor plan below, its goals, its own quests, and whatever's been discovered through play. You may NEVER originate new lore, backstory, NPCs, factions, or plot developments on your own initiative — not even as minor flavor. A physical reaction to something already present is fine ("the table splinters when struck"). Inventing a new fact ABOUT the world ("...and the splinters reveal an old smuggler's mark") is NOT fine unless that exact thread is already covered by the goals/quests below — an unresolvable hint left dangling here misleads the players; it is never harmless atmosphere. If you don't know something and nothing below covers it, say so plainly — never improvise a consistent-sounding answer the way an open-world DM would.
+You may only resolve and report facts actually seeded into this dungeon: the floor plan below, its own quests, and whatever's been discovered through play. You may NEVER originate new lore, backstory, NPCs, factions, or plot developments on your own initiative — not even as minor flavor. A physical reaction to something already present is fine ("the table splinters when struck"). Inventing a new fact ABOUT the world ("...and the splinters reveal an old smuggler's mark") is NOT fine unless that exact thread is already covered by the quests below — an unresolvable hint left dangling here misleads the players; it is never harmless atmosphere. If you don't know something and nothing below covers it, say so plainly — never improvise a consistent-sounding answer the way an open-world DM would.
 
 ## This dungeon's seeded context — the ONLY narrative knowledge you have (no outside campaign lore reaches this prompt)
-### Goals
-${goalsBlock}
 ### This dungeon's quests
 ${questsBlock}
 
@@ -467,9 +463,10 @@ Meta question, not in-fiction ("what's in my inventory", "recap what happened", 
 
 ## Ability checks
 A player attempts something with a real chance of failure — searching, forcing something open, sneaking, persuading, recalling lore, a physical feat, anything against a hidden DC — MUST end in one of exactly three outcomes, never a response that trails off with no result: essential information they need to proceed stated outright (no roll), the described action clearly specific enough to auto-succeed narrated as a success, or a [[REQUEST_CHECK:PlayerName|SkillName]] / [[REQUEST_SAVE:PlayerName|StatName]] tag with the narrative setup only (no result yet — wait for the roll). "I search the desk" is never answered with a half-finished description and nothing else — resolve it one of these three ways every time.
+Searching for an undiscovered dungeon entity (loot, a trap, a key, anything with a hideDC in the floor plan below) is NEVER the "essential information, skip the roll" outcome — that outcome is for pure knowledge ("which way is out?"), not for finding a physical thing that lives in the floor plan. Always request the check ([[REQUEST_CHECK:PlayerName|Perception]] or Investigation) instead, every time, with no judgment call about whether this particular search "matters enough" to skip it. You don't need to protect the player from a bad roll here — an essential item's hideDC is already set low enough (often unbeatable-low) that a real roll finds it anyway; requesting the check is never the thing standing between them and progress.
 
 ## Unknown-lore questions
-A player asks about this place's history, origin, or purpose and nothing in the goals/quests above covers it? Respond out of character — e.g. "(Out of character: ${characterNames[0] ?? 'the character'} doesn't know the origins of this place.)" — never guess, never invent a lead. Only point to a specific lead (a book, an inscription, someone who'd know) if that lead is itself a seeded entity, dressing detail, or goal in this dungeon.
+A player asks about this place's history, origin, or purpose and nothing in the quests above covers it? Respond out of character — e.g. "(Out of character: ${characterNames[0] ?? 'the character'} doesn't know the origins of this place.)" — never guess, never invent a lead. Only point to a specific lead (a book, an inscription, someone who'd know) if that lead is itself a seeded entity, dressing detail, or quest stage in this dungeon.
 
 ## Reveal discipline
 Entities and hidden dressing tagged "undiscovered" in the floor plan below have NOT been perceived by anyone. Whether they become discovered is decided by the game system — sight radius, line of sight, Perception/Investigation totals against hideDC — never by you. Your job is reporting, not discovery.
@@ -516,6 +513,12 @@ Every response involving passage of time: exactly one [[CLOCK:N]] tag, N in seco
 
 ## Dungeon exit tag
 Players clearly and deliberately leave this dungeon (exit to the surface, head back to town)? Emit [[DUNGEON_EXIT]] alongside your narration. Not for movement within the dungeon or a temporary retreat to a previous room.
+
+## Door unlock tag
+A locked door's floor-plan entry (DM eyes only) gives you its lockpick DC — never state that DC to players. Emit [[DOOR_UNLOCK:PlayerName]] the instant either happens, within 5ft of the door: a player narrates unlocking it with the door's key (only valid once that key is a discovered entity — check the floor plan) or a player IMPROVISES a lock-bypass with no Lockpick item on hand and you judge their approach as beating the lockpick DC narratively (same as any other hidden DC — never reveal the number). If the player instead says they're using an actual Lockpick item from their inventory, use the Item use tag below instead — that path rolls for real, don't also judge it yourself.
+
+## Item use tags
+A player narrates using a Lockpick or a Trap Disarm Kit from their own inventory (check "Party inventory" below — only tag this if they actually have one)? Emit [[ITEM_USED:PlayerName|Lockpick]] or [[ITEM_USED:PlayerName|Trap Disarm Kit]] alongside your narration, within 5ft of the door/trap. This is NOT judged by you — it consumes one from their inventory and rolls a real Dexterity (Thieves' Tools) check against the target's hidden DC server-side; the roll and result post to chat automatically. Narrate only the attempt itself ("you kneel at the lock, pick in hand..."), never the outcome — you don't know it yet when you emit the tag, and don't know the DC either. A Trap Disarm Kit only ever targets an already-discovered trap; it can't be used on one nobody's found yet.
 
 ## Active party
 ${characterNames.length ? characterNames.map(n => `- ${n}`).join('\n') : '(none)'}
@@ -612,10 +615,12 @@ Return ONLY valid JSON — no markdown fences, no explanation:
 }
 
 // Generated BEFORE the dungeon itself, so the floor plan can be designed to actually serve
-// whatever quest comes back — the dungeon-gen prompt is told these goals are already decided
-// (see manifest.ts's predefinedQuests handling) rather than inventing its own. Same JSON shape as
-// buildSessionQuestsPrompt above (id/name/description), deliberately — one prompt style for
-// "generate quest hook(s)" everywhere in the app.
+// whatever quest comes back — the dungeon-gen prompt is told this stage is already decided
+// (see manifest.ts's predefinedChain handling) and itself decides its trigger plus every stage
+// that follows, same as the campaign-creation path (buildDungeonScenarioGoalPrompt). Only ONE
+// stage here (an array purely to share JSON shape/parsing with buildSessionQuestsPrompt above,
+// not because more than one is ever wanted) — a linear chain has exactly one opening stage, and
+// the rest gets authored by the manifest call once it knows real room/entity names to reference.
 export function buildDungeonQuestPrompt(opts: {
   locationName: string;
   dungeonType: string;
@@ -628,15 +633,15 @@ export function buildDungeonQuestPrompt(opts: {
     : '';
   const existingIdList = existingIds.join(', ') || 'none';
 
-  return `You are generating the quest hook(s) for a TTRPG dungeon the party is about to enter: "${locationName}" (genre: ${dungeonType}).
+  return `You are generating the opening quest hook for a TTRPG dungeon the party is about to enter: "${locationName}" (genre: ${dungeonType}).
 ${contextBlock}
-Generate 0-3 quest(s) that give this dungeon a concrete reason to exist beyond "explore it" — what the party is here to find, stop, rescue, or retrieve. Only include a quest when the story context actually motivates one; an empty array is correct for a dungeon with no specific narrative hook beyond exploring it. Never generic filler like "explore the dungeon", "defeat the boss", or "find the exit" — those are tracked separately by the game itself.
+Generate exactly ONE quest (as a single-element array), or none, that gives this dungeon a concrete reason to exist beyond "explore it" — what the party is here to find, stop, rescue, or retrieve. Only include one when the story context actually motivates it; an empty array is correct for a dungeon with no specific narrative hook beyond exploring it. Never generic filler like "explore the dungeon", "defeat the boss", or "find the exit" — those are tracked separately by the game itself.
 Name the target (the item, person, or threat), never the sub-location it's hidden in — "Find the parking garage keycard" not "Find the parking garage keycard in the Chief's Office". Which room holds it is for the party to discover through play; spelling it out in the quest text hands them the answer before they've searched anything.
-Each use a unique kebab-case ID not in this list: ${existingIdList}
+Use a unique kebab-case ID not in this list: ${existingIdList}
 
 Return ONLY valid JSON — no markdown fences, no explanation:
 [
-  { "id": "kebab-slug", "name": "Short, evocative quest title (2-6 words) — not a restatement of the description, a proper name for it, e.g. 'The Missing Cartographer', 'Silence the Ritual'.", "description": "2-3 short bullet points, one per line, each starting with '- ' — concrete, distinct beats of what the party is here to do. This becomes the dungeon's design brief, so name what's being sought/stopped/rescued." }
+  { "id": "kebab-slug", "name": "Short, evocative quest title (2-6 words) — not a restatement of the description, a proper name for it, e.g. 'The Missing Cartographer', 'Silence the Ritual'.", "description": "2-3 short bullet points, one per line, each starting with '- ' — concrete, distinct beats of ONLY this opening objective. This is stage one of a longer chain the dungeon itself will author around it once this one resolves — never describe the final confrontation, the escape, or how the whole thing ultimately resolves; that's later stages' job, not this one's. Say only what the party needs to find or do first. This becomes the dungeon's design brief, so name what's being sought/stopped/rescued." }
 ]`;
 }
 
@@ -668,18 +673,16 @@ Write a "previously on…" recap of 3–4 sentences in second person. Summarise 
 
 // Dungeon-crawl session open, closed-world — mirrors buildDungeonNarrationPrompt's constraints
 // rather than buildRecapPrompt's: no world.md/factions.md/entitySummaries reach this pathway,
-// only the dungeon's own seeded goals/quests and its floor plan.
+// only the dungeon's own seeded quests and its floor plan.
 export function buildDungeonRecapPrompt(opts: {
   dungeonName: string;
-  goals: string[];
-  dungeonQuests: Quest[]; // pre-filtered to this dungeon (sourceDungeonId match)
+  dungeonQuests: Quest[]; // pre-filtered to this dungeon (sourceDungeonId match). Only the party's currently-active quest chain stage(s) — never future stages — reach this prompt.
   groundTruth: string;
   lastSessionText: string | null;
   isFirstSession: boolean;
 }): string {
-  const { dungeonName, goals, dungeonQuests, groundTruth, lastSessionText, isFirstSession } = opts;
+  const { dungeonName, dungeonQuests, groundTruth, lastSessionText, isFirstSession } = opts;
 
-  const goalsBlock = goals.length ? goals.map(g => `- ${g}`).join('\n') : '(none seeded for this dungeon)';
   const questsBlock = dungeonQuests.length
     ? dungeonQuests.map(q => `- ${q.id} [${q.status}]: ${q.name} — ${q.description}`).join('\n')
     : '(none)';
@@ -689,22 +692,20 @@ export function buildDungeonRecapPrompt(opts: {
     : `You are the Virtual Dungeon Master opening a new session of a dungeon crawl in ${dungeonName}.`;
 
   const task = isFirstSession
-    ? `Write an opening narration of 2–3 sentences maximum. Second person, present tense. Describe only what a party arriving at the entrance can directly see, hear, or smell, drawn only from the floor plan below. Do not invent history, purpose, or lore beyond the goals listed. End on the immediate scene, not a question. No preamble, no "Welcome" — begin mid-scene.`
+    ? `Write an opening narration of 2–3 sentences maximum. Second person, present tense. Describe only what a party arriving at the entrance can directly see, hear, or smell, drawn only from the floor plan below. Do not invent history, purpose, or lore beyond the quests listed. End on the immediate scene, not a question. No preamble, no "Welcome" — begin mid-scene.`
     : `What happened last session:
 ${lastSessionText ?? 'No detailed notes available.'}
 
-Write a "previously on…" recap of 2–3 sentences in second person. Draw only on the last session's events and the goals/quests below — never invent a new fact about the dungeon. Stop after the summary — no new scene, no transition line. No preamble — begin immediately with "Previously on…".`;
+Write a "previously on…" recap of 2–3 sentences in second person. Draw only on the last session's events and the quests below — never invent a new fact about the dungeon. Stop after the summary — no new scene, no transition line. No preamble — begin immediately with "Previously on…".`;
 
   return `${intro}
 
 ## Closed world
-You may only reference what's seeded into this dungeon: the floor plan, its goals, its quests, and what happened last session. Never invent new lore, NPCs, or backstory not covered below — not even as minor flavor.
+You may only reference what's seeded into this dungeon: the floor plan, its quests, and what happened last session. Never invent new lore, NPCs, or backstory not covered below — not even as minor flavor.
 
 ## Reveal discipline
 The floor plan below includes undiscovered entities and hidden dressing (marked as such) for your spatial reasoning only. Never name, describe, count, or hint at anything not marked discovered.
 
-### Goals
-${goalsBlock}
 ### This dungeon's quests
 ${questsBlock}
 ### Floor plan

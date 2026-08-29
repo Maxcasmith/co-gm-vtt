@@ -86,7 +86,7 @@ const OPENAI_VOICES = [
 const DEFAULT_CONFIG: AppConfig = {
   workflows: [],
   apiKeys: { openai: '', anthropic: '', deepseek: '', kimi: '' },
-  image: { model: 'gpt-image-1', generateWorldMap: false, generateTilesets: false, generateStoryboard: false },
+  image: { model: 'gpt-image-1', generateWorldMap: false, generateTilesets: false, generateStoryboard: false, generateBestiaryPortraits: false, generatePropImages: false },
   narration: { model: 'none', voice: 'onyx' },
   adminPassword: '',
 };
@@ -297,6 +297,40 @@ export default function SettingsSidebar({ open, password, onClose, onPasswordCha
                 className={`settings-toggle ${config.image.generateStoryboard ? 'settings-toggle--on' : ''}`}
                 onClick={() => setConfig(c => ({ ...c, image: { ...c.image, generateStoryboard: !c.image.generateStoryboard } }))}
                 aria-pressed={config.image.generateStoryboard}
+              >
+                <span className="settings-toggle-thumb" />
+              </button>
+            </div>
+            <div className="settings-toggle-row">
+              <div className="settings-toggle-text">
+                <span className="settings-toggle-label">Generate bestiary portraits</span>
+                <span className="settings-toggle-desc">
+                  {config.image.generateBestiaryPortraits
+                    ? 'When a dungeon introduces a creature with no portrait yet, one is generated with AI and reused for every future encounter.'
+                    : 'Creatures show no generated portrait until one already exists in storage.'}
+                </span>
+              </div>
+              <button
+                className={`settings-toggle ${config.image.generateBestiaryPortraits ? 'settings-toggle--on' : ''}`}
+                onClick={() => setConfig(c => ({ ...c, image: { ...c.image, generateBestiaryPortraits: !c.image.generateBestiaryPortraits } }))}
+                aria-pressed={config.image.generateBestiaryPortraits}
+              >
+                <span className="settings-toggle-thumb" />
+              </button>
+            </div>
+            <div className="settings-toggle-row">
+              <div className="settings-toggle-text">
+                <span className="settings-toggle-label">Generate prop images for dungeon crawls</span>
+                <span className="settings-toggle-desc">
+                  {config.image.generatePropImages
+                    ? 'When a dungeon introduces a decorative prop with no sprite yet, one is generated with AI and reused for every future dungeon.'
+                    : 'Props show no generated sprite until one already exists in storage.'}
+                </span>
+              </div>
+              <button
+                className={`settings-toggle ${config.image.generatePropImages ? 'settings-toggle--on' : ''}`}
+                onClick={() => setConfig(c => ({ ...c, image: { ...c.image, generatePropImages: !c.image.generatePropImages } }))}
+                aria-pressed={config.image.generatePropImages}
               >
                 <span className="settings-toggle-thumb" />
               </button>

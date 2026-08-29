@@ -1,11 +1,31 @@
+import { useState } from 'react';
 import type { InventoryItem } from 'shared';
 import { hasOriginFeat } from 'shared';
-import emptyFrameIcon from '../assets/icons/Icon-Frame-Blue.jpg';
+import ItemIcon from '../ItemIcon.tsx';
 import { useCharacter } from './CharacterContext.tsx';
-import { SHOP_ITEMS } from './srd.ts';
+import { SHOP_ITEMS, type ShopItem } from './srd.ts';
+
+const CATEGORY_LABELS: Record<string, string> = {
+  weapon: 'Weapons',
+  armor: 'Armor',
+  ammunition: 'Ammunition',
+  consumable: 'Consumables',
+};
+const CATEGORY_ORDER = ['weapon', 'armor', 'ammunition', 'consumable'];
+const categoryOf = (item: ShopItem) => item.type && item.type in CATEGORY_LABELS ? item.type : 'consumable';
 
 export default function ShopTab() {
   const c = useCharacter();
+  const [category, setCategory] = useState('all');
+  const [nameFilter, setNameFilter] = useState('');
+  const query = nameFilter.trim().toLowerCase();
+  const groups = CATEGORY_ORDER
+    .map(key => ({
+      key,
+      label: CATEGORY_LABELS[key],
+      items: SHOP_ITEMS.filter(i => categoryOf(i) === key && i.name.toLowerCase().includes(query)),
+    }))
+    .filter(g => g.items.length > 0 && (category === 'all' || category === g.key));
   // Origin feat Crafter: 20% discount on nonmagical items — everything in SHOP_ITEMS qualifies
   // (starting gear only, no magic items sold here).
   const hasCrafterDiscount = hasOriginFeat(c, 'Crafter');
@@ -47,42 +67,63 @@ export default function ShopTab() {
       <div className="shop-col">
         <p className="shop-col-title">Your Inventory</p>
         <p className="shop-gold">{c.gold} gp remaining</p>
-        {c.inventory.length === 0
-          ? <p className="shop-inv-empty">Nothing yet — buy something!</p>
-          : c.inventory.map(item => (
-            <div key={item.id} className="shop-inv-item">
-              <span className="shop-inv-item-name">{item.name}</span>
-              {item.quantity > 1 && <span className="shop-inv-item-qty">×{item.quantity}</span>}
-              <button className="shop-sell-btn" onClick={() => sell(item.id)}>Sell</button>
-            </div>
-          ))
-        }
+        <div className="shop-scroll">
+          {c.inventory.length === 0
+            ? <p className="shop-inv-empty">Nothing yet — buy something!</p>
+            : c.inventory.map(item => (
+              <div key={item.id} className="shop-inv-item">
+                <span className="shop-inv-item-name">{item.name}</span>
+                {item.quantity > 1 && <span className="shop-inv-item-qty">×{item.quantity}</span>}
+                <button className="shop-sell-btn" onClick={() => sell(item.id)}>Sell</button>
+              </div>
+            ))
+          }
+        </div>
       </div>
 
       <div className="shop-col">
-        <p className="shop-col-title">Shop</p>
-        {SHOP_ITEMS.map(item => (
-          <div key={item.id} className="shop-item">
-            <img className="shop-item-icon" src={item.iconPath || emptyFrameIcon} alt="" />
-            <div className="shop-item-info">
-              <p className="shop-item-name">{item.name}</p>
-              <p className="shop-item-desc">{item.description}</p>
+        <div className="shop-col-header">
+          <input
+            className="shop-filter-input"
+            type="text"
+            placeholder="Search…"
+            value={nameFilter}
+            onChange={e => setNameFilter(e.target.value)}
+          />
+          <select className="shop-filter-select" value={category} onChange={e => setCategory(e.target.value)}>
+            <option value="all">All</option>
+            {CATEGORY_ORDER.map(key => <option key={key} value={key}>{CATEGORY_LABELS[key]}</option>)}
+          </select>
+        </div>
+        <div className="shop-scroll">
+          {groups.map(group => (
+            <div key={group.key} className="shop-category-group">
+              <p className="shop-category-title">{group.label}</p>
+              {group.items.map(item => (
+                <div key={item.id} className="shop-item">
+                  <ItemIcon className="shop-item-icon" name={item.name} iconPath={item.iconPath} />
+                  <div className="shop-item-info">
+                    <p className="shop-item-name">{item.name}</p>
+                    <p className="shop-item-desc">{item.description}</p>
+                  </div>
+                  <div className="shop-item-right">
+                    <span className="shop-item-cost">
+                      {hasCrafterDiscount && priceFor(item.cost) !== item.cost && (
+                        <span className="shop-item-cost-original">{item.cost} gp</span>
+                      )}
+                      {priceFor(item.cost)} gp
+                    </span>
+                    <button
+                      className="shop-buy-btn"
+                      disabled={c.gold < priceFor(item.cost)}
+                      onClick={() => buy(item.id)}
+                    >Buy</button>
+                  </div>
+                </div>
+              ))}
             </div>
-            <div className="shop-item-right">
-              <span className="shop-item-cost">
-                {hasCrafterDiscount && priceFor(item.cost) !== item.cost && (
-                  <span className="shop-item-cost-original">{item.cost} gp</span>
-                )}
-                {priceFor(item.cost)} gp
-              </span>
-              <button
-                className="shop-buy-btn"
-                disabled={c.gold < priceFor(item.cost)}
-                onClick={() => buy(item.id)}
-              >Buy</button>
-            </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </div>
   );

@@ -623,6 +623,81 @@ There must be:
 7. Correct left-to-right, top-to-bottom order as listed above`;
 }
 
+// Icon atlas, modeled on buildDynamicTilesetPrompt's fixed-math grid (no chroma-key/grid-line
+// detection needed — icons are opaque frames, cropped by computeGridRects same as tileset
+// materials). frameDescription comes from a vision pass over the app's actual default icon frame
+// (see dungeon/icons.ts's describeDefaultFrame) so every cell reuses that real styling rather than
+// the model guessing at a "frame" from scratch.
+export interface IconEntry { name: string; description: string }
+
+export function buildIconAtlasPrompt(items: IconEntry[], frameDescription: string, cellSize: number): string {
+  const real = items.slice(0, 16);
+  const lines = real.map((it, i) => `${i + 1}. **${it.name}** — ${it.description}`);
+  if (real.length < 16) {
+    const from = real.length + 1;
+    const rangeLabel = from === 16 ? '16' : `${from}-16`;
+    lines.push(`${rangeLabel}. Blank — the empty frame on its own, no item inside it. Keeps the crop grid of the others consistent.`);
+  }
+
+  const labels = real.map(it => it.name);
+  while (labels.length < 16) labels.push('(blank frame, no item)');
+  const gridRows: string[] = [];
+  for (let r = 0; r < 4; r++) gridRows.push(`Row ${r + 1}: ${labels.slice(r * 4, r * 4 + 4).join(' | ')}`);
+
+  return `Generate a **2D game-icon atlas** for a tabletop RPG inventory UI.
+
+# FRAME STYLE (reuse identically in every one of the 16 cells)
+
+${frameDescription}
+
+Every cell must use this exact same frame — same border, same background, same bevel/ornament, same colour treatment — with only the item drawn inside it changing. The frame itself must look pixel-for-pixel consistent, cell to cell, like a UI kit's icon slots.
+
+# OUTPUT
+
+Create a single icon atlas:
+
+* **4 columns**
+* **4 rows**
+* **16 icons**
+* Each icon is an **exact 1:1 square: width equals height, precisely, no exceptions**
+* Every icon occupies exactly the same amount of space
+* Complete atlas aspect ratio: **1:1**
+* Target atlas size: **${cellSize * 4} × ${cellSize * 4}**
+* Target icon size: **${cellSize} × ${cellSize}**, exactly
+
+No gaps or padding between icons.
+
+# GRID LAYOUT (exact position — this is a literal map of the atlas, not a loose ordering)
+
+Each cell below MUST contain exactly the item named at that position. Do not reorder, shift, merge, or drop any cell.
+
+${gridRows.join('\n')}
+
+# ITEMS (detail for each — numbers match left-to-right, top-row-down reading order of the grid above)
+
+${lines.join('\n\n')}
+
+# ICON REQUIREMENTS
+
+Each item sits centered inside its own copy of the frame described above, drawn at a scale that reads clearly even shrunk down to a small UI icon.
+
+Consistent lighting, rendering style, and level of detail across all 16 — one cohesive icon set, not 16 unrelated images.
+
+There must be:
+
+* NO text or labels anywhere in the atlas
+* NO numbering
+* NO gaps, seams, or misalignment between cells
+* NO part of any item extending past its own cell into a neighboring cell
+
+# PRIORITIES
+
+1. Every cell uses the exact same frame styling, identically
+2. Every cell is an exact 1:1 square, all 16 the same size, laid out on an even 4×4 grid
+3. Instantly readable item silhouette/identity at small size
+4. Every item fits entirely within its own cell, centered, matching the described frame`;
+}
+
 export interface StoryboardSubject {
   name: string;
   species?: string;

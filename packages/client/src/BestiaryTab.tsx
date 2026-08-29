@@ -21,10 +21,21 @@ interface BestiaryCreature {
   portraitSrc?: string;
 }
 
-export default function BestiaryTab() {
+interface UsageRef {
+  kind: 'campaign' | 'saved-adventure';
+  id: string;
+  name: string;
+}
+
+interface BestiaryTabProps {
+  password: string;
+}
+
+export default function BestiaryTab({ password }: BestiaryTabProps) {
   const [creatures, setCreatures] = useState<BestiaryCreature[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<BestiaryCreature | null>(null);
+  const [deleteError, setDeleteError] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetch(`${API}/api/creatures/manifest`)
@@ -32,6 +43,28 @@ export default function BestiaryTab() {
       .then((data: BestiaryCreature[]) => setCreatures(data))
       .catch(() => {});
   }, []);
+
+  async function deleteCreature(slug: string, name: string) {
+    if (!window.confirm(`Permanently delete "${name}"'s portrait and stats? This cannot be undone.`)) return;
+    setDeleteError(f => { const n = { ...f }; delete n[slug]; return n; });
+    const r = await fetch(`${API}/api/admin/creatures/${slug}`, {
+      method: 'DELETE',
+      headers: { 'x-admin-password': password },
+    });
+    if (r.ok) {
+      setCreatures(cs => cs.filter(c => c.slug !== slug));
+      setSelected(null);
+    } else {
+      const data = await r.json().catch(() => ({})) as { usage?: UsageRef[] };
+      const where = data.usage?.map(u => `${u.kind === 'campaign' ? 'campaign' : 'saved adventure'} "${u.name}"`).join(', ');
+      setDeleteError(f => ({ ...f, [slug]: where ? `Still used in ${where}` : 'Failed to delete' }));
+    }
+  }
+
+  function selectCreature(c: BestiaryCreature) {
+    setDeleteError(f => { const n = { ...f }; delete n[c.slug]; return n; });
+    setSelected(c);
+  }
 
   function toggle(letter: string) {
     setExpanded(prev => {
@@ -71,7 +104,7 @@ export default function BestiaryTab() {
               <div className="tiles-accordion-body">
                 <div className="tile-grid">
                   {group.map(c => (
-                    <button key={c.slug} className="tile-card tile-card-button" onClick={() => setSelected(c)}>
+                    <button key={c.slug} className="tile-card tile-card-button" onClick={() => selectCreature(c)}>
                       {c.portraitSrc ? (
                         <img src={`${API}${c.portraitSrc}`} alt={c.name} title={c.name} className="tile-img" />
                       ) : (
@@ -86,7 +119,12 @@ export default function BestiaryTab() {
           </div>
         );
       })}
-      <CreatureDetailModal creature={selected} onClose={() => setSelected(null)} />
+      <CreatureDetailModal
+        creature={selected}
+        onClose={() => setSelected(null)}
+        onDelete={() => { if (selected) void deleteCreature(selected.slug, selected.name); }}
+        deleteError={selected ? deleteError[selected.slug] : undefined}
+      />
     </div>
   );
 }

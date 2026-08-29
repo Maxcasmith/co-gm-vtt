@@ -3,7 +3,7 @@ import type { AppConfig, Dungeon, DungeonEntity, DungeonRoom, EnemyStatBlock } f
 import { slugifyTheme } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { fetchManifest } from './manifest.ts';
-import { generateGrid } from './generator.ts';
+import { generateGrid, type DoorRect } from './generator.ts';
 import { generateBuildingLayout } from './buildingLayout.ts';
 import { placeEntities, placeEncounterEntities } from './placer.ts';
 import { ensureTilesetSupport } from './tilesets.ts';
@@ -21,14 +21,16 @@ export async function generateDungeon(
      * tagged with the dungeon's id before the dungeon itself exists. */
     id?: string;
     /** Generated before this call — see session-processor's generateDungeonQuests. When present,
-     * these ARE dungeon.goals (set directly below, not whatever the manifest LLM call echoes back)
-     * — the floor plan is designed to serve them, not invent its own on top. */
-    predefinedQuests?: { name: string; description: string }[];
+     * this becomes questChain[0] (set directly below, id/name/description never re-echoed by the
+     * manifest LLM call) — the floor plan is designed to serve it, and the manifest call itself
+     * decides its trigger plus every stage that follows, since only it knows the real room/entity
+     * names to reference. */
+    predefinedChain?: { id: string; name: string; description: string }[];
   },
   onToken: (t: string) => void = () => {},
   config?: AppConfig,
 ): Promise<Dungeon> {
-  const manifest = await fetchManifest(name, dungeonType, adapter, storyContext, opts?.roomRange, opts?.partySize, opts?.partyLevel, onToken, opts?.predefinedQuests);
+  const manifest = await fetchManifest(name, dungeonType, adapter, storyContext, opts?.roomRange, opts?.partySize, opts?.partyLevel, onToken, opts?.predefinedChain);
   // Man-made structures get a deterministic floor-plan layout driven by the manifest's adjacency
   // graph; natural/carved spaces (cave, crypt, tomb) go straight to the procedural row-packer —
   // no LLM geometry call, and no attempt to force building-shaped rooms onto a cave.
@@ -36,12 +38,19 @@ export async function generateDungeon(
     ? generateBuildingLayout(manifest, opts)
     : generateGrid(manifest, opts);
   const entities = placeEntities(rooms, manifest, cells);
+  // Name -> id for every placed loot entity, to resolve a locked door's keyName (still just a
+  // name at this point — manifest.ts validated it refers to *some* loot item, but nothing gets a
+  // real id until placeEntities runs above) into the real DungeonEntity.requiresKeyId points at.
+  const lootIdByName = new Map(entities.filter(e => e.type === 'loot').map(e => [e.name, e.id]));
   // Every carved doorway (building layouts only — organic spaces carve plain gaps, no literal
-  // door fits the genre) becomes its own Door entity: closed, opaque, unlocked by default.
+  // door fits the genre) becomes its own Door entity, state/key resolved by resolveDoorState.
   for (const door of doors ?? []) {
+    const { doorState, requiresKeyId, lockpickDC } = resolveDoorState(door, lootIdByName);
     entities.push({
       id: randomUUID(), type: 'door', x: door.x, y: door.y, width: door.width, height: door.height,
-      name: 'Door', discovered: true, doorState: 'closed', transparency: 0,
+      name: 'Door', discovered: true, doorState, transparency: 0,
+      ...(requiresKeyId ? { requiresKeyId } : {}),
+      ...(lockpickDC ? { lockpickDC } : {}),
     });
   }
   // Synchronous/deterministic — every creature entity gets a portraitSrc before this function
@@ -71,7 +80,7 @@ export async function generateDungeon(
     cells,
     rooms,
     entities,
-    goals: manifest.goals,
+    questChain: manifest.questChain,
     theme: manifest.theme,
     tilesetSlug,
     structureType: manifest.structureType,
@@ -82,10 +91,32 @@ export async function generateDungeon(
   return dungeon;
 }
 
+// Resolves a carved doorway's lock into what actually ships on the Door entity. `door.keyName`
+// (see buildingLayout.ts's lockFor) is still just a name — manifest.ts's resolveDoorLocks already
+// checked it matches *some* loot item in the manifest, but nothing gets a real id until
+// placeEntities runs, so this is the point that turns it into a real requiresKeyId. A 'locked'
+// door whose key doesn't resolve in `lootIdByName` — should never happen given manifest.ts's own
+// validation, but never trusted blind twice — downgrades to 'closed' rather than shipping
+// unopenable. Exported/pure so this one small but safety-critical branch is unit-testable without
+// spinning up a full generateDungeon call (see doorLocks.selfcheck.ts).
+// Same fallback manifest.ts's resolveDoorLocks already applies — repeated here as a second,
+// independent guarantee that a 'locked' door can never ship without one, not a config to tune.
+const DEFAULT_LOCKPICK_DC = 15;
+
+export function resolveDoorState(
+  door: DoorRect, lootIdByName: Map<string, string>,
+): { doorState: 'open' | 'closed' | 'locked'; requiresKeyId?: string; lockpickDC?: number } {
+  if (door.doorState === 'locked') {
+    const requiresKeyId = lootIdByName.get(door.keyName ?? '');
+    return requiresKeyId ? { doorState: 'locked', requiresKeyId, lockpickDC: door.lockpickDC ?? DEFAULT_LOCKPICK_DC } : { doorState: 'closed' };
+  }
+  return { doorState: door.doorState ?? 'closed' };
+}
+
 // Combat-arena dungeon: one bare room sized for the encounter, no LLM calls — who spawns is
 // already decided (the stat blocks), this only needs geometry to drop them into.
 export function generateEncounterDungeon(statBlocks: EnemyStatBlock[]): Dungeon {
-  const { cells, rooms } = generateGrid({ rooms: [{ name: 'Battle', size: 'large' }], structureType: 'organic', theme: 'high_fantasy', goals: [], illumination: 1, materials: [], props: [] });
+  const { cells, rooms } = generateGrid({ rooms: [{ name: 'Battle', size: 'large' }], structureType: 'organic', theme: 'high_fantasy', questChain: [], illumination: 1, materials: [], props: [] });
   const room = rooms[0]!;
   const entities = placeEncounterEntities(room, statBlocks);
 
@@ -193,10 +224,17 @@ export function describeCombatLocation(dungeon: Dungeon, defeatedAt: { gx: numbe
 
 function entityStatus(e: DungeonEntity): string {
   if (!e.discovered) return `undiscovered, hideDC ${e.hideDC ?? '?'}`;
+  if (e.type === 'door' && e.doorState === 'locked') {
+    return `discovered — locked (DM eyes only, NEVER state the DC: opens if a player narrates using the key once it's discovered, or on a Thieves' Tools/DEX check beating DC ${e.lockpickDC ?? '?'} — tag [[DOOR_UNLOCK:PlayerName]] the moment either happens, within 5ft)`;
+  }
   if (e.type === 'door') return `discovered — ${e.doorState ?? 'closed'}`;
   if (e.type === 'loot' && e.contents?.length) return `discovered — contains: ${e.contents.join(', ')}`;
-  if (e.type === 'trap' && e.trap?.kind === 'seal' && e.trap.escapeDC) {
-    return `discovered — sealed shut (DM eyes only, NEVER state this: resolves on a DC ${e.trap.escapeDC} ${e.trap.escapeSkill ?? 'Athletics'} check when a player attempts something that would plausibly force/bypass it)`;
+  if (e.type === 'trap') {
+    const seal = e.trap?.kind === 'seal' && e.trap.escapeDC
+      ? ` — sealed shut (DM eyes only, NEVER state this: resolves on a DC ${e.trap.escapeDC} ${e.trap.escapeSkill ?? 'Athletics'} check when a player attempts something that would plausibly force/bypass it)`
+      : '';
+    const disarm = e.trap?.disarmDC ? ` (DM eyes only, NEVER state the DC — DC ${e.trap.disarmDC}: a player narrating using a Trap Disarm Kit on this trap removes it entirely if their roll beats it. Requires the kit — tag [[ITEM_USED:PlayerName|Trap Disarm Kit]], the roll and result happen automatically.)` : '';
+    return `discovered${seal}${disarm}`;
   }
   return 'discovered';
 }

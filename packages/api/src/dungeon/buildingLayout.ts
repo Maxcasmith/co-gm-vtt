@@ -10,6 +10,7 @@ import {
   separateAdjacentRooms,
   fixDiagonalPinches,
   type GeneratorResult,
+  type DoorRect,
 } from './generator.ts';
 
 const DEFAULT_WIDTH = 50;
@@ -146,6 +147,27 @@ function carveDoorway(cells: number[][], a: Rect, b: Rect): { x: number; y: numb
 
 const center = (r: Rect) => ({ x: r.x + Math.floor(r.w / 2), y: r.y + Math.floor(r.h / 2) });
 
+// A room-pair's door state/key, if either side of the edge declared one via ManifestRoom.doors
+// (see manifest.ts's per-room "doors" schema, validated against real loot names there already —
+// this just carries the already-validated name through, unresolved to a real id until placement).
+// Only one side typically declares an edge, but if both do and disagree, the more restrictive
+// state wins — a lock should never be silently loosened by the other room's laxer entry.
+const RESTRICTIVENESS: Record<'open' | 'closed' | 'locked', number> = { open: 0, closed: 1, locked: 2 };
+
+function lockFor(roomA: ManifestRoom, roomB: ManifestRoom): { doorState: 'open' | 'closed' | 'locked'; keyName?: string; lockpickDC?: number } | null {
+  const fromA = roomA.doors?.find(d => d.toRoom === roomB.name);
+  const fromB = roomB.doors?.find(d => d.toRoom === roomA.name);
+  const candidates = [fromA, fromB].filter((d): d is NonNullable<typeof d> => !!d);
+  if (!candidates.length) return null;
+  const winner = candidates.reduce((best, cur) =>
+    RESTRICTIVENESS[cur.state ?? 'closed'] > RESTRICTIVENESS[best.state ?? 'closed'] ? cur : best);
+  return {
+    doorState: winner.state ?? 'closed',
+    ...(winner.keyName ? { keyName: winner.keyName } : {}),
+    ...(winner.lockpickDC ? { lockpickDC: winner.lockpickDC } : {}),
+  };
+}
+
 /**
  * Floor-plan layout for man-made structures. Walks the manifest's room adjacency graph breadth-first
  * from the entrance and packs each room flush against the parent that discovered it, so rooms that
@@ -253,7 +275,7 @@ export function generateBuildingLayout(manifest: DungeonManifest, opts?: { width
   // tree didn't use, which is what gives a floor plan its loops. `graph` is undirected but stores
   // both directions of each edge, so carveDoorway(a,b) and carveDoorway(b,a) would otherwise both
   // fire for the same wall — carvedPairs keeps that down to one Door entity per edge.
-  const doors: { x: number; y: number; width: number; height: number }[] = [];
+  const doors: DoorRect[] = [];
   const carvedPairs = new Set<string>();
   for (const [name, neighbors] of graph) {
     const a = rects[indexOf.get(name)!];
@@ -265,7 +287,9 @@ export function generateBuildingLayout(manifest: DungeonManifest, opts?: { width
       const b = rects[indexOf.get(neighborName)!];
       if (!b) continue;
       const door = carveDoorway(cells, a, b);
-      if (door) doors.push(door);
+      if (!door) continue;
+      const lock = lockFor(manifestRooms[indexOf.get(name)!]!, manifestRooms[indexOf.get(neighborName)!]!);
+      doors.push(lock ? { ...door, ...lock } : door);
     }
   }
 

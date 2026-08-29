@@ -31,6 +31,14 @@ export function slugifyTheme(theme: string): string {
   return theme.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+// Same job as slugifyTheme but snake_case, for the icon storage/URL convention
+// (storage/icons/<iconSlug(name)>/icon.jpg) — shared by the generator (write path), the icon
+// static route (read path), and every client display spot (predicts the URL from an item's name
+// alone, no manifest lookup needed) so a freshly generated icon just resolves on next render.
+export function iconSlug(name: string): string {
+  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
+
 export type DungeonStructureType = "building" | "organic";
 
 export interface DungeonRoom {
@@ -74,6 +82,14 @@ export interface TrapEffect {
   /** kind === 'seal' only — the skill and DC needed to resolve it later. DM-eyes-only. */
   escapeSkill?: string;
   escapeDC?: number;
+  /**
+   * Either kind — the Thieves' Tools DC to neutralize this trap before it ever triggers (a Trap
+   * Disarm Kit rolls against this). Guaranteed present on every AI-authored dungeon trap
+   * (default-filled in placer.ts's trapEffectFor if the manifest omitted one) — may be absent on
+   * a combat-placed trap (Snare), which falls back to a flat default DC at disarm-attempt time.
+   * DM-eyes-only, same discipline as escapeDC.
+   */
+  disarmDC?: number;
 }
 
 export interface DungeonEntity {
@@ -83,6 +99,10 @@ export interface DungeonEntity {
   y: number;
   name: string;
   discovered: boolean;
+  /** A loot entity acting as a door's key (see requiresKeyId below) always has this forced to -99
+   * server-side regardless of what the manifest proposed — a key is never gated behind a hard
+   * search, it's found on any Investigation/Perception attempt at all, even a nat 1 with a
+   * negative modifier. (0 would already pass any realistic roll; -99 leaves zero doubt.) */
   hideDC?: number;
   /** type === 'loot' only — the actual items inside, seeded at generation so opening it reveals something concrete and consistent instead of the narrator improvising contents on the spot. */
   contents?: string[];
@@ -111,8 +131,31 @@ export interface DungeonEntity {
   /** type === 'object' decorative props only, or type === 'door' — footprint in grid cells, anchored at (x,y) as the top-left corner (same convention as DungeonRoom). Omitted = 1x1. */
   width?: number;
   height?: number;
-  /** type === 'door' only. Toggled by a click (see toggleDoor) unless 'locked', which no click can change yet — no unlock mechanic exists. */
+  /**
+   * type === 'door' only. Toggled by a click (see toggleDoor) — for a 'locked' door, a click only
+   * succeeds (and unlocks + opens in one step) if the clicking character is within 5ft AND the
+   * door's key (requiresKeyId) has been discovered. A player can also narrate using the key or
+   * successfully picking the lock ("I use the key" / "I pick the lock") within 5ft — the DM tags
+   * [[DOOR_UNLOCK:PlayerName]] to resolve that path (see tag-processor.ts, effects.ts).
+   */
   doorState?: "open" | "closed" | "locked";
+  /**
+   * type === 'door', doorState === 'locked' only — the id of the loot entity that unlocks it.
+   * Every locked door is guaranteed to have one: authored by name in the manifest (same
+   * cross-reference discipline as DungeonQuestTrigger), resolved to a real placed entity id once
+   * placement assigns one, and downgraded to 'closed' rather than left locked if that resolution
+   * ever fails — a lock with no reachable key is never shipped. See dungeon/index.ts.
+   */
+  requiresKeyId?: string;
+  /**
+   * type === 'door', doorState === 'locked' only — the DC to bypass this lock with Thieves' Tools
+   * (or an equivalent improvised approach) instead of the key. Every locked door is guaranteed to
+   * have one (default-filled server-side if the manifest omitted it — see dungeon/index.ts).
+   * DM-eyes-only, same discipline as a seal trap's escapeDC: never stated to players, and never
+   * hinted at in room/door text — resolved narratively when a player's roll total is compared
+   * against it (see session-processor/prompts.ts's dungeon narration prompt).
+   */
+  lockpickDC?: number;
   /**
    * type === 'door' only — whether this door blocks line of sight while shut (closed or locked).
    * 0 = opaque, blocks sight same as a wall. Above 0 = never blocks (a barred gate, a window).
@@ -121,6 +164,40 @@ export interface DungeonEntity {
    * threads through.
    */
   transparency?: number;
+}
+
+/**
+ * What resolves a DungeonQuestStage and advances the chain to the next one:
+ * - 'enter_room': the party steps into the room named `roomName`.
+ * - 'discover_entity': the entity named `entityName` (creature/loot/trap/object) becomes
+ *   `discovered` — the existing sight-radius/hideDC mechanic, not a separate inventory check.
+ * - 'defeat_boss': the dungeon's one `isBoss` creature dies. No name needed — a dungeon has at
+ *   most one boss (see manifest.ts), so this is never ambiguous.
+ * - 'exit_dungeon': the party leaves the dungeon entirely ([[DUNGEON_EXIT]]).
+ */
+export type DungeonQuestTriggerKind = "enter_room" | "discover_entity" | "defeat_boss" | "exit_dungeon";
+
+export interface DungeonQuestTrigger {
+  kind: DungeonQuestTriggerKind;
+  /** 'enter_room' only — must exactly match a DungeonRoom.name in this same dungeon. */
+  roomName?: string;
+  /** 'discover_entity' only — must exactly match a DungeonEntity.name in this same dungeon. */
+  entityName?: string;
+}
+
+/**
+ * One beat of a dungeon's quest chain — see Dungeon.questChain. Authored as an ordered list at
+ * manifest generation time (the LLM designs the whole narrative arc up front, cross-referencing
+ * the rooms/entities it invents in that same response), not invented incrementally mid-session.
+ * Only one stage is ever the party's active (open) quest at a time; resolving it (its `trigger`
+ * firing — see dungeon/questChain.ts) both closes it out and opens the next stage in the array,
+ * so the quest log visibly mutates as the dungeon is explored instead of sitting static.
+ */
+export interface DungeonQuestStage {
+  id: string;
+  name: string;
+  description: string;
+  trigger: DungeonQuestTrigger;
 }
 
 export interface Dungeon {
@@ -133,7 +210,8 @@ export interface Dungeon {
   entities: DungeonEntity[];
   positions?: Record<string, { gx: number; gy: number }>;
   arena?: boolean;
-  goals?: string[];
+  /** Ordered narrative quest chain for this dungeon — may be empty, never forced. See DungeonQuestStage. */
+  questChain?: DungeonQuestStage[];
   theme?: DungeonStylePack;
   /** Resolved folder key the client should fetch floor textures from — theme-slug, or theme-slug--<materials-hash> once a dynamic tileset has been generated for this dungeon's actual material set. Falls back to `theme` for dungeons predating this field. */
   tilesetSlug?: string;

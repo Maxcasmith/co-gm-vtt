@@ -216,24 +216,25 @@ campaignsRouter.post('/generate', async (req, res) => {
       // generateScenarioStoryboard's own try/catch), so it's safe to await plainly.
       const storyboardDone = generateScenarioStoryboard(slug, title, synopsis, config);
 
-      // One strong goal derived from the synopsis, not the manifest's own free-form invention —
-      // same predefinedQuests mechanism effects.ts's mid-campaign dungeon_gen handler already uses
-      // to override manifest goals, just constrained to exactly one here instead of that path's 0-3.
+      // One strong opening stage derived from the synopsis, not the manifest's own free-form
+      // invention — same predefinedChain mechanism effects.ts's mid-campaign dungeon_gen handler
+      // already uses. The manifest call below decides this stage's trigger (nothing exists yet
+      // for it to reference) plus the entire rest of the chain.
       send({ type: 'progress', message: 'Determining the dungeon\'s goal…' });
-      let predefinedQuests: { name: string; description: string }[] = [];
+      let predefinedChain: { id: string; name: string; description: string }[] = [];
       try {
         const goalRaw = await getFeatureProvider(config, 'questGeneration').complete(
           buildDungeonScenarioGoalPrompt(synopsis, 'dungeon-crawl', []),
         );
         const goal = parseLlmJson<{ id?: string; name?: string; description?: string }>(goalRaw);
-        if (goal.name && goal.description) predefinedQuests = [{ name: goal.name, description: goal.description }];
+        if (goal.name && goal.description) predefinedChain = [{ id: goal.id || slugify(goal.name), name: goal.name, description: goal.description }];
       } catch (err) { logError('routes/campaigns:generate:dungeonScenarioGoal', err); }
 
       send({ type: 'progress', message: 'Generating dungeon…' });
       const dungeonId = randomUUID();
       const dungeon = await generateDungeon(
         title, 'dungeon-crawl', getFeatureProvider(config, 'dungeonGeneration'), synopsis,
-        { width: 100, height: 100, roomRange: [14, 20], partySize, id: dungeonId, predefinedQuests },
+        { width: 100, height: 100, roomRange: [14, 20], partySize, id: dungeonId, predefinedChain },
         token => send({ type: 'token', text: token }),
         config,
       );
@@ -241,18 +242,14 @@ campaignsRouter.post('/generate', async (req, res) => {
       await saveDungeonAscii(slug, dungeon);
 
       const today = new Date().toISOString().slice(0, 10);
-      // Prefer predefinedQuests' own name/description (the LLM-authored quest, distinct title
-      // from its bullet-point brief) — dungeon.goals is just its description text, flattened for
-      // the manifest prompt. Only falls back to goals when the goal call above failed outright.
-      const goalQuests: Quest[] = predefinedQuests.length
-        ? predefinedQuests.map(q => ({
-            id: `goal-${slugify(q.name)}`, name: q.name, description: q.description,
-            status: 'open' as const, log: [], addedAt: today, sourceDungeonId: dungeonId,
-          }))
-        : (dungeon.goals ?? []).map(goal => ({
-            id: `goal-${slugify(goal)}`, name: goal, description: goal,
-            status: 'open' as const, log: [], addedAt: today, sourceDungeonId: dungeonId,
-          }));
+      // dungeon.questChain[0] is authoritative either way — the predefinedChain stage above
+      // (id/name/description preserved verbatim, see fetchManifest) or, if that goal call failed
+      // outright, whatever the manifest invented on its own. Only stage 0 becomes a visible quest
+      // now; later stages activate one at a time as each one's trigger resolves (dungeon/questChain.ts).
+      const stage0 = dungeon.questChain?.[0];
+      const goalQuests: Quest[] = stage0
+        ? [{ id: stage0.id, name: stage0.name, description: stage0.description, status: 'open' as const, log: [], addedAt: today, sourceDungeonId: dungeonId }]
+        : [];
       await writeQuests(slug, [...(await readQuests(slug)), ...goalQuests]);
 
       send({ type: 'progress', message: 'Finishing scenario storyboard…' });

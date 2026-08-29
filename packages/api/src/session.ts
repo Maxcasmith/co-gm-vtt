@@ -123,7 +123,6 @@ export async function runRecap(campaignId: string): Promise<{ text: string; isFi
     const groundTruth = dungeon ? describeDungeonGroundTruth(dungeon, {}) : '(no dungeon generated yet)';
     const text = await provider.complete(buildDungeonRecapPrompt({
       dungeonName: dungeon?.name ?? meta.name ?? 'the dungeon',
-      goals: dungeon?.goals ?? [],
       dungeonQuests,
       groundTruth,
       lastSessionText,

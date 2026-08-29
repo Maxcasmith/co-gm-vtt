@@ -8,6 +8,7 @@ import { spellsRouter } from './routes/spells.ts';
 import { tilesetsRouter } from './routes/tilesets.ts';
 import { creaturesRouter } from './routes/creatures.ts';
 import { propsRouter } from './routes/props.ts';
+import { iconsRouter } from './routes/icons.ts';
 import { debugPerfRouter } from './routes/debugPerf.ts';
 import { licensesRouter } from './routes/licenses.ts';
 import { initLicensesTable } from './licenses/db.ts';
@@ -25,6 +26,7 @@ app.use('/api/spells', spellsRouter);
 app.use('/api/tilesets', tilesetsRouter);
 app.use('/api/creatures', creaturesRouter);
 app.use('/api/props', propsRouter);
+app.use('/api/icons', iconsRouter);
 app.use('/api/debug/perf-log', debugPerfRouter);
 app.use('/api/licenses', licensesRouter);
 

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { Character, Item, Weapon, Armor, Consumable } from "shared";
 import { isWeapon, isArmor, isConsumable, isAmmunition } from "shared";
 import { dispatch } from "../events.ts";
-import emptyFrameIcon from "../assets/icons/Icon-Frame-Blue.jpg";
+import ItemIcon from "../ItemIcon.tsx";
 import { ActionCostDot } from "./helpers.tsx";
 
 const WEAPON_NAMES =
@@ -11,6 +11,8 @@ const ARMOUR_NAMES = /armou?r|shield|helmet|gauntlet|boot|plate|chain|mail/i;
 const CONSUMABLE_NAMES = /potion|scroll|ration|herb|tincture|elixir|berry/i;
 const POTION_OF_HEALING_NAME = /potion of healing/i;
 const GOODBERRY_NAME = /goodberry/i;
+const LOCKPICK_NAME = /lockpick/i;
+const TRAP_DISARM_KIT_NAME = /trap disarm kit/i;
 
 const SECTIONS = [
   {
@@ -61,7 +63,7 @@ function EquipSlot({
   title,
   label,
   className,
-  iconPath,
+  item,
   dragItem,
   onDrop,
 }: {
@@ -69,14 +71,14 @@ function EquipSlot({
   title?: string;
   label?: string;
   className?: string;
-  iconPath?: string;
+  item?: { name: string; iconPath?: string };
   dragItem: DragItem | null;
   onDrop: (name: EquipSlotName) => void;
 }) {
   const compatible = slotAccepts(name, dragItem);
   const slot = (
     <div
-      className={`sheet-equip-slot${className ? ` ${className}` : ""}${iconPath ? " sheet-equip-slot--filled" : ""}${compatible ? " sheet-equip-slot--target" : ""}`}
+      className={`sheet-equip-slot${className ? ` ${className}` : ""}${item ? " sheet-equip-slot--filled" : ""}${compatible ? " sheet-equip-slot--target" : ""}`}
       title={title}
       onDragOver={(e) => {
         if (compatible) e.preventDefault();
@@ -85,8 +87,8 @@ function EquipSlot({
         if (compatible) onDrop(name);
       }}
     >
-      {iconPath && (
-        <img className="sheet-equip-slot-icon" src={iconPath} alt="" />
+      {item && (
+        <ItemIcon className="sheet-equip-slot-icon" name={item.name} iconPath={item.iconPath} />
       )}
     </div>
   );
@@ -162,6 +164,16 @@ export function InventoryTab({
         characterName: character.name,
         healDice: "1d1",
       });
+    } else if (LOCKPICK_NAME.test(item.name)) {
+      dispatch("vtt:consumable:lockpick", {
+        characterId: character.id,
+        characterName: character.name,
+      });
+    } else if (TRAP_DISARM_KIT_NAME.test(item.name)) {
+      dispatch("vtt:consumable:trapdisarm", {
+        characterId: character.id,
+        characterName: character.name,
+      });
     }
   }
 
@@ -200,13 +212,10 @@ export function InventoryTab({
   const equippedIds = new Set(
     Object.values(character.equipment ?? {}).filter((id): id is string => !!id),
   );
-  function iconForSlot(slot: EquipSlotName): string | undefined {
+  function equippedItem(slot: EquipSlotName): Item | Weapon | Armor | Consumable | undefined {
     const itemId = character.equipment?.[slot];
     if (!itemId) return undefined;
-    return (
-      character.inventory?.find((i) => i.id === itemId)?.iconPath ||
-      emptyFrameIcon
-    );
+    return character.inventory?.find((i) => i.id === itemId);
   }
 
   // Assign each item to its first matching section
@@ -264,28 +273,28 @@ export function InventoryTab({
               <EquipSlot
                 name="head"
                 label="Head"
-                iconPath={iconForSlot("head")}
+                item={equippedItem("head")}
                 dragItem={dragItem}
                 onDrop={handleEquipDrop}
               />
               <EquipSlot
                 name="body"
                 label="Body"
-                iconPath={iconForSlot("body")}
+                item={equippedItem("body")}
                 dragItem={dragItem}
                 onDrop={handleEquipDrop}
               />
               <EquipSlot
                 name="gloves"
                 label="Gloves"
-                iconPath={iconForSlot("gloves")}
+                item={equippedItem("gloves")}
                 dragItem={dragItem}
                 onDrop={handleEquipDrop}
               />
               <EquipSlot
                 name="boots"
                 label="Boots"
-                iconPath={iconForSlot("boots")}
+                item={equippedItem("boots")}
                 dragItem={dragItem}
                 onDrop={handleEquipDrop}
               />
@@ -294,14 +303,14 @@ export function InventoryTab({
               <EquipSlot
                 name="mainHand"
                 label="Main Hand"
-                iconPath={iconForSlot("mainHand")}
+                item={equippedItem("mainHand")}
                 dragItem={dragItem}
                 onDrop={handleEquipDrop}
               />
               <EquipSlot
                 name="offHand"
                 label="Off Hand"
-                iconPath={iconForSlot("offHand")}
+                item={equippedItem("offHand")}
                 dragItem={dragItem}
                 onDrop={handleEquipDrop}
               />
@@ -331,10 +340,10 @@ export function InventoryTab({
             <div className="sheet-spell-detail">
               <div className="sheet-spell-detail-header">
                 <div className="sheet-spell-detail-heading">
-                  <img
+                  <ItemIcon
                     className="sheet-inv-icon sheet-spell-detail-icon"
-                    src={selected.iconPath || emptyFrameIcon}
-                    alt=""
+                    name={selected.name}
+                    iconPath={selected.iconPath}
                   />
                   <div>
                     <span className="sheet-spell-detail-name">
@@ -458,10 +467,10 @@ export function InventoryTab({
                         </span>
                       )}
                       <div className="sheet-inv-card-header">
-                        <img
+                        <ItemIcon
                           className="sheet-inv-icon"
-                          src={item.iconPath || emptyFrameIcon}
-                          alt=""
+                          name={item.name}
+                          iconPath={item.iconPath}
                         />
                         <span className="sheet-inv-name">{item.name}</span>
                         <div className="sheet-inv-card-header-right">

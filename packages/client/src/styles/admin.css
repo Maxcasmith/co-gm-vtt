@@ -324,6 +324,64 @@
   margin-top: 14px;
 }
 
+.item-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.item-cell {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  cursor: pointer;
+}
+.item-cell:hover .item-cell-name { color: var(--gold); }
+
+.item-cell-icon {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.item-cell-name {
+  font-size: 24px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item-cell--no-icon .item-cell-name { color: #e57373; }
+.item-cell--no-icon .item-cell-icon { border-color: #e57373; }
+
+.icon-candidate-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.icon-candidate-list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.icon-confirm-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+
 .tile-card {
   display: flex;
   flex-direction: column;
@@ -475,6 +533,94 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* ── item/ability detail sidebar — same slide-in shell as .props-sidebar, kept separate per this
+   file's own convention (each admin panel gets its own copy rather than sharing one generic name) ── */
+.item-detail-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: 420px;
+  max-width: 90vw;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  z-index: 101;
+  transform: translateX(100%);
+  transition: transform 0.3s ease;
+}
+
+.item-detail-sidebar--open {
+  transform: translateX(0);
+}
+
+.item-detail-sidebar-header {
+  position: relative;
+  padding: 24px 24px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.item-detail-sidebar-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+
+.item-detail-sidebar-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+
+.item-detail-sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+
+.item-detail-icon-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.item-detail-fields {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.item-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.item-detail-row-label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.item-detail-row-value {
+  color: var(--text);
+  text-align: right;
+  word-break: break-word;
 }
 
 /* ── creature detail super modal — portrait one side, stat block the other ── */

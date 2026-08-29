@@ -4,6 +4,7 @@ import { getCharacter, updateCharacter, readChatLog, appendChatLog, saveEncounte
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateCombatFlavour, evaluateNemesisCandidates } from '../session-processor/imagePrompts.ts';
 import { toClientDungeon } from '../dungeon/index.ts';
+import { checkQuestChainTriggers } from '../dungeon/questChain.ts';
 import { Team, Participant } from '../domain/encounter.ts';
 import { Creature } from '../domain/creature.ts';
 import { logError, logDebug } from '../logger.ts';
@@ -1629,6 +1630,13 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
     });
     // A dead participant's lingering effects go with it — nothing should tick for a corpse.
     engine.unregisterByOwner(targetId);
+
+    // Creature.from() doesn't carry isBoss (combat participants only need combat-relevant fields),
+    // so check the dungeon entity itself rather than the live creature/encounter — it's the one
+    // place the flag survives the manifest -> entity -> Creature hop unmodified.
+    if (dungeons.get(cid)?.entities.find(e => e.id === targetId)?.statBlock?.isBoss) {
+      void checkQuestChainTriggers(cid, { kind: 'defeat_boss' });
+    }
 
     if (encounter.allEnemiesDead()) {
       const enemyStatBlocks = encounter.enemies

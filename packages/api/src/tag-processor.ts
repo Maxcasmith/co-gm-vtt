@@ -13,6 +13,8 @@ export type TagEffect =
   | { type: 'npc_build'; npcName: string; detail: string }
   | { type: 'dungeon_gen'; name: string; dungeonType: string }
   | { type: 'dungeon_exit' }
+  | { type: 'door_unlock'; characterName: string }
+  | { type: 'item_used'; characterName: string; itemName: string }
   | { type: 'quest_add'; id: string; name: string; description: string }
   | { type: 'quest_update'; id: string; entry: string }
   | { type: 'quest_resolve'; id: string }
@@ -230,6 +232,25 @@ export async function processVdmResponse(
     }
   }
 
+  const DOOR_UNLOCK_RE = /\[\[DOOR_UNLOCK:([^\]]+)\]\]/g;
+  for (const match of [...text.matchAll(DOOR_UNLOCK_RE)]) {
+    const characterName = match[1]?.trim();
+    if (characterName) {
+      console.log(`[tag] DOOR_UNLOCK: ${characterName}`);
+      effects.push({ type: 'door_unlock', characterName });
+    }
+  }
+
+  const ITEM_USED_RE = /\[\[ITEM_USED:([^|[\]]+)\|([^\]]+)\]\]/g;
+  for (const match of [...text.matchAll(ITEM_USED_RE)]) {
+    const characterName = match[1]?.trim();
+    const itemName = match[2]?.trim();
+    if (characterName && itemName) {
+      console.log(`[tag] ITEM_USED: ${characterName} uses ${itemName}`);
+      effects.push({ type: 'item_used', characterName, itemName });
+    }
+  }
+
   const CLOCK_RE = /\[\[CLOCK:(\d+)\]\]/g;
   for (const match of [...text.matchAll(CLOCK_RE)]) {
     const secs = parseInt(match[1]!, 10);
@@ -359,7 +380,7 @@ export async function processVdmResponse(
     }),
   ]);
 
-  let strippedText = text.replace(TAG_RE, '').replace(PARTY_JOIN_RE, '').replace(SCENE_BUILD_RE, '').replace(NPC_BUILD_RE, '').replace(COMBAT_INIT_RE, '').replace(DUNGEON_EXIT_RE, '').replace(SPEAKING_AS_RE, '').replace(CHECK_RE, '').replace(SAVE_RE, '').replace(DUNGEON_GEN_RE, '').replace(QUEST_ADD_RE, '').replace(QUEST_UPDATE_RE, '').replace(QUEST_RESOLVE_RE, '').replace(CLOCK_RE, '').replace(NEMESIS_RETIRE_RE, '').replace(ALLY_XP_RE, '').replace(ALLY_LEARN_RE, '').replace(CURRENCY_ADD_RE, '').replace(CURRENCY_REMOVE_RE, '').replace(CAST_SPELL_RE, '').replace(/\s{2,}/g, ' ').trim();
+  let strippedText = text.replace(TAG_RE, '').replace(PARTY_JOIN_RE, '').replace(SCENE_BUILD_RE, '').replace(NPC_BUILD_RE, '').replace(COMBAT_INIT_RE, '').replace(DUNGEON_EXIT_RE, '').replace(DOOR_UNLOCK_RE, '').replace(ITEM_USED_RE, '').replace(SPEAKING_AS_RE, '').replace(CHECK_RE, '').replace(SAVE_RE, '').replace(DUNGEON_GEN_RE, '').replace(QUEST_ADD_RE, '').replace(QUEST_UPDATE_RE, '').replace(QUEST_RESOLVE_RE, '').replace(CLOCK_RE, '').replace(NEMESIS_RETIRE_RE, '').replace(ALLY_XP_RE, '').replace(ALLY_LEARN_RE, '').replace(CURRENCY_ADD_RE, '').replace(CURRENCY_REMOVE_RE, '').replace(CAST_SPELL_RE, '').replace(/\s{2,}/g, ' ').trim();
   // A tag sitting at the end of a sentence (the common case — models emit it after the prose it
   // corresponds to) gets eaten above along with the punctuation the model tucked inside it, e.g.
   // "...picks up a med kit[[PICKED_UP_HEALING:...]]" leaves "...picks up a med kit" with no period.

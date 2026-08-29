@@ -15,7 +15,8 @@ import {
 } from './state.ts';
 import { D20Roll, toSlug, escalateCr } from './combat/dice.ts';
 import { rollPlayerInitiatives, addToTurnOrder, sweepGameTimeExpiries, trySpendSpellSlot } from './combat/runtime.ts';
-import { generateAndBroadcastEnemies } from './dungeon/runtime.ts';
+import { generateAndBroadcastEnemies, unlockDoorNear, resolveLockpickAttempt, resolveTrapDisarmAttempt } from './dungeon/runtime.ts';
+import { checkQuestChainTriggers } from './dungeon/questChain.ts';
 import { findSpell } from './routes/spells.ts';
 
 // A player name in a tag comes from the model's narration, not a dropdown — it's never going to
@@ -27,6 +28,11 @@ function findCharByName(chars: Character[], name: string): Character | undefined
   const norm = name.trim().toLowerCase();
   return chars.find(c => c.name.trim().toLowerCase() === norm);
 }
+
+// Mirrors InventoryTab's click-handler name match (no general item-effects table exists — see
+// socketHandlers/inventory.ts's identical POTION_OF_HEALING_NAME comment) — kept in sync manually.
+const LOCKPICK_NAME = /lockpick/i;
+const TRAP_DISARM_KIT_NAME = /trap disarm kit/i;
 
 export async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
   await Promise.all(consolidateEffects(effects).map(async effect => {
@@ -117,16 +123,19 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
         ? Math.round(characters.reduce((sum, c) => sum + (c.level ?? 1), 0) / characters.length)
         : 1;
       // Generated first so the floor plan can be designed to actually serve the quest, not the
-      // other way around — dungeonId is decided up front so these are tagged and written before
+      // other way around — dungeonId is decided up front so this is tagged and written before
       // the dungeon itself exists, never the untagged/orphaned quest ensureSessionQuests avoids.
+      // At most one stage comes back (see buildDungeonQuestPrompt) — the manifest call below
+      // decides its trigger plus the entire rest of the chain, same as the campaign-creation path.
       const dungeonId = randomUUID();
       const predefinedQuests = await generateDungeonQuests(cid, dungeonId, effect.name, effect.dungeonType, storyContext, config);
       if (predefinedQuests.length) {
         await writeQuests(cid, [...(await readQuests(cid)), ...predefinedQuests]);
         io.to(ROOM).emit('quest:update', { quests: await readQuests(cid), act: (await readManifest(cid))?.act ?? 1 });
       }
+      const predefinedChain = predefinedQuests.map(q => ({ id: q.id, name: q.name, description: q.description }));
 
-      const dungeon = await generateDungeon(effect.name, effect.dungeonType, getFeatureProvider(config, 'dungeonGeneration'), storyContext, { partySize, partyLevel, id: dungeonId, predefinedQuests }, undefined, config);
+      const dungeon = await generateDungeon(effect.name, effect.dungeonType, getFeatureProvider(config, 'dungeonGeneration'), storyContext, { partySize, partyLevel, id: dungeonId, predefinedChain }, undefined, config);
       dungeons.set(cid, dungeon);
       await saveDungeon(cid, dungeon);
       await saveDungeonAscii(cid, dungeon);
@@ -134,11 +143,38 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
       console.log(`[dungeon] generated and broadcast: ${dungeon.name} (${dungeon.rooms.length} rooms, ${dungeon.entities.length} entities)`);
     } else if (effect.type === 'dungeon_exit') {
       if (combatState.get(cid) || !dungeons.has(cid)) return; // don't rip the map out from under an active fight, or if there's nothing loaded
+      // Must run before the dungeon is deleted below — checkQuestChainTriggers reads the live
+      // in-memory dungeon (for its questChain), not storage.
+      await checkQuestChainTriggers(cid, { kind: 'exit_dungeon' });
       dungeons.delete(cid);
       microDungeons.delete(cid);
       await clearDungeon(cid);
       io.to(ROOM).emit('dungeon:cleared');
       console.log('[dungeon] party left — cleared');
+    } else if (effect.type === 'door_unlock') {
+      await unlockDoorNear(cid, effect.characterName);
+    } else if (effect.type === 'item_used') {
+      // Narrated equivalent of InventoryTab's click (consumable:used decrements, then a bespoke
+      // handler applies the effect) — this does both in one step since there's no UI event pair
+      // to split it across. Anything other than Lockpick/Trap Disarm Kit just gets consumed with
+      // no mechanical effect, same as any other consumable with no bespoke handler.
+      const chars = await listCharacters(cid);
+      const char = findCharByName(chars, effect.characterName);
+      const item = char?.inventory?.find(i => i.name.toLowerCase() === effect.itemName.toLowerCase());
+      if (!char || !item) { console.warn(`[item_used] no "${effect.itemName}" in ${effect.characterName}'s inventory`); return; }
+
+      const quantity = item.quantity - 1;
+      await updateCharacter(cid, char.id, c => ({
+        ...c,
+        inventory: quantity > 0
+          ? (c.inventory ?? []).map(i => i.id === item.id ? { ...i, quantity } : i)
+          : (c.inventory ?? []).filter(i => i.id !== item.id),
+      }));
+      const sid = playerSocketIds.get(char.id);
+      if (sid) io.to(sid).emit('character:inventory:remove', { itemId: item.id, quantity: Math.max(0, quantity) });
+
+      if (LOCKPICK_NAME.test(item.name)) await resolveLockpickAttempt(cid, char.id, char.name);
+      else if (TRAP_DISARM_KIT_NAME.test(item.name)) await resolveTrapDisarmAttempt(cid, char.id, char.name);
     } else if (effect.type === 'party_join') {
       const currentAllies = await loadPartyAllies(cid);
       const alreadyPresent = currentAllies.some(a => a.name === effect.ally.name);

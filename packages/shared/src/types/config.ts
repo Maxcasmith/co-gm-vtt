@@ -30,6 +30,8 @@ export interface ImageConfig {
   generateWorldMap: boolean;
   generateTilesets: boolean;
   generateStoryboard: boolean;
+  generateBestiaryPortraits: boolean;
+  generatePropImages: boolean;
 }
 
 export type NarrationModel = "none" | "browser" | "tts-1" | "tts-1-hd";

@@ -125,7 +125,9 @@ export async function openaiValidateImageKey(apiKey: string): Promise<boolean> {
   return openaiValidateKey(apiKey);
 }
 
-export async function describeImage(base64image: string, apiKey: string): Promise<string> {
+const DEFAULT_DESCRIBE_INSTRUCTION = 'Describe this character\'s physical appearance in detail: face shape, hair colour and style, skin tone, distinctive features, expression, and any visible clothing or accessories. Be specific and vivid. 2-3 sentences only.';
+
+export async function describeImage(base64image: string, apiKey: string, instruction: string = DEFAULT_DESCRIBE_INSTRUCTION): Promise<string> {
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -135,10 +137,7 @@ export async function describeImage(base64image: string, apiKey: string): Promis
       messages: [{
         role: 'user',
         content: [
-          {
-            type: 'text',
-            text: 'Describe this character\'s physical appearance in detail: face shape, hair colour and style, skin tone, distinctive features, expression, and any visible clothing or accessories. Be specific and vivid. 2-3 sentences only.',
-          },
+          { type: 'text', text: instruction },
           { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64image}`, detail: 'low' } },
         ],
       }],

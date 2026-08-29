@@ -68,6 +68,8 @@ export type CombatDefeatPayload = Record<string, never>;
 export interface PlayerDeadPayload { characterId: string; characterName: string }
 export interface ConsumableUsedPayload { item: Consumable; characterId: string }
 export interface ConsumableHealPayload { characterId: string; characterName: string; healDice?: string }
+export interface ConsumableLockpickPayload { characterId: string; characterName: string }
+export interface ConsumableTrapDisarmPayload { characterId: string; characterName: string }
 export interface ConsumableHealResultPayload { characterId: string; characterName: string; healAmount: number; currentHp: number; maxHp: number }
 export interface EquipmentUpdatePayload { characterId: string; slot: 'head' | 'body' | 'gloves' | 'boots' | 'mainHand' | 'offHand'; itemId: string | null }
 export interface TacticsUpdatePayload { characterId: string; tactics: Manoeuvre[]; aiControlled: boolean }
@@ -232,6 +234,8 @@ export interface VTTEventMap {
   'vtt:combat:player:dead':     PlayerDeadPayload;
   'vtt:consumable:used':        ConsumableUsedPayload;
   'vtt:consumable:heal':        ConsumableHealPayload;
+  'vtt:consumable:lockpick':    ConsumableLockpickPayload;
+  'vtt:consumable:trapdisarm':  ConsumableTrapDisarmPayload;
   'vtt:consumable:heal:result': ConsumableHealResultPayload;
   'vtt:equipment:update':       EquipmentUpdatePayload;
   'vtt:tactics:update':         TacticsUpdatePayload;

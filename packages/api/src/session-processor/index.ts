@@ -417,7 +417,6 @@ export async function getDungeonNarrationResponse(
   const dungeonQuests = quests.filter(q => q.sourceDungeonId === dungeon.id);
   const system = buildDungeonNarrationPrompt({
     dungeonName: dungeon.name,
-    goals: dungeon.goals ?? [],
     dungeonQuests,
     characterNames,
     characterSummaries,

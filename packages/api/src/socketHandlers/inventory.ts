@@ -4,6 +4,7 @@ import { getCharacter, updateCharacter } from '../storage.ts';
 import { io, ROOM, playerSocketIds, encounters } from '../state.ts';
 import { rollDice, calcMaxHp } from '../combat/dice.ts';
 import { setLightSourceFor } from '../combat/runtime.ts';
+import { resolveLockpickAttempt, resolveTrapDisarmAttempt } from '../dungeon/runtime.ts';
 import type { JoinContext } from './context.ts';
 
 // Mirrors InventoryTab's click-handler name match (client has no structured heal data to read —
@@ -157,5 +158,16 @@ export function registerInventoryHandlers(ctx: JoinContext): void {
 
       io.to(ROOM).emit('consumable:heal:result', { characterId, characterName, healAmount, currentHp, maxHp });
     })();
+  });
+
+  // Lockpick / Trap Disarm Kit — same "consumable:used already burned the item, this just applies
+  // the effect" split as consumable:heal. Both roll a real DEX check (see resolveLockpickAttempt/
+  // resolveTrapDisarmAttempt in dungeon/runtime.ts) against the nearest matching target in range.
+  socket.on('consumable:lockpick', ({ characterId, characterName }: { characterId: string; characterName: string }) => {
+    void resolveLockpickAttempt(campaignId, characterId, characterName);
+  });
+
+  socket.on('consumable:trapdisarm', ({ characterId, characterName }: { characterId: string; characterName: string }) => {
+    void resolveTrapDisarmAttempt(campaignId, characterId, characterName);
   });
 }

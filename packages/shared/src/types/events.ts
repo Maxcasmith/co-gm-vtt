@@ -358,6 +358,10 @@ export interface ClientToServerEvents {
     healDice?: string;
   }) => void;
   "consumable:used": (payload: { characterId: string; itemId: string }) => void;
+  /** Lockpick — a real DEX ("Thieves' Tools") check rolled server-side against the nearest locked door in range. Result arrives as chat messages, not a dedicated event (see resolveLockpickAttempt). */
+  "consumable:lockpick": (payload: { characterId: string; characterName: string }) => void;
+  /** Trap Disarm Kit — same convention as consumable:lockpick, rolled against the nearest discovered trap in range. */
+  "consumable:trapdisarm": (payload: { characterId: string; characterName: string }) => void;
   "character:tactics:update": (payload: { characterId: string; tactics: Manoeuvre[]; aiControlled: boolean }) => void;
   "combat:reaction:respond": (payload: {
     requestId: string;

@@ -164,6 +164,8 @@ export async function previewGridCells(sourceBuffer: Buffer): Promise<Buffer[]> 
 // already on disk (global reuse across every dungeon/campaign, same philosophy as
 // creaturePortraits.ts), batches whatever's left into groups of 32.
 export async function generatePropSprites(propSpecs: PropSpec[], config: AppConfig): Promise<void> {
+  if (!config.image.generatePropImages) return;
+
   const needed: PendingProp[] = propSpecs
     .filter(spec => !hasPropSprite(spec.key))
     .map(spec => ({ slug: spec.key, name: titleCase(spec.key), description: spec.description }));

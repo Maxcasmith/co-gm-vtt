@@ -274,11 +274,12 @@ Return ONLY a single valid JSON object — no markdown fences, no explanation:
 }`;
 }
 
-// Fully replaces the manifest's own free-form goal invention (same "predefinedGoals... over the
+// Fully replaces the manifest's own free-form goal invention (same "predefinedChain... over the
 // ones it was explicitly told were already decided" precedent manifest.ts already applies for
-// mid-campaign dungeon entry — see fetchManifest's predefinedQuests handling) — deliberately ONE
-// goal, not the 0-3 buildDungeonQuestPrompt allows, so a fresh dungeon-crawl campaign opens on a
-// single strong thread pulled straight from the scenario instead of several disconnected hooks.
+// mid-campaign dungeon entry — see fetchManifest's predefinedChain handling) — deliberately ONE
+// opening stage; the manifest call itself decides its trigger and authors the entire rest of the
+// chain, so a fresh dungeon-crawl campaign opens on a single strong thread pulled straight from
+// the scenario instead of several disconnected hooks.
 export function buildDungeonScenarioGoalPrompt(synopsis: string, dungeonType: string, existingIds: string[]): string {
   const existingIdList = existingIds.join(', ') || 'none';
   return `You are generating the single goal that gives this tabletop RPG dungeon crawl (genre: ${dungeonType}) a reason to exist beyond "explore it."
@@ -290,5 +291,5 @@ Generate exactly ONE concrete, player-facing goal — what the party is here to 
 Use a kebab-case ID not in this list: ${existingIdList}
 
 Return ONLY a single valid JSON object — no markdown fences, no explanation:
-{ "id": "kebab-slug", "name": "Short, evocative quest title (2-6 words) — not a restatement of the description, a proper name for it, e.g. 'The Missing Cartographer', 'Silence the Ritual'.", "description": "2-3 short bullet points, one per line, each starting with '- ' — concrete, distinct beats of what the party is here to do. This becomes the dungeon's design brief, so name what's being sought/stopped/rescued." }`;
+{ "id": "kebab-slug", "name": "Short, evocative quest title (2-6 words) — not a restatement of the description, a proper name for it, e.g. 'The Missing Cartographer', 'Silence the Ritual'.", "description": "2-3 short bullet points, one per line, each starting with '- ' — concrete, distinct beats of ONLY this opening objective. This is stage one of a longer chain the dungeon itself will author around it once this one resolves — never describe the final confrontation, the escape, or how the whole thing ultimately resolves; that's later stages' job, not this one's. Say only what the party needs to find or do first. This becomes the dungeon's design brief, so name what's being sought/stopped/rescued." }`;
 }

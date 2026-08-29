@@ -1,7 +1,8 @@
 import type { DungeonEntity, EnemyStatBlock } from 'shared';
-import { hasLineOfSight, closedDoorCells } from 'shared';
+import { hasLineOfSight, closedDoorCells, statMod } from 'shared';
 import { randomUUID } from 'crypto';
-import { saveDungeon, saveEncounter, getConfig, readChatLog, listCharacters, readNemeses, readManifest, appendChatLog } from '../storage.ts';
+import { saveDungeon, saveEncounter, getConfig, readChatLog, listCharacters, getCharacter, readNemeses, readManifest, appendChatLog } from '../storage.ts';
+import { D20Roll } from '../combat/dice.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateEncounterEnemies } from '../session-processor/imagePrompts.ts';
 import { generateEncounterDungeon, toClientDungeon, roomAt } from './index.ts';
@@ -12,6 +13,7 @@ import { Creature } from '../domain/creature.ts';
 import { logError, logDebug } from '../logger.ts';
 import { io, ROOM, combatState, encounters, tokenPositions, dungeons, microDungeons, withLivePositions, PLAYER_SIGHT_RADIUS, ENEMY_AGGRO_RADIUS, enemiesReady, combatStartedAt } from '../state.ts';
 import { addToTurnOrder, rollPlayerInitiatives, rollEnemyInitiatives, checkTrapAt } from '../combat/runtime.ts';
+import { checkQuestChainTriggers } from './questChain.ts';
 
 // Live cell positions of every participant currently in the fight — players keyed by name,
 // everyone else (creatures, allies) keyed by id, matching tokenPositions' own convention.
@@ -52,6 +54,7 @@ export async function checkDungeonProximity(cid: string, gx: number, gy: number,
     room.visited = true;
     changed = true;
     dungeonEvents.emit('room_entered', { cid, room, characterName });
+    void checkQuestChainTriggers(cid, { kind: 'enter_room', roomName: room.name });
   }
 
   await checkTrapAt(cid, gx, gy, characterName, characterName, true);
@@ -62,7 +65,11 @@ export async function checkDungeonProximity(cid: string, gx: number, gy: number,
     // Discovery (fog of war) stays scoped to what the moving player themself can actually see.
     const dist = Math.max(Math.abs(gx - entity.x), Math.abs(gy - entity.y));
     const seen = dist <= PLAYER_SIGHT_RADIUS && hasLineOfSight(dungeon.cells, gx, gy, entity.x, entity.y, blocked);
-    if (!entity.discovered && seen) { entity.discovered = true; changed = true; }
+    if (!entity.discovered && seen) {
+      entity.discovered = true;
+      changed = true;
+      void checkQuestChainTriggers(cid, { kind: 'discover_entity', entityName: entity.name });
+    }
 
     const aggroed = aggroSources.some(pos =>
       Math.max(Math.abs(pos.gx - entity.x), Math.abs(pos.gy - entity.y)) <= ENEMY_AGGRO_RADIUS &&
@@ -110,6 +117,7 @@ export async function checkDungeonHiddenReveal(cid: string, characterName: strin
     changed = true;
     found.push(entity);
     console.log(`[dungeon] ${characterName} notices ${entity.name}`);
+    void checkQuestChainTriggers(cid, { kind: 'discover_entity', entityName: entity.name });
   }
 
   // Hidden dressing is text-only — no coordinates, no sprite — so it resolves against the room the
@@ -131,26 +139,127 @@ export async function checkDungeonHiddenReveal(cid: string, characterName: strin
   return found;
 }
 
-// Player-clicked open/closed toggle — a no-op (not an error) if the door doesn't exist, is
-// locked (no unlock mechanic exists yet — see DungeonEntity.doorState's doc), or the requester
-// isn't within 5ft of any cell the door occupies. Authority lives here, not on the client: the
-// click only sends intent, this decides whether it actually happens.
-export async function toggleDoor(cid: string, doorId: string, characterName: string): Promise<void> {
-  const dungeon = dungeons.get(cid);
-  const door = dungeon?.entities.find(e => e.id === doorId && e.type === 'door');
-  if (!dungeon || !door || door.doorState === 'locked') return;
-
-  const pos = tokenPositions.get(cid)?.[characterName];
-  if (!pos) return;
+// Chebyshev distance in feet from a character's cell to the nearest cell a door/entity occupies —
+// shared by toggleDoor's click gate and the narrated door_unlock effect's proximity check.
+function feetToDoor(pos: { gx: number; gy: number }, door: { x: number; y: number; width?: number; height?: number }): number {
   const w = door.width ?? 1, h = door.height ?? 1;
   const dx = Math.max(door.x - pos.gx, 0, pos.gx - (door.x + w - 1));
   const dy = Math.max(door.y - pos.gy, 0, pos.gy - (door.y + h - 1));
-  if (Math.max(dx, dy) * 5 > 5) return;
+  return Math.max(dx, dy) * 5;
+}
 
-  door.doorState = door.doorState === 'open' ? 'closed' : 'open';
-  console.log(`[dungeon] ${characterName} ${door.doorState === 'open' ? 'opens' : 'closes'} a door`);
+// Player-clicked open/closed toggle. A no-op (not an error) if the door doesn't exist or the
+// requester isn't within 5ft of any cell the door occupies. For a 'locked' door specifically, a
+// click also requires its key (requiresKeyId) to already be discovered — no key found yet means
+// this is still a dead end; the door unlocks AND opens in this one click once it is (see
+// DungeonEntity.doorState's doc — narrating the key/a successful lockpick instead goes through
+// [[DOOR_UNLOCK]], see effects.ts). Authority lives here, not on the client: the click only sends
+// intent, this decides whether it actually happens.
+export async function toggleDoor(cid: string, doorId: string, characterName: string): Promise<void> {
+  const dungeon = dungeons.get(cid);
+  const door = dungeon?.entities.find(e => e.id === doorId && e.type === 'door');
+  if (!dungeon || !door) return;
+
+  const pos = tokenPositions.get(cid)?.[characterName];
+  if (!pos || feetToDoor(pos, door) > 5) return;
+
+  if (door.doorState === 'locked') {
+    const key = door.requiresKeyId ? dungeon.entities.find(e => e.id === door.requiresKeyId) : undefined;
+    if (!key?.discovered) return;
+    door.doorState = 'open';
+    console.log(`[dungeon] ${characterName} unlocks and opens a door with ${key.name}`);
+  } else {
+    door.doorState = door.doorState === 'open' ? 'closed' : 'open';
+    console.log(`[dungeon] ${characterName} ${door.doorState === 'open' ? 'opens' : 'closes'} a door`);
+  }
   await saveDungeon(cid, dungeon);
   io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+}
+
+// Narrated unlock ("I use the key", "I pick the lock") — the DM tags [[DOOR_UNLOCK:PlayerName]]
+// once its narration establishes the door opened, whether via the key or a successful Thieves'
+// Tools check against the door's (DM-eyes-only) lockpickDC. Unlike toggleDoor's click path, this
+// doesn't re-check key discovery or compare a roll against lockpickDC itself — same trust model
+// already used for a seal trap's escapeDC (resolved by the DM's own judgment, never re-verified in
+// code) — proximity is the only thing enforced server-side. No-op if nothing locked is in range.
+export async function unlockDoorNear(cid: string, characterName: string): Promise<void> {
+  const dungeon = dungeons.get(cid);
+  const pos = tokenPositions.get(cid)?.[characterName];
+  if (!dungeon || !pos) return;
+
+  const door = dungeon.entities.find(e => e.type === 'door' && e.doorState === 'locked' && feetToDoor(pos, e) <= 5);
+  if (!door) return;
+
+  door.doorState = 'open';
+  console.log(`[dungeon] ${characterName} narrates a door unlocked`);
+  await saveDungeon(cid, dungeon);
+  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+}
+
+// A consumable Lockpick's whole job — unlike unlockDoorNear (the key/narration path, AI-trusted,
+// no roll), this always rolls a real DEX check (labeled Thieves' Tools; no tool-proficiency bonus
+// is modeled — this codebase has no tool-proficiency concept on Character at all) against the
+// nearest locked door's lockpickDC. Shared by both the inventory-click path (socketHandlers/
+// inventory.ts's consumable:lockpick) and the narrated path ([[ITEM_USED]], see effects.ts) — the
+// item itself is consumed by the caller either way, this only resolves what the roll does.
+export async function resolveLockpickAttempt(cid: string, characterId: string, characterName: string): Promise<void> {
+  const char = await getCharacter(cid, characterId);
+  const dungeon = dungeons.get(cid);
+  const pos = tokenPositions.get(cid)?.[characterName];
+  if (!char || !dungeon || !pos) return;
+
+  const d20 = new D20Roll().roll();
+  const total = d20 + statMod(char.stats.dex);
+  await appendChatLogAndBroadcast(cid, `${characterName} rolls Thieves' Tools (DEX) to pick a lock: ${total}.`);
+
+  const door = dungeon.entities.find(e => e.type === 'door' && e.doorState === 'locked' && feetToDoor(pos, e) <= 5);
+  if (!door) {
+    await appendChatLogAndBroadcast(cid, `${characterName} has no locked door within reach.`);
+    return;
+  }
+  if (total < (door.lockpickDC ?? 15)) {
+    await appendChatLogAndBroadcast(cid, `${characterName} fails to pick the lock.`);
+    return;
+  }
+  door.doorState = 'open';
+  await saveDungeon(cid, dungeon);
+  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  await appendChatLogAndBroadcast(cid, `${characterName} picks the lock — the door swings open.`);
+}
+
+// A consumable Trap Disarm Kit's whole job — same DEX-check convention as resolveLockpickAttempt,
+// rolled against the nearest DISCOVERED trap's disarmDC (an undiscovered trap can't be targeted —
+// you have to have found it first). Success removes the trap entity outright, same end state as
+// it triggering, just without the consequence. Shared by the click and narrated paths.
+export async function resolveTrapDisarmAttempt(cid: string, characterId: string, characterName: string): Promise<void> {
+  const char = await getCharacter(cid, characterId);
+  const dungeon = dungeons.get(cid);
+  const pos = tokenPositions.get(cid)?.[characterName];
+  if (!char || !dungeon || !pos) return;
+
+  const d20 = new D20Roll().roll();
+  const total = d20 + statMod(char.stats.dex);
+  await appendChatLogAndBroadcast(cid, `${characterName} rolls Thieves' Tools (DEX) to disarm a trap: ${total}.`);
+
+  const trap = dungeon.entities.find(e => e.type === 'trap' && e.discovered && feetToDoor(pos, e) <= 5);
+  if (!trap) {
+    await appendChatLogAndBroadcast(cid, `${characterName} has no discovered trap within reach.`);
+    return;
+  }
+  if (total < (trap.trap?.disarmDC ?? 13)) {
+    await appendChatLogAndBroadcast(cid, `${characterName} fails to disarm the trap.`);
+    return;
+  }
+  dungeon.entities = dungeon.entities.filter(e => e.id !== trap.id);
+  await saveDungeon(cid, dungeon);
+  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  await appendChatLogAndBroadcast(cid, `${characterName} disarms the trap safely.`);
+}
+
+async function appendChatLogAndBroadcast(cid: string, text: string): Promise<void> {
+  const msg = { text, senderName: 'System', timestamp: Date.now() };
+  await appendChatLog(cid, msg);
+  io.to(ROOM).emit('chat:message', msg);
 }
 
 export async function generateAndBroadcastEnemies(campaignId: string, combatants: string[] = []): Promise<void> {

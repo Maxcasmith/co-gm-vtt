@@ -4,13 +4,16 @@ import { rm, readdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import sharp from 'sharp';
-import { slugifyTheme } from 'shared';
+import { slugifyTheme, iconSlug } from 'shared';
 import type { Dungeon, DungeonMaterialSpec, StoryboardTestRecord } from 'shared';
-import { CAMPAIGNS_DIR, PROPS_DIR, TILESETS_DIR, STORYBOARD_TEST_DIR, getConfig, getWorldMeta, listCampaigns, writeStoryboardTestFile, getStoryboardTestRecord } from '../storage.ts';
+import { CAMPAIGNS_DIR, PROPS_DIR, TILESETS_DIR, CREATURES_DIR, ICONS_DIR, STORYBOARD_TEST_DIR, getConfig, getWorldMeta, listCampaigns, loadDungeon, writeStoryboardTestFile, getStoryboardTestRecord } from '../storage.ts';
 import { saveCampaignAsAdventure, SAVED_ADVENTURES_DIR } from '../adventures/storage.ts';
+import { findCreatureUsage, deleteUnusedResources, type ResourceCleanupRequest } from '../resourceUsage.ts';
 import { generateExtendedTileset } from '../dungeon/tilesets.ts';
 import { generatePropSpriteBatch, previewGridCells } from '../dungeon/props.ts';
 import type { PendingProp } from '../dungeon/props.ts';
+import { generateIconsForItems } from '../dungeon/icons.ts';
+import type { PendingIcon } from '../dungeon/icons.ts';
 import { runStoryboardPipeline, SLIDE_COUNT } from '../dungeon/storyboard.ts';
 import { logError } from '../logger.ts';
 
@@ -57,12 +60,40 @@ adminRouter.get('/campaigns', async (req, res) => {
 
 adminRouter.delete('/campaigns/:id', async (req, res) => {
   if (!(await requireAdmin(req, res))) return;
-  const campaignDir = path.join(CAMPAIGNS_DIR, req.params['id']!);
+  const campaignId = req.params['id']!;
+  const campaignDir = path.join(CAMPAIGNS_DIR, campaignId);
   try {
+    const { resources } = req.body as { resources?: ResourceCleanupRequest };
+    let messages: string[] = [];
+    if (resources && (resources.tiles || resources.creatures || resources.props)) {
+      const dungeon = await loadDungeon(campaignId);
+      if (dungeon) messages = await deleteUnusedResources(dungeon, resources, { excludeId: campaignId, excludeKind: 'campaign' });
+    }
     if (existsSync(campaignDir)) await rm(campaignDir, { recursive: true });
-    res.json({ ok: true });
+    res.json({ ok: true, messages });
   } catch (err) {
     logError('routes/admin:deleteCampaign', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// Global reuse across every dungeon (see dungeon/creaturePortraits.ts) — refuse to delete a
+// creature's portrait/stats while any campaign or saved adventure still references it, same
+// guard shape deleteUnusedResources uses for the bulk campaign-delete cleanup path.
+adminRouter.delete('/creatures/:slug', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
+  const slug = req.params['slug']!;
+  try {
+    const usage = await findCreatureUsage(slug);
+    if (usage.length) {
+      res.status(409).json({ ok: false, error: 'Still in use', usage });
+      return;
+    }
+    const dir = path.join(CREATURES_DIR, slug);
+    if (existsSync(dir)) await rm(dir, { recursive: true });
+    res.json({ ok: true });
+  } catch (err) {
+    logError('routes/admin:deleteCreature', err);
     res.status(500).json({ ok: false, error: String(err) });
   }
 });
@@ -234,6 +265,62 @@ adminRouter.post('/props/generate', async (req, res) => {
     send({ type: 'error', message: err instanceof Error ? err.message : 'Generation failed' });
   } finally {
     res.end();
+  }
+});
+
+// SSE, mirrors /props/generate. No slug in the request — the icon's storage folder/URL is always
+// iconSlug(name) (see dungeon/icons.ts), so the client can predict where a finished icon will land
+// straight from the name, without the server handing back a URL map.
+adminRouter.post('/icons/generate', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
+  const { items: rawItems } = req.body as { items?: PendingIcon[] };
+  const items = (Array.isArray(rawItems) ? rawItems : [])
+    .filter((i): i is PendingIcon => !!i?.name?.trim() && !!i?.description?.trim())
+    .slice(0, 64);
+  if (!items.length) {
+    res.status(400).json({ error: 'At least one item (name + description) is required' });
+    return;
+  }
+
+  const config = await getConfig();
+  const apiKey = config.apiKeys.openai;
+  if (!apiKey) {
+    res.status(400).json({ error: 'No OpenAI API key configured' });
+    return;
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  function send(data: object) { res.write(`data: ${JSON.stringify(data)}\n\n`); }
+
+  try {
+    await generateIconsForItems(items, apiKey, config.image.model, message => send({ type: 'progress', message }));
+    send({ type: 'complete' });
+  } catch (err) {
+    logError('routes/admin:generateIconsForItems', err);
+    send({ type: 'error', message: err instanceof Error ? err.message : 'Generation failed' });
+  } finally {
+    res.end();
+  }
+});
+
+// Discards one generated icon (the "uncheck to discard" step of the Create Icons confirmation
+// screen, or the detail sidebar's "Remove Icon"). Mirrors /tilesets/:theme's delete route.
+adminRouter.delete('/icons/:slug', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
+  const slug = req.params['slug']!;
+  if (iconSlug(slug) !== slug) {
+    res.status(400).json({ error: 'Invalid slug' });
+    return;
+  }
+  const dir = path.join(ICONS_DIR, slug);
+  try {
+    if (existsSync(dir)) await rm(dir, { recursive: true });
+    res.json({ ok: true });
+  } catch (err) {
+    logError('routes/admin:deleteIcon', err);
+    res.status(500).json({ ok: false, error: String(err) });
   }
 });
 

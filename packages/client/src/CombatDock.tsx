@@ -3,9 +3,7 @@ import type { Character, Spell, Weapon } from 'shared';
 import { actionCostFromCastingTime, isWeapon, hasOriginFeat, ABILITY_DEFS, RESOURCE_DEFS, resourceCurrent, resourceMax } from 'shared';
 import { dispatch, on } from './events.ts';
 import type { TargetingStartPayload } from './events.ts';
-import emptyFrameIcon from './assets/icons/Icon-Frame-Blue.jpg';
-import fistIcon from './assets/icons/Icon-Frame-Fist.jpg';
-import healerKitIcon from './assets/icons/Icon-Frame-potion-of-healing.jpg';
+import ItemIcon from './ItemIcon.tsx';
 import './app.css';
 
 const API = `http://${window.location.hostname}:3001`;
@@ -58,7 +56,6 @@ function unarmedStrikeFor(character: Character): Weapon {
     id: 'unarmed-strike', name: 'Unarmed Strike', description: 'A bare-handed strike.', quantity: 1,
     type: 'weapon', damage: hasOriginFeat(character, 'Tavern Brawler') ? '1d4' : '1',
     damageType: 'bludgeoning', attackBonus: 0, range: 5, properties: ['simple'], isFinesse: false,
-    iconPath: fistIcon,
   };
 }
 
@@ -403,7 +400,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
             title={`Healer's Kit (${healersKit?.quantity}) — expend a use to tend a creature within 5ft`}
             onClick={() => setHealerPicker(true)}
           >
-            <img className="combat-dock-weapon-icon" src={healerKitIcon} alt="Healer's Kit" />
+            <ItemIcon className="combat-dock-weapon-icon" name="Healer's Kit" />
           </button>
         )
       )}
@@ -426,7 +423,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
               title={weapon.name}
               onClick={() => handleWeaponClick(weapon)}
             >
-              <img className="combat-dock-weapon-icon" src={weapon.iconPath || emptyFrameIcon} alt="" />
+              <ItemIcon className="combat-dock-weapon-icon" name={weapon.name} iconPath={weapon.iconPath} />
             </button>
           ))}
           {offhandWeapon && (
@@ -437,7 +434,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
               title={`${offhandWeapon.name} (off-hand)`}
               onClick={() => handleOffhandClick(offhandWeapon)}
             >
-              <img className="combat-dock-weapon-icon" src={offhandWeapon.iconPath || emptyFrameIcon} alt="" />
+              <ItemIcon className="combat-dock-weapon-icon" name={offhandWeapon.name} iconPath={offhandWeapon.iconPath} />
             </button>
           )}
           {availableAbilities.map(([key, ability]) => (
@@ -467,7 +464,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
                 title={ability.label}
                 onClick={() => handleAbilityClick(key, ability)}
               >
-                <img className="combat-dock-weapon-icon" src={emptyFrameIcon} alt={ability.label} />
+                <ItemIcon className="combat-dock-weapon-icon" name={ability.label} alt={ability.label} />
               </button>
               <span className="combat-dock-ability-uses">{resourceCurrent(character, ability.resourceKey)}/{resourceMax(character, ability.resourceKey)}</span>
             </div>
@@ -480,7 +477,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
                 title={huntersMarkActive ? 'More Favored Enemy' : "Hunter's Mark (Favored Enemy)"}
                 onClick={handleCastHuntersMark}
               >
-                <img className="combat-dock-weapon-icon" src={emptyFrameIcon} alt="Hunter's Mark" />
+                <ItemIcon className="combat-dock-weapon-icon" name="Hunter's Mark" alt="Hunter's Mark" />
               </button>
               <span className="combat-dock-ability-uses">{resourceCurrent(character, 'favoredEnemy')}/{resourceMax(character, 'favoredEnemy')}</span>
             </div>

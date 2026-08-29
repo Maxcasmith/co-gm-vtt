@@ -12,11 +12,22 @@ export const SIZE_RANGE: Record<'small' | 'medium' | 'large', [number, number]> 
   large: [9, 13],
 };
 
+/** A carved doorway rect plus whatever lock the manifest authored for that room-pair (see
+ * ManifestRoom.doors) — `doorState`/`keyName` omitted means an ordinary unlocked door.
+ * `keyName` is still a name at this point (the loot entity it references has no real id until
+ * placeEntities runs); dungeon/index.ts resolves it into DungeonEntity.requiresKeyId. */
+export interface DoorRect {
+  x: number; y: number; width: number; height: number;
+  doorState?: 'open' | 'closed' | 'locked';
+  keyName?: string;
+  lockpickDC?: number;
+}
+
 export interface GeneratorResult {
   cells: number[][];
   rooms: DungeonRoom[];
   /** Carved doorway rects (building layouts only — see buildingLayout.ts's carveDoorway) that generateDungeon turns into Door entities. Omitted/empty for organic layouts, which carve plain gaps instead of literal doors. */
-  doors?: { x: number; y: number; width: number; height: number }[];
+  doors?: DoorRect[];
 }
 
 export function randInt(min: number, max: number): number {

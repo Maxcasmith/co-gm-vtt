@@ -17,6 +17,7 @@ export const PREMADE_DIR   = path.join(STORAGE_DIR, 'premade');
 export const TILESETS_DIR  = path.join(STORAGE_DIR, 'tilesets');
 export const CREATURES_DIR = path.join(STORAGE_DIR, 'creatures');
 export const PROPS_DIR      = path.join(STORAGE_DIR, 'props');
+export const ICONS_DIR      = path.join(STORAGE_DIR, 'icons');
 export const STORYBOARD_TEST_DIR = path.join(STORAGE_DIR, 'storyboard-test');
 
 const NARRATIVE_FEATURES: AppConfig['workflows'][number]['features'] = [
@@ -35,7 +36,7 @@ const DEFAULT_CONFIG: AppConfig = {
     { id: 'default-combat', name: 'Combat & World', enabled: true, models: [{ provider: 'openai', model: 'gpt-4o-mini' }], features: WORLD_AND_COMBAT_FEATURES },
   ],
   apiKeys:  { openai: '', anthropic: '', deepseek: '', kimi: '' },
-  image:    { model: 'gpt-image-1', generateWorldMap: false, generateTilesets: false, generateStoryboard: false },
+  image:    { model: 'gpt-image-1', generateWorldMap: false, generateTilesets: false, generateStoryboard: false, generateBestiaryPortraits: false, generatePropImages: false },
   narration: { model: 'none', voice: 'onyx' },
   adminPassword: '',
 };

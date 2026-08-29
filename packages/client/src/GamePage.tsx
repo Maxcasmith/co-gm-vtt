@@ -377,6 +377,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       socket.emit('consumable:used', { characterId, itemId: item.id });
     });
     const unsubHeal = on('vtt:consumable:heal', payload => socket.emit('consumable:heal', payload));
+    const unsubLockpick = on('vtt:consumable:lockpick', payload => socket.emit('consumable:lockpick', payload));
+    const unsubTrapDisarm = on('vtt:consumable:trapdisarm', payload => socket.emit('consumable:trapdisarm', payload));
     socket.on('consumable:heal:result', data => {
       dispatch('vtt:consumable:heal:result', data);
       if (data.characterId === character.id) setPlayerHpState(prev => ({ current: data.currentHp, max: data.maxHp, temp: prev?.temp }));
@@ -476,6 +478,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       unsubAlertSwap();
       unsubHealerKit();
       unsubHeal();
+      unsubLockpick();
+      unsubTrapDisarm();
       unsubConsumableUsed();
       unsubDoorToggle();
     };

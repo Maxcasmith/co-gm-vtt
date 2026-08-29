@@ -25,6 +25,8 @@ interface CreatureDetail {
 interface Props {
   creature: CreatureDetail | null;
   onClose: () => void;
+  onDelete: () => void;
+  deleteError?: string;
 }
 
 const API = `http://${window.location.hostname}:3001`;
@@ -38,7 +40,7 @@ const ABILITY_LABELS: [key: keyof NonNullable<CreatureDetail['stats']>, label: s
   ['str', 'STR'], ['dex', 'DEX'], ['con', 'CON'], ['int', 'INT'], ['wis', 'WIS'], ['cha', 'CHA'],
 ];
 
-export default function CreatureDetailModal({ creature, onClose }: Props) {
+export default function CreatureDetailModal({ creature, onClose, onDelete, deleteError }: Props) {
   if (!creature) return null;
 
   return (
@@ -106,7 +108,10 @@ export default function CreatureDetailModal({ creature, onClose }: Props) {
           </div>
         </div>
 
+        {deleteError && <p className="modal-error">{deleteError}</p>}
+
         <div className="modal-actions">
+          <button className="btn-danger" onClick={onDelete}>Delete</button>
           <button className="btn-primary" onClick={onClose}>Close</button>
         </div>
       </dialog>

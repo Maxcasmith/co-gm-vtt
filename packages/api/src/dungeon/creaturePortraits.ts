@@ -104,6 +104,8 @@ interface PendingPortrait {
 // whatever's left into groups of 16, and reuses the exact atlas-request/resize/crop shape
 // tilesets.ts uses for tile textures (generateTilesetAtlas, computeGridRects).
 export async function generateCreaturePortraits(entities: DungeonEntity[], config: AppConfig): Promise<void> {
+  if (!config.image.generateBestiaryPortraits) return;
+
   const statsWrites: Promise<void>[] = [];
   const seen = new Set<string>();
   const needed: PendingPortrait[] = [];

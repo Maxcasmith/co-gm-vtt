@@ -6,6 +6,7 @@ import CreateFromModuleModal from './CreateFromModuleModal.tsx';
 import CreateFromAdventureModal from './CreateFromAdventureModal.tsx';
 import SaveAdventureModal from './SaveAdventureModal.tsx';
 import CreateCampaignModal from './CreateCampaignModal.tsx';
+import DeleteResourcesModal from './DeleteResourcesModal.tsx';
 import './app.css';
 
 const API = `http://${window.location.hostname}:3001`;
@@ -32,6 +33,8 @@ export default function AdminPage({ password, onOpenResources, onPasswordChanged
   const [resumeAdventure, setResumeAdventure]       = useState<CompendiumMeta | null>(null);
   const [selectedSavedAdventure, setSelectedSavedAdventure] = useState<SavedAdventureMeta | null>(null);
   const [saveAdventureCampaign, setSaveAdventureCampaign]   = useState<Campaign | null>(null);
+  const [deleteCampaignTarget, setDeleteCampaignTarget]     = useState<Campaign | null>(null);
+  const [deleteAdventureTarget, setDeleteAdventureTarget]   = useState<SavedAdventureMeta | null>(null);
 
   function fetchCampaigns() {
     fetch(`${API}/api/admin/campaigns`, { headers: adminHeaders(password) })
@@ -60,28 +63,21 @@ export default function AdminPage({ password, onOpenResources, onPasswordChanged
     fetchSavedAdventures();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function deleteCampaign(campaignId: string, campaignName: string) {
-    if (!window.confirm(`Permanently delete the entire campaign "${campaignName}"? This cannot be undone.`)) return;
-    const r = await fetch(`${API}/api/admin/campaigns/${campaignId}`, {
-      method: 'DELETE',
-      headers: adminHeaders(password),
-    });
-    if (r.ok) {
-      // Clear any session/local storage the player may have for this campaign
-      try {
-        const sessionRaw = sessionStorage.getItem(`vtt-session:${campaignId}`);
-        if (sessionRaw) {
-          const char = JSON.parse(sessionRaw) as { id?: string };
-          if (char.id) {
-            const passwords = JSON.parse(localStorage.getItem('vtt-passwords') ?? '{}') as Record<string, string>;
-            delete passwords[`${campaignId}:${char.id}`];
-            localStorage.setItem('vtt-passwords', JSON.stringify(passwords));
-          }
+  function onCampaignDeleted(campaignId: string) {
+    // Clear any session/local storage the player may have for this campaign
+    try {
+      const sessionRaw = sessionStorage.getItem(`vtt-session:${campaignId}`);
+      if (sessionRaw) {
+        const char = JSON.parse(sessionRaw) as { id?: string };
+        if (char.id) {
+          const passwords = JSON.parse(localStorage.getItem('vtt-passwords') ?? '{}') as Record<string, string>;
+          delete passwords[`${campaignId}:${char.id}`];
+          localStorage.setItem('vtt-passwords', JSON.stringify(passwords));
         }
-      } catch { /* ignore */ }
-      sessionStorage.removeItem(`vtt-session:${campaignId}`);
-      setCampaigns(cs => cs.filter(c => c.id !== campaignId));
-    } else setFeedback(f => ({ ...f, [`${campaignId}:delete`]: 'Failed' }));
+      }
+    } catch { /* ignore */ }
+    sessionStorage.removeItem(`vtt-session:${campaignId}`);
+    setCampaigns(cs => cs.filter(c => c.id !== campaignId));
   }
 
   async function deleteAdventure(slug: string, name: string) {
@@ -89,13 +85,6 @@ export default function AdminPage({ password, onOpenResources, onPasswordChanged
     const r = await fetch(`${API}/api/compendium/${slug}`, { method: 'DELETE' });
     if (r.ok) setAdventures(a => a.filter(x => x.slug !== slug));
     else setFeedback(f => ({ ...f, [`module:${slug}`]: 'Failed' }));
-  }
-
-  async function deleteSavedAdventure(slug: string, name: string) {
-    if (!window.confirm(`Permanently delete the saved adventure "${name}"? This cannot be undone.`)) return;
-    const r = await fetch(`${API}/api/adventures/${slug}`, { method: 'DELETE' });
-    if (r.ok) setSavedAdventures(a => a.filter(x => x.slug !== slug));
-    else setFeedback(f => ({ ...f, [`adventure:${slug}`]: 'Failed' }));
   }
 
   async function erase(campaignId: string, type: 'chat' | 'sessions') {
@@ -164,7 +153,7 @@ export default function AdminPage({ password, onOpenResources, onPasswordChanged
                   <button className="btn-secondary" onClick={() => setSaveAdventureCampaign(c)}>Save</button>
                 </td>
                 <td>
-                  <button className="btn-danger" onClick={() => void deleteCampaign(c.id, c.name)}>Delete</button>
+                  <button className="btn-danger" onClick={() => setDeleteCampaignTarget(c)}>Delete</button>
                 </td>
               </tr>
             ))}
@@ -253,8 +242,7 @@ export default function AdminPage({ password, onOpenResources, onPasswordChanged
                   <button className="btn-secondary" onClick={() => setSelectedSavedAdventure(adv)}>Create</button>
                 </td>
                 <td>
-                  <button className="btn-danger" onClick={() => void deleteSavedAdventure(adv.slug, adv.name)}>Delete</button>
-                  {feedback[`adventure:${adv.slug}`] && <span className="admin-feedback">{feedback[`adventure:${adv.slug}`]}</span>}
+                  <button className="btn-danger" onClick={() => setDeleteAdventureTarget(adv)}>Delete</button>
                 </td>
               </tr>
             ))}
@@ -293,6 +281,21 @@ export default function AdminPage({ password, onOpenResources, onPasswordChanged
       adventure={selectedSavedAdventure}
       onClose={() => setSelectedSavedAdventure(null)}
       onCreated={fetchCampaigns}
+    />
+    <DeleteResourcesModal
+      open={deleteCampaignTarget !== null}
+      name={deleteCampaignTarget?.name ?? ''}
+      deleteUrl={`/api/admin/campaigns/${deleteCampaignTarget?.id ?? ''}`}
+      password={password}
+      onClose={() => setDeleteCampaignTarget(null)}
+      onDeleted={() => { if (deleteCampaignTarget) onCampaignDeleted(deleteCampaignTarget.id); }}
+    />
+    <DeleteResourcesModal
+      open={deleteAdventureTarget !== null}
+      name={deleteAdventureTarget?.name ?? ''}
+      deleteUrl={`/api/adventures/${deleteAdventureTarget?.slug ?? ''}`}
+      onClose={() => setDeleteAdventureTarget(null)}
+      onDeleted={() => { if (deleteAdventureTarget) setSavedAdventures(a => a.filter(x => x.slug !== deleteAdventureTarget.slug)); }}
     />
     </>
   );

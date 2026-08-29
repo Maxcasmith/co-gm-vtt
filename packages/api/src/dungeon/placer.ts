@@ -2,20 +2,31 @@ import { randomUUID } from 'crypto';
 import type { DungeonRoom, DungeonEntity, EnemyStatBlock, TrapEffect } from 'shared';
 import type { DungeonManifest, ManifestTrap } from './manifest.ts';
 
+// Every AI-authored dungeon trap not otherwise given one gets this Thieves' Tools disarm DC — a
+// hard guarantee, not something the model can skip by omission (same pattern as manifest.ts's
+// DEFAULT_LOCKPICK_DC for doors).
+const DEFAULT_DISARM_DC = 13;
+
+function clampDisarmDC(dc: unknown): number {
+  return typeof dc === 'number' && Number.isFinite(dc) ? Math.max(1, Math.min(30, Math.round(dc))) : DEFAULT_DISARM_DC;
+}
+
 // Builds the mechanical TrapEffect from the manifest's flavor+mechanics split. 'seal' carries no
 // save/damage at all — it's an environmental consequence, not something to roll against. 'damage'
 // (and anything else the model might emit for kind) rolls a save if the model gave one; missing
 // save/damage data falls through to checkTrapAt's alert-only branch rather than guessing a formula.
+// Either kind always gets a disarmDC — see clampDisarmDC.
 export function trapEffectFor(hint: ManifestTrap): TrapEffect {
+  const disarmDC = clampDisarmDC(hint.disarmDC);
   if (hint.kind === 'seal') {
     return {
-      kind: 'seal', effects: [],
+      kind: 'seal', effects: [], disarmDC,
       ...(hint.escapeSkill ? { escapeSkill: hint.escapeSkill } : {}),
       ...(hint.escapeDC ? { escapeDC: hint.escapeDC } : {}),
     };
   }
   return {
-    kind: 'damage',
+    kind: 'damage', disarmDC,
     ...(hint.saveAbility && hint.dc ? { save: { ability: hint.saveAbility, dc: hint.dc, halfOnSave: true } } : {}),
     effects: hint.damageFormula
       ? [{ type: 'damage' as const, ...(hint.damageType ? { damageType: hint.damageType } : {}), scaling: { mode: 'spell-slot' as const, base: hint.damageFormula, tiers: [] } }]
@@ -75,7 +86,7 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
 
     // Safe zone is the entrance room itself, nothing wider — a raw-distance buffer used to also
     // swallow whichever rooms happened to sit nearby, discarding manifest-authored content (see
-    // fetchManifest's predefinedQuests handling) along with it, which silently broke quests the
+    // fetchManifest's predefinedChain handling) along with it, which silently broke quests the
     // dungeon was built to serve. checkDungeonProximity (runtime.ts) backs this up: aggro itself
     // is suppressed while a player is standing in the entrance room, so a creature placed right
     // outside it still can't ambush someone who hasn't stepped out yet.
