@@ -3,6 +3,7 @@ import { claudeComplete, claudeStream, claudeValidateKey, claudeChat } from './c
 import { openaiComplete, openaiStream, openaiValidateKey, openaiValidateImageKey, openaiChat } from './openai.ts';
 import { deepseekComplete, deepseekStream, deepseekValidateKey, deepseekChat } from './deepseek.ts';
 import { kimiComplete, kimiStream, kimiValidateKey, kimiChat } from './kimi.ts';
+import { qwenComplete, qwenStream, qwenValidateKey, qwenChat } from './qwen.ts';
 import { logError } from '../logger.ts';
 
 export type { ChatMessage } from './claude.ts';
@@ -19,6 +20,7 @@ const PROVIDER_KEY_MAP: Record<StoryProvider, keyof ApiKeys> = {
   openai: 'openai',
   deepseek: 'deepseek',
   kimi: 'kimi',
+  qwen: 'qwen',
 };
 
 export function getTierApiKey(apiKeys: AppConfig['apiKeys'], provider: StoryProvider): string {
@@ -41,9 +43,9 @@ export function buildAdapter(tier: ModelTier, apiKey: string): StoryProviderAdap
       validateKey: () => openaiValidateKey(apiKey),
     },
     deepseek: {
-      complete: p => deepseekComplete(p, apiKey, model, timeoutSeconds),
-      stream: (p, cb) => deepseekStream(p, apiKey, model, cb, timeoutSeconds),
-      chat: (sys, msgs) => deepseekChat(sys, msgs, apiKey, model, timeoutSeconds),
+      complete: p => deepseekComplete(p, apiKey, model, effort, timeoutSeconds),
+      stream: (p, cb) => deepseekStream(p, apiKey, model, cb, effort, timeoutSeconds),
+      chat: (sys, msgs) => deepseekChat(sys, msgs, apiKey, model, effort, timeoutSeconds),
       validateKey: () => deepseekValidateKey(apiKey),
     },
     kimi: {
@@ -51,6 +53,12 @@ export function buildAdapter(tier: ModelTier, apiKey: string): StoryProviderAdap
       stream: (p, cb) => kimiStream(p, apiKey, model, cb, effort, timeoutSeconds),
       chat: (sys, msgs) => kimiChat(sys, msgs, apiKey, model, effort, timeoutSeconds),
       validateKey: () => kimiValidateKey(apiKey),
+    },
+    qwen: {
+      complete: p => qwenComplete(p, apiKey, model, timeoutSeconds),
+      stream: (p, cb) => qwenStream(p, apiKey, model, cb, timeoutSeconds),
+      chat: (sys, msgs) => qwenChat(sys, msgs, apiKey, model, timeoutSeconds),
+      validateKey: () => qwenValidateKey(apiKey),
     },
   };
   return adapters[provider];

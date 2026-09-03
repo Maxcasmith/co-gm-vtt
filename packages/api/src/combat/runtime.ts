@@ -2,7 +2,7 @@ import type { Character, EffectSpec, CreatureType, Condition as ConditionName, A
 import { statMod, calcAC, spellSlotsForCharacter, CLASS_SAVING_THROWS, effectiveWeaponProfs, findPath, hasOriginFeat, isWeapon, isArmor, SKILL_ABILITY, trySpendResource, resourceCurrent, magicInitiateResourceKey, closedDoorCells } from 'shared';
 import { getCharacter, updateCharacter, readChatLog, appendChatLog, saveEncounter, clearEncounter, clearDungeon, saveDungeon, listCharacters, loadPartyAllies, readManifest, readNemeses, getConfig, getHouseRules } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
-import { generateCombatFlavour, evaluateNemesisCandidates } from '../session-processor/imagePrompts.ts';
+import { generateCombatFlavour, generateCombatAftermath, evaluateNemesisCandidates } from '../session-processor/imagePrompts.ts';
 import { toClientDungeon } from '../dungeon/index.ts';
 import { checkQuestChainTriggers } from '../dungeon/questChain.ts';
 import { Team, Participant } from '../domain/encounter.ts';
@@ -1207,7 +1207,15 @@ export async function breakConcentration(cid: string, targetId: string): Promise
 
   const engine = getStateEngine(cid);
   for (const ownerId of link.targetIds) engine.unregisterBySource(ownerId, link.spellName);
-  holder.write(removeCondition(holder.conditions, 'Concentrating'));
+  const conditions = removeCondition(holder.conditions, 'Concentrating');
+  holder.write(conditions);
+  // Unlike setCondition's other callers (applyCondition/removeConditionByName), this wrote
+  // directly via holder.write and skipped the broadcast — the client's own copy of `conditions`
+  // (character.conditions, what the Spells tab's free-recast check reads) never found out
+  // concentration ended, so a caster who wanted to redirect Hex/Hunter's Mark to a new target for
+  // free (RAW: no slot spent while already concentrating) saw the Cast button disabled once their
+  // one spell slot was gone, even though the server would have let the redirect through free.
+  io.to(ROOM).emit('character:condition:update', { targetId, conditions });
 
   const mark = activeMarks.get(cid)?.get(targetId);
   if (mark) {
@@ -1240,8 +1248,10 @@ export async function startConcentrating(
   const holder = await conditionsHolder(cid, casterId);
   if (!holder) return;
   const withoutOld = removeCondition(holder.conditions, 'Concentrating');
-  holder.write([...withoutOld, { name: 'Concentrating', concentration: { spellName, targetIds: hookedTargetIds } }]);
+  const conditions = [...withoutOld, { name: 'Concentrating' as const, concentration: { spellName, targetIds: hookedTargetIds } }];
+  holder.write(conditions);
   console.log(`[concentration] ${holder.label} begins concentrating on ${spellName}`);
+  io.to(ROOM).emit('character:condition:update', { targetId: casterId, conditions });
   io.to(ROOM).emit('combat:concentration', { targetId: casterId, targetName: holder.label, spellName });
 }
 
@@ -1713,11 +1723,23 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
           }
         }
 
-        const kills = enemyStatBlocks.map(e => e.name).join(', ');
-        const summary = `[Combat over — party victorious. Defeated: ${kills}. ${xpPerPlayer} XP awarded per player. Describe the immediate aftermath and give the party something to act on.]`;
-        void appendChatLog(cid, { text: summary, senderName: 'System', timestamp: Date.now() }).then(() => {
-          dispatchDMResponse(cid, enemyPositions);
-        });
+        const kills = enemyStatBlocks.map(e => e.name);
+        void (async () => {
+          const config = await getConfig();
+          const aftermath = hasFeatureProvider(config, 'combatNarration')
+            ? await generateCombatAftermath(kills, getFeatureProvider(config, 'combatNarration'))
+            : null;
+          if (aftermath) {
+            await appendChatLog(cid, { text: aftermath, senderName: 'Virtual DM', timestamp: Date.now() });
+            io.to(ROOM).emit('session:recap', { text: aftermath, senderName: 'Virtual DM' });
+          } else {
+            // No combatNarration provider configured — fall back to the general narrator rather
+            // than leaving the aftermath beat silent.
+            const summary = `[Combat over — party victorious. Defeated: ${kills.join(', ')}. ${xpPerPlayer} XP awarded per player. Describe the immediate aftermath and give the party something to act on.]`;
+            await appendChatLog(cid, { text: summary, senderName: 'System', timestamp: Date.now() });
+            dispatchDMResponse(cid, enemyPositions);
+          }
+        })();
       }, 7000);
     }
   } else if (damage > 0) {

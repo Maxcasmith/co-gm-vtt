@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type { DungeonRoom } from 'shared';
+import type { DungeonRoom, DungeonEntity } from 'shared';
 import type { DungeonManifest } from './manifest.ts';
 
 const DEFAULT_WIDTH = 50;
@@ -28,6 +28,8 @@ export interface GeneratorResult {
   rooms: DungeonRoom[];
   /** Carved doorway rects (building layouts only — see buildingLayout.ts's carveDoorway) that generateDungeon turns into Door entities. Omitted/empty for organic layouts, which carve plain gaps instead of literal doors. */
   doors?: DoorRect[];
+  /** Building layouts only, multi-floor manifests only — paired 'stairs' entities already fully resolved (id + linkTo) by generateBuildingLayout's stitching step. generateDungeon pushes these straight onto Dungeon.entities. */
+  stairs?: DungeonEntity[];
 }
 
 export function randInt(min: number, max: number): number {

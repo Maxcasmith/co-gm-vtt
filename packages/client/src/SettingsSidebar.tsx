@@ -40,10 +40,8 @@ export const STORY_PROVIDERS: { id: StoryProvider; label: string; models: { id: 
     id: 'deepseek',
     label: 'DeepSeek',
     models: [
-      { id: 'deepseek-chat', label: 'DeepSeek Chat' },
-      { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner' },
       { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
-      { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
+      { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', supportsEffort: true },
     ],
   },
   {
@@ -51,6 +49,15 @@ export const STORY_PROVIDERS: { id: StoryProvider; label: string; models: { id: 
     label: 'Kimi (Moonshot AI)',
     models: [
       { id: 'kimi-k3', label: 'Kimi K3', supportsEffort: true },
+      { id: 'kimi-k2.7-code', label: 'Kimi K2.7 Code' },
+      { id: 'kimi-k2.6', label: 'Kimi K2.6' },
+    ],
+  },
+  {
+    id: 'qwen',
+    label: 'Qwen (Alibaba)',
+    models: [
+      { id: 'qwen3.8-max', label: 'Qwen3.8 Max' },
     ],
   },
 ];
@@ -85,7 +92,7 @@ const OPENAI_VOICES = [
 
 const DEFAULT_CONFIG: AppConfig = {
   workflows: [],
-  apiKeys: { openai: '', anthropic: '', deepseek: '', kimi: '' },
+  apiKeys: { openai: '', anthropic: '', deepseek: '', kimi: '', qwen: '' },
   image: { model: 'gpt-image-1', generateWorldMap: false, generateTilesets: false, generateStoryboard: false, generateBestiaryPortraits: false, generatePropImages: false },
   narration: { model: 'none', voice: 'onyx' },
   adminPassword: '',
@@ -216,6 +223,16 @@ export default function SettingsSidebar({ open, password, onClose, onPasswordCha
                 type="password"
                 value={config.apiKeys.kimi}
                 onChange={e => setConfig(c => ({ ...c, apiKeys: { ...c.apiKeys, kimi: e.target.value } }))}
+                placeholder="sk-..."
+              />
+            </label>
+            <label className="modal-label">
+              Qwen (Alibaba)
+              <input
+                className="modal-input"
+                type="password"
+                value={config.apiKeys.qwen}
+                onChange={e => setConfig(c => ({ ...c, apiKeys: { ...c.apiKeys, qwen: e.target.value } }))}
                 placeholder="sk-..."
               />
             </label>

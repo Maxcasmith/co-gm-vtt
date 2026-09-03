@@ -3,8 +3,9 @@ import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
-import type { SavedAdventureMeta, WorldMeta, Dungeon, Quest } from 'shared';
+import type { SavedAdventureMeta, WorldMeta, Dungeon, Quest, ScenarioStoryboard } from 'shared';
 import { CAMPAIGNS_DIR, emptyManifest } from '../storage.ts';
+import { scenarioSlideUrl } from '../dungeon/storyboard.ts';
 import { logError } from '../logger.ts';
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
@@ -41,16 +42,16 @@ export async function saveCampaignAsAdventure(campaignSlug: string, adventureSlu
   ]);
 
   // Quests/dungeon reset to a fresh starting state — a template is replayed from scratch every
-  // time, never resumed mid-progress. Deterministic dungeon quests (boss-*, exit-dungeon — no
-  // longer generated for new dungeons, but may still exist in an older saved campaign) were never
-  // discovery-gated — seeded straight to 'open' on generation — so they reset back to 'open', not
-  // 'undiscovered', or QuestLog's undiscovered filter would hide them forever since nothing ever
-  // fires a quest_add to un-hide them.
+  // time, never resumed mid-progress. Any quest seeded by a dungeon's own goals (sourceDungeonId
+  // set — see generateDungeonQuests/questChain) was never discovery-gated: it's written straight
+  // to 'open' at dungeon-generation time and the dungeon's closed-world narration never fires a
+  // QUEST_ADD to un-hide it, so resetting it to 'undiscovered' would hide it forever. Only
+  // campaign-level narrative quests (no sourceDungeonId — discovered mid-session via QUEST_ADD)
+  // reset to 'undiscovered'.
   const questsPath = path.join(dstDir, 'quests.json');
   try {
     const quests = JSON.parse(await readFile(questsPath, 'utf-8')) as Quest[];
-    const isDeterministic = (id: string) => id === 'exit-dungeon' || id.startsWith('boss-');
-    const reset = quests.map(q => ({ ...q, status: isDeterministic(q.id) ? 'open' as const : 'undiscovered' as const, log: [] }));
+    const reset = quests.map(q => ({ ...q, status: q.sourceDungeonId ? 'open' as const : 'undiscovered' as const, log: [] }));
     await writeFile(questsPath, JSON.stringify(reset, null, 2), 'utf-8');
   } catch (err) { logError('adventures/storage:saveCampaignAsAdventure:quests', err); }
 
@@ -132,4 +133,20 @@ export async function copyAdventureToCampaign(adventureSlug: string, campaignSlu
   const original = JSON.parse(await readFile(worldMetaPath, 'utf-8')) as WorldMeta;
   const worldMeta: WorldMeta = { ...original, id: randomUUID(), name: campaignName, campaignDir: campaignSlug };
   await writeFile(worldMetaPath, JSON.stringify(worldMeta, null, 2), 'utf-8');
+
+  // scenario-storyboard.json bakes each slide's URL with the source campaign's slug baked in
+  // (generateScenarioStoryboard writes it once, at generation time, for the campaign it was
+  // generated for). A plain file copy carries those stale URLs over unchanged — the physical
+  // jpgs move to campaignSlug's own directory, but slides[].url still points at adventureSlug's
+  // old campaign path, which 404s (black screen) once that source campaign is gone or was never
+  // a live campaign route to begin with. Rewrite them to the new campaignSlug, same idea as the
+  // worldMeta rewrite above.
+  const storyboardPath = path.join(dstDir, 'scenario-storyboard.json');
+  try {
+    const storyboard = JSON.parse(await readFile(storyboardPath, 'utf-8')) as ScenarioStoryboard;
+    storyboard.slides = storyboard.slides.map((slide, i) => ({ ...slide, url: scenarioSlideUrl(campaignSlug, i + 1) }));
+    await writeFile(storyboardPath, JSON.stringify(storyboard, null, 2), 'utf-8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') logError('adventures/storage:copyAdventureToCampaign:storyboard', err);
+  }
 }

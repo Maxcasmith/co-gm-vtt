@@ -49,6 +49,9 @@ export interface ManifestRoom {
   material?: string; // floor material key for this room — free-text, slugified on parse
   materialDescription?: string; // visual description of this room's texture — server-only, feeds the tileset prompt, never forwarded to DungeonRoom
   isHallway?: boolean; // building layouts only — a passage/circulation room, not a destination
+  floor?: number; // building layouts only — omitted/0 = ground floor, negative = basement, positive = upper. Every room on the same floor is laid out together; a multi-floor building is generateBuildingLayout stitching one per-floor layout per distinct value used here.
+  isStairwell?: boolean; // building layouts only — this room IS the vertical connection to another floor. Always exactly 2x2 (footprint() forces this regardless of "size"). Comes out of the same room-count budget as every other room, not on top of it.
+  stairsTo?: string; // building layouts only, isStairwell rooms only — the exact "name" of the OTHER isStairwell room (on a different floor) this one connects to. Validated in fetchManifest against this dungeon's own rooms — an unresolvable or non-stairwell target downgrades this room's isStairwell/stairsTo away entirely (see resolveStairLinks).
   connectsTo?: string[]; // building layouts only — names of other rooms in this manifest it directly opens onto
   /**
    * Building layouts only — the lock state of the door(s) this room's connectsTo edges produce.
@@ -209,8 +212,11 @@ Return ONLY valid JSON, no markdown fences, no explanation:
       "name": "string",
       "size": "small|medium|large",
       "role": "entrance|exit — omit for a normal room. Mark exactly as many entrance/exit rooms as make sense for this location (usually one of each, sometimes more).",
-      "isHallway": "boolean — BUILDING ONLY. true if this room's job is passage/circulation (a corridor, hallway, stairwell) rather than being a destination in itself.",
-      "connectsTo": "string[] — BUILDING ONLY, REQUIRED for every room. Names of the other rooms in THIS list that this room directly opens onto (a door or opening exists there). Every room must be reachable from the entrance room through this graph — no isolated rooms.",
+      "isHallway": "boolean — BUILDING ONLY. true if this room's job is passage/circulation (a corridor or hallway) rather than being a destination in itself. Never use this for a stairwell — see isStairwell below.",
+      "floor": "number — BUILDING ONLY, omit for single-floor locations. Which floor this room sits on: omit or 0 for the ground floor, negative for a basement (-1, -2...), positive for upper floors (1, 2...). Decide the total floor count yourself, from what this location actually is (a house is 1-2 floors, a school 2-3, a mansion 2-4, a police precinct might have a basement). The ${minRooms}-${maxRooms} rooms are DISTRIBUTED across however many floors you choose, never added on top — a 16-room 3-floor building has roughly 5-6 rooms per floor, not 16 per floor.",
+      "isStairwell": "boolean — BUILDING ONLY, multi-floor locations only. true if this room IS the vertical connection between two floors. Always exactly a 2x2 footprint regardless of \"size\" — don't bother sizing it. Comes out of the same room budget as every other room.",
+      "stairsTo": "string — isStairwell rooms ONLY. The EXACT \"name\" of the other isStairwell room (on the adjacent floor) this one connects to. Every floor transition needs exactly one such pair — one isStairwell room on each side, naming each other. Separate from \"connectsTo\": this is the vertical link, connectsTo is still how this room wires into its OWN floor's layout.",
+      "connectsTo": "string[] — BUILDING ONLY, REQUIRED for every room. Names of the other rooms on THIS SAME FLOOR in this list that this room directly opens onto (a door or opening exists there). Every room must be reachable from its floor's entrance/stairwell through this graph — no isolated rooms. Never list a room from a different floor here — floors connect only via isStairwell/stairsTo.",
       "doors": [{ "toRoom": "string — BUILDING ONLY, one of this room's connectsTo names. Only declare an entry for an edge that ISN'T a plain open doorway — omit connectsTo edges you want left as ordinary unlocked doors entirely.", "state": "closed|locked — 'closed' is an ordinary shut-but-unlocked door (this is already the default for every connectsTo edge, so only write 'closed' here if you want to say so explicitly). 'locked' REQUIRES keyName.", "keyName": "string — 'locked' only. Must be the EXACT \"name\" of a loot entry placed somewhere in THIS response, ideally in a different room than either side of this door. That loot entry is the key — it is always trivially found (no hard search) once discovered.", "lockpickDC": "number 10-20 — 'locked' only. The DC to bypass this specific lock with Thieves' Tools instead of the key, scaled to how sturdy/important it is. Never hinted at anywhere in room text, same discipline as a trap's hidden DC." }],
       "material": "string — short lowercase key (1-2 words, e.g. wood, cracked-stone, wet-sand) naming this room's floor material, fitting its actual purpose (grass for an outdoor/dirt-floored space, wood for an indoor wood-floored room, stone for an indoor stone-floored room like a dungeon or crypt).",
       "materialDescription": "string — vivid visual description of this exact floor texture's appearance (color, wear, pattern) for an image generator. Reuse the EXACT SAME material key AND description verbatim across every room that should share the same texture (e.g. two plain-stone rooms both use key 'stone' with identical wording) rather than inventing near-duplicate keys for the same material — this dungeon may use AT MOST 16 distinct material keys in total across all rooms.",
@@ -268,14 +274,14 @@ Return ONLY valid JSON, no markdown fences, no explanation:
   ]
 }
 
-IF BUILDING: produce the ${minRooms}-${maxRooms} REAL rooms a location of this exact type would actually have — plain functional names only, never evocative or archaic diction (write "Chapel", never "Weeping Narthex"; write "Storage Closet", never "Sacristy of Moth-Eaten Vestments"). Reuse a letter/number suffix for repeated room types the way a real building would (e.g. "Classroom A".."Classroom E", "Boys Locker Room" / "Girls Locker Room"). Include hallway(s) as their own room(s) in the list whenever the building has more than a couple rooms — do not fold circulation space silently into other rooms. Every room needs "connectsTo".
+IF BUILDING: produce the ${minRooms}-${maxRooms} REAL rooms a location of this exact type would actually have — plain functional names only, never evocative or archaic diction (write "Chapel", never "Weeping Narthex"; write "Storage Closet", never "Sacristy of Moth-Eaten Vestments"). Reuse a letter/number suffix for repeated room types the way a real building would (e.g. "Classroom A".."Classroom E", "Boys Locker Room" / "Girls Locker Room"). Include hallway(s) as their own room(s) in the list whenever the building has more than a couple rooms — do not fold circulation space silently into other rooms. Every room needs "connectsTo". Only go multi-floor (see "floor" above) when the location genuinely would be — a small shop or single cottage stays one floor; don't force floors onto a location that wouldn't have them just because you can.
 
-IF ORGANIC: produce ${minRooms}-${maxRooms} rooms with location-authentic, atmospheric names fitting a natural/dug space (e.g. for a crypt: "Ossuary", "Collapsed Passage"). Omit "isHallway" and "connectsTo" entirely for organic rooms — layout is handled separately.
+IF ORGANIC: produce ${minRooms}-${maxRooms} rooms with location-authentic, atmospheric names fitting a natural/dug space (e.g. for a crypt: "Ossuary", "Collapsed Passage"). Omit "isHallway", "connectsTo", "floor", "isStairwell", and "stairsTo" entirely for organic rooms — layout is handled separately, and a natural/dug space never has a built stairwell.
 
 Omit "creatures"/"traps"/"loot"/"props" for rooms that don't have any — not every room needs them. Match creature types and stat blocks (use official 5e monster stat blocks as reference) to the genre. hideDC ranges 1-22 (higher = harder to spot); scale it to how well-concealed the trap/item narratively is. If the story context implies a non-hostile purpose (e.g. sneaking in to gather information), it's fine for rooms to have no creatures at all — don't force combat that doesn't fit.
 Most traps should be "seal" kind, not "damage" — an environmental obstacle (a door that slams shut, a passage that collapses, an alarm) makes for better play than a random damage roll on discovery. Reach for "damage" only when the trap's whole concept is physically hurting whoever sets it off (a dart trap, a pressure-plate blade). Never let "name" hint at the DC or the way past it — that's the players' problem to solve, not something you hand them.
 
-Give most rooms 1-4 props fitting their function (a bedroom gets a bed and a dresser, a kitchen gets a stove and shelves) — this is what makes a room feel real, not empty. Skip props only for rooms that are genuinely bare (hallways, a stripped cell, a collapsed passage).
+Give most rooms 1-4 props fitting their function (a bedroom gets a bed and a dresser, a kitchen gets a stove and shelves) — this is what makes a room feel real, not empty. Skip props only for rooms that are genuinely bare (hallways, a stripped cell, a collapsed passage). Never give an isStairwell room creatures, traps, loot, or props — it's a fixed 2x2 passage, not a destination, and anything placed there is dropped anyway.
 
 Give most rooms 2-5 "dressing" entries and, where it fits, 0-2 "hiddenDressing" entries — mundane, concrete sensory texture (temperature, smell, sound, wear, small clutter) that makes the room feel inhabited without needing an image or a stat block. Dressing must never imply a named person, faction, event, or plot thread that isn't already established by the story context or "questChain" below — an unresolvable hint left dangling in a dungeon with no way to follow up on it misleads the players, it's not atmosphere. "Scorch marks on the ceiling" is fine anywhere; "scorch marks matching the Ashcult's ritual brand" is only fine if the Ashcult is actually part of this dungeon's story context.
 
@@ -322,7 +328,7 @@ Genre: ${dungeonType}`;
         }),
       };
     });
-    const lockedRooms = resolveDoorLocks(rooms);
+    const lockedRooms = resolveStairLinks(resolveDoorLocks(rooms));
     const roomNames = new Set(lockedRooms.map(r => r.name));
     const entityNames = new Set(lockedRooms.flatMap(r => [
       ...(r.creatures ?? []).map(c => c.name),
@@ -422,5 +428,41 @@ export function resolveDoorLocks(rooms: ManifestRoom[]): ManifestRoom[] {
   return fixedRooms.map(r => {
     if (!r.loot?.some(l => keysUsed.has(l.name))) return r;
     return { ...r, loot: r.loot.map(l => keysUsed.has(l.name) ? { ...l, hideDC: -99 } : l) };
+  });
+}
+
+// Same conservative-parsing discipline as resolveDoorLocks: an isStairwell room's stairsTo must
+// resolve to another room that (a) exists and (b) is itself isStairwell — anything else means the
+// model authored a stairwell with no real pair, which buildingLayout.ts could never place a
+// working 'stairs' entity for. Rather than ship that broken, this demotes the room back to an
+// ordinary one (isStairwell/stairsTo both dropped) instead of dropping the room entirely — same
+// "never lose a room, just downgrade its special behavior" convention resolveDoorLocks uses for
+// an unresolvable lock.
+export function resolveStairLinks(rooms: ManifestRoom[]): ManifestRoom[] {
+  const stairwellNames = new Set(rooms.filter(r => r.isStairwell).map(r => r.name));
+
+  // Pass 1: greedily accept edges in array order, each accepted edge claiming BOTH its rooms —
+  // this is what stops a 3-way tangle (A->B and C->B both naming the same target) from surviving
+  // into buildingLayout.ts as two 'stairs' entities stacked on B's one 2x2 cell. First valid
+  // claimant wins, same "first-come" discipline resolveDoorLocks and parseQuestChain already use
+  // elsewhere in this file. A room with no stairsTo of its own (the one-directional case — only
+  // the OTHER side names it) contributes no claim here but can still be claimed BY that other room.
+  const claimed = new Set<string>();
+  for (const r of rooms) {
+    if (!r.isStairwell) continue;
+    const hasValidTarget = typeof r.stairsTo === 'string' && r.stairsTo !== r.name && stairwellNames.has(r.stairsTo);
+    if (hasValidTarget && !claimed.has(r.name) && !claimed.has(r.stairsTo!)) {
+      claimed.add(r.name);
+      claimed.add(r.stairsTo!);
+    }
+  }
+
+  // Pass 2: keep every room that ended up claimed (as either side of an accepted edge) exactly as
+  // authored; downgrade everything else — an isStairwell room with no accepted edge, whether its
+  // own target was invalid or already taken by an earlier claimant.
+  return rooms.map(r => {
+    if (!r.isStairwell || claimed.has(r.name)) return r;
+    const { isStairwell: _isStairwell, stairsTo: _stairsTo, ...rest } = r;
+    return rest;
   });
 }

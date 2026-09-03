@@ -156,6 +156,11 @@ export interface SpellAttackResult {
   damageFormula?: string | undefined;
   remainingHp?: number | undefined;
   targetDead: boolean;
+  // Present when a pending on-hit hook (Hex's necrotic curse damage, ...) triggered on this
+  // attack — same shape as AttackResult's equivalent fields, above.
+  bonusSpellName?: string | undefined;
+  bonusDamage?: number | undefined;
+  bonusDamageType?: string | undefined;
 }
 
 export interface SpellSaveOutcome {

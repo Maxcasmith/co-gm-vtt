@@ -86,6 +86,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [tokenUrls, setTokenUrls] = useState<Record<string, string>>({});
   const [portraitUrls, setPortraitUrls] = useState<Record<string, string>>({});
   const [partyCharacterIds, setPartyCharacterIds] = useState<Record<string, string>>({});
+  const partyCharacterIdsRef = useRef<Record<string, string>>({});
+  useEffect(() => { partyCharacterIdsRef.current = partyCharacterIds; }, [partyCharacterIds]);
+  const [partyAiControlled, setPartyAiControlled] = useState<Record<string, boolean>>({});
   const [viewingMemberId, setViewingMemberId] = useState<string | null>(null);
   const [acquisitions, setAcquisitions] = useState<Character['inventory']>([]);
   const [itemQtyOverrides, setItemQtyOverrides] = useState<Record<string, number>>({});
@@ -113,14 +116,17 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [errorNotifications, setErrorNotifications] = useState<{ id: string; reason: string }[]>([]);
   const [worldMapUrl, setWorldMapUrl] = useState<string | undefined>(undefined);
   const [dungeon, setDungeon] = useState<Dungeon | null>(null);
+  // The big socket-setup effect below only re-registers on character.name change, so its handlers
+  // close over stale state — this mirror lets the quest:update handler read the CURRENT dungeon.
+  const dungeonRef = useRef<Dungeon | null>(null);
+  useEffect(() => { dungeonRef.current = dungeon; }, [dungeon]);
   const [dungeonGenerating, setDungeonGenerating] = useState(false);
   const dungeonReady = useDungeonReady(dungeon ?? undefined, dungeonGenerating);
   const [questLogOpen, setQuestLogOpen] = useState(false);
   const [quests, setQuests] = useState<Quest[]>([]);
-  // Quest(s) that just flipped to 'resolved' this quest:update tick — surfaced as a congrats
-  // modal, then cleared on dismiss. Not derived from `quests` itself (which only holds the
-  // current snapshot), so it's set once, from the diff, inside the socket handler below.
-  const [congrats, setCongrats] = useState<Quest[] | null>(null);
+  // Set once the dungeon's whole questChain resolves (quest:update's `final` flag) — the full
+  // page recap screen, not the old per-stage popup. Cleared once Finish navigates away.
+  const [congrats, setCongrats] = useState<{ dungeon: Dungeon; quests: Quest[]; roster: Character[] } | null>(null);
   const [act, setAct] = useState(1);
   const [worldTimeSecs, setWorldTimeSecs] = useState(43200);
   // Reaction-sidebar display prefs — set on GameSettingsPage, fetched once here since they never
@@ -231,9 +237,14 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
             const max = c.maxHp ?? derivedMax;
             const current = c.currentHp ?? max;
             setPartyHp(prev => ({ ...prev, [name]: { current, max } }));
+            setPartyAiControlled(prev => ({ ...prev, [name]: !!c.aiControlled }));
           })
           .catch(() => {});
       });
+    });
+    socket.on('character:aiControlled:update', ({ characterId, aiControlled }) => {
+      const name = Object.entries(partyCharacterIdsRef.current).find(([, id]) => id === characterId)?.[0];
+      if (name) setPartyAiControlled(prev => ({ ...prev, [name]: aiControlled }));
     });
     socket.on('character:inventory:add', items => {
       const acquired = items as NonNullable<Character['inventory']>;
@@ -426,18 +437,18 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('dungeon:generating', () => setDungeonGenerating(true));
     socket.on('dungeon:loaded', dungeon => { setDungeonGenerating(false); setDungeon(dungeon); dispatch('vtt:dungeon:loaded', dungeon); loadRuntimeTilesets(); });
     socket.on('dungeon:cleared', () => setDungeon(null));
-    socket.on('quest:update', ({ quests: q, act: a }) => {
-      setQuests(prev => {
-        // prev.length === 0 means this is the first snapshot since mount/reconnect, not an
-        // actual resolution just now — diffing against it would pop the modal for every quest
-        // that was already resolved before this player ever loaded the page.
-        const newlyResolved = prev.length
-          ? q.filter((nq: Quest) => nq.status === 'resolved' && prev.find(pq => pq.id === nq.id)?.status !== 'resolved')
-          : [];
-        if (newlyResolved.length) setCongrats(newlyResolved);
-        return q;
-      });
+    socket.on('quest:update', ({ quests: q, act: a, final }) => {
+      setQuests(q);
       setAct(a);
+      // `final` (see questChain.ts) means this update closed the dungeon's whole questChain, not
+      // just one stage of it — only then does the full recap screen show, once, at the true end.
+      const dungeonNow = dungeonRef.current;
+      if (!final || !dungeonNow) return;
+      const resolvedChain = q.filter((nq: Quest) => nq.sourceDungeonId === dungeonNow.id && nq.status === 'resolved');
+      fetch(`${API}/api/campaigns/${character.campaignId}/party`)
+        .then(r => r.json())
+        .then((roster: Character[]) => setCongrats({ dungeon: dungeonNow, quests: resolvedChain, roster }))
+        .catch(() => setCongrats({ dungeon: dungeonNow, quests: resolvedChain, roster: [] }));
     });
     socket.on('clock:update', ({ worldTimeSecs: t }) => { setWorldTimeSecs(t); });
 
@@ -457,6 +468,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     const unsubAlertSwap    = on('vtt:combat:alert:swap', payload => socket.emit('combat:alert:swap', { ...payload, campaignId: character.campaignId }));
     const unsubHealerKit    = on('vtt:combat:healerKit:use', payload => socket.emit('combat:healerKit:use', payload));
     const unsubDoorToggle   = on('vtt:door:toggle', ({ doorId }) => socket.emit('door:toggle', { campaignId: character.campaignId, doorId, characterName: character.name }));
+    const unsubStairsUse    = on('vtt:stairs:use', ({ stairsId }) => socket.emit('stairs:use', { campaignId: character.campaignId, stairsId, characterName: character.name }));
 
     return () => {
       socketRef.current = null;
@@ -482,6 +494,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       unsubTrapDisarm();
       unsubConsumableUsed();
       unsubDoorToggle();
+      unsubStairsUse();
     };
   }, [character.name]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -673,6 +686,11 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     ? dungeon.rooms.find(r => myDungeonPos.gx >= r.x && myDungeonPos.gx < r.x + r.width && myDungeonPos.gy >= r.y && myDungeonPos.gy < r.y + r.height)?.name
     : undefined;
 
+  // Ally tokens on the map should include every party member the lobby knows about, not just
+  // who's actually connected right now — an offline AI-controlled party member is still a live
+  // token on the board (it takes damage, it should be visible), same as a connected human's.
+  const mapAllyNames = [...new Set([...connected, ...Object.keys(partyCharacterIds)])];
+
   const liveCharacter: Character = {
     ...character,
     inventory: [...(character.inventory ?? []), ...(acquisitions ?? [])]
@@ -692,7 +710,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         player={character.name}
         characterId={character.id}
         character={character}
-        connected={connected}
+        connected={mapAllyNames}
         showBattleMap={combatActive || dungeon != null}
         encounter={combatActive ? encounter : null}
         companions={combatActive ? companions : []}
@@ -710,7 +728,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       {currentRoomName && <div className="room-name-banner">{currentRoomName}</div>}
       <TurnOrderBar campaignId={character.campaignId} encounter={encounter} deadCreatureIds={deadCreatureIds} />
       <PartyHud
+        roster={Object.keys(partyCharacterIds)}
         connected={connected}
+        aiControlled={{ ...partyAiControlled, [character.name]: !!aiControlled }}
         portraitUrls={portraitUrls}
         characterIds={partyCharacterIds}
         self={character.name}
@@ -738,7 +758,14 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       <QuickChat open={quickChatOpen} onClose={() => setQuickChatOpen(false)} senderName={character.name} sessionActive={sessionActive} disabled={combatActive && !isMyTurn} />
       {victory && <VictoryScreen data={victory} onDismiss={() => setVictory(null)} />}
       {defeated && <DefeatScreen onDismiss={() => setDefeated(false)} />}
-      {congrats && <CongratsScreen quests={congrats} onDismiss={() => setCongrats(null)} />}
+      {congrats && (
+        <CongratsScreen
+          dungeon={congrats.dungeon}
+          quests={congrats.quests}
+          roster={congrats.roster}
+          onFinish={() => { socketRef.current?.disconnect(); window.location.href = `/${character.campaignId}/lobby`; }}
+        />
+      )}
       <ReactionPrompt
         onRespond={(requestId, spellName) => socketRef.current?.emit('combat:reaction:respond', { requestId, spellName })}
         showDetailsByDefault={houseRules.reactionShowDetailsByDefault}

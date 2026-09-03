@@ -1,4 +1,5 @@
 import type { EnemyStatBlock } from "./combat.ts";
+import type { PlotHookTag } from "./plotHooks.ts";
 
 export interface WorldConcept {
   name: string;
@@ -23,6 +24,10 @@ export interface WorldMeta {
   /** Dungeon-crawl worlds only — the rich scenario synopsis generated before the dungeon itself,
    * shown in full in the game lobby and fed into manifest generation as story context. */
   scenarioSynopsis?: string;
+  /** Grown from actual play (session-end classification), not set at creation — what this campaign's
+   * play has actually proven to be about, used to filter the plot hook pool. Empty/undefined means
+   * "not yet known", not "nothing fits" — pool eligibility treats that as no tag filter at all. */
+  storyTags?: PlotHookTag[];
 }
 
 /** Optional per-campaign rule toggles, off by default. */

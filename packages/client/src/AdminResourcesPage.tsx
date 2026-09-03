@@ -5,6 +5,8 @@ import GenerateTilesetModal from './GenerateTilesetModal.tsx';
 import GeneratePropsSidebar from './GeneratePropsSidebar.tsx';
 import PreviewCellsModal from './PreviewCellsModal.tsx';
 import BestiaryTab from './BestiaryTab.tsx';
+import PlotHooksTab from './PlotHooksTab.tsx';
+import Paginated, { PageSizeSelect } from './Paginated.tsx';
 import StoryboardTestModal from './StoryboardTestModal.tsx';
 import StoryboardOverlay from './StoryboardOverlay.tsx';
 import { iconSrcFor } from './ItemIcon.tsx';
@@ -16,9 +18,9 @@ import ItemDetailSidebar, { type DetailSubject } from './ItemDetailSidebar.tsx';
 const API = `http://${window.location.hostname}:3001`;
 
 type TilesetManifest = Record<string, Record<string, string[]>>;
-type PropsManifest = { props: Record<string, string>; sources: string[] };
+interface PropSpriteItem { slug: string; url: string }
 type IconsManifest = { icons: Record<string, string>; sources: string[] };
-type ResourceTab = 'tiles' | 'props' | 'icons' | 'items' | 'bestiary' | 'storyboard';
+type ResourceTab = 'tiles' | 'props' | 'icons' | 'items' | 'bestiary' | 'storyboard' | 'plot-hooks';
 
 const ICON_MODULES = import.meta.glob('./assets/icons/*', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
 const ICONS = Object.entries(ICON_MODULES)
@@ -65,7 +67,9 @@ export default function AdminResourcesPage({ password, onBack }: AdminResourcesP
   const [generateOpen, setGenerateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [propsManifest, setPropsManifest] = useState<PropsManifest>({ props: {}, sources: [] });
+  const [propsSources, setPropsSources] = useState<string[]>([]);
+  const [propsReloadKey, setPropsReloadKey] = useState(0);
+  const [propsPageSize, setPropsPageSize] = useState(24);
   const [generatePropsOpen, setGeneratePropsOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<string | null>(null);
   const [storyboardRecord, setStoryboardRecord] = useState<StoryboardTestRecord | null>(null);
@@ -92,11 +96,13 @@ export default function AdminResourcesPage({ password, onBack }: AdminResourcesP
       .catch(() => {});
   }
 
-  function fetchPropsManifest() {
-    fetch(`${API}/api/props/manifest`)
-      .then(r => r.json())
-      .then((data: PropsManifest) => setPropsManifest(data))
-      .catch(() => {});
+  // `sources` (the raw atlas previews) come back identically on every page — captured as a side
+  // effect here rather than exposed through Paginated's children, since it isn't part of the paged
+  // item list itself.
+  function fetchPropsPage(page: number, pageSize: number) {
+    return fetch(`${API}/api/props/manifest?page=${page}&pageSize=${pageSize}`)
+      .then(r => r.json() as Promise<{ props: PropSpriteItem[]; total: number; sources: string[] }>)
+      .then(data => { setPropsSources(data.sources); return { items: data.props, total: data.total }; });
   }
 
   function fetchIconsManifest() {
@@ -107,7 +113,6 @@ export default function AdminResourcesPage({ password, onBack }: AdminResourcesP
   }
 
   useEffect(() => { fetchManifest(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchPropsManifest(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { fetchStoryboardRecord(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Refetch whenever Create Icons / the detail sidebar's generate-or-remove bumps the refresh key.
   useEffect(() => { fetchIconsManifest(); }, [iconsRefreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -183,9 +188,12 @@ export default function AdminResourcesPage({ password, onBack }: AdminResourcesP
           <button className={`sheet-tab${tab === 'items' ? ' sheet-tab--active' : ''}`} onClick={() => setTab('items')}>Items</button>
           <button className={`sheet-tab${tab === 'bestiary' ? ' sheet-tab--active' : ''}`} onClick={() => setTab('bestiary')}>Bestiary</button>
           <button className={`sheet-tab${tab === 'storyboard' ? ' sheet-tab--active' : ''}`} onClick={() => setTab('storyboard')}>Storyboard</button>
+          <button className={`sheet-tab${tab === 'plot-hooks' ? ' sheet-tab--active' : ''}`} onClick={() => setTab('plot-hooks')}>Plot Hooks</button>
         </div>
 
         {tab === 'bestiary' && <BestiaryTab password={password} />}
+
+        {tab === 'plot-hooks' && <PlotHooksTab password={password} />}
 
         {tab === 'storyboard' && <>
         <div className="admin-modules-header">
@@ -234,12 +242,15 @@ export default function AdminResourcesPage({ password, onBack }: AdminResourcesP
         {tab === 'props' && <>
         <div className="admin-modules-header">
           <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">🗝️</span>Dungeon Props</h2>
-          <button className="btn-primary" onClick={() => setGeneratePropsOpen(true)}>+ Generate Test Batch</button>
+          <div className="admin-modules-header-actions">
+            <PageSizeSelect value={propsPageSize} onChange={setPropsPageSize} />
+            <button className="btn-primary" onClick={() => setGeneratePropsOpen(true)}>+ Generate Test Batch</button>
+          </div>
         </div>
 
-        {propsManifest.sources.length > 0 && (
+        {propsSources.length > 0 && (
           <div className="tile-grid">
-            {propsManifest.sources.map(url => (
+            {propsSources.map(url => (
               <div key={url} className="tile-source">
                 <img
                   src={`${API}${url}`}
@@ -254,18 +265,20 @@ export default function AdminResourcesPage({ password, onBack }: AdminResourcesP
           </div>
         )}
 
-        {Object.keys(propsManifest.props).length === 0 && (
-          <div className="admin-table-card"><p className="admin-empty">No props generated yet.</p></div>
-        )}
-
-        <div className="tile-grid">
-          {Object.entries(propsManifest.props).map(([slug, url]) => (
-            <div key={slug} className="tile-card">
-              <img src={`${API}${url}`} alt={titleCase(slug)} title={titleCase(slug)} className="tile-img" />
-              <span className="tile-label">{titleCase(slug)}</span>
+        <Paginated key={`props-${propsReloadKey}`} fetchPage={fetchPropsPage} pageSize={propsPageSize}>
+          {props => props.length === 0 ? (
+            <div className="admin-table-card"><p className="admin-empty">No props generated yet.</p></div>
+          ) : (
+            <div className="tile-grid">
+              {props.map(({ slug, url }) => (
+                <div key={slug} className="tile-card">
+                  <img src={`${API}${url}`} alt={titleCase(slug)} title={titleCase(slug)} className="tile-img" />
+                  <span className="tile-label">{titleCase(slug)}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          )}
+        </Paginated>
         </>}
 
         {tab === 'icons' && <>
@@ -442,7 +455,7 @@ export default function AdminResourcesPage({ password, onBack }: AdminResourcesP
         password={password}
         onClose={() => setGeneratePropsOpen(false)}
         onGenerated={sourceFile => {
-          fetchPropsManifest();
+          setPropsReloadKey(k => k + 1);
           setGeneratePropsOpen(false);
           if (sourceFile) setPreviewFile(sourceFile);
         }}

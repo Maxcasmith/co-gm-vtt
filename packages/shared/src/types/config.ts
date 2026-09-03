@@ -1,4 +1,4 @@
-export type StoryProvider = "claude" | "openai" | "deepseek" | "kimi";
+export type StoryProvider = "claude" | "openai" | "deepseek" | "kimi" | "qwen";
 export type ImageModel = "gpt-image-1" | "gpt-image-1.5" | "gpt-image-2" | "dall-e-3" | "dall-e-2";
 
 export type ReasoningEffort = "low" | "medium" | "high" | "maximum";
@@ -12,7 +12,7 @@ export interface ModelTier {
 
 export type AiFeature =
   | "campaignConcepts" | "dungeonPremise" | "dungeonScenarioSynopsis" | "backstoryGeneration" | "backstoryCheck" | "worldLoreSync" | "storyboardCaptions"
-  | "nemesisGeneration" | "dmBrief" | "questGeneration" | "dmChatResponse" | "sessionTriage" | "sessionRecap" | "tagEffectProcessing"
+  | "nemesisGeneration" | "dmBrief" | "questGeneration" | "dmChatResponse" | "sessionTriage" | "sessionRecap" | "tagEffectProcessing" | "plotHookNormalize"
   | "worldGeneration" | "dungeonGeneration" | "worldStateAdvance"
   | "combatNarration" | "encounterGeneration" | "improvisedResolution"
   | "compendium";
@@ -46,6 +46,7 @@ export interface ApiKeys {
   anthropic: string;
   deepseek: string;
   kimi: string;
+  qwen: string;
 }
 
 export interface AppConfig {

@@ -132,6 +132,8 @@ export function registerInventoryHandlers(ctx: JoinContext): void {
       await updateCharacter(campaignId, characterId, c => ({ ...c, tactics, aiControlled }));
       const sid = playerSocketIds.get(characterId);
       if (sid) io.to(sid).emit('character:tactics:update', { characterId, tactics, aiControlled });
+      // Unlike tactics (private), aiControlled needs to reach every client so the party roster's pip/offline styling stays live.
+      io.to(ROOM).emit('character:aiControlled:update', { characterId, aiControlled });
     })();
   });
 

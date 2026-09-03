@@ -17,7 +17,7 @@ import { resolveReaction } from '../combat/stateEngine/reactionPrompt.ts';
 import { D20Roll, rollDice, rollDiceRerollLow, fmtMod, rollApplicableDamage, rollApplicableHeal, rollChainableDamage, resolveHit, maxDiceValue } from '../combat/dice.ts';
 import { rollModeFor, attackModeAgainstTarget } from '../combat/conditions/rollModeFor.ts';
 import { applyDamageToCreature, applyDamageToPlayer, applyHealingToPlayer, applyHealingToCreature, grantTempHpToPlayer, advanceTurn, trySpendSpellSlot, tryBeginCombat, emitResources, applyCondition, clearCondition, startConcentrating, isConcentratingOn, rollSavingThrow, checkTrapAt, canMove, breakSanctuaryOn, getWorldTimeSecs, applyElevationChange, investigateIllusion, checkMovementTriggers, bladeWardPenalty, stabilizeParticipant, offerLuckAttackReroll, trySpendHeroicInspiration, requestAlertSwap, breakConcentration } from '../combat/runtime.ts';
-import { checkDungeonProximity, toggleDoor } from '../dungeon/runtime.ts';
+import { checkDungeonProximity, toggleDoor, useStairs } from '../dungeon/runtime.ts';
 import { applyEffects } from '../effects.ts';
 import type { JoinContext } from './context.ts';
 
@@ -942,6 +942,7 @@ export async function resolvePlayerSpellAttack(
 
         let damage: number | undefined;
         let damageRoll: number | undefined;
+        let bonus: { spellName: string; damageType: string | undefined; total: number } | undefined;
         if (hit && rolledDamage) {
           damageRoll = rolledDamage.total;
           const dmgCtx = await engine.trigger('beforeDamage', {
@@ -950,6 +951,15 @@ export async function resolvePlayerSpellAttack(
             damageType: rolledDamage.damageType, sourceName: spell.name,
           });
           damage = Math.max(0, dmgCtx.amount);
+          // Hex, Hunter's Mark redirected onto a spell-attack cast, ... — OnHitBonusDamageHook
+          // already folded these into `damage` above; itemized here too so the combat log shows
+          // them as their own line instead of the total silently growing with no explanation,
+          // same treatment combat:attack's weapon-hit path already gets.
+          if (dmgCtx.bonusSources?.length) {
+            const hookTotal = dmgCtx.bonusSources.reduce((sum, s) => sum + s.amount, 0);
+            const hookNames = dmgCtx.bonusSources.map(s => s.sourceName).join(' + ');
+            bonus = { spellName: hookNames, damageType: dmgCtx.bonusSources[0]?.damageType, total: hookTotal };
+          }
           await applyDamageToCreature(cid, targetId, damage, { sourceId: casterId, isCrit });
           await engine.trigger('afterDamage', dmgCtx);
 
@@ -1020,6 +1030,9 @@ export async function resolvePlayerSpellAttack(
           damageRoll,
           damageType: rolledDamage?.damageType,
           damageFormula: rolledDamage?.formula,
+          bonusSpellName: bonus?.spellName,
+          bonusDamage: bonus?.total,
+          bonusDamageType: bonus?.damageType,
           remainingHp: hit ? encounter.findCreature(targetId)?.currentHp : undefined,
           targetDead: encounter.findCreature(targetId)?.isDead() ?? false,
         };
@@ -1110,6 +1123,10 @@ export function registerCombatHandlers(ctx: JoinContext): void {
 
   socket.on('door:toggle', ({ doorId, characterName }) => {
     void toggleDoor(campaignId, doorId, characterName);
+  });
+
+  socket.on('stairs:use', ({ stairsId, characterName }) => {
+    void useStairs(campaignId, stairsId, characterName);
   });
 
   // Manual GM-driven condition control — traps, cures, anything outside the spell-save path

@@ -64,6 +64,9 @@ export default function CombatLogOverlay({ open, onClose }: Props) {
         damageRoll: result.damageRoll,
         damageType: result.damageType,
         damageFormula: result.damageFormula,
+        bonusSpellName: result.bonusSpellName,
+        bonusDamage: result.bonusDamage,
+        bonusDamageType: result.bonusDamageType,
         targetName: result.targetName,
       }]);
     });
@@ -222,6 +225,12 @@ export default function CombatLogOverlay({ open, onClose }: Props) {
                               <span>{entry.spellName} ({entry.damageFormula ?? 'die'})</span>
                               <span className="combat-log-breakdown-box">{entry.damageRoll}</span>
                             </div>
+                            {entry.bonusDamage != null && (
+                              <div className="combat-log-breakdown-row">
+                                <span>{entry.bonusSpellName} ({entry.bonusDamageType ?? 'bonus'})</span>
+                                <span className="combat-log-breakdown-box">+{entry.bonusDamage}</span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       ) : !entry.hit ? (

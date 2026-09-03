@@ -172,81 +172,140 @@
   background: rgba(180, 50, 50, 0.1);
 }
 
-/* ── Congrats screen (quest/goal resolved) ──────────────────────────────────── */
+/* ── Congrats screen (dungeon questline complete) — full page, not a modal ──── */
 
-.congrats-overlay {
+.congrats-page {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.75);
+  z-index: 9500;
+  background: radial-gradient(ellipse at center, rgba(30, 24, 12, 0.97) 0%, rgba(6, 5, 10, 0.99) 75%);
+  overflow-y: auto;
   display: flex;
-  align-items: center;
   justify-content: center;
-  z-index: 9000;
   animation: fade-in 0.6s ease;
 }
 
-.congrats-card {
-  background: rgba(10, 8, 20, 0.96);
-  border: 1px solid rgba(212, 175, 55, 0.5);
-  border-radius: 16px;
-  padding: 48px 64px;
+.congrats-page-inner {
+  width: 100%;
+  max-width: 640px;
+  margin: 8vh auto;
+  padding: 0 32px 64px;
   text-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
-  max-width: 480px;
-  width: 90vw;
-  box-shadow: 0 0 60px rgba(212, 175, 55, 0.15);
+  gap: 8px;
+}
+
+.congrats-eyebrow {
+  font-size: 12px;
+  color: rgba(212, 175, 55, 0.7);
+  text-transform: uppercase;
+  letter-spacing: 0.25em;
+  margin: 0;
 }
 
 .congrats-title {
-  font-size: 48px;
+  font-size: 56px;
   font-weight: 700;
   color: #d4af37;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   margin: 0;
+  text-shadow: 0 0 40px rgba(212, 175, 55, 0.35);
 }
 
 .congrats-subtitle {
+  font-size: 15px;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.55);
+  margin: 0 0 32px;
+}
+
+.congrats-quests-section,
+.congrats-leaderboard-section {
+  width: 100%;
+  border-top: 1px solid rgba(212, 175, 55, 0.25);
+  padding-top: 24px;
+  margin-top: 16px;
+}
+
+.congrats-section-title {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.5);
   text-transform: uppercase;
-  letter-spacing: 0.15em;
-  margin: 0;
+  letter-spacing: 0.18em;
+  margin: 0 0 16px;
 }
 
 .congrats-quests {
   list-style: none;
   padding: 0;
-  margin: 8px 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .congrats-quests li {
   font-family: 'Cinzel', serif;
-  font-size: 16px;
+  font-size: 17px;
   color: rgba(255, 255, 255, 0.85);
 }
 
-.congrats-dismiss {
-  margin-top: 16px;
-  padding: 10px 32px;
-  border: 1px solid rgba(212, 175, 55, 0.4);
+.congrats-leaderboard {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.congrats-leaderboard-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 16px;
+  background: rgba(212, 175, 55, 0.06);
+  border: 1px solid rgba(212, 175, 55, 0.2);
+  border-radius: 8px;
+}
+
+.congrats-leaderboard-label {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: left;
+}
+
+.congrats-leaderboard-winner {
+  font-family: 'Cinzel', serif;
+  font-size: 16px;
+  color: #d4af37;
+}
+
+.congrats-leaderboard-value {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.congrats-finish {
+  margin-top: 40px;
+  padding: 14px 56px;
+  border: 1px solid rgba(212, 175, 55, 0.5);
   border-radius: 8px;
   background: transparent;
   color: #d4af37;
-  font-size: 13px;
-  letter-spacing: 0.1em;
+  font-size: 14px;
+  letter-spacing: 0.15em;
   text-transform: uppercase;
   cursor: pointer;
   transition: background 0.2s;
 }
 
-.congrats-dismiss:hover {
-  background: rgba(212, 175, 55, 0.1);
+.congrats-finish:hover {
+  background: rgba(212, 175, 55, 0.12);
 }
 

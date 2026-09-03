@@ -139,6 +139,9 @@ export interface CombatLogSpellAttackPayload {
   damageRoll?: number;
   damageType?: string;
   damageFormula?: string;
+  bonusSpellName?: string;
+  bonusDamage?: number;
+  bonusDamageType?: string;
   targetName: string;
 }
 export interface CombatLogSpellSavePayload {
@@ -206,6 +209,7 @@ export interface VTTEventMap {
   'vtt:token:move':             TokenPosition;
   'vtt:token:moved':            TokenPosition;
   'vtt:door:toggle':            { doorId: string };
+  'vtt:stairs:use':             { stairsId: string };
   'vtt:targeting:start':        TargetingStartPayload;
   'vtt:targeting:cancel':       TargetingCancelPayload;
   'vtt:combat:attack':          CombatAttackPayload;

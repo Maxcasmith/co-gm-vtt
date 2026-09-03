@@ -4,6 +4,7 @@ import { readdir } from 'fs/promises';
 import path from 'path';
 import { slugifyTheme } from 'shared';
 import { PROPS_DIR } from '../storage.ts';
+import { parsePageParams } from '../utils/pagination.ts';
 
 export const propsRouter = Router();
 
@@ -14,23 +15,29 @@ function isSafeSlug(s: string): boolean {
   return s.length > 0 && slugifyTheme(s) === s;
 }
 
-// Gallery listing for the admin Props tab — every generated prop's sprite plus the raw, unmodified
-// source atlases saved under _source (same review purpose as tilesets/manifest's source_extended).
-propsRouter.get('/manifest', async (_req, res) => {
-  if (!existsSync(PROPS_DIR)) { res.json({ props: {}, sources: [] }); return; }
+// Gallery listing for the admin Props tab — every generated prop's sprite (paginated, sorted by
+// slug for a stable page order) plus the raw, unmodified source atlases saved under _source (small
+// and shown in full, same review purpose as tilesets/manifest's source_extended — never paginated).
+propsRouter.get('/manifest', async (req, res) => {
+  const { page, pageSize } = parsePageParams(req, 20);
+  if (!existsSync(PROPS_DIR)) { res.json({ props: [], total: 0, sources: [] }); return; }
 
   const entries = (await readdir(PROPS_DIR, { withFileTypes: true })).filter(e => e.isDirectory());
-  const props: Record<string, string> = {};
   const sources: string[] = [];
+  const slugs: string[] = [];
   await Promise.all(entries.map(async entry => {
     if (entry.name === '_source') {
       const files = await readdir(path.join(PROPS_DIR, '_source'));
       sources.push(...files.map(f => `/api/props/_source/${f}`));
       return;
     }
-    props[entry.name] = `/api/props/${entry.name}/sprite_01.png`;
+    slugs.push(entry.name);
   }));
-  res.json({ props, sources });
+  slugs.sort();
+
+  const start = (page - 1) * pageSize;
+  const props = slugs.slice(start, start + pageSize).map(slug => ({ slug, url: `/api/props/${slug}/sprite_01.png` }));
+  res.json({ props, total: slugs.length, sources });
 });
 
 propsRouter.get('/:slug/:file', (req, res) => {

@@ -34,10 +34,14 @@ export async function generateDungeon(
   // Man-made structures get a deterministic floor-plan layout driven by the manifest's adjacency
   // graph; natural/carved spaces (cave, crypt, tomb) go straight to the procedural row-packer —
   // no LLM geometry call, and no attempt to force building-shaped rooms onto a cave.
-  const { cells, rooms, doors } = manifest.structureType === 'building'
+  const { cells, rooms, doors, stairs } = manifest.structureType === 'building'
     ? generateBuildingLayout(manifest, opts)
     : generateGrid(manifest, opts);
   const entities = placeEntities(rooms, manifest, cells);
+  // Multi-floor building layouts only — already fully resolved (id + reciprocal linkTo) by
+  // generateBuildingLayout's stitching step, nothing left to look up here (unlike doors' keyName,
+  // stairs pairing never depends on placeEntities' output).
+  entities.push(...(stairs ?? []));
   // Name -> id for every placed loot entity, to resolve a locked door's keyName (still just a
   // name at this point — manifest.ts validated it refers to *some* loot item, but nothing gets a
   // real id until placeEntities runs above) into the real DungeonEntity.requiresKeyId points at.
@@ -75,8 +79,10 @@ export async function generateDungeon(
   const dungeon: Dungeon = {
     id: opts?.id ?? randomUUID(),
     name,
-    width: opts?.width ?? 50,
-    height: opts?.height ?? 50,
+    // Actual carved dimensions, not the per-floor opts — a multi-floor building's stitched canvas
+    // is wider than any single floor block (see buildingLayout.ts's generateBuildingLayout).
+    width: cells[0]?.length ?? opts?.width ?? 50,
+    height: cells.length || (opts?.height ?? 50),
     cells,
     rooms,
     entities,
@@ -228,6 +234,7 @@ function entityStatus(e: DungeonEntity): string {
     return `discovered — locked (DM eyes only, NEVER state the DC: opens if a player narrates using the key once it's discovered, or on a Thieves' Tools/DEX check beating DC ${e.lockpickDC ?? '?'} — tag [[DOOR_UNLOCK:PlayerName]] the moment either happens, within 5ft)`;
   }
   if (e.type === 'door') return `discovered — ${e.doorState ?? 'closed'}`;
+  if (e.type === 'stairs') return 'discovered — stairs to another floor, always usable, no lock';
   if (e.type === 'loot' && e.contents?.length) return `discovered — contains: ${e.contents.join(', ')}`;
   if (e.type === 'trap') {
     const seal = e.trap?.kind === 'seal' && e.trap.escapeDC
@@ -305,10 +312,11 @@ export function describeDungeonGroundTruth(dungeon: Dungeon, positions: Record<s
 
   lines.push('Rooms:');
   for (const room of dungeon.rooms) {
-    const kind = room.isHallway ? ' (hallway)' : '';
+    const kind = room.isStairwell ? ' (stairwell)' : room.isHallway ? ' (hallway)' : '';
+    const floor = room.floor ? ` (floor ${room.floor})` : '';
     const role = room.role ? ` (${room.role})` : '';
     const connects = room.connectsTo?.length ? ` — connects to: ${room.connectsTo.join(', ')}` : '';
-    lines.push(`- ${room.name}${kind}${role}${connects}`);
+    lines.push(`- ${room.name}${kind}${floor}${role}${connects}`);
     for (const d of room.dressing ?? []) lines.push(`  - dressing: ${d}`);
     for (const hd of room.hiddenDressing ?? []) {
       const state = hd.discovered ? 'discovered' : 'undiscovered — never state outright in narration';

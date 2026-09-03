@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir, readdir, rm } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, WorldState, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord, CharacterStoryboard, ScenarioStoryboard, StoryboardTestRecord, HouseRules } from 'shared';
+import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, WorldState, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord, CharacterStoryboard, ScenarioStoryboard, StoryboardTestRecord, HouseRules, PlotHook, ActivePlotArc } from 'shared';
 import { DEFAULT_HOUSE_RULES } from 'shared';
 import { Encounter } from './domain/encounter.ts';
 import { renderDungeonAscii } from './dungeon/index.ts';
@@ -11,6 +11,7 @@ import { logError } from './logger.ts';
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 export const STORAGE_DIR = path.resolve(__dir, '../storage');
 const CONFIG_PATH = path.join(STORAGE_DIR, 'config.json');
+const PLOT_HOOKS_PATH = path.join(STORAGE_DIR, 'plot-hooks.json');
 
 export const CAMPAIGNS_DIR = path.join(STORAGE_DIR, 'campaigns');
 export const PREMADE_DIR   = path.join(STORAGE_DIR, 'premade');
@@ -22,7 +23,7 @@ export const STORYBOARD_TEST_DIR = path.join(STORAGE_DIR, 'storyboard-test');
 
 const NARRATIVE_FEATURES: AppConfig['workflows'][number]['features'] = [
   'campaignConcepts', 'dungeonPremise', 'dungeonScenarioSynopsis', 'backstoryGeneration', 'backstoryCheck', 'worldLoreSync', 'storyboardCaptions',
-  'nemesisGeneration', 'dmBrief', 'questGeneration', 'dmChatResponse', 'sessionTriage', 'sessionRecap', 'tagEffectProcessing',
+  'nemesisGeneration', 'dmBrief', 'questGeneration', 'dmChatResponse', 'sessionTriage', 'sessionRecap', 'tagEffectProcessing', 'plotHookNormalize',
 ];
 const WORLD_AND_COMBAT_FEATURES: AppConfig['workflows'][number]['features'] = [
   'worldGeneration', 'dungeonGeneration', 'worldStateAdvance',
@@ -35,7 +36,7 @@ const DEFAULT_CONFIG: AppConfig = {
     { id: 'default-story', name: 'Story & DM', enabled: true, models: [{ provider: 'claude', model: 'claude-sonnet-4-6' }], features: NARRATIVE_FEATURES },
     { id: 'default-combat', name: 'Combat & World', enabled: true, models: [{ provider: 'openai', model: 'gpt-4o-mini' }], features: WORLD_AND_COMBAT_FEATURES },
   ],
-  apiKeys:  { openai: '', anthropic: '', deepseek: '', kimi: '' },
+  apiKeys:  { openai: '', anthropic: '', deepseek: '', kimi: '', qwen: '' },
   image:    { model: 'gpt-image-1', generateWorldMap: false, generateTilesets: false, generateStoryboard: false, generateBestiaryPortraits: false, generatePropImages: false },
   narration: { model: 'none', voice: 'onyx' },
   adminPassword: '',
@@ -70,6 +71,22 @@ export async function getConfig(): Promise<AppConfig> {
 export async function saveConfig(config: AppConfig): Promise<void> {
   await mkdir(STORAGE_DIR, { recursive: true });
   await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+}
+
+// Global pool, not per-campaign — same single-JSON-file shape as config.json above.
+export async function readPlotHooks(): Promise<PlotHook[]> {
+  try {
+    const raw = await readFile(PLOT_HOOKS_PATH, 'utf-8');
+    return JSON.parse(raw) as PlotHook[];
+  } catch (err) {
+    logError('storage:readPlotHooks', err);
+    return [];
+  }
+}
+
+export async function writePlotHooks(hooks: PlotHook[]): Promise<void> {
+  await mkdir(STORAGE_DIR, { recursive: true });
+  await writeFile(PLOT_HOOKS_PATH, JSON.stringify(hooks, null, 2), 'utf-8');
 }
 
 export async function writeCampaignFile(slug: string, filename: string, content: string): Promise<void> {
@@ -395,6 +412,29 @@ export async function readQuests(slug: string): Promise<Quest[]> {
 
 export async function writeQuests(slug: string, quests: Quest[]): Promise<void> {
   await writeCampaignFile(slug, 'quests.json', JSON.stringify(quests, null, 2));
+}
+
+// A campaign's in-progress plot hooks — only the current beat of each is ever exposed as a real
+// quest (see plotArcs.ts's advancePlotArc); the rest live only here until their turn comes.
+export async function readPlotArcs(slug: string): Promise<ActivePlotArc[]> {
+  try {
+    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'plot-arcs.json'), 'utf-8');
+    return JSON.parse(raw) as ActivePlotArc[];
+  } catch (err) { logError('storage:readPlotArcs', err); return []; }
+}
+
+export async function writePlotArcs(slug: string, arcs: ActivePlotArc[]): Promise<void> {
+  await writeCampaignFile(slug, 'plot-arcs.json', JSON.stringify(arcs, null, 2));
+}
+
+// Records that a pool hook has been committed to a campaign — checked at selection time so the
+// same hook is never picked for a campaign twice while (or after) it's already running there.
+export async function markPlotHookUsed(hookId: string, campaignId: string): Promise<void> {
+  const hooks = await readPlotHooks();
+  const hook = hooks.find(h => h.id === hookId);
+  if (!hook) return;
+  hook.usedIn.push({ campaignId, usedAt: new Date().toISOString() });
+  await writePlotHooks(hooks);
 }
 
 // Parse [[NPC:slug]], [[Location:slug]], [[Faction:slug]] links from entity file content.

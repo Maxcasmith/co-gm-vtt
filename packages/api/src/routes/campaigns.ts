@@ -12,7 +12,7 @@ import {
   listEntitySlugs, readEntity, saveDungeon, saveDungeonAscii, writeManifest, readManifest, emptyManifest, readQuests, writeQuests,
 } from '../storage.ts';
 import { generateDungeon } from '../dungeon/index.ts';
-import { generateCharacterStoryboard, generateScenarioStoryboard, SLIDE_COUNT } from '../dungeon/storyboard.ts';
+import { generateCharacterStoryboard, generateScenarioStoryboard, SLIDE_COUNT, SCENARIO_SLIDE_COUNT } from '../dungeon/storyboard.ts';
 import { calcMaxHp } from '../combat/dice.ts';
 import { getFeatureProvider } from '../providers/index.ts';
 import { copyCompendiumToCampaign } from '../compendium/storage.ts';
@@ -25,17 +25,10 @@ import { generateBattleMap } from '../providers/openai.ts';
 import { writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { jsonrepair } from 'jsonrepair';
+import { parseLlmJson } from '../utils/llmJson.ts';
 import { logError } from '../logger.ts';
 
 export const campaignsRouter = Router();
-
-// LLMs occasionally tack a stray closing quote onto true/false/null literals
-// (e.g. `"factionAffiliation": null"`) — jsonrepair can't infer intent there, so strip it first.
-function parseLlmJson<T>(raw: string): T {
-  const desanitized = raw.replace(/(:\s*(?:true|false|null))"(?=\s*[,}])/g, '$1');
-  return JSON.parse(jsonrepair(desanitized)) as T;
-}
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -605,7 +598,7 @@ campaignsRouter.get('/:id/scenario-storyboard', async (req, res) => {
 
 campaignsRouter.get('/:id/scenario-storyboard/:n', (req, res) => {
   const { id, n } = req.params as { id: string; n: string };
-  if (!new RegExp(`^[1-${SLIDE_COUNT}]$`).test(n)) { res.status(400).json({ error: 'Invalid slide number' }); return; }
+  if (!new RegExp(`^[1-${SCENARIO_SLIDE_COUNT}]$`).test(n)) { res.status(400).json({ error: 'Invalid slide number' }); return; }
   res.sendFile(`${id}/scenario-storyboard_slide_${n}.jpg`, { root: CAMPAIGNS_DIR }, err => {
     if (err) res.status(404).json({ error: 'Scenario storyboard slide not found' });
   });

@@ -70,5 +70,7 @@ export function templateSearchResult(characterName: string, found: SearchFind): 
     // Doors are never hidden (discovered: true, no hideDC — see toggleDoor's doc), so this never
     // actually fires; here only to keep the switch exhaustive.
     case 'door': return `${characterName} makes out a door.`;
+    // Stairs are also always discovered: true, no hideDC — see useStairs' doc. Never fires either.
+    case 'stairs': return `${characterName} makes out a stairwell.`;
   }
 }

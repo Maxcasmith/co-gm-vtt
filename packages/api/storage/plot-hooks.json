@@ -1,0 +1,191 @@
+[
+  {
+    "id": "4850eec3-880c-4410-b5b4-ef82963899e7",
+    "rawText": "The king sentences the party along with the kingsguard to a small town within their kingdom which is currently under hostage of a neighboring kingdom at war.\nArriving at the town the party along with the kingsguard must fight off the second kingdom. (This should be a taxing encounter)\nAfter dealing with the enemies the kingsguard begin making preparations to burn down the village leaving no survivors and blame it on this second kingdom in an attempt to raise support\nThey offer the party the chance to join,\nShould the party reject they will be forced into an unwinnable encounter\nShould the party flee the kings plan is fulfilled, the village is burned down and the party are deemed treasonous and complicit in the burning of the village orchestrated by the second kingdom.\nThis should turn the country against the party",
+    "title": "Liberation Mission Becomes False Flag",
+    "tags": [
+      "authority-betrayal",
+      "false-flag",
+      "moral-dilemma",
+      "protector-turned-oppressor",
+      "unjust-persecution",
+      "dark",
+      "grim"
+    ],
+    "structuralRequirements": [
+      "an authority figure or faction that can issue binding orders to the party",
+      "an elite enforcement arm loyal to that authority, deployed alongside the party",
+      "a hostile rival force currently occupying or besieging a community",
+      "a settlement or community whose destruction can serve as propaganda",
+      "a wider population whose opinion of the party can be turned against them"
+    ],
+    "beats": [
+      {
+        "order": 1,
+        "function": "the governing authority dispatches the party, alongside the authority's own elite agents, on a mission to relieve a community held by a hostile rival force — framing the mission as rescue while concealing an ulterior purpose"
+      },
+      {
+        "order": 2,
+        "function": "the party and the elite agents must overcome the occupying hostile force in a costly, taxing confrontation, establishing the mission's apparent success and the agents' image as protectors"
+      },
+      {
+        "order": 3,
+        "function": "the elite agents reveal the true objective: destroy the very community they just saved, leave no witnesses, and pin the atrocity on the rival force to manufacture public support for the authority's cause"
+      },
+      {
+        "order": 4,
+        "function": "the agents offer the party the chance to participate in the atrocity, forcing a moral choice between complicity and refusal"
+      },
+      {
+        "order": 5,
+        "function": "if the party refuses, they are forced into an unwinnable confrontation against the elite agents, punishing defiance and showing the mission was always a trap"
+      },
+      {
+        "order": 6,
+        "function": "if the party flees, the false-flag atrocity is carried out anyway, the party is publicly branded as traitors complicit in the rival force's crime, and the wider population turns against them — making refusal cost the party their standing regardless of innocence"
+      }
+    ],
+    "createdAt": "2026-09-03T21:18:51.569Z",
+    "usedIn": []
+  },
+  {
+    "id": "b9cbe801-05df-459c-aecd-fe6a3f047f3d",
+    "rawText": "Your party in search of something or someone are informed about a coven of hags that reside in an orphanage who are able to find anything and anyone.\nIf the party enter the orphanage they will meet the various sickly orphans who live there under the heel of the hags.\nShould the party approach the hags, The hags will attempt to make a deal with the party.\nA circle of shadow druids are cutting off the hags supply route, something they need is being frequently intercepted before it can get to their orphanage\nThe hags have agreed to hold up their end of the bargain after the party have resolved their issue\nShould the party accept they will need to head towards the druids circle\nOnce they arrive they catch the druids in the middle of summoning a great vengeful forest spirit who vowes to cleanse the land of those who do harm to the earth.\nThe spirit speaks to the party, informing them that the hags intend to do something monstrous to them and they are currently being kept on a plane unreachable by the party. The only one who can save the orphans is the spirit\nShould the party agree to allow the druids complete their ritual, the vengful spirit will be let loose in the campaign world however will make good on their agreement, the children will be saved and taken to a good home.\nShould the party prevent the summoning from finishing a fight will ensue with the shadow druids.\nShould the shadow druids fall the route will no longer be intercepted, the hags will be able to receive their goods and they will inform the party where to find the item or persons they seek. (This will however open their story to future potential antagonists)\nShould the party leave the druids untouched the hags will not hold up their end of the bargain",
+    "title": "Deal With Exploiters, Terrible Price",
+    "tags": [
+      "moral-dilemma",
+      "morally-gray",
+      "dark"
+    ],
+    "structuralRequirements": [
+      "a quest objective (person, item, or knowledge) the party is actively seeking",
+      "a morally dubious broker faction uniquely able to deliver that objective",
+      "a group of vulnerable dependents suffering under the broker faction's control",
+      "a rival faction disrupting the brokers by intercepting a resource they need",
+      "a powerful destructive force the rival faction can unleash, which alone can save the dependents",
+      "a sealed-off or unreachable location where the dependents' fate is being decided"
+    ],
+    "beats": [
+      {
+        "order": 1,
+        "function": "Hook: the party, searching for a person, item, or knowledge, is directed to a faction of dubious reputation that uniquely possesses the means to locate or provide it"
+      },
+      {
+        "order": 2,
+        "function": "Complication: on visiting the faction's domain, the party witnesses vulnerable dependents living in misery under the faction's exploitation, establishing that dealing with them carries a moral cost"
+      },
+      {
+        "order": 3,
+        "function": "The bargain: the faction offers to fulfill the party's need only after the party eliminates an external problem for them"
+      },
+      {
+        "order": 4,
+        "function": "The problem revealed: a rival faction is intercepting a resource the brokers depend on, and the brokers want the interference stopped"
+      },
+      {
+        "order": 5,
+        "function": "Terms confirmed: the brokers commit to payment contingent on the party resolving the disruption, locking in a conditional deal"
+      },
+      {
+        "order": 6,
+        "function": "If the party accepts, they travel to confront the rival faction at its seat of power"
+      },
+      {
+        "order": 7,
+        "function": "Reversal: the party catches the rivals in the act of calling forth a powerful destructive force devoted to punishing those who despoil something sacred to it"
+      },
+      {
+        "order": 8,
+        "function": "The true stakes: the force reveals that the brokers intend something monstrous for their dependents, that the dependents are held beyond the party's reach, and that only this force can save them"
+      },
+      {
+        "order": 9,
+        "function": "Choice A — permit the summoning: the destructive force is released into the world as a loose, ongoing menace, but it honors the agreement and the dependents are rescued and delivered to safety"
+      },
+      {
+        "order": 10,
+        "function": "Choice B — stop the summoning: open conflict with the rival faction ensues"
+      },
+      {
+        "order": 11,
+        "function": "If the rivals are defeated: the interception ends, the brokers honor the deal and grant the party its objective, but the dependents remain condemned and the brokers are seeded as future antagonists"
+      },
+      {
+        "order": 12,
+        "function": "If the party refuses to act against the rivals: the brokers withhold their end of the bargain, denying the party its objective"
+      }
+    ],
+    "createdAt": "2026-09-03T21:59:44.410Z",
+    "usedIn": []
+  },
+  {
+    "id": "70b96b86-d28b-42cd-b9b6-dfd6b46f5aad",
+    "rawText": "The mayor of a town leaves fliers for a job he's offering that he will pay handsomely for\nWhen he is approached he will inform the party of the job.\nThe towns sewers are beset with vermin and the adventurers are tasked with cleaning them out. This has been an going problem for months.\nThe job pays very well. very high price. Absurdly high.\nOn acceptance within the sewers the party will find a tribe of mutated rat men that are planning an attack on the surface\nThe rat men will attack anyone on sight going almost feral.\nIf the party can end the fight verbally the rat men will inform them that the mayor has been experimenting on them in secret, they recently broke loose into the towns sewers.\nThey claim if the mayor does not come down and face judgment they will rise to the surface and slaughter all who dwell in the village to send a message.\nShould the party lure the mayor to the sewers the rats will kill him permanently removing him from the story in future.\nShould the party actively refuse them, the rats will once again attack\nIf the party can appease the rats in one way or another they will remain in the sewers and set up their own home there.\nIf the party exterminate the rats they are offered the reward\nThe reward will not be freely given if the Mayor is arrested, condemned or killed",
+    "title": "Pest Hunt Hides Persecuted Victims",
+    "tags": [
+      "authority-betrayal",
+      "unjust-persecution",
+      "moral-dilemma",
+      "revenge",
+      "morally-gray"
+    ],
+    "structuralRequirements": [
+      "an authority figure with a guilty secret and leverage over the party's reward",
+      "a sentient victimized group hiding beneath or beside a settlement",
+      "a settlement or community that is unknowingly at risk",
+      "a posted job or bounty that draws the party into the situation"
+    ],
+    "beats": [
+      {
+        "order": 1,
+        "function": "an authority figure publicly advertises a job and promises the party a large payment"
+      },
+      {
+        "order": 2,
+        "function": "the authority figure briefs the party: a low-status pest/threat dwelling beneath a settlement must be exterminated, framed as a long-running nuisance"
+      },
+      {
+        "order": 3,
+        "function": "the offered payment is conspicuously, suspiciously excessive — a foreshadowing beat signaling the authority figure is hiding something"
+      },
+      {
+        "order": 4,
+        "function": "upon entering the threat's territory, the party discovers the 'pests' are actually an organized sentient group preparing a violent strike against the community above"
+      },
+      {
+        "order": 5,
+        "function": "the group is hostile on sight, forcing an initial violent confrontation before any understanding is possible"
+      },
+      {
+        "order": 6,
+        "function": "if the party resolves the encounter through words instead of force, the group reveals the truth: the authority figure secretly wronged and victimized them, and they escaped into hiding"
+      },
+      {
+        "order": 7,
+        "function": "the group issues an ultimatum: the authority figure must be delivered to face their judgment, or they will attack the entire community to send a message"
+      },
+      {
+        "order": 8,
+        "function": "branch — if the party delivers the authority figure, the group executes them, permanently removing that authority from the story"
+      },
+      {
+        "order": 9,
+        "function": "branch — if the party refuses the group's demand outright, hostilities resume"
+      },
+      {
+        "order": 10,
+        "function": "branch — if the party finds a way to appease the group, the group stands down and peacefully establishes a permanent home in their hidden refuge"
+      },
+      {
+        "order": 11,
+        "function": "branch — if the party exterminates the group as originally hired, the authority figure offers the promised reward"
+      },
+      {
+        "order": 12,
+        "function": "the reward is withheld if the authority figure is arrested, condemned, or killed — their control over payment is the final leverage complicating any just outcome"
+      }
+    ],
+    "createdAt": "2026-09-03T22:18:22.826Z",
+    "usedIn": []
+  }
+]

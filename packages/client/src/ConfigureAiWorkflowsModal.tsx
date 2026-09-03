@@ -69,6 +69,10 @@ const AI_FEATURES: { id: AiFeature; label: string; description: string; group: s
     id: 'tagEffectProcessing', label: 'Tag & Effect Processing', group: 'Narrative',
     description: 'Parses the Virtual DM’s raw response into structured effects (loot, combat triggers, quest updates). Structured extraction, not prose — a fast model usually suffices.',
   },
+  {
+    id: 'plotHookNormalize', label: 'Plot Hook Normalization', group: 'Narrative',
+    description: 'Abstracts an admin-authored plot arc into a reusable, genre-agnostic skeleton for the Plot Hook Pool. Runs once per hook, on save — quality over speed, since a weak abstraction here degrades every later use of that hook.',
+  },
   // ── World ──
   {
     id: 'worldGeneration', label: 'World Generation', group: 'World',

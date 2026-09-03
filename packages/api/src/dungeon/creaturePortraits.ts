@@ -172,21 +172,30 @@ async function generateBatch(batch: PendingPortrait[], apiKey: string, model: st
     // lines actually got drawn (same detectGridBoundaries pipeline props.ts uses), never a naive even
     // division — a bust drawn slightly oversized bleeds across the row boundary otherwise, cutting two
     // different creatures' heads in half into the same cell.
+    // Only the rows/cols that hold a real creature (batch.length cells, not the full 16) get cropped
+    // below, so that's all this needs to check — an under-full batch's trailing blank cells have no
+    // dividing line between them (nothing to fence), which used to collapse the unused trailing rows
+    // and fail this check on a perfectly good atlas (confirmed live: real 7-creature crop came out
+    // correct off an atlas detected as 4x3, discarded anyway, wasting 2 retries). Still guards against
+    // the genuine misdetection this loop exists for (confirmed live: a mismatched 6x1 detection spliced
+    // two other creatures into one crop) by requiring exact GRID_SIZE columns and enough rows to reach
+    // every real cell.
     const boundaries = await detectGridBoundaries(candidateAtlas, width, height, isBackgroundOrBlank);
     const actualCols = boundaries.cols.length - 1, actualRows = boundaries.rows.length - 1;
-    if (actualCols === GRID_SIZE && actualRows === GRID_SIZE) {
+    const neededRows = Math.ceil(batch.length / GRID_SIZE);
+    if (actualCols === GRID_SIZE && actualRows >= neededRows) {
       atlas = candidateAtlas; rows = boundaries.rows; cols = boundaries.cols;
       break;
     }
-    console.warn(`[creaturePortraits] attempt ${attempt}: detected a ${actualCols}x${actualRows} grid, not the requested ${GRID_SIZE}x${GRID_SIZE} — discarding and ${attempt < MAX_ATLAS_ATTEMPTS ? 're-requesting' : 'giving up'}`);
+    console.warn(`[creaturePortraits] attempt ${attempt}: detected a ${actualCols}x${actualRows} grid, needed ${GRID_SIZE}x${neededRows}+ — discarding and ${attempt < MAX_ATLAS_ATTEMPTS ? 're-requesting' : 'giving up'}`);
   }
   if (!atlas || !rows || !cols) {
     console.error(`[creaturePortraits] gave up on batch [${batch.map(b => b.name).join(', ')}] after ${MAX_ATLAS_ATTEMPTS} attempts — no portraits written, will retry whenever this creature is next needed`);
     return;
   }
 
-  // GRID_SIZE x GRID_SIZE is guaranteed at this point (the loop above only breaks on an exact match),
-  // so batch[i] maps onto the real, requested grid — no dynamic actualCols/actualRows guessing needed.
+  // GRID_SIZE columns and at least one boundary past every real cell's row are guaranteed at this
+  // point (the loop above only breaks once that holds), so batch[i]'s row/col lookups below are safe.
   const rects: GridRect[] = [];
   batch.forEach((b, i) => {
     const r = Math.floor(i / GRID_SIZE), c = i % GRID_SIZE;

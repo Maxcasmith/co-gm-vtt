@@ -3,13 +3,15 @@ import { readdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import {
   readChatLog, listEntitySlugs, readEntity, writeEntity, archiveChatLog,
-  getCharacter, getWorldMeta, CAMPAIGNS_DIR, readManifest, writeManifest,
+  getCharacter, getWorldMeta, writeWorldMeta, CAMPAIGNS_DIR, readManifest, writeManifest,
   readQuests, writeQuests, readCampaignFile,
+  readPlotHooks, readPlotArcs, writePlotArcs, markPlotHookUsed,
 } from '../storage.ts';
 import { getConfig } from '../storage.ts';
 import { getFeatureProvider, type ChatMessage } from '../providers/index.ts';
-import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDungeonNarrationPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, buildDungeonQuestPrompt, type EntityType } from './prompts.ts';
-import type { AppConfig, ChatPayload, Character, CurrencyDenomination, Dungeon, Quest } from 'shared';
+import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDungeonNarrationPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, buildPlotHookCandidatePrompt, buildDungeonQuestPrompt, buildStoryTagsPrompt, type EntityType } from './prompts.ts';
+import { PLOT_HOOK_TAGS } from 'shared';
+import type { AppConfig, ChatPayload, Character, CurrencyDenomination, Dungeon, Quest, PlotHook, ActivePlotArc, PlotHookTag } from 'shared';
 import { logError } from '../logger.ts';
 
 const ENTITY_TYPES: EntityType[] = ['npc', 'faction', 'location', 'character', 'nemesis'];
@@ -250,7 +252,42 @@ export async function generateDmBrief(
 
 // ── Session quest generation ──────────────────────────────────────────────────
 
+// Grounds a winning plot arc's invented cast as real entity files from the moment it starts,
+// instead of leaving them as names that only exist inside quest description text — mirrors
+// routes/campaigns.ts's syncCharacterToWorldLore (same "skip anything that collides with an
+// existing slug" rule: a same-named entity is almost certainly the established one, and this
+// pass must never clobber hand-authored lore).
+async function seedPlotArcEntities(
+  campaignSlug: string, arcTitle: string, entities: Array<{ name: string; type: 'npc' | 'faction' | 'location'; description: string }>,
+): Promise<void> {
+  const toEntitySlug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  await Promise.all(entities.filter(e => e.name?.trim()).map(async e => {
+    const slug = toEntitySlug(e.name);
+    const existingSlugs = await listEntitySlugs(campaignSlug, e.type);
+    if (existingSlugs.includes(slug)) return;
+    const heading = e.type === 'location' ? '## Scene Notes' : '## Observed';
+    const content = `# ${e.name}\n\n${e.description}\n\n${heading}\n- Introduced by the "${arcTitle}" storyline.\n`;
+    await writeEntity(campaignSlug, e.type, slug, content);
+  }));
+}
+
 const UNDISCOVERED_THRESHOLD = 2;
+
+// Deterministic pre-filter — the only judgment call left to the LLM is Task 3 in
+// buildPlotHookCandidatePrompt (does this one fit well enough to beat an invented alternative).
+// Empty storyTags means "not yet known" (see WorldMeta.storyTags), not "nothing fits" — every
+// not-yet-used hook stays eligible until play has actually proven a theme, at which point overlap
+// starts breaking ties toward what this campaign has shown itself to be about.
+function pickEligiblePlotHook(hooks: PlotHook[], campaignSlug: string, storyTags: string[]): PlotHook | undefined {
+  const eligible = hooks.filter(h =>
+    !h.usedIn.some(u => u.campaignId === campaignSlug) &&
+    (storyTags.length === 0 || h.tags.some(t => storyTags.includes(t))),
+  );
+  if (!eligible.length) return undefined;
+  return eligible
+    .map(h => ({ hook: h, overlap: h.tags.filter(t => storyTags.includes(t)).length }))
+    .sort((a, b) => b.overlap - a.overlap)[0]!.hook;
+}
 
 export async function ensureSessionQuests(campaignSlug: string): Promise<void> {
   // Dungeon-crawl worlds are closed-world: quests come only from the dungeon's own seeded goals
@@ -280,26 +317,87 @@ export async function ensureSessionQuests(campaignSlug: string): Promise<void> {
 
     const config = await getConfig();
     const provider = getFeatureProvider(config, 'questGeneration');
-    const prompt = buildSessionQuestsPrompt({
-      campaignName: meta?.name ?? campaignSlug,
-      currentAct,
-      actConditions,
-      existingIds,
-      openQuestNames: openNames,
-      resolvedQuestNames: resolvedNames,
-      currentLocation: manifest?.currentLocation ?? null,
-      needed: UNDISCOVERED_THRESHOLD - undiscovered.length,
-    });
-
-    const raw = await provider.complete(prompt);
-    console.log('[session-quests] raw response:\n', raw);
-    const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```\s*$/, '');
-    const generated = JSON.parse(cleaned) as Array<{ id: string; name: string; description: string }>;
-
     const today = new Date().toISOString().slice(0, 10);
-    const newQuests = generated
-      .filter(q => q.id && q.name && !existingIds.includes(q.id))
-      .map(q => ({ id: q.id, name: q.name, description: q.description, status: 'undiscovered' as const, log: [], addedAt: today }));
+
+    // Pool contributes at most one quest per call — the rest of `needed` (if any) still comes from
+    // plain invention below, same as before this feature existed.
+    let remainingNeeded = UNDISCOVERED_THRESHOLD - undiscovered.length;
+    const newQuests: Quest[] = [];
+
+    const pool = await readPlotHooks();
+    const chosenHook = pickEligiblePlotHook(pool, campaignSlug, meta?.storyTags ?? []);
+    if (chosenHook) {
+      const entitySummaries = await buildEntitySummaries(campaignSlug);
+      const candidatePrompt = buildPlotHookCandidatePrompt({
+        campaignName: meta?.name ?? campaignSlug,
+        entitySummaries,
+        currentAct,
+        actConditions,
+        existingIds,
+        openQuestNames: openNames,
+        resolvedQuestNames: resolvedNames,
+        currentLocation: manifest?.currentLocation ?? null,
+        poolHook: { title: chosenHook.title, structuralRequirements: chosenHook.structuralRequirements, beats: chosenHook.beats },
+      });
+
+      const raw = await provider.complete(candidatePrompt);
+      console.log('[session-quests] plot-hook candidate raw response:\n', raw);
+      const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```\s*$/, '');
+      const parsed = JSON.parse(cleaned) as {
+        poolCandidate: {
+          score: number;
+          beats: Array<{ order: number; id: string; name: string; description: string }>;
+          entities?: Array<{ name: string; type: 'npc' | 'faction' | 'location'; description: string }>;
+        };
+        inventedCandidate: { score: number; id: string; name: string; description: string };
+      };
+
+      const poolWins = parsed.poolCandidate.score > parsed.inventedCandidate.score
+        && parsed.poolCandidate.beats.length === chosenHook.beats.length;
+
+      if (poolWins) {
+        const arcBeats = parsed.poolCandidate.beats
+          .slice().sort((a, b) => a.order - b.order)
+          .map(b => ({ order: b.order, questId: b.id, name: b.name, description: b.description }));
+        const first = arcBeats[0]!;
+        newQuests.push({ id: first.questId, name: first.name, description: first.description, status: 'undiscovered', log: [], addedAt: today });
+
+        const arc: ActivePlotArc = { plotHookId: chosenHook.id, beats: arcBeats, currentBeatIndex: 0, startedAt: new Date().toISOString() };
+        await writePlotArcs(campaignSlug, [...await readPlotArcs(campaignSlug), arc]);
+        await markPlotHookUsed(chosenHook.id, campaignSlug);
+        await seedPlotArcEntities(campaignSlug, chosenHook.title, parsed.poolCandidate.entities ?? []);
+        console.log(`[session-quests] plot hook "${chosenHook.title}" selected (score ${parsed.poolCandidate.score} vs invented ${parsed.inventedCandidate.score}) — started arc with ${arcBeats.length} beat(s)`);
+      } else {
+        const c = parsed.inventedCandidate;
+        newQuests.push({ id: c.id, name: c.name, description: c.description, status: 'undiscovered', log: [], addedAt: today });
+      }
+      remainingNeeded -= 1;
+    }
+
+    if (remainingNeeded > 0) {
+      const prompt = buildSessionQuestsPrompt({
+        campaignName: meta?.name ?? campaignSlug,
+        currentAct,
+        actConditions,
+        existingIds: [...existingIds, ...newQuests.map(q => q.id)],
+        openQuestNames: openNames,
+        resolvedQuestNames: resolvedNames,
+        currentLocation: manifest?.currentLocation ?? null,
+        needed: remainingNeeded,
+      });
+
+      const raw = await provider.complete(prompt);
+      console.log('[session-quests] raw response:\n', raw);
+      const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```\s*$/, '');
+      const generated = JSON.parse(cleaned) as Array<{ id: string; name: string; description: string }>;
+      const knownIds = new Set([...existingIds, ...newQuests.map(q => q.id)]);
+      for (const q of generated) {
+        if (q.id && q.name && !knownIds.has(q.id)) {
+          newQuests.push({ id: q.id, name: q.name, description: q.description, status: 'undiscovered', log: [], addedAt: today });
+          knownIds.add(q.id);
+        }
+      }
+    }
 
     if (newQuests.length) {
       await writeQuests(campaignSlug, [...quests, ...newQuests]);
@@ -387,6 +485,7 @@ export async function getDMResponse(campaignSlug: string): Promise<string> {
     worldType,
     entitySummaries,
     characterSummaries,
+    meta?.tags ?? [],
   );
 
   const provider = getFeatureProvider(config, 'dmChatResponse');
@@ -516,6 +615,32 @@ export async function processSession(campaignSlug: string): Promise<ProcessResul
     }
   } catch (err) {
     logError('session-processor/index:actAdvancement', err);
+  }
+
+  // Story tag growth — see WorldMeta.storyTags: what this campaign's play has actually proven to be
+  // about, used by ensureSessionQuests to filter the plot hook pool. Dungeon-crawl campaigns never
+  // read storyTags at all (ensureSessionQuests hard-skips them), so classifying here would be pure
+  // wasted cost with nothing downstream to use it.
+  try {
+    const meta = await getWorldMeta(campaignSlug);
+    if (meta && meta.type !== 'dungeon-crawl') {
+      const existingTags = meta.storyTags ?? [];
+      const candidateTags = PLOT_HOOK_TAGS.filter(t => !existingTags.includes(t));
+      if (candidateTags.length) {
+        const raw = await provider.complete(buildStoryTagsPrompt(chatLogText, candidateTags));
+        const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```\s*$/, '');
+        const result = JSON.parse(cleaned) as { tags: Array<{ tag: string; confidence: number; evidence: string }> };
+        const earned = result.tags
+          .filter(t => t.confidence >= 70 && (candidateTags as readonly string[]).includes(t.tag))
+          .map(t => t.tag as PlotHookTag);
+        if (earned.length) {
+          await writeWorldMeta(campaignSlug, { ...meta, storyTags: [...existingTags, ...earned] });
+          console.log(`[story-tags] +${earned.length} for ${campaignSlug}: ${earned.join(', ')}`);
+        }
+      }
+    }
+  } catch (err) {
+    logError('session-processor/index:storyTags', err);
   }
 
   return { updated, created, cascaded };

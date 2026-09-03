@@ -131,6 +131,23 @@ export async function generateCombatFlavour(result: AttackResult | SpellAttackRe
   ], adapter);
 }
 
+// Fired once, right after the last enemy drops — deliberately its own narrow prompt rather than
+// routing through the general dungeon/world narrator (getDungeonNarrationResponse), which sees
+// the full chat history and open-ended DM instructions and tends to recap the whole fight instead
+// of just landing this one short beat.
+export async function generateCombatAftermath(defeatedNames: string[], adapter: StoryProviderAdapter): Promise<string | null> {
+  return llmText([
+    {
+      role: 'system',
+      content: 'You are narrating the immediate aftermath of a combat encounter that just ended in the party\'s total victory, in a tabletop RPG. Write 2-4 sentences covering ONLY the beat right after the last blow lands: the enemy falling, the immediate physical/sensory aftermath (sound, smell, the sudden quiet), then hand the moment back to the players. Do NOT recap the fight blow-by-blow, do NOT restate earlier narration, do NOT list every enemy killed, do NOT introduce new plot hooks or NPCs. This is a short beat, not a scene.',
+    },
+    {
+      role: 'user',
+      content: `Defeated: ${defeatedNames.join(', ')}.`,
+    },
+  ], adapter);
+}
+
 export async function generateSpellSaveFlavour(result: SpellSaveResult, adapter: StoryProviderAdapter): Promise<string | null> {
   const outcomeLines = result.outcomes.map(o => {
     // A failed save with no immediate damage (e.g. Tasha's Caustic Brew — no on-cast damage,

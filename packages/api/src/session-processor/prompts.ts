@@ -1,3 +1,4 @@
+import { PLOT_HOOK_TAGS } from 'shared';
 import type { Quest } from 'shared';
 
 export type EntityType = 'npc' | 'faction' | 'location' | 'character' | 'nemesis';
@@ -143,8 +144,10 @@ function buildNarrationPrompt(opts: {
   entitySummaries: string;
   characterSummaries: string;
   combatSection: string;
+  tags: string[];
 }): string {
-  const { worldName, worldType, entitySummaries, characterSummaries, combatSection } = opts;
+  const { worldName, worldType, entitySummaries, characterSummaries, combatSection, tags } = opts;
+  const tagsLine = tags.length ? tags.join(', ') : 'no tags set — infer tone from the world entities and story so far';
   return `You are the Virtual Dungeon Master for a D&D 5e ${worldType === 'one-shot' ? 'one-shot adventure' : worldType === 'dungeon-crawl' ? 'dungeon crawl' : 'ongoing campaign'} set in ${worldName}.
 
 ## Your role
@@ -308,11 +311,12 @@ When the players enter a dungeon, crypt, building interior, or any navigable enc
 
 Format: [[DUNGEON_GEN:Location Name:genre]]
 
-Genre must be one of: fantasy, horror, sci-fi, dungeon-crawl, mystery
+Genre must be one of: fantasy, horror, sci-fi, dungeon-crawl, mystery — but pick it to match THIS campaign's own tags (${tagsLine}), not the location name alone. A police station, a crypt, a spaceship — any of these can be fantasy, sci-fi, mystery, or dungeon-crawl depending on the campaign. Only choose horror when the campaign's tags actually call for horror; do not default to it just because a building or interior feels ambiguous.
 
 Examples:
-- Players descend into the Tomb of the Cursed Dragon King → [[DUNGEON_GEN:Tomb of the Cursed Dragon King:fantasy]] alongside your narration.
-- Players enter the RPD police station → [[DUNGEON_GEN:RPD Police Station:horror]] alongside your narration.
+- Campaign tagged high fantasy, dragons — players descend into the Tomb of the Cursed Dragon King → [[DUNGEON_GEN:Tomb of the Cursed Dragon King:fantasy]] alongside your narration.
+- Campaign tagged cyberpunk, corporate dystopia — players enter a corporate tower's server floor → [[DUNGEON_GEN:Kessler Tower Server Floor:sci-fi]] alongside your narration.
+- Campaign tagged survival horror, zombies — players enter the RPD police station → [[DUNGEON_GEN:RPD Police Station:horror]] alongside your narration.
 - Players explore a cave system → [[DUNGEON_GEN:cave:dungeon-crawl]] alongside your narration.
 
 Emit DUNGEON_GEN once when players first enter the location — not on follow-up actions within it. Do NOT emit for outdoor locations, open fields, or places that don't logically have room structure.
@@ -417,6 +421,7 @@ export function buildDMSystemPrompt(
   worldType: 'campaign' | 'one-shot' | 'dungeon-crawl',
   entitySummaries: string,
   characterSummaries: string,
+  tags: string[],
 ): string {
   return buildNarrationPrompt({
     worldName,
@@ -424,6 +429,7 @@ export function buildDMSystemPrompt(
     entitySummaries,
     characterSummaries,
     combatSection: OPEN_WORLD_COMBAT,
+    tags,
   });
 }
 
@@ -614,6 +620,82 @@ Return ONLY valid JSON — no markdown fences, no explanation:
 ]`;
 }
 
+// The pool's actual value-driver — reflavors an eligible plot hook's stripped skeleton into this
+// specific campaign's own concrete vehicle (fresh names/places/threats, not the skeleton's bare
+// function text) AND independently invents an ordinary quest the way buildSessionQuestsPrompt does,
+// then scores both on the same rubric so the caller (ensureSessionQuests) can pick deterministically.
+// One call produces both halves so a losing pool candidate never costs a second round trip — the
+// invented half is already sitting there ready to use either way.
+export function buildPlotHookCandidatePrompt(opts: {
+  campaignName: string;
+  entitySummaries: string;
+  currentAct: number;
+  actConditions: string[];
+  existingIds: string[];
+  openQuestNames: string[];
+  resolvedQuestNames: string[];
+  currentLocation: string | null;
+  poolHook: { title: string; structuralRequirements: string[]; beats: { order: number; function: string }[] };
+}): string {
+  const { campaignName, entitySummaries, currentAct, actConditions, existingIds, openQuestNames, resolvedQuestNames, currentLocation, poolHook } = opts;
+  const conditionsList = actConditions.length ? actConditions.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No specific conditions defined.';
+  const openList = openQuestNames.length ? openQuestNames.join(', ') : 'none';
+  const resolvedList = resolvedQuestNames.length ? resolvedQuestNames.join(', ') : 'none';
+  const existingIdList = existingIds.join(', ') || 'none';
+  const requirementsList = poolHook.structuralRequirements.length ? poolHook.structuralRequirements.map(r => `- ${r}`).join('\n') : '(none)';
+  const beatsList = poolHook.beats.map(b => `${b.order}. ${b.function}`).join('\n');
+
+  return `You are generating the next story hook for a TTRPG campaign called "${campaignName}", and separately judging whether a pre-authored plot arc fits this campaign right now.
+
+Current act: ${currentAct}
+Act ${currentAct} advancement conditions:
+${conditionsList}
+
+Currently open quests (player is already tracking these): ${openList}
+Already resolved quests: ${resolvedList}
+Current location: ${currentLocation ?? 'unknown'}
+
+World state:
+${entitySummaries || '(no entity notes yet — this is early in the campaign)'}
+
+## Task 1 — reflavor a pre-authored plot arc
+Below is a plot arc's SKELETON: a title, the entity roles it needs, and each beat's narrative FUNCTION only — every concrete noun (names, places, factions, threats) has deliberately been stripped out so it can be reflavored fresh for any campaign. Invent a completely fresh, concrete vehicle for it — new names/places/threats fitting THIS campaign's established world and tone above — and write out EVERY beat as real, concrete, player-facing text. Do not reuse a vehicle that would belong in a different genre or a different campaign; invent one that could only exist here. Keep every beat's names and facts consistent with each other — this is one continuous cast across all beats, not unrelated scenes. Only beat 1 is shown to the player now; the rest stay hidden until earned, so beat 1's text must not leak or reference what a later beat reveals. Never contradict anything already established in the world state above — if there's no existing entity that fits a needed role, invent a new one consistent with the world rather than repurpose an established one out of character.
+
+Plot arc title: ${poolHook.title}
+Needed entity roles:
+${requirementsList}
+Beats (function only):
+${beatsList}
+
+List every named entity you invent for this arc (the roles above, plus anyone else you name across the beats) — these get written into the world as real, permanent NPCs/factions/locations from the moment this arc starts, so later beats' narration has something grounded to stay consistent against instead of just a name repeated in quest text.
+
+## Task 2 — invent an independent alternative
+Generate one ordinary new quest hook the way you normally would, unrelated to the arc above — relating to the act conditions or the current world state, not duplicating any open/resolved quest.
+
+## Task 3 — score both candidates
+Score each 0-100 on the same rubric: how well it fits this campaign's established world and current act right now, how much it escalates stakes or advances the story, and how fresh it feels against what's already been played. Judge both exactly the same way — do not favor the pre-authored arc for the work that went into it, and do not favor the invented one for being simpler.
+
+Every new quest ID must be a unique kebab-case slug not in this list: ${existingIdList}. The reflavored arc needs ${poolHook.beats.length} such IDs, one per beat, none colliding with each other or the list above.
+
+Return ONLY a single valid JSON object — no markdown fences, no explanation:
+{
+  "poolCandidate": {
+    "score": number,
+    "beats": [
+      { "order": 1, "id": "kebab-slug", "name": "Quest Name", "description": "1-2 sentences, player-facing" }
+    ],
+    "entities": [
+      { "name": "string", "type": "npc" | "faction" | "location", "description": "1-2 sentences — grounded enough that a later beat's narration can stay consistent with it" }
+    ]
+  },
+  "inventedCandidate": {
+    "score": number,
+    "id": "kebab-slug", "name": "Quest Name", "description": "1-2 sentences, player-facing"
+  }
+}
+poolCandidate.beats must have exactly ${poolHook.beats.length} entries, in the same order as the beats listed above. poolCandidate.entities is only read if this candidate wins — populate it fully regardless.`;
+}
+
 // Generated BEFORE the dungeon itself, so the floor plan can be designed to actually serve
 // whatever quest comes back — the dungeon-gen prompt is told this stage is already decided
 // (see manifest.ts's predefinedChain handling) and itself decides its trigger plus every stage
@@ -779,4 +861,29 @@ Then write only the cascade YAML. If nothing to cascade: write cascade: []
 
 Start your output now (begin with ---):
 `;
+}
+
+// Grows a campaign's WorldMeta.storyTags from actual play — closed-set classification against the
+// same fixed taxonomy a plot hook is tagged from (see shared/plotHooks.ts), so pool eligibility can
+// eventually filter on what this campaign has PROVEN to be about, not just what it was tagged at
+// creation. Only asks about tags not already on the campaign — a confirmed theme doesn't need
+// re-litigating every session, and it keeps this call cheap and closed-set rather than open-ended.
+export function buildStoryTagsPrompt(chatLog: string, candidateTags: readonly string[] = PLOT_HOOK_TAGS): string {
+  return `You are classifying a tabletop RPG session's themes against a fixed list, for a system that matches future story content to what this campaign has actually proven to be about.
+
+Session log:
+${chatLog}
+
+Candidate themes (choose only from this list, do not invent others):
+${candidateTags.join(', ')}
+
+For each theme that was a genuine, substantial driver of this session's events — not a single line of dialogue, a passing mention, or something merely adjacent — include it below with a confidence score. A theme belongs here only if you could point to real events in this session that were ABOUT it. When in doubt, leave it out; a false positive here means future sessions get matched against a theme this campaign was never really about.
+
+Return ONLY a single valid JSON object — no markdown fences, no explanation:
+{
+  "tags": [
+    { "tag": "one of the candidate themes above", "confidence": number (0-100), "evidence": "one sentence citing what actually happened this session" }
+  ]
+}
+If nothing this session clearly earns a theme from the list, return { "tags": [] }.`;
 }

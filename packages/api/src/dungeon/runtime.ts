@@ -139,9 +139,10 @@ export async function checkDungeonHiddenReveal(cid: string, characterName: strin
   return found;
 }
 
-// Chebyshev distance in feet from a character's cell to the nearest cell a door/entity occupies —
-// shared by toggleDoor's click gate and the narrated door_unlock effect's proximity check.
-function feetToDoor(pos: { gx: number; gy: number }, door: { x: number; y: number; width?: number; height?: number }): number {
+// Chebyshev distance in feet from a character's cell to the nearest cell a door/stairs/entity
+// occupies — shared by toggleDoor's/useStairs' click gate and the narrated door_unlock effect's
+// proximity check.
+function feetToEntity(pos: { gx: number; gy: number }, door: { x: number; y: number; width?: number; height?: number }): number {
   const w = door.width ?? 1, h = door.height ?? 1;
   const dx = Math.max(door.x - pos.gx, 0, pos.gx - (door.x + w - 1));
   const dy = Math.max(door.y - pos.gy, 0, pos.gy - (door.y + h - 1));
@@ -161,7 +162,7 @@ export async function toggleDoor(cid: string, doorId: string, characterName: str
   if (!dungeon || !door) return;
 
   const pos = tokenPositions.get(cid)?.[characterName];
-  if (!pos || feetToDoor(pos, door) > 5) return;
+  if (!pos || feetToEntity(pos, door) > 5) return;
 
   if (door.doorState === 'locked') {
     const key = door.requiresKeyId ? dungeon.entities.find(e => e.id === door.requiresKeyId) : undefined;
@@ -174,6 +175,35 @@ export async function toggleDoor(cid: string, doorId: string, characterName: str
   }
   await saveDungeon(cid, dungeon);
   io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  // Opening a door can put a creature on the other side within sight/aggro range for the first
+  // time — without this, it stayed hidden until the opener's next token:move re-ran this scan,
+  // reading as the creature "spawning" a beat late rather than being revealed the instant the
+  // door swings open.
+  if (door.doorState === 'open') await checkDungeonProximity(cid, pos.gx, pos.gy, characterName);
+}
+
+// Player-clicked stairs — warps the clicker straight to the paired stairs entity's coordinates.
+// No lock/key concept (unlike toggleDoor), no state to persist on the dungeon itself (unlike a
+// door's open/closed) — this only moves tokenPositions, same shape as a normal token:move, not a
+// dungeon mutation. Works regardless of turn/combat state, same precedent as toggleDoor (an
+// environment interaction, not an action-economy one) — not gated by canMove.
+export async function useStairs(cid: string, stairsId: string, characterName: string): Promise<void> {
+  const dungeon = dungeons.get(cid);
+  const stairs = dungeon?.entities.find(e => e.id === stairsId && e.type === 'stairs');
+  const target = stairs?.linkTo ? dungeon?.entities.find(e => e.id === stairs.linkTo && e.type === 'stairs') : undefined;
+  if (!dungeon || !stairs || !target) return;
+
+  const pos = tokenPositions.get(cid)?.[characterName];
+  if (!pos || feetToEntity(pos, stairs) > 5) return;
+
+  const positions = tokenPositions.get(cid) ?? {};
+  positions[characterName] = { gx: target.x, gy: target.y };
+  tokenPositions.set(cid, positions);
+  io.to(ROOM).emit('token:moved', { tokenId: characterName, gx: target.x, gy: target.y });
+  console.log(`[dungeon] ${characterName} takes the stairs`);
+  // Handles room-visited/quest-trigger/trap-check/aggro on landing — same post-move checks a
+  // normal token:move gets (see socketHandlers/combat.ts), just triggered by a teleport instead.
+  await checkDungeonProximity(cid, target.x, target.y, characterName);
 }
 
 // Narrated unlock ("I use the key", "I pick the lock") — the DM tags [[DOOR_UNLOCK:PlayerName]]
@@ -187,13 +217,14 @@ export async function unlockDoorNear(cid: string, characterName: string): Promis
   const pos = tokenPositions.get(cid)?.[characterName];
   if (!dungeon || !pos) return;
 
-  const door = dungeon.entities.find(e => e.type === 'door' && e.doorState === 'locked' && feetToDoor(pos, e) <= 5);
+  const door = dungeon.entities.find(e => e.type === 'door' && e.doorState === 'locked' && feetToEntity(pos, e) <= 5);
   if (!door) return;
 
   door.doorState = 'open';
   console.log(`[dungeon] ${characterName} narrates a door unlocked`);
   await saveDungeon(cid, dungeon);
   io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  await checkDungeonProximity(cid, pos.gx, pos.gy, characterName);
 }
 
 // A consumable Lockpick's whole job — unlike unlockDoorNear (the key/narration path, AI-trusted,
@@ -212,7 +243,7 @@ export async function resolveLockpickAttempt(cid: string, characterId: string, c
   const total = d20 + statMod(char.stats.dex);
   await appendChatLogAndBroadcast(cid, `${characterName} rolls Thieves' Tools (DEX) to pick a lock: ${total}.`);
 
-  const door = dungeon.entities.find(e => e.type === 'door' && e.doorState === 'locked' && feetToDoor(pos, e) <= 5);
+  const door = dungeon.entities.find(e => e.type === 'door' && e.doorState === 'locked' && feetToEntity(pos, e) <= 5);
   if (!door) {
     await appendChatLogAndBroadcast(cid, `${characterName} has no locked door within reach.`);
     return;
@@ -224,6 +255,7 @@ export async function resolveLockpickAttempt(cid: string, characterId: string, c
   door.doorState = 'open';
   await saveDungeon(cid, dungeon);
   io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  await checkDungeonProximity(cid, pos.gx, pos.gy, characterName);
   await appendChatLogAndBroadcast(cid, `${characterName} picks the lock — the door swings open.`);
 }
 
@@ -241,7 +273,7 @@ export async function resolveTrapDisarmAttempt(cid: string, characterId: string,
   const total = d20 + statMod(char.stats.dex);
   await appendChatLogAndBroadcast(cid, `${characterName} rolls Thieves' Tools (DEX) to disarm a trap: ${total}.`);
 
-  const trap = dungeon.entities.find(e => e.type === 'trap' && e.discovered && feetToDoor(pos, e) <= 5);
+  const trap = dungeon.entities.find(e => e.type === 'trap' && e.discovered && feetToEntity(pos, e) <= 5);
   if (!trap) {
     await appendChatLogAndBroadcast(cid, `${characterName} has no discovered trap within reach.`);
     return;

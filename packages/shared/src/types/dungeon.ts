@@ -51,6 +51,10 @@ export interface DungeonRoom {
   role?: "entrance" | "exit";
   material?: string;
   isHallway?: boolean;
+  /** Building layouts only — this room is a stairwell, always exactly 2x2, connecting to another floor. */
+  isStairwell?: boolean;
+  /** Building layouts only — which floor this room sits on. Omitted/0 = ground floor, negative = basement, positive = upper floors. */
+  floor?: number;
   connectsTo?: string[];
   description?: string;
   visited?: boolean;
@@ -94,11 +98,13 @@ export interface TrapEffect {
 
 export interface DungeonEntity {
   id: string;
-  type: "creature" | "loot" | "trap" | "object" | "door";
+  type: "creature" | "loot" | "trap" | "object" | "door" | "stairs";
   x: number;
   y: number;
   name: string;
   discovered: boolean;
+  /** type === 'stairs' only — the id of the paired stairs entity this one warps to on click (see useStairs, runtime.ts). Always reciprocal: each side's linkTo points at the other. */
+  linkTo?: string;
   /** A loot entity acting as a door's key (see requiresKeyId below) always has this forced to -99
    * server-side regardless of what the manifest proposed — a key is never gated behind a hard
    * search, it's found on any Investigation/Perception attempt at all, even a nat 1 with a

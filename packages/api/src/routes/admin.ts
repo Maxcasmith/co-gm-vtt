@@ -3,10 +3,11 @@ import type { Request, Response } from 'express';
 import { rm, readdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import sharp from 'sharp';
 import { slugifyTheme, iconSlug } from 'shared';
-import type { Dungeon, DungeonMaterialSpec, StoryboardTestRecord } from 'shared';
-import { CAMPAIGNS_DIR, PROPS_DIR, TILESETS_DIR, CREATURES_DIR, ICONS_DIR, STORYBOARD_TEST_DIR, getConfig, getWorldMeta, listCampaigns, loadDungeon, writeStoryboardTestFile, getStoryboardTestRecord } from '../storage.ts';
+import type { Dungeon, DungeonMaterialSpec, StoryboardTestRecord, PlotHook } from 'shared';
+import { CAMPAIGNS_DIR, PROPS_DIR, TILESETS_DIR, CREATURES_DIR, ICONS_DIR, STORYBOARD_TEST_DIR, getConfig, getWorldMeta, listCampaigns, loadDungeon, writeStoryboardTestFile, getStoryboardTestRecord, readPlotHooks, writePlotHooks } from '../storage.ts';
 import { saveCampaignAsAdventure, SAVED_ADVENTURES_DIR } from '../adventures/storage.ts';
 import { findCreatureUsage, deleteUnusedResources, type ResourceCleanupRequest } from '../resourceUsage.ts';
 import { generateExtendedTileset } from '../dungeon/tilesets.ts';
@@ -15,6 +16,10 @@ import type { PendingProp } from '../dungeon/props.ts';
 import { generateIconsForItems } from '../dungeon/icons.ts';
 import type { PendingIcon } from '../dungeon/icons.ts';
 import { runStoryboardPipeline, SLIDE_COUNT } from '../dungeon/storyboard.ts';
+import { getFeatureProvider } from '../providers/index.ts';
+import { buildPlotHookNormalizePrompt } from '../prompts.ts';
+import { parseLlmJson } from '../utils/llmJson.ts';
+import { parsePageParams } from '../utils/pagination.ts';
 import { logError } from '../logger.ts';
 
 function slugify(name: string): string {
@@ -447,4 +452,75 @@ adminRouter.delete('/storyboard-test', async (req, res) => {
     logError('routes/admin:deleteStoryboardTest', err);
     res.status(500).json({ ok: false, error: String(err) });
   }
+});
+
+// ── Plot hook pool ────────────────────────────────────────────────────────────
+// Global, not per-campaign — admin-authored arcs, normalized into a reusable skeleton at write
+// time (see buildPlotHookNormalizePrompt) so selection/reflavor later can read a uniform shape.
+
+type NormalizedPlotHook = Pick<PlotHook, 'title' | 'tags' | 'structuralRequirements' | 'beats'>;
+
+async function normalizePlotHook(rawText: string): Promise<NormalizedPlotHook> {
+  const config = await getConfig();
+  const raw = await getFeatureProvider(config, 'plotHookNormalize').complete(buildPlotHookNormalizePrompt(rawText));
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  return parseLlmJson<NormalizedPlotHook>(cleaned);
+}
+
+adminRouter.get('/plot-hooks', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
+  const { page, pageSize } = parsePageParams(req, 10);
+  // Newest first, so a freshly created hook always lands on page 1 instead of wherever the
+  // append-order tail happens to fall.
+  const hooks = (await readPlotHooks()).slice().reverse();
+  const start = (page - 1) * pageSize;
+  res.json({ items: hooks.slice(start, start + pageSize), total: hooks.length });
+});
+
+adminRouter.post('/plot-hooks', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
+  const { rawText } = req.body as { rawText?: string };
+  if (!rawText?.trim()) { res.status(400).json({ error: 'rawText is required' }); return; }
+  try {
+    const normalized = await normalizePlotHook(rawText);
+    const hook: PlotHook = {
+      id: randomUUID(),
+      rawText,
+      ...normalized,
+      createdAt: new Date().toISOString(),
+      usedIn: [],
+    };
+    const hooks = await readPlotHooks();
+    await writePlotHooks([...hooks, hook]);
+    res.json(hook);
+  } catch (err) {
+    logError('routes/admin:createPlotHook', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Normalization failed' });
+  }
+});
+
+// Re-normalizes against a (possibly edited) rawText — id/createdAt/usedIn survive untouched.
+adminRouter.put('/plot-hooks/:id', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
+  const { rawText } = req.body as { rawText?: string };
+  if (!rawText?.trim()) { res.status(400).json({ error: 'rawText is required' }); return; }
+  try {
+    const hooks = await readPlotHooks();
+    const existing = hooks.find(h => h.id === req.params['id']);
+    if (!existing) { res.status(404).json({ error: 'Plot hook not found' }); return; }
+    const normalized = await normalizePlotHook(rawText);
+    const updated: PlotHook = { ...existing, rawText, ...normalized };
+    await writePlotHooks(hooks.map(h => h.id === updated.id ? updated : h));
+    res.json(updated);
+  } catch (err) {
+    logError('routes/admin:updatePlotHook', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Normalization failed' });
+  }
+});
+
+adminRouter.delete('/plot-hooks/:id', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
+  const hooks = await readPlotHooks();
+  await writePlotHooks(hooks.filter(h => h.id !== req.params['id']));
+  res.json({ ok: true });
 });

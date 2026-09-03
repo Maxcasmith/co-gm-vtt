@@ -61,6 +61,30 @@ export function useCanvasPointerControls(
     setDragTick(t => t + 1);
   }, [dungeon, tokenPositions, player]);
 
+  // Camera: re-centre on my own token once a stairs teleport actually lands. useStairs (server)
+  // warps tokenPositions the same way a normal token:move does — no dedicated event — so Canvas.tsx
+  // arms this with my pre-teleport cell via armStairsRecenter() right when it sends the stairs-use
+  // intent, and this effect fires the recenter on the first position change after that (current
+  // zoom kept, unlike the dungeon-entry centering above which forces MAX_ZOOM).
+  const pendingStairsRecenterRef = useRef<{ gx: number; gy: number } | null>(null);
+  function armStairsRecenter(fromPos: { gx: number; gy: number }): void {
+    pendingStairsRecenterRef.current = fromPos;
+  }
+  useEffect(() => {
+    const pending = pendingStairsRecenterRef.current;
+    const myPos = tokenPositions?.[player];
+    const canvas = canvasRef.current;
+    if (!pending || !myPos || !canvas) return;
+    if (myPos.gx === pending.gx && myPos.gy === pending.gy) return; // still waiting for the server to land it
+    pendingStairsRecenterRef.current = null;
+    const cellSz = CELL * dungeonZoomRef.current;
+    dungeonPanRef.current = {
+      x: canvas.offsetWidth / 2 - (myPos.gx * cellSz + cellSz / 2),
+      y: canvas.offsetHeight / 2 - (myPos.gy * cellSz + cellSz / 2),
+    };
+    setDragTick(t => t + 1);
+  }, [tokenPositions, player]);
+
   // Resize observer: redraw when canvas element size changes
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -239,5 +263,5 @@ export function useCanvasPointerControls(
     };
   }, []);
 
-  return { dungeonPanRef, dungeonZoomRef, isPanningRef, panStartRef, dragRef, dragOffset, reachableRef, dragTick, sizeTick };
+  return { dungeonPanRef, dungeonZoomRef, isPanningRef, panStartRef, dragRef, dragOffset, reachableRef, dragTick, sizeTick, armStairsRecenter };
 }

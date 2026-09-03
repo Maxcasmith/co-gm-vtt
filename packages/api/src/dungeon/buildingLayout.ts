@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type { DungeonRoom } from 'shared';
+import type { DungeonEntity, DungeonRoom } from 'shared';
 import type { DungeonManifest, ManifestRoom } from './manifest.ts';
 import {
   SIZE_RANGE,
@@ -17,6 +17,7 @@ const DEFAULT_WIDTH = 50;
 const DEFAULT_HEIGHT = 50;
 const MARGIN = 1; // keep a border wall around the whole building
 const MIN_OVERLAP = 2; // shared wall must be at least this long to fit a door
+const FLOOR_GAP = 4; // solid-wall buffer between two floors' blocks on the combined canvas
 
 interface Rect { x: number; y: number; w: number; h: number }
 
@@ -50,6 +51,7 @@ function buildGraph(rooms: ManifestRoom[]): Map<string, Set<string>> {
 
 // Destination rooms are boxy; hallways are strips whose length scales with how much hangs off them.
 function footprint(room: ManifestRoom, degree: number, horizontal: boolean, width: number, height: number): { w: number; h: number } {
+  if (room.isStairwell) return { w: 2, h: 2 }; // a flight of stairs is a fixed 2x2, whatever "size" claims
   if (!room.isHallway) {
     const [lo, hi] = SIZE_RANGE[room.size];
     return { w: randInt(lo, hi), h: randInt(lo, hi) };
@@ -169,16 +171,16 @@ function lockFor(roomA: ManifestRoom, roomB: ManifestRoom): { doorState: 'open' 
 }
 
 /**
- * Floor-plan layout for man-made structures. Walks the manifest's room adjacency graph breadth-first
- * from the entrance and packs each room flush against the parent that discovered it, so rooms that
- * are supposed to open onto each other actually share a wall — a school reads as a school, not a cave.
+ * Floor-plan layout for ONE floor of a man-made structure. Walks that floor's room adjacency graph
+ * breadth-first from the entrance and packs each room flush against the parent that discovered it,
+ * so rooms that are supposed to open onto each other actually share a wall — a school reads as a
+ * school, not a cave. Multi-floor stitching is generateBuildingLayout's job, below.
  */
-export function generateBuildingLayout(manifest: DungeonManifest, opts?: { width?: number; height?: number }): GeneratorResult {
+function layoutOneFloor(manifestRooms: ManifestRoom[], opts?: { width?: number; height?: number }): GeneratorResult {
   const width = opts?.width ?? DEFAULT_WIDTH;
   const height = opts?.height ?? DEFAULT_HEIGHT;
   const cells: number[][] = Array.from({ length: height }, () => new Array<number>(width).fill(0));
 
-  const manifestRooms = manifest.rooms;
   if (!manifestRooms.length) return { cells, rooms: [] };
 
   const graph = buildGraph(manifestRooms);
@@ -187,7 +189,11 @@ export function generateBuildingLayout(manifest: DungeonManifest, opts?: { width
   const childCount = new Array<number>(manifestRooms.length).fill(0);
   const corridorTo: number[][] = []; // [child, parent] pairs that couldn't share a wall
 
-  const startIndex = Math.max(0, manifestRooms.findIndex(r => r.role === 'entrance'));
+  // Only the ground floor tends to have an entrance; an upper floor's anchor is its stairwell.
+  const startIndex = Math.max(0, [
+    manifestRooms.findIndex(r => r.role === 'entrance'),
+    manifestRooms.findIndex(r => r.isStairwell),
+  ].find(i => i >= 0) ?? 0);
 
   const sizeFor = (i: number, horizontal: boolean) =>
     footprint(manifestRooms[i]!, graph.get(manifestRooms[i]!.name)!.size, horizontal, width, height);
@@ -264,6 +270,8 @@ export function generateBuildingLayout(manifest: DungeonManifest, opts?: { width
       ...(manifestRoom.role ? { role: manifestRoom.role } : {}),
       ...(manifestRoom.material ? { material: manifestRoom.material } : {}),
       ...(manifestRoom.isHallway ? { isHallway: true } : {}),
+      ...(manifestRoom.floor ? { floor: manifestRoom.floor } : {}),
+      ...(manifestRoom.isStairwell ? { isStairwell: true } : {}),
       ...(connections.length ? { connectsTo: connections } : {}),
       ...(manifestRoom.description && manifestRoom.role !== 'entrance' ? { description: manifestRoom.description } : {}),
       ...(manifestRoom.dressing?.length ? { dressing: manifestRoom.dressing } : {}),
@@ -308,4 +316,66 @@ export function generateBuildingLayout(manifest: DungeonManifest, opts?: { width
   fixDiagonalPinches(cells, width, height);
 
   return { cells, rooms, doors };
+}
+
+/**
+ * Floor-plan layout for man-made structures. Each distinct ManifestRoom.floor gets its own complete
+ * layout pass (repair/separate/pinch-fix all run per floor, never on the combined grid — running them
+ * after stitching would carve a corridor straight through the wall buffer and undo the isolation),
+ * then the blocks are laid out left-to-right in one horizontal strip separated by FLOOR_GAP cells of
+ * solid wall. Floors connect only through the paired 'stairs' entities returned alongside.
+ *
+ * A single-floor manifest — i.e. every manifest that predates floors — takes the fast path and comes
+ * back from layoutOneFloor completely untouched.
+ */
+export function generateBuildingLayout(manifest: DungeonManifest, opts?: { width?: number; height?: number }): GeneratorResult {
+  const byFloor = new Map<number, ManifestRoom[]>();
+  for (const room of manifest.rooms) {
+    const floor = room.floor ?? 0;
+    const bucket = byFloor.get(floor);
+    if (bucket) bucket.push(room);
+    else byFloor.set(floor, [room]);
+  }
+
+  if (byFloor.size <= 1) return layoutOneFloor(manifest.rooms, opts);
+
+  const blocks = [...byFloor.entries()].sort((a, b) => a[0] - b[0]).map(([, rooms]) => layoutOneFloor(rooms, opts));
+
+  // Top-aligned strip: shorter floors just leave wall cells below them.
+  const height = Math.max(...blocks.map(b => b.cells.length));
+  const width = blocks.reduce((sum, b) => sum + (b.cells[0]?.length ?? 0), 0) + FLOOR_GAP * (blocks.length - 1);
+  const cells: number[][] = Array.from({ length: height }, () => new Array<number>(width).fill(0));
+
+  const rooms: DungeonRoom[] = [];
+  const doors: DoorRect[] = [];
+  let originX = 0;
+  for (const block of blocks) {
+    block.cells.forEach((row, y) => row.forEach((cell, x) => { if (cell) cells[y]![originX + x] = cell; }));
+    for (const room of block.rooms) rooms.push({ ...room, x: room.x + originX });
+    for (const door of block.doors ?? []) doors.push({ ...door, x: door.x + originX });
+    originX += (block.cells[0]?.length ?? 0) + FLOOR_GAP;
+  }
+
+  // Stair pairing is edge-based, not reciprocal-declaration-based: manifest.ts only guarantees that a
+  // declared stairsTo points at a real isStairwell room, so A may name B while B names nobody.
+  // Dedupe by sorted name pair, same as the door edges above.
+  const placedByName = new Map(rooms.map(r => [r.name, r]));
+  const pairs = new Map<string, [string, string]>();
+  for (const room of manifest.rooms) {
+    if (!room.isStairwell || !room.stairsTo) continue;
+    pairs.set([room.name, room.stairsTo].sort().join('|'), [room.name, room.stairsTo]);
+  }
+
+  const stairs: DungeonEntity[] = [];
+  for (const [nameA, nameB] of pairs.values()) {
+    const a = placedByName.get(nameA), b = placedByName.get(nameB);
+    if (!a || !b) continue; // a room the layout had no space for — skip rather than emit a half-pair
+    const idA = randomUUID(), idB = randomUUID();
+    stairs.push(
+      { id: idA, type: 'stairs', x: a.x, y: a.y, width: 2, height: 2, name: 'Stairs', discovered: true, linkTo: idB },
+      { id: idB, type: 'stairs', x: b.x, y: b.y, width: 2, height: 2, name: 'Stairs', discovered: true, linkTo: idA },
+    );
+  }
+
+  return { cells, rooms, doors, stairs };
 }

@@ -50,5 +50,8 @@ export async function checkQuestChainTriggers(cid: string, event: QuestChainEven
 
   await writeQuests(cid, quests);
   const manifest = await readManifest(cid);
-  io.to(ROOM).emit('quest:update', { quests, act: manifest?.act ?? 1 });
+  // `final` — this resolution closed out the chain's last stage (no next stage queued), i.e. the
+  // whole dungeon questline is done, not just one stage of it. The Congrats screen (client)
+  // gates on this instead of "any quest resolved" so it only shows once, at the true end.
+  io.to(ROOM).emit('quest:update', { quests, act: manifest?.act ?? 1, final: !next });
 }

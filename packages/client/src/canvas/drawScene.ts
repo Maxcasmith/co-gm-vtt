@@ -8,10 +8,11 @@ import { inArea, resolveAoeOrigin, drawAoeShape, nearestRingCell } from './aoe.t
 import { drawToken, drawHitFlash, drawTargetRing, drawDeadMarker, drawDeadSkull, drawTokenEffect, drawConcentrationBadge } from './drawToken.ts';
 import { drawTokenIconStack, markIconFor, type TokenIconKey } from './tokenIcons.ts';
 import { drawDoorMarker } from './drawDoor.ts';
+import { drawStairsMarker } from './drawStairs.ts';
 import { drawHazardCell } from './drawHazard.ts';
 import { drawSwing } from './drawSwing.ts';
 import { computeLighting, applyGroundLighting, tokenLightFilter } from './lighting.ts';
-import { buildGroundCache, type GroundCache } from './groundCache.ts';
+import { buildGroundCache, resolveFloorSlice, type GroundCache } from './groundCache.ts';
 import type { FloatEffect, FlashEffect, TokenSpecialEffect, SwingEffect, SenseCells, TokenDim, LightSourceCells } from './types.ts';
 
 // ponytail: debug-only perf overlay — draws aren't on a continuous rAF loop here (they fire per
@@ -191,27 +192,34 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
         }
         const variantPicks = floorVariantRef.current.picks;
         const textureVersion = getTextureLoadVersion();
+        // Which floor-block to bake — the whole grid for a single-floor dungeon, or just the
+        // player's own floor for a multi-floor building (see resolveFloorSlice's doc). Keeps the
+        // bake (and its corridor-material search) at single-floor cost regardless of how many
+        // floors the building has.
+        const slice = resolveFloorSlice(dungeon, tokenPositions?.[player]?.gx);
         let ground = groundCacheRef.current;
-        if (!ground || ground.dungeonId !== dungeon.id || ground.textureVersion !== textureVersion) {
-          ground = buildGroundCache(dungeon, variantPicks, textureVersion);
+        if (!ground || ground.dungeonId !== dungeon.id || ground.textureVersion !== textureVersion || ground.floorKey !== slice.floorKey) {
+          ground = buildGroundCache(dungeon, variantPicks, textureVersion, slice);
           groundCacheRef.current = ground;
           mark('ground-cache-REBUILD');
         } else {
           mark('ground-cache-check');
         }
         // Crop both source and destination to the actually-visible viewport, intersected with the
-        // dungeon bounds — requesting a drawImage scaled across the *full* dungeon extent (up to
-        // 12800x12800px destination at max zoom for a 100-wide map) measured as costing roughly
-        // proportional to the requested area, not the on-screen portion — the canvas's own
-        // clipping to its bounds did not make an oversized scaled blit cheap in practice, contrary
-        // to the naive assumption that off-canvas pixels are free. Cropping first keeps the cost
-        // proportional to what's actually visible instead.
-        const visX0 = Math.max(0, Math.floor(-panX / cellSz));
+        // dungeon bounds AND the baked floor-slice's own column range — requesting a drawImage
+        // scaled across the *full* dungeon extent (up to 12800x12800px destination at max zoom for
+        // a 100-wide map) measured as costing roughly proportional to the requested area, not the
+        // on-screen portion — the canvas's own clipping to its bounds did not make an oversized
+        // scaled blit cheap in practice, contrary to the naive assumption that off-canvas pixels
+        // are free. Cropping first keeps the cost proportional to what's actually visible instead.
+        const floorX0 = ground.originX;
+        const floorX1 = ground.originX + ground.canvas.width / CELL;
+        const visX0 = Math.max(0, floorX0, Math.floor(-panX / cellSz));
         const visY0 = Math.max(0, Math.floor(-panY / cellSz));
-        const visX1 = Math.min(dungeon.width, Math.ceil((canvas.width - panX) / cellSz));
+        const visX1 = Math.min(dungeon.width, floorX1, Math.ceil((canvas.width - panX) / cellSz));
         const visY1 = Math.min(dungeon.height, Math.ceil((canvas.height - panY) / cellSz));
         if (visX1 > visX0 && visY1 > visY0) {
-          const sx = visX0 * CELL, sy = visY0 * CELL;
+          const sx = (visX0 - ground.originX) * CELL, sy = visY0 * CELL;
           const sw = (visX1 - visX0) * CELL, sh = (visY1 - visY0) * CELL;
           const dx = visX0 * cellSz + panX, dy = visY0 * cellSz + panY;
           const dw = (visX1 - visX0) * cellSz, dh = (visY1 - visY0) * cellSz;
@@ -576,6 +584,16 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
             const cx = (entity.x + w / 2) * cellSz + panX;
             const cy = (entity.y + h / 2) * cellSz + panY;
             drawDoorMarker(ctx, cx, cy, DOOR_BUTTON_R * zoom, entity.doorState, hoveredTokenKey === entity.id);
+          }
+          for (const entity of dungeon.entities) {
+            if (entity.type !== 'stairs') continue;
+            const w = entity.width ?? 1, h = entity.height ?? 1;
+            const dx = Math.max(entity.x - playerPos.gx, 0, playerPos.gx - (entity.x + w - 1));
+            const dy = Math.max(entity.y - playerPos.gy, 0, playerPos.gy - (entity.y + h - 1));
+            if (Math.max(dx, dy) > DOOR_AWARENESS_RADIUS) continue;
+            const cx = (entity.x + w / 2) * cellSz + panX;
+            const cy = (entity.y + h / 2) * cellSz + panY;
+            drawStairsMarker(ctx, cx, cy, DOOR_BUTTON_R * zoom, hoveredTokenKey === entity.id);
           }
         }
 

@@ -24,11 +24,20 @@ export const SLIDE_COUNT = COLS * ROWS;
 const ATLAS_W = 3840, ATLAS_H = 2160; // exact 16:9 overall (4K)
 const TILE_W = ATLAS_W / COLS, TILE_H = ATLAS_H / ROWS; // 1280 x 720 — exact 16:9 per cell too
 
+// Scenario (dungeon-crawl cold open) storyboards use a smaller 2x2 grid, not the 3x3 character
+// grid above — there's one scenario slideshow per campaign vs. one per character, so 9 slides of
+// "why are we here" is excessive next to each party member's own 9-slide backstory. Character
+// storyboards are untouched by this — separate consts, not a shared COLS/ROWS made variable.
+const SCENARIO_COLS = 2, SCENARIO_ROWS = 2;
+export const SCENARIO_SLIDE_COUNT = SCENARIO_COLS * SCENARIO_ROWS;
+const SCENARIO_ATLAS_W = 2560, SCENARIO_ATLAS_H = 1440; // exact 16:9 overall
+const SCENARIO_TILE_W = SCENARIO_ATLAS_W / SCENARIO_COLS, SCENARIO_TILE_H = SCENARIO_ATLAS_H / SCENARIO_ROWS; // 1280 x 720
+
 function slideUrl(campaignId: string, charId: string, n: number): string {
   return `/api/campaigns/${campaignId}/party/${charId}/storyboard/${n}`;
 }
 
-function scenarioSlideUrl(campaignId: string, n: number): string {
+export function scenarioSlideUrl(campaignId: string, n: number): string {
   return `/api/campaigns/${campaignId}/scenario-storyboard/${n}`;
 }
 
@@ -180,7 +189,7 @@ export async function getStoryboardQueue(campaignId: string): Promise<Storyboard
   ]);
 
   const entries = characterEntries.filter((e): e is NonNullable<typeof e> => e !== null);
-  if (scenario && scenario.slides.length === SLIDE_COUNT) {
+  if (scenario && scenario.slides.length === SCENARIO_SLIDE_COUNT) {
     entries.unshift({ characterId: 'scenario', characterName: '', slides: scenario.slides });
   }
 
@@ -203,25 +212,25 @@ export async function runScenarioStoryboardPipeline(
   logStep(`synopsis input for "${subject.title}" (${subject.synopsis.length} chars)`, subject.synopsis.slice(0, 2400));
 
   onProgress?.('Extracting key scenario beats…');
-  const beatsRaw = await getFeatureProvider(config, 'storyboardCaptions').complete(buildScenarioStoryboardBeatsPrompt(subject, SLIDE_COUNT));
-  const beats = parseStoryboardBeats(beatsRaw, SLIDE_COUNT);
+  const beatsRaw = await getFeatureProvider(config, 'storyboardCaptions').complete(buildScenarioStoryboardBeatsPrompt(subject, SCENARIO_SLIDE_COUNT));
+  const beats = parseStoryboardBeats(beatsRaw, SCENARIO_SLIDE_COUNT);
   logStep('beats extracted', beats.map((b, i) => `  ${i + 1}. visual: ${b.visual}\n     narration: ${b.narration}`).join('\n'));
 
-  const imagePrompt = buildScenarioStoryboardPrompt(subject, beats.map(b => b.visual), COLS, ROWS, ATLAS_W, ATLAS_H, TILE_W, TILE_H);
+  const imagePrompt = buildScenarioStoryboardPrompt(subject, beats.map(b => b.visual), SCENARIO_COLS, SCENARIO_ROWS, SCENARIO_ATLAS_W, SCENARIO_ATLAS_H, SCENARIO_TILE_W, SCENARIO_TILE_H);
   logStep('image prompt sent', imagePrompt);
 
   onProgress?.(`Requesting scenario storyboard atlas from ${config.image.model}…`);
-  const rawAtlas = await generateTilesetAtlas(imagePrompt, apiKey, config.image.model, `${ATLAS_W}x${ATLAS_H}`);
+  const rawAtlas = await generateTilesetAtlas(imagePrompt, apiKey, config.image.model, `${SCENARIO_ATLAS_W}x${SCENARIO_ATLAS_H}`);
   const rawMeta = await sharp(rawAtlas).metadata();
   logStep('atlas received', `${rawMeta.width}x${rawMeta.height} (${rawMeta.format})`);
 
   onProgress?.('Cropping atlas into slides…');
-  const atlas = await sharp(rawAtlas).resize(ATLAS_W, ATLAS_H, { fit: 'fill' }).toBuffer();
+  const atlas = await sharp(rawAtlas).resize(SCENARIO_ATLAS_W, SCENARIO_ATLAS_H, { fit: 'fill' }).toBuffer();
 
   const slides = await Promise.all(beats.map(async (beat, i) => {
-    const col = i % COLS, row = Math.floor(i / COLS);
+    const col = i % SCENARIO_COLS, row = Math.floor(i / SCENARIO_COLS);
     const buffer = await sharp(atlas)
-      .extract({ left: col * TILE_W, top: row * TILE_H, width: TILE_W, height: TILE_H })
+      .extract({ left: col * SCENARIO_TILE_W, top: row * SCENARIO_TILE_H, width: SCENARIO_TILE_W, height: SCENARIO_TILE_H })
       .jpeg()
       .toBuffer();
     return { buffer, caption: beat.narration };

@@ -78,7 +78,7 @@ export default function Canvas({ player, characterId, character, connected, show
   useEffect(() => { visibleCellsRef.current = visibleCells; },    [visibleCells]);
 
   const {
-    dungeonPanRef, dungeonZoomRef, isPanningRef, panStartRef, dragRef, dragOffset, reachableRef, dragTick, sizeTick,
+    dungeonPanRef, dungeonZoomRef, isPanningRef, panStartRef, dragRef, dragOffset, reachableRef, dragTick, sizeTick, armStairsRecenter,
   } = useCanvasPointerControls(ref, player, tokenPositions, dungeon, playerRef, tokenPositionsRef, movementRef, dungeonRef, showBattleMapRef, visibleCellsRef);
 
   // Wall-aware combat move-reach highlight — computed once when the player's own token drag
@@ -347,6 +347,22 @@ export default function Canvas({ player, characterId, character, connected, show
       });
       if (doorHit) {
         dispatch('vtt:door:toggle', { doorId: doorHit.id });
+        e.preventDefault();
+        return;
+      }
+
+      // Stairs click — warp to the paired stairs entity. Same reach validation deferred to the
+      // server (see useStairs) as the door click above; this only sends intent.
+      const stairsHit = dungeon.entities.find(en => {
+        if (en.type !== 'stairs') return false;
+        const cx = (en.x + (en.width ?? 1) / 2) * hdCellSz;
+        const cy = (en.y + (en.height ?? 1) / 2) * hdCellSz;
+        return Math.hypot(mx - cx, my - cy) <= doorButtonR;
+      });
+      if (stairsHit) {
+        const myPos = tokenPositions[player];
+        if (myPos) armStairsRecenter(myPos);
+        dispatch('vtt:stairs:use', { stairsId: stairsHit.id });
         e.preventDefault();
         return;
       }
@@ -647,6 +663,15 @@ export default function Canvas({ player, characterId, character, connected, show
         const cx = (entity.x + (entity.width ?? 1) / 2) * grabCellSz;
         const cy = (entity.y + (entity.height ?? 1) / 2) * grabCellSz;
         if (Math.hypot(mx - cx, my - cy) <= doorButtonR) { hovered = entity.id; break; }
+      }
+    }
+    if (!hovered && dungeon) {
+      const stairsButtonR = DOOR_BUTTON_R * dungeonZoomRef.current;
+      for (const entity of dungeon.entities) {
+        if (entity.type !== 'stairs') continue;
+        const cx = (entity.x + (entity.width ?? 1) / 2) * grabCellSz;
+        const cy = (entity.y + (entity.height ?? 1) / 2) * grabCellSz;
+        if (Math.hypot(mx - cx, my - cy) <= stairsButtonR) { hovered = entity.id; break; }
       }
     }
     if (hovered !== hoveredTokenKey) setHoveredTokenKey(hovered);

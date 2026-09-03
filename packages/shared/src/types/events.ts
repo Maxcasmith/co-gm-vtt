@@ -250,11 +250,14 @@ export interface ServerToClientEvents {
     itemId: string | null;
   }) => void;
   "character:tactics:update": (data: { characterId: string; tactics: Manoeuvre[]; aiControlled: boolean }) => void;
+  /** Broadcast to the whole room (unlike tactics:update above, which is private to the owner) so every client's party roster can show the AI pip / offline styling live. */
+  "character:aiControlled:update": (data: { characterId: string; aiControlled: boolean }) => void;
   "character:currency:update": (data: { characterId: string }) => void;
   "dungeon:generating": () => void;
   "dungeon:loaded": (dungeon: Dungeon) => void;
   "dungeon:cleared": () => void;
-  "quest:update": (data: { quests: Quest[]; act: number }) => void;
+  /** `final`: true only when this update closed out a dungeon's questChain's last stage — the whole questline is done, not just one stage of it. Unset/false for every intermediate stage and for non-chain quest updates. */
+  "quest:update": (data: { quests: Quest[]; act: number; final?: boolean }) => void;
   "clock:update": (data: { worldTimeSecs: number }) => void;
   "rest:open": () => void;
   "rest:result": (payload: RestResultBroadcast) => void;
@@ -297,6 +300,8 @@ export interface ClientToServerEvents {
   "token:move": (pos: TokenPosition) => void;
   /** Toggles a door open/closed — a no-op server-side if it's locked or the requester isn't within 5ft of it. See toggleDoor. */
   "door:toggle": (payload: { campaignId: string; doorId: string; characterName: string }) => void;
+  /** Warps the requester to the paired stairs entity's coordinates — a no-op server-side if the requester isn't within 5ft of it. See useStairs. */
+  "stairs:use": (payload: { campaignId: string; stairsId: string; characterName: string }) => void;
   "combat:turn:end": () => void;
   "combat:initiative:roll": (entry: TurnOrderEntry) => void;
   "combat:attack": (payload: {

@@ -91,10 +91,19 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
     // is suppressed while a player is standing in the entrance room, so a creature placed right
     // outside it still can't ambush someone who hasn't stepped out yet.
     const isEntranceRoom = room.id === startRoom.id;
+    // A stairwell is a fixed 2x2 (see buildingLayout.ts's footprint()) with its own 'stairs' entity
+    // taking the whole footprint, added later in dungeon/index.ts — placer.ts runs first and has no
+    // idea that entity is coming, so nothing here can avoid colliding with it. Treat it as excluded
+    // the same way the entrance room already is, rather than risk a creature/chest/prop sharing a
+    // cell with the stairs icon in a room barely big enough for one. Also skips the area-based
+    // auto-chest fallback below — a 2x2 room is almost always the smallest in the dungeon, so
+    // without this every stairwell would otherwise get one.
+    const isStairwellRoom = room.isStairwell === true;
+    const skipContent = isEntranceRoom || isStairwellRoom;
 
-    const isLoot = !isEntranceRoom && lootRooms.has(room.id);
+    const isLoot = !skipContent && lootRooms.has(room.id);
 
-    for (const creatureHint of isEntranceRoom ? [] : hints?.creatures ?? []) {
+    for (const creatureHint of skipContent ? [] : hints?.creatures ?? []) {
       const cell = findFreeCell(room, cx, cy, occupied, cells);
       if (cell) {
         occupied.add(key(cell.x, cell.y));
@@ -104,7 +113,7 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
     }
 
     // No manifest loot hints but this room's in the smallest-area third: fall back to one auto chest.
-    const lootHints = isEntranceRoom ? [] : hints?.loot?.length ? hints.loot : isLoot ? [{ name: 'Chest', hideDC: 10, contents: ['a few silver coins'] }] : [];
+    const lootHints = skipContent ? [] : hints?.loot?.length ? hints.loot : isLoot ? [{ name: 'Chest', hideDC: 10, contents: ['a few silver coins'] }] : [];
     for (const lootHint of lootHints) {
       const cell = findFreeCell(room, cx + 1, cy, occupied, cells);
       if (cell) {
@@ -113,7 +122,7 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
       }
     }
 
-    for (const trapHint of isEntranceRoom ? [] : hints?.traps ?? []) {
+    for (const trapHint of skipContent ? [] : hints?.traps ?? []) {
       const cell = findFreeCell(room, cx - 1, cy, occupied, cells);
       if (cell) {
         occupied.add(key(cell.x, cell.y));
@@ -128,7 +137,7 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
     // ponytail: footprint (width/height) is cosmetic only — collision tracking still uses just the
     // single anchor cell, same as every other entity type here. Upgrade to real multi-cell occupancy
     // if props ever need to mechanically block movement.
-    for (const prop of hints?.props ?? []) {
+    for (const prop of isStairwellRoom ? [] : hints?.props ?? []) {
       const size = prop.size === 'large' ? 3 : prop.size === 'small' ? 1 : 2;
       const rawX = room.x + Math.round(prop.relX * (room.width - 1));
       const rawY = room.y + Math.round(prop.relY * (room.height - 1));

@@ -1,26 +1,18 @@
-import type { ReasoningEffort } from 'shared';
 import { logError } from '../logger.ts';
 
-const API_BASE = 'https://api.deepseek.com/v1';
+// Alibaba DashScope's OpenAI-compatible mode, international endpoint (the Beijing/mainland
+// endpoint is cheaper but requires a China-region account — not assumed here).
+const API_BASE = 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1';
 
 export interface ChatMessage { role: 'user' | 'assistant'; content: string }
 
-// V4-Pro only. DeepSeek accepts low|high|max — collapse the app's 4-level UI onto that.
-// https://api-docs.deepseek.com/guides/thinking_mode/
-function thinkingParams(model: string, effort?: ReasoningEffort) {
-  if (model !== 'deepseek-v4-pro') return {};
-  const reasoning_effort = effort === 'low' ? 'low' : effort === 'maximum' ? 'max' : 'high';
-  return { thinking: { type: 'enabled' }, reasoning_effort };
-}
-
-export async function deepseekChat(system: string, messages: ChatMessage[], apiKey: string, model: string, effort?: ReasoningEffort, timeoutSeconds?: number): Promise<string> {
+export async function qwenChat(system: string, messages: ChatMessage[], apiKey: string, model: string, timeoutSeconds?: number): Promise<string> {
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model,
       max_tokens: 1024,
-      ...thinkingParams(model, effort),
       messages: [{ role: 'system', content: system }, ...messages],
     }),
     ...(timeoutSeconds ? { signal: AbortSignal.timeout(timeoutSeconds * 1000) } : {}),
@@ -33,14 +25,13 @@ export async function deepseekChat(system: string, messages: ChatMessage[], apiK
   return data.choices[0]?.message.content ?? '';
 }
 
-export async function deepseekComplete(prompt: string, apiKey: string, model: string, effort?: ReasoningEffort, timeoutSeconds?: number): Promise<string> {
+export async function qwenComplete(prompt: string, apiKey: string, model: string, timeoutSeconds?: number): Promise<string> {
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model,
       max_tokens: 8000,
-      ...thinkingParams(model, effort),
       messages: [{ role: 'user', content: prompt }],
     }),
     ...(timeoutSeconds ? { signal: AbortSignal.timeout(timeoutSeconds * 1000) } : {}),
@@ -53,12 +44,11 @@ export async function deepseekComplete(prompt: string, apiKey: string, model: st
   return data.choices[0]?.message.content ?? '';
 }
 
-export async function deepseekStream(
+export async function qwenStream(
   prompt: string,
   apiKey: string,
   model: string,
   onToken: (token: string) => void,
-  effort?: ReasoningEffort,
   timeoutSeconds?: number,
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/chat/completions`, {
@@ -66,9 +56,7 @@ export async function deepseekStream(
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model,
-      // DeepSeek caps output at 8192 regardless of what's requested — don't ask for more.
-      max_tokens: 8192,
-      ...thinkingParams(model, effort),
+      max_tokens: 8000,
       stream: true,
       messages: [{ role: 'user', content: prompt }],
     }),
@@ -95,19 +83,16 @@ export async function deepseekStream(
       const data = line.slice(6);
       if (data === '[DONE]') continue;
       try {
-        const evt = JSON.parse(data) as { choices: { delta?: { content?: string; reasoning_content?: string } }[] };
-        const delta = evt.choices[0]?.delta;
-        // R1-style models stream thinking under reasoning_content before the real answer starts —
-        // surface it to onToken (visible progress) but never fold it into `full` (parsed downstream).
-        if (delta?.reasoning_content) onToken(delta.reasoning_content);
-        if (delta?.content) { full += delta.content; onToken(delta.content); }
-      } catch (err) { logError('providers/deepseek:deepseekStream', err); }
+        const evt = JSON.parse(data) as { choices: { delta?: { content?: string } }[] };
+        const delta = evt.choices[0]?.delta?.content;
+        if (delta) { full += delta; onToken(delta); }
+      } catch (err) { logError('providers/qwen:qwenStream', err); }
     }
   }
   return full;
 }
 
-export async function deepseekValidateKey(apiKey: string): Promise<boolean> {
+export async function qwenValidateKey(apiKey: string): Promise<boolean> {
   const res = await fetch(`${API_BASE}/models`, {
     headers: { Authorization: `Bearer ${apiKey}` },
     signal: AbortSignal.timeout(10000),

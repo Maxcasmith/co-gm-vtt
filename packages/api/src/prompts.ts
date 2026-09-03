@@ -1,3 +1,5 @@
+import { PLOT_HOOK_TAGS } from 'shared';
+
 type CampaignType = 'campaign' | 'one-shot' | 'dungeon-crawl';
 
 // ── Shared lore instruction ───────────────────────────────────────────────────
@@ -264,13 +266,15 @@ Tags: ${tags.join(', ')}
 
 ${LORE_INSTRUCTION}
 
-Write in second person plural, present tense — "you" and "your", speaking directly to the party as it's happening right now, not a past-tense summary. Ground it in specific, concrete stakes and a specific inciting moment: what just happened to force them here, what they've lost or are running from, what they need, and why turning back isn't an option. Vivid, dramatic, a little purple is fine and encouraged — but every sentence still has to carry a concrete fact (a place, an action, a threat), never float on pure mood with nothing underneath it. End on the tension that drives play forward, not a resolved feeling.
+Write it like the back-of-the-book blurb for this scenario, not a story recap — a short, punchy scene-setter that tells the reader where they are and why, then gets out of the way. Second person plural, present tense — "you" and "your". Ground it in the concrete state of the world and the concrete reason the party is here, but keep it general: describe the situation, not a specific remembered event, conversation, or named bystander who supposedly caused it (no invented trucker, informant, dying stranger, or similar one-off character — that reads as recapping something that "already happened," which is exactly what this isn't). Vivid is good, purple is fine in small doses, but every sentence needs a concrete fact underneath it, not just mood. End on the tension that pulls play forward, not a resolved feeling.
 
-Do not name any player character, companion, or specific NPC — the party doesn't exist yet. Do not describe the dungeon's rooms or layout — that's generated separately, from this text. Do not invent a wider world, factions, or lore beyond this one scenario.
+Do not name, class, or background any player character, companion, or specific NPC — the party doesn't exist yet and decides who they are at character creation, not here. Do not describe the dungeon's rooms or layout — that's generated separately, from this text. Do not invent a wider world, factions, or lore beyond this one scenario.
+
+Keep it short and easy to read: 3-4 short paragraphs, plain grammar, no run-ons. Trim anything that isn't setting or stakes.
 
 Return ONLY a single valid JSON object — no markdown fences, no explanation:
 {
-  "synopsis": "string — 1-2 flowing paragraphs, second person plural, present tense. This is read in full by players and also used to guide the dungeon's design, so be concrete about the immediate situation, not just atmosphere."
+  "synopsis": "string — 3-4 short paragraphs, second person plural, present tense. Read in full by players before the game starts and also used to guide the dungeon's design, so it must be concrete about the situation, not just atmosphere — but it should read like jacket-copy flavor text, not a recap of events that already happened to this specific party."
 }`;
 }
 
@@ -292,4 +296,35 @@ Use a kebab-case ID not in this list: ${existingIdList}
 
 Return ONLY a single valid JSON object — no markdown fences, no explanation:
 { "id": "kebab-slug", "name": "Short, evocative quest title (2-6 words) — not a restatement of the description, a proper name for it, e.g. 'The Missing Cartographer', 'Silence the Ritual'.", "description": "2-3 short bullet points, one per line, each starting with '- ' — concrete, distinct beats of ONLY this opening objective. This is stage one of a longer chain the dungeon itself will author around it once this one resolves — never describe the final confrontation, the escape, or how the whole thing ultimately resolves; that's later stages' job, not this one's. Say only what the party needs to find or do first. This becomes the dungeon's design brief, so name what's being sought/stopped/rescued." }`;
+}
+
+// ── Plot hook pool (admin-authored, normalized here into a reusable skeleton) ─────────────────────
+// This runs once, at authoring time, when the admin submits or edits raw arc text in the Plot Hooks
+// resource tab. It is NOT the reflavor step — reflavor (turning the skeleton back into a concrete,
+// campaign-specific quest, with a freshly invented vehicle) happens later, per-campaign, in
+// session-processor's plot hook candidate prompt. This prompt's only job is stripping a hand-written
+// arc down to its reusable skeleton, so that later step always starts from the same clean shape.
+export function buildPlotHookNormalizePrompt(rawText: string): string {
+  return `You are a tabletop RPG story analyst. An admin has written a plot arc they think is compelling and want reused across many future campaigns, in many different genres. Your job is to abstract it into a reusable SKELETON — never to summarize or rewrite it as prose.
+
+RAW ARC (as written by the admin):
+${rawText}
+
+The skeleton must be stripped of every concrete noun — no character names, no faction names, no place names, no specific monster or threat type. Keep only each beat's narrative FUNCTION — what role it plays in the arc — so the exact same skeleton could later be reflavored into a completely different genre and be unrecognizable on the surface while telling structurally the same story.
+
+Example of the level of abstraction required: a "rats infesting the basement, the mayor wants them exterminated" arc does NOT get stored as "clear out the rats" — it gets stored as a beat like "an authority figure asks the party to exterminate a low-status pest/threat living beneath a settlement", because that same beat could later become a ratfolk uprising, a fungal outbreak, or a horde of graveyard revenants depending on the campaign it's reflavored into. Do the same level of abstraction for every beat below.
+
+Tags: choose ONLY from this fixed list — ${PLOT_HOOK_TAGS.join(', ')}. Include a tag only if it is central to the arc's actual dramatic engine, never for a theme the arc merely brushes past. When in doubt, leave it out — a false tag on this device means it gets selected for campaigns it doesn't actually fit. Never invent a tag outside this list, and never include a genre/setting tag (fantasy, horror, sci-fi, etc.) — genre is decided per-campaign at reflavor time, not stored here.
+
+structuralRequirements: short plain-English phrases naming the entity roles this arc needs to exist (e.g. "an authority figure or faction the party can trust or oppose", "a settlement or community at risk") — roles, never named entities.
+
+Return ONLY a single valid JSON object — no markdown fences, no explanation:
+{
+  "title": "string — short admin-facing label for this arc, 2-6 words, describing its shape not its flavor (e.g. 'Trusted Protector Turns Persecutor')",
+  "tags": ["string — zero or more, only from the fixed list above"],
+  "structuralRequirements": ["string — a needed entity role, as plain English"],
+  "beats": [
+    { "order": 1, "function": "string — this beat's narrative function only, no concrete nouns" }
+  ]
+}`;
 }

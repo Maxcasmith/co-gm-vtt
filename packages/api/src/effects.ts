@@ -17,6 +17,7 @@ import { D20Roll, toSlug, escalateCr } from './combat/dice.ts';
 import { rollPlayerInitiatives, addToTurnOrder, sweepGameTimeExpiries, trySpendSpellSlot } from './combat/runtime.ts';
 import { generateAndBroadcastEnemies, unlockDoorNear, resolveLockpickAttempt, resolveTrapDisarmAttempt } from './dungeon/runtime.ts';
 import { checkQuestChainTriggers } from './dungeon/questChain.ts';
+import { advancePlotArc } from './plotArcs.ts';
 import { findSpell } from './routes/spells.ts';
 
 // A player name in a tag comes from the model's narration, not a dropdown — it's never going to
@@ -219,6 +220,9 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
       } else if (effect.type === 'quest_resolve') {
         const q = quests.find(q => q.id === effect.id);
         if (q) q.status = 'resolved';
+        // If this quest was the live beat of a plot arc, this pushes the next beat into `quests`
+        // (or drops the finished arc) — must run before the write below picks it up.
+        await advancePlotArc(cid, effect.id, quests);
       }
 
       await writeQuests(cid, quests);
