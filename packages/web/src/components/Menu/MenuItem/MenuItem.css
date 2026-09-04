@@ -1,0 +1,25 @@
+.menu--item--wrapper {
+  display: flex;
+  gap: 20px;
+  box-sizing: border-box;
+  padding: 20px;
+}
+
+.menu--item--wrapper:hover {
+  background: rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+}
+
+.menu--item--submenu--container {
+  border-left: 1px dashed gray;
+  margin-left: 1em;
+  padding-left: 1em;
+}
+
+.menu--item--active {
+  background:
+    radial-gradient(100% 106.69% at 2.15% 0%,
+      rgba(255, 255, 255, 0.05) 0%,
+      rgba(255, 255, 255, 0) 100%),
+    rgb(99, 90, 57);
+}

@@ -1,0 +1,6 @@
+.tags--list--wrapper {
+  display: flex;
+  width: 500px;
+  gap: 10px;
+  flex-wrap: wrap;
+}

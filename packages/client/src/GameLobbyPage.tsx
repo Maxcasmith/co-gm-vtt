@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Character, ScenarioStoryboard, StoryboardQueuePayload } from 'shared';
 import StoryboardOverlay from './StoryboardOverlay.tsx';
+import SaveAdventureModal from './SaveAdventureModal.tsx';
 import './app.css';
 
 interface Props { campaignId: string }
@@ -19,6 +20,48 @@ export default function GameLobbyPage({ campaignId }: Props) {
   const [party, setParty] = useState<Character[]>([]);
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [savingAdventure, setSavingAdventure] = useState(false);
+
+  // The game-level password gate — null while the silent empty-password check is still in
+  // flight, so nothing else in the lobby renders until we know whether one is needed.
+  const [gameAuthed, setGameAuthed] = useState<boolean | null>(null);
+  const [gameEntryPassword, setGameEntryPassword] = useState('');
+  const [gameAuthError, setGameAuthError] = useState('');
+  const [checkingGameAuth, setCheckingGameAuth] = useState(false);
+
+  // A game with no password authenticates on an empty string server-side — try that silently
+  // first so a passwordless campaign skips straight past the gate.
+  async function tryGameAuth(pw: string): Promise<boolean> {
+    try {
+      const r = await fetch(`${API}/api/campaigns/${campaignId}/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw }),
+      });
+      const data = await r.json() as { ok?: boolean; error?: string };
+      const ok = r.ok && !data.error;
+      setGameAuthed(ok);
+      if (ok && pw) sessionStorage.setItem(`vtt-game-password:${campaignId}`, pw);
+      return ok;
+    } catch {
+      setGameAuthed(false);
+      return false;
+    }
+  }
+
+  async function handleGameAuth() {
+    setCheckingGameAuth(true);
+    setGameAuthError('');
+    const ok = await tryGameAuth(gameEntryPassword);
+    if (!ok) setGameAuthError('Invalid password');
+    setCheckingGameAuth(false);
+  }
+
+  useEffect(() => {
+    const remembered = sessionStorage.getItem(`vtt-game-password:${campaignId}`) ?? '';
+    void tryGameAuth(remembered);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignId]);
 
   useEffect(() => {
     fetch(`${API}/api/campaigns/${campaignId}`)
@@ -60,6 +103,38 @@ export default function GameLobbyPage({ campaignId }: Props) {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (gameAuthed === null) return null;
+
+  if (!gameAuthed) {
+    return (
+      <div className="auth-gate">
+        <div className="auth-gate-card">
+          <h1 className="auth-gate-title">This Game is Locked</h1>
+          <p className="auth-gate-sub">Enter the game password to continue.</p>
+          <label className="modal-label">
+            Game Password
+            <input
+              className="modal-input"
+              type="password"
+              value={gameEntryPassword}
+              onChange={e => setGameEntryPassword(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') void handleGameAuth(); }}
+              placeholder="Game password"
+              autoFocus
+            />
+          </label>
+          {gameAuthError && <p className="modal-error">{gameAuthError}</p>}
+          <div className="auth-gate-actions">
+            <a className="btn-secondary" href="/">&larr; Back to Game List</a>
+            <button className="btn-primary" onClick={() => void handleGameAuth()} disabled={checkingGameAuth}>
+              {checkingGameAuth ? 'Checking…' : 'Enter'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (playingStoryboard && scenarioStoryboard) {
@@ -127,6 +202,15 @@ export default function GameLobbyPage({ campaignId }: Props) {
           </div>
         </div>
       </div>
+      <div className="lobby-save-adventure">
+        <button className="btn-secondary" onClick={() => setSavingAdventure(true)}>Save Adventure</button>
+      </div>
+      <SaveAdventureModal
+        open={savingAdventure}
+        campaign={{ id: campaignId, name: campaignName }}
+        onClose={() => setSavingAdventure(false)}
+        onSaved={() => {}}
+      />
     </div>
   );
 }

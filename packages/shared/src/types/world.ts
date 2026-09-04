@@ -24,6 +24,8 @@ export interface WorldMeta {
   /** Dungeon-crawl worlds only — the rich scenario synopsis generated before the dungeon itself,
    * shown in full in the game lobby and fed into manifest generation as story context. */
   scenarioSynopsis?: string;
+  /** Dungeon-crawl worlds only — the party size the dungeon's rooms/encounters were scaled for. */
+  partySize?: number;
   /** Grown from actual play (session-end classification), not set at creation — what this campaign's
    * play has actually proven to be about, used to filter the plot hook pool. Empty/undefined means
    * "not yet known", not "nothing fits" — pool eligibility treats that as no tag filter at all. */
@@ -91,6 +93,13 @@ export interface SavedAdventureMeta {
   sourceType: WorldMeta["type"];
   savedAt: string;
   hasDungeon: boolean;
+  /** Dungeon-crawl templates only — carried over from the source campaign's WorldMeta so a
+   * "Play a Copy of X" screen can show what the dungeon is about instead of just "a dungeon". */
+  scenarioSynopsis?: string;
+  /** Dungeon-crawl templates only — carried over from the source campaign's WorldMeta. */
+  partySize?: number;
+  /** Carried over from the source campaign's WorldMeta.concept.name — the generated world's theme/premise. */
+  theme?: string;
   entityCount: {
     npc: number;
     creature: number;

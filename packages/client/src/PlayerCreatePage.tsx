@@ -11,6 +11,9 @@ import OrderTab from './character-creation/OrderTab.tsx';
 import InvocationsTab from './character-creation/InvocationsTab.tsx';
 import { BACKGROUND_SKILLS, CLASS_FEATURES } from './character-creation/srd.ts';
 import './app.css';
+import './styles/create-campaign.css';
+
+type Tab = 'info' | 'backstory' | 'spells' | 'fightingStyle' | 'classOrder' | 'invocations' | 'shop' | 'finished';
 
 interface Props { campaignId: string }
 
@@ -49,9 +52,42 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
   const [copied, setCopied] = useState(false);
 
 
-  function handleBack() {
+  function handleExit() {
     if (c.isDirty) { backDialogRef.current?.showModal(); return; }
     window.location.href = `/${campaignId}/lobby`;
+  }
+
+  const steps: Tab[] = [
+    'info',
+    ...(isCampaign ? ['backstory' as const] : []),
+    ...(hasSpellcasting ? ['spells' as const] : []),
+    ...(hasFightingStyle ? ['fightingStyle' as const] : []),
+    ...(hasClassOrder ? ['classOrder' as const] : []),
+    ...(hasInvocations ? ['invocations' as const] : []),
+    'shop',
+    'finished',
+  ];
+  const stepIndex = steps.indexOf(c.activeTab);
+
+  function titleFor(tab: Tab): string {
+    switch (tab) {
+      case 'info': return 'Player Info';
+      case 'backstory': return 'Backstory';
+      case 'spells': return 'Spells';
+      case 'fightingStyle': return 'Fighting Style';
+      case 'classOrder': return c.characterClass === 'Cleric' ? 'Divine Order' : 'Primal Order';
+      case 'invocations': return 'Invocations';
+      case 'shop': return 'Shop';
+      case 'finished': return 'Finished';
+    }
+  }
+
+  function goBack() {
+    if (stepIndex > 0) c.set('activeTab', steps[stepIndex - 1]!);
+  }
+
+  function goNext() {
+    if (stepIndex < steps.length - 1) c.set('activeTab', steps[stepIndex + 1]!);
   }
 
   const canCreate = c.name.trim() !== '' && c.password.trim() !== '' && c.rolled && c.pool.length === 0;
@@ -118,84 +154,47 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
 
   return (
     <div className="create-page">
-      <header className="create-header">
-        <button className="btn-back" onClick={handleBack}>← Back</button>
-        <div className="create-header-titles">
-          <span className="create-campaign-name">{campaignName}</span>
-          <h1 className="create-title">Character Creation</h1>
+      <aside className="create-rail">
+        <span className="create-rail-wordmark">{campaignName}</span>
+        <ol className="create-rail-steps">
+          {steps.map((tab, i) => (
+            <li
+              key={tab}
+              className={`create-rail-step ${i === stepIndex ? 'create-rail-step--current' : ''} ${i < stepIndex ? 'create-rail-step--done' : ''}`}
+            >
+              {titleFor(tab)}
+            </li>
+          ))}
+        </ol>
+      </aside>
+
+      <div className="create-page-main">
+        <div className="create-page-atmosphere" aria-hidden="true" />
+        <div className="create-page-body">
+          <h1 className="modal-title">{titleFor(c.activeTab)}</h1>
+          {c.activeTab === 'backstory' && isCampaign ? <BackstoryTab campaignId={campaignId} />
+            : c.activeTab === 'spells' && hasSpellcasting ? <SpellsTab />
+            : c.activeTab === 'fightingStyle' && hasFightingStyle ? <FightingStyleTab />
+            : c.activeTab === 'classOrder' && hasClassOrder ? <OrderTab />
+            : c.activeTab === 'invocations' && hasInvocations ? <InvocationsTab />
+            : c.activeTab === 'shop' ? <ShopTab />
+            : c.activeTab === 'finished' ? <FinishedTab error={error} />
+            : <PlayerInfoTab campaignId={campaignId} />}
         </div>
-      </header>
 
-      <nav className="tab-nav">
-        <button
-          className={`tab-btn ${c.activeTab === 'info' ? 'tab-btn--active' : ''}`}
-          onClick={() => c.set('activeTab', 'info')}
-        >
-          Player Info
-        </button>
-        {isCampaign && (
-          <button
-            className={`tab-btn ${c.activeTab === 'backstory' ? 'tab-btn--active' : ''}`}
-            onClick={() => c.set('activeTab', 'backstory')}
-          >
-            Backstory
-          </button>
-        )}
-        {hasSpellcasting && (
-          <button
-            className={`tab-btn ${c.activeTab === 'spells' ? 'tab-btn--active' : ''}`}
-            onClick={() => c.set('activeTab', 'spells')}
-          >
-            Spells
-          </button>
-        )}
-        {hasFightingStyle && (
-          <button
-            className={`tab-btn ${c.activeTab === 'fightingStyle' ? 'tab-btn--active' : ''}`}
-            onClick={() => c.set('activeTab', 'fightingStyle')}
-          >
-            Fighting Style
-          </button>
-        )}
-        {hasClassOrder && (
-          <button
-            className={`tab-btn ${c.activeTab === 'classOrder' ? 'tab-btn--active' : ''}`}
-            onClick={() => c.set('activeTab', 'classOrder')}
-          >
-            {c.characterClass === 'Cleric' ? 'Divine Order' : 'Primal Order'}
-          </button>
-        )}
-        {hasInvocations && (
-          <button
-            className={`tab-btn ${c.activeTab === 'invocations' ? 'tab-btn--active' : ''}`}
-            onClick={() => c.set('activeTab', 'invocations')}
-          >
-            Invocations
-          </button>
-        )}
-        <button
-          className={`tab-btn ${c.activeTab === 'shop' ? 'tab-btn--active' : ''}`}
-          onClick={() => c.set('activeTab', 'shop')}
-        >
-          Shop
-        </button>
-        <button
-          className={`tab-btn ${c.activeTab === 'finished' ? 'tab-btn--active' : ''}`}
-          onClick={() => c.set('activeTab', 'finished')}
-        >
-          Finished
-        </button>
-      </nav>
-
-      <div className="create-body">
-        {c.activeTab === 'backstory' && isCampaign ? <BackstoryTab campaignId={campaignId} />
-          : c.activeTab === 'spells' && hasSpellcasting ? <SpellsTab />
-          : c.activeTab === 'fightingStyle' && hasFightingStyle ? <FightingStyleTab />
-          : c.activeTab === 'classOrder' && hasClassOrder ? <OrderTab />
-          : c.activeTab === 'invocations' && hasInvocations ? <InvocationsTab />
-          : c.activeTab === 'shop' ? <ShopTab />
-          : c.activeTab === 'finished' ? <FinishedTab onCreate={handleCreate} canCreate={canCreate} saving={saving} error={error} />
-          : <PlayerInfoTab campaignId={campaignId} />}
+        <footer className="create-page-footer">
+          <button className="create-page-exit" onClick={handleExit}>Cancel</button>
+          <div className="create-page-footer-actions">
+            <button className="btn-secondary" onClick={goBack} disabled={stepIndex === 0}>Back</button>
+            {c.activeTab === 'finished' ? (
+              <button className="btn-primary" onClick={handleCreate} disabled={!canCreate || saving}>
+                {saving ? 'Creating…' : 'Create Character'}
+              </button>
+            ) : (
+              <button className="btn-primary" onClick={goNext}>Next</button>
+            )}
+          </div>
+        </footer>
       </div>
 
       {/* back confirmation */}

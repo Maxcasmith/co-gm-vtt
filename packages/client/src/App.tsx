@@ -1,4 +1,6 @@
 import HomePage from './HomePage.tsx';
+import CreateCampaignPage from './create-campaign/CreateCampaignPage.tsx';
+import SavedAdventuresPage from './SavedAdventuresPage.tsx';
 import GamePage from './GamePage.tsx';
 import GameLobbyPage from './GameLobbyPage.tsx';
 import PlayerCreatePage from './PlayerCreatePage.tsx';
@@ -14,6 +16,10 @@ export default function App() {
 
 function renderRoute(parts: string[]) {
   if (parts[0] === 'admin') return <AdminLayout initialTab={parts[1] === 'resources' ? 'resources' : 'campaigns'} />;
+
+  if (parts[0] === 'create') return <CreateCampaignPage />;
+
+  if (parts[0] === 'saved-adventures') return <SavedAdventuresPage />;
 
   // /{campaignId}/player/create
   if (parts.length === 3 && parts[1] === 'player' && parts[2] === 'create') {

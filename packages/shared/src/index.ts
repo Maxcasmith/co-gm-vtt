@@ -12,3 +12,4 @@ export * from "./types/events.ts";
 export * from "./types/tactics.ts";
 export * from "./types/storyboard.ts";
 export * from "./types/plotHooks.ts";
+export * from "./types/auth.ts";

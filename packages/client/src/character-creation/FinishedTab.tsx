@@ -7,13 +7,10 @@ import CharacterSheet from './CharacterSheet.tsx';
 const API = `http://${window.location.hostname}:3001`;
 
 interface Props {
-  onCreate: () => void;
-  canCreate: boolean;
-  saving: boolean;
   error: string;
 }
 
-export default function FinishedTab({ onCreate, canCreate, saving, error }: Props) {
+export default function FinishedTab({ error }: Props) {
   const c = useCharacter();
   const stats = c.toStats();
   const [spellDetails, setSpellDetails] = useState<Spell[]>([]);
@@ -95,12 +92,6 @@ export default function FinishedTab({ onCreate, canCreate, saving, error }: Prop
         </section>
 
         {error && <p className="modal-error create-error">{error}</p>}
-
-        <div className="finished-create-row">
-          <button className="btn-primary" onClick={onCreate} disabled={!canCreate || saving}>
-            {saving ? 'Creating…' : 'Create Character'}
-          </button>
-        </div>
       </div>
       <CharacterSheet />
     </div>

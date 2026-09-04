@@ -5,7 +5,18 @@
     "outDir": "dist",
     "moduleResolution": "bundler",
     "types": ["node"],
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "baseUrl": "src",
+    "paths": {
+      "@/*": ["./*"],
+      "@entities/*": ["domain/entities/*"],
+      "@repositories/*": ["repositories/*"],
+      "@commands/*": ["application/commands/*"],
+      "@queries/*": ["application/queries/*"],
+      "@controllers/*": ["presentation/controllers/*"],
+      "@middleware/*": ["presentation/middleware/*"],
+      "@containers/*": ["presentation/containers/*"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

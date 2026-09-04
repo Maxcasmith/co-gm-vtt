@@ -1,0 +1,335 @@
+/* ── create page shell ──
+   Full-bleed grid (rail + content), not a centered card — a wizard rail on the left gives the
+   page real structure, so content isn't just floating centered in empty space. */
+.create-page {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  height: 100vh;
+  color: var(--text);
+  overflow: hidden;
+}
+
+/* ── left rail ── */
+.create-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 28px 24px;
+  overflow-y: auto;
+}
+
+.create-rail-wordmark {
+  font-family: 'Cinzel', serif;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  color: var(--platinum);
+}
+
+.create-rail-steps {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.create-rail-step {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding-left: 16px;
+  border-left: 2px solid var(--border);
+}
+
+.create-rail-step--done {
+  color: var(--text);
+  border-left-color: var(--gold);
+}
+
+.create-rail-step--current {
+  color: var(--gold);
+  border-left-color: var(--gold);
+  font-weight: 600;
+}
+
+/* ── main column ── */
+.create-page-main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background:
+    radial-gradient(ellipse 900px 500px at 0% -10%, rgba(201, 168, 76, 0.08), transparent 60%),
+    var(--bg);
+  overflow: hidden;
+}
+
+.create-page-atmosphere {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.012) 0px,
+    rgba(255, 255, 255, 0.012) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  mix-blend-mode: overlay;
+}
+
+.create-page-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: 56px 48px 32px;
+  overflow-y: auto;
+}
+
+.create-page-footer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--border);
+  padding: 18px 48px;
+}
+
+.create-page-exit {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-decoration: none;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.create-page-exit:hover {
+  color: var(--gold);
+}
+
+.create-page-footer-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.create-step {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  animation: create-step-in 0.25s ease backwards;
+}
+
+.create-badge-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.create-type-badge {
+  display: inline-block;
+  align-self: flex-start;
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold);
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 5px 12px;
+}
+
+.create-info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 6px;
+  border-radius: 50%;
+  border: 1px solid var(--text-muted);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: italic;
+  font-family: 'Crimson Pro', Georgia, serif;
+  cursor: help;
+  vertical-align: middle;
+}
+
+.create-info-icon:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.create-field-title {
+  display: block;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 7px;
+}
+
+.create-label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* More breathing room on this page's own fields — scoped here rather than bumping the shared
+   .modal-input/.modal-select/.tag-chips classes, which every other modal in the app also uses. */
+.create-step .modal-input,
+.create-step .modal-select,
+.create-step .tag-chips {
+  padding: 14px 16px;
+}
+
+@keyframes create-step-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── choose-source step ── */
+.create-source-types {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.create-source-type-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  background: linear-gradient(155deg, var(--surface) 0%, var(--bg) 130%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 22px;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+
+.create-source-type-card:hover {
+  border-color: var(--gold);
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px -14px rgba(0, 0, 0, 0.7);
+}
+
+.create-source-type-card--selected {
+  border-color: var(--gold);
+  background: linear-gradient(155deg, var(--surface-hover) 0%, var(--bg) 130%);
+  box-shadow: 0 0 0 1px rgba(201, 168, 76, 0.4);
+}
+
+.create-source-type-title {
+  font-family: 'Cinzel', serif;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: var(--gold);
+}
+
+.create-source-type-body {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.create-source-section {
+  margin-bottom: 28px;
+}
+
+.create-source-section-title {
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 12px;
+}
+
+.create-source-empty {
+  font-size: 13px;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.create-source-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.saved-adventures-list {
+  max-width: 620px;
+  margin: 0 auto;
+}
+
+.create-source-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.create-source-list-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.create-source-list-synopsis {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.create-source-list-item:hover {
+  border-color: var(--gold);
+  background: var(--surface-hover);
+}
+
+/* Same card, no click-to-select affordance — used on the "My Saved Adventures" management page,
+   where the row isn't a choice, only its Delete button does anything. */
+.create-source-list-item--static {
+  cursor: default;
+}
+
+.create-source-list-item--static:hover {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.create-source-list-item--selected {
+  border-color: var(--gold);
+  background: var(--surface-hover);
+  box-shadow: 0 0 0 1px rgba(201, 168, 76, 0.4);
+}
+
+.create-source-list-name {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.create-source-list-arrow {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 18px;
+}

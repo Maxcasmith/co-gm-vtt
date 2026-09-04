@@ -1,0 +1,39 @@
+label {
+  display: block;
+  font-size: 0.8rem;
+}
+
+input {
+  display: block;
+  padding: 10px;
+  font-size: 1.2rem;
+  border: 1px solid #514a30;
+  background: #090909;
+  border-radius: 7px;
+  margin-top: 5px;
+}
+
+input.errors {
+  background: #402121;
+  border-color: red;
+}
+
+.input--wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+.input--errors--container {
+  color: red;
+  font-size: 0.8rem;
+}
+
+.input--errors--container>ul {
+  margin: 0;
+}
+
+@media (prefers-color-scheme: light) {
+  input {
+    background: white;
+  }
+}

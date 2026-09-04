@@ -8,7 +8,7 @@ import sharp from 'sharp';
 import { slugifyTheme, iconSlug } from 'shared';
 import type { Dungeon, DungeonMaterialSpec, StoryboardTestRecord, PlotHook } from 'shared';
 import { CAMPAIGNS_DIR, PROPS_DIR, TILESETS_DIR, CREATURES_DIR, ICONS_DIR, STORYBOARD_TEST_DIR, getConfig, getWorldMeta, listCampaigns, loadDungeon, writeStoryboardTestFile, getStoryboardTestRecord, readPlotHooks, writePlotHooks } from '../storage.ts';
-import { saveCampaignAsAdventure, SAVED_ADVENTURES_DIR } from '../adventures/storage.ts';
+import { saveCampaignAsAdventure, slugifyAdventureName, uniqueAdventureSlug, SAVED_ADVENTURES_DIR } from '../adventures/storage.ts';
 import { findCreatureUsage, deleteUnusedResources, type ResourceCleanupRequest } from '../resourceUsage.ts';
 import { generateExtendedTileset } from '../dungeon/tilesets.ts';
 import { generatePropSpriteBatch, previewGridCells } from '../dungeon/props.ts';
@@ -21,21 +21,6 @@ import { buildPlotHookNormalizePrompt } from '../prompts.ts';
 import { parseLlmJson } from '../utils/llmJson.ts';
 import { parsePageParams } from '../utils/pagination.ts';
 import { logError } from '../logger.ts';
-
-function slugify(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-}
-
-// Same collision-avoidance pattern as routes/campaigns.ts's uniqueSlug, scoped to the saved-adventures dir.
-function uniqueAdventureSlug(base: string): string {
-  let slug = base;
-  let n = 2;
-  while (existsSync(path.join(SAVED_ADVENTURES_DIR, slug))) {
-    slug = `${base}-${n}`;
-    n++;
-  }
-  return slug;
-}
 
 export const adminRouter = Router();
 
@@ -122,7 +107,7 @@ adminRouter.post('/campaigns/:id/save-adventure', async (req, res) => {
   try {
     const meta = await getWorldMeta(campaignSlug);
     const adventureName = name || meta?.name || campaignSlug;
-    const adventureSlug = uniqueAdventureSlug(slugify(adventureName));
+    const adventureSlug = uniqueAdventureSlug(slugifyAdventureName(adventureName));
     await saveCampaignAsAdventure(campaignSlug, adventureSlug, adventureName);
     res.json({ ok: true, slug: adventureSlug });
   } catch (err) {

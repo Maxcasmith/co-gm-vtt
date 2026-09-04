@@ -16,7 +16,7 @@ import { generateCharacterStoryboard, generateScenarioStoryboard, SLIDE_COUNT, S
 import { calcMaxHp } from '../combat/dice.ts';
 import { getFeatureProvider } from '../providers/index.ts';
 import { copyCompendiumToCampaign } from '../compendium/storage.ts';
-import { copyAdventureToCampaign } from '../adventures/storage.ts';
+import { copyAdventureToCampaign, saveCampaignAsAdventure, slugifyAdventureName, uniqueAdventureSlug } from '../adventures/storage.ts';
 import { buildConceptsPrompt, buildWorldGenPrompt, buildDungeonCrawlPremisePrompt, buildDungeonScenarioSynopsisPrompt, buildDungeonScenarioGoalPrompt, buildBackstoryCheckPrompt, buildBackstoryGeneratePrompt, buildBackstoryExtractPrompt } from '../prompts.ts';
 import { processSession, generateDmBrief } from '../session-processor/index.ts';
 import { processPortrait } from '../utils/image.ts';
@@ -27,6 +27,7 @@ import { existsSync } from 'fs';
 import path from 'path';
 import { parseLlmJson } from '../utils/llmJson.ts';
 import { logError } from '../logger.ts';
+import { authMiddleware } from '../presentation/middleware/AuthMiddleware/AuthMiddleware.ts';
 
 export const campaignsRouter = Router();
 
@@ -116,6 +117,22 @@ campaignsRouter.put('/:id/game-password', async (req, res) => {
   res.json({ gamePassword: gamePassword ?? '' });
 });
 
+campaignsRouter.post('/:id/save-adventure', async (req, res) => {
+  const campaignSlug = req.params.id ?? '';
+  const { name } = req.body as { name?: string };
+  try {
+    const meta = await getWorldMeta(campaignSlug);
+    if (!meta) { res.status(404).json({ error: 'Campaign not found' }); return; }
+    const adventureName = name || meta.name || campaignSlug;
+    const adventureSlug = uniqueAdventureSlug(slugifyAdventureName(adventureName));
+    await saveCampaignAsAdventure(campaignSlug, adventureSlug, adventureName);
+    res.json({ ok: true, slug: adventureSlug });
+  } catch (err) {
+    logError('routes/campaigns:saveAdventure', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
 // ── house rules ───────────────────────────────────────────────────────────────
 
 campaignsRouter.put('/:id/house-rules', async (req, res) => {
@@ -129,7 +146,7 @@ campaignsRouter.put('/:id/house-rules', async (req, res) => {
 
 // ── concept generation ────────────────────────────────────────────────────────
 
-campaignsRouter.post('/concepts', async (req, res) => {
+campaignsRouter.post('/concepts', authMiddleware, async (req, res) => {
   const { tags, type = 'campaign' } = req.body as { tags: string[]; type?: 'campaign' | 'one-shot' };
   if (!tags?.length) { res.status(400).json({ error: 'tags required' }); return; }
   const config = await getConfig();
@@ -145,7 +162,7 @@ campaignsRouter.post('/concepts', async (req, res) => {
 
 // ── world generation (SSE) ────────────────────────────────────────────────────
 
-campaignsRouter.post('/generate', async (req, res) => {
+campaignsRouter.post('/generate', authMiddleware, async (req, res) => {
   const { tags, concept, name, type = 'campaign', partySize = 4 } = req.body as { tags: string[]; concept: WorldConcept; name: string; type?: 'campaign' | 'one-shot' | 'dungeon-crawl'; partySize?: number };
   if (!concept || !tags?.length) { res.status(400).json({ error: 'tags and concept required' }); return; }
 
@@ -172,8 +189,10 @@ campaignsRouter.post('/generate', async (req, res) => {
         if (parsed.premise) premise = parsed.premise;
       } catch (err) { logError('routes/campaigns:generate:dungeonCrawlPremise', err); }
 
-      // Slugged from the generated title (like campaigns), not the tags[0] placeholder the client
-      // passes as `name`/`concept.name` before the real title exists.
+      // The client's rename step gives the user final say over the title — that's the point of
+      // it — so an explicitly-provided name wins over whatever this stream invented.
+      if (name) title = name;
+
       const slug = uniqueSlug(slugify(title));
       await writeCampaignFile(slug, 'world.md', `# ${title}\n\n${premise.trim()}`);
 
@@ -202,6 +221,7 @@ campaignsRouter.post('/generate', async (req, res) => {
         type,
         concept: { name: concept.name, description: concept.description },
         scenarioSynopsis: synopsis,
+        partySize,
       });
 
       // Started here, awaited only right before `complete` below — runs the whole time the goal
@@ -270,7 +290,9 @@ campaignsRouter.post('/generate', async (req, res) => {
     await writeVault(slug, world, tags, concept, msg => send({ type: 'progress', message: msg }));
 
     // write world.json with stable id + display name
-    const campaignName = world.world?.name ?? name ?? concept.name;
+    // The client's rename step gives the user final say over the title — an explicitly-provided
+    // name wins over whatever the world-generation step invented on its own.
+    const campaignName = name || world.world?.name || concept.name;
     await writeWorldMeta(slug, {
       id: randomUUID(),
       name: campaignName,
@@ -320,7 +342,7 @@ campaignsRouter.post('/generate', async (req, res) => {
 
 // ── create from module ────────────────────────────────────────────────────────
 
-campaignsRouter.post('/from-module', async (req, res) => {
+campaignsRouter.post('/from-module', authMiddleware, async (req, res) => {
   const { adventureSlug, campaignName } = req.body as { adventureSlug?: string; campaignName?: string };
   if (!adventureSlug || !campaignName) {
     res.status(400).json({ error: 'adventureSlug and campaignName are required' });
@@ -377,7 +399,7 @@ campaignsRouter.post('/from-module', async (req, res) => {
 // No LLM calls: the template already carries a starting location, undiscovered quests, and a
 // reset dungeon — spinning up a copy is a plain filesystem clone, so no SSE progress is needed.
 
-campaignsRouter.post('/from-adventure', async (req, res) => {
+campaignsRouter.post('/from-adventure', authMiddleware, async (req, res) => {
   const { adventureSlug, campaignName } = req.body as { adventureSlug?: string; campaignName?: string };
   if (!adventureSlug || !campaignName) {
     res.status(400).json({ error: 'adventureSlug and campaignName are required' });

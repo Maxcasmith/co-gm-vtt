@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Campaign, Character } from 'shared';
 import './app.css';
 
@@ -25,9 +25,6 @@ function readSessions(): Character[] {
 }
 
 export default function HomePage() {
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const [selectedGame, setSelectedGame] = useState<Game | null>(null);
-  const [password, setPassword] = useState('');
   const [games, setGames] = useState<Game[] | null>(null);
   const [sessions] = useState<Character[]>(readSessions);
 
@@ -39,41 +36,6 @@ export default function HomePage() {
   }
 
   useEffect(() => { fetchCampaigns(); }, []);
-
-  function closeModal() { dialogRef.current?.close(); }
-
-  async function tryJoin(gameId: string, pw: string): Promise<boolean> {
-    const r = await fetch(`${API}/api/campaigns/${gameId}/auth`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: pw }),
-    });
-    const data = await r.json() as { ok?: boolean; error?: string };
-    if (!r.ok || data.error) return false;
-    window.location.href = `/${gameId}/lobby`;
-    return true;
-  }
-
-  // A game with no password authenticates on an empty string server-side — try that silently
-  // first so a passwordless campaign skips straight to the lobby, and only fall back to the
-  // modal when the server actually rejects it (i.e. a password is required).
-  async function handleGameClick(game: Game) {
-    setSelectedGame(game);
-    try {
-      if (await tryJoin(game.id, '')) return;
-    } catch { /* fall through to the modal — also covers a network error */ }
-    setPassword('');
-    dialogRef.current?.showModal();
-  }
-
-  async function handleJoin() {
-    if (!selectedGame) return;
-    try {
-      if (!(await tryJoin(selectedGame.id, password))) alert('Invalid password');
-    } catch {
-      alert('Could not connect to server');
-    }
-  }
 
   return (
       <div className="home">
@@ -89,9 +51,14 @@ export default function HomePage() {
             <p className="home-tagline">Choose your table and step back into the story.</p>
           </div>
           <div className="home-header-actions">
+            <a className="btn-secondary" href="/saved-adventures">My Saved Adventures</a>
             <a className="btn-secondary" href="/admin">Admin</a>
           </div>
         </header>
+
+        <div className="home-create-cta">
+          <a className="btn-primary" href="/create">+ Create New Game</a>
+        </div>
 
         {games === null && (
           <ul className="game-list">
@@ -117,13 +84,15 @@ export default function HomePage() {
         {games !== null && games.length > 0 && (
           <ul className="game-list">
             {games.map((game, i) => (
-              <li key={i} className="game-card" onClick={() => void handleGameClick(game)}>
-                <span className="game-card-sigil">{game.name[0]?.toUpperCase()}</span>
-                <div className="game-card-info">
-                  <span className="game-name">{game.name}</span>
-                  <span className="game-meta">{game.system}</span>
-                </div>
-                <span className="game-arrow">›</span>
+              <li key={i} className="game-card">
+                <a className="game-card-link" href={`/${game.id}/lobby`}>
+                  <span className="game-card-sigil">{game.name[0]?.toUpperCase()}</span>
+                  <div className="game-card-info">
+                    <span className="game-name">{game.name}</span>
+                    <span className="game-meta">{game.system}</span>
+                  </div>
+                  <span className="game-arrow">›</span>
+                </a>
               </li>
             ))}
           </ul>
@@ -158,30 +127,6 @@ export default function HomePage() {
             </div>
           </section>
         )}
-
-        <dialog ref={dialogRef} className="modal">
-          <div className="modal-header">
-            <h2 className="modal-title">{selectedGame?.name}</h2>
-          </div>
-          <div className="modal-form">
-            <label className="modal-label">
-              Password
-              <input
-                className="modal-input"
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') void handleJoin(); }}
-                placeholder="Game password (leave blank if none)"
-                autoFocus
-              />
-            </label>
-          </div>
-          <div className="modal-actions">
-            <button className="btn-secondary" onClick={closeModal}>Cancel</button>
-            <button className="btn-primary" onClick={() => void handleJoin()}>Enter</button>
-          </div>
-        </dialog>
       </div>
   );
 }

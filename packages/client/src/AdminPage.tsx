@@ -1,11 +1,8 @@
 import { useEffect, useState } from 'react';
-import type { Campaign, CompendiumMeta, SavedAdventureMeta } from 'shared';
+import type { Campaign, CompendiumMeta } from 'shared';
 import SettingsSidebar from './SettingsSidebar.tsx';
 import UploadModuleModal from './UploadModuleModal.tsx';
-import CreateFromModuleModal from './CreateFromModuleModal.tsx';
-import CreateFromAdventureModal from './CreateFromAdventureModal.tsx';
 import SaveAdventureModal from './SaveAdventureModal.tsx';
-import CreateCampaignModal from './CreateCampaignModal.tsx';
 import DeleteResourcesModal from './DeleteResourcesModal.tsx';
 import './app.css';
 
@@ -24,17 +21,12 @@ interface AdminPageProps {
 export default function AdminPage({ password, onOpenResources, onPasswordChanged }: AdminPageProps) {
   const [campaigns, setCampaigns]   = useState<Campaign[]>([]);
   const [adventures, setAdventures] = useState<CompendiumMeta[]>([]);
-  const [savedAdventures, setSavedAdventures] = useState<SavedAdventureMeta[]>([]);
   const [feedback, setFeedback]     = useState<Record<string, string>>({});
   const [settingsOpen, setSettingsOpen]         = useState(false);
   const [uploadOpen, setUploadOpen]             = useState(false);
-  const [createCampaignOpen, setCreateCampaignOpen] = useState(false);
-  const [selectedAdventure, setSelectedAdventure]   = useState<CompendiumMeta | null>(null);
   const [resumeAdventure, setResumeAdventure]       = useState<CompendiumMeta | null>(null);
-  const [selectedSavedAdventure, setSelectedSavedAdventure] = useState<SavedAdventureMeta | null>(null);
   const [saveAdventureCampaign, setSaveAdventureCampaign]   = useState<Campaign | null>(null);
   const [deleteCampaignTarget, setDeleteCampaignTarget]     = useState<Campaign | null>(null);
-  const [deleteAdventureTarget, setDeleteAdventureTarget]   = useState<SavedAdventureMeta | null>(null);
 
   function fetchCampaigns() {
     fetch(`${API}/api/admin/campaigns`, { headers: adminHeaders(password) })
@@ -50,17 +42,9 @@ export default function AdminPage({ password, onOpenResources, onPasswordChanged
       .catch(() => setAdventures([]));
   }
 
-  function fetchSavedAdventures() {
-    fetch(`${API}/api/adventures`)
-      .then(r => r.json())
-      .then((data: SavedAdventureMeta[]) => setSavedAdventures(data))
-      .catch(() => setSavedAdventures([]));
-  }
-
   useEffect(() => {
     fetchCampaigns();
     fetchAdventures();
-    fetchSavedAdventures();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function onCampaignDeleted(campaignId: string) {
@@ -121,7 +105,6 @@ export default function AdminPage({ password, onOpenResources, onPasswordChanged
 
       <div className="admin-modules-header">
         <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">⚔</span>Campaigns</h2>
-        <button className="btn-primary" onClick={() => setCreateCampaignOpen(true)}>+ Create Campaign</button>
       </div>
       <div className="admin-table-card">
         <table className="admin-table">
@@ -170,13 +153,12 @@ export default function AdminPage({ password, onOpenResources, onPasswordChanged
           <thead>
             <tr>
               <th>Module</th>
-              <th>Create Campaign</th>
               <th>Delete</th>
             </tr>
           </thead>
           <tbody>
             {adventures.length === 0 && (
-              <tr><td colSpan={3} className="admin-empty">No modules uploaded yet.</td></tr>
+              <tr><td colSpan={2} className="admin-empty">No modules uploaded yet.</td></tr>
             )}
             {adventures.map(adv => (
               <tr key={adv.slug}>
@@ -191,58 +173,13 @@ export default function AdminPage({ password, onOpenResources, onPasswordChanged
                       adv.entityCount.location > 0 && `${adv.entityCount.location} locations`,
                     ].filter(Boolean).join(' · ')}
                   </span>
-                </td>
-                <td>
-                  {adv.status === 'draft' ? (
-                    <button className="btn-secondary" onClick={() => { setResumeAdventure(adv); setUploadOpen(true); }}>Resume</button>
-                  ) : (
-                    <button className="btn-secondary" onClick={() => setSelectedAdventure(adv)}>Create</button>
+                  {adv.status === 'draft' && (
+                    <button className="btn-secondary" onClick={() => { setResumeAdventure(adv); setUploadOpen(true); }}>Resume Upload</button>
                   )}
                 </td>
                 <td>
                   <button className="btn-danger" onClick={() => void deleteAdventure(adv.slug, adv.name)}>Delete</button>
                   {feedback[`module:${adv.slug}`] && <span className="admin-feedback">{feedback[`module:${adv.slug}`]}</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="admin-modules-header">
-        <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">💾</span>Saved Adventures</h2>
-      </div>
-      <div className="admin-table-card">
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>Adventure</th>
-              <th>Create Campaign</th>
-              <th>Delete</th>
-            </tr>
-          </thead>
-          <tbody>
-            {savedAdventures.length === 0 && (
-              <tr><td colSpan={3} className="admin-empty">No saved adventures yet — save a campaign above to reuse it without regenerating.</td></tr>
-            )}
-            {savedAdventures.map(adv => (
-              <tr key={adv.slug}>
-                <td className="admin-campaign-name">
-                  {adv.name}
-                  <span className="admin-campaign-id">{adv.slug}</span>
-                  <span className="admin-module-counts">
-                    {[
-                      adv.entityCount.npc > 0 && `${adv.entityCount.npc} NPCs`,
-                      adv.entityCount.creature > 0 && `${adv.entityCount.creature} creatures`,
-                      adv.entityCount.location > 0 && `${adv.entityCount.location} locations`,
-                      adv.hasDungeon && 'dungeon',
-                    ].filter(Boolean).join(' · ')}
-                  </span>
-                </td>
-                <td>
-                  <button className="btn-secondary" onClick={() => setSelectedSavedAdventure(adv)}>Create</button>
-                </td>
-                <td>
-                  <button className="btn-danger" onClick={() => setDeleteAdventureTarget(adv)}>Delete</button>
                 </td>
               </tr>
             ))}
@@ -258,29 +195,11 @@ export default function AdminPage({ password, onOpenResources, onPasswordChanged
       onUploaded={fetchAdventures}
       resumeAdventure={resumeAdventure}
     />
-    <CreateFromModuleModal
-      open={selectedAdventure !== null}
-      adventure={selectedAdventure}
-      onClose={() => setSelectedAdventure(null)}
-      onCreated={fetchCampaigns}
-    />
-    <CreateCampaignModal
-      open={createCampaignOpen}
-      onClose={() => setCreateCampaignOpen(false)}
-      onCreated={fetchCampaigns}
-    />
     <SaveAdventureModal
       open={saveAdventureCampaign !== null}
       campaign={saveAdventureCampaign}
-      password={password}
       onClose={() => setSaveAdventureCampaign(null)}
-      onSaved={fetchSavedAdventures}
-    />
-    <CreateFromAdventureModal
-      open={selectedSavedAdventure !== null}
-      adventure={selectedSavedAdventure}
-      onClose={() => setSelectedSavedAdventure(null)}
-      onCreated={fetchCampaigns}
+      onSaved={() => {}}
     />
     <DeleteResourcesModal
       open={deleteCampaignTarget !== null}
@@ -289,13 +208,6 @@ export default function AdminPage({ password, onOpenResources, onPasswordChanged
       password={password}
       onClose={() => setDeleteCampaignTarget(null)}
       onDeleted={() => { if (deleteCampaignTarget) onCampaignDeleted(deleteCampaignTarget.id); }}
-    />
-    <DeleteResourcesModal
-      open={deleteAdventureTarget !== null}
-      name={deleteAdventureTarget?.name ?? ''}
-      deleteUrl={`/api/adventures/${deleteAdventureTarget?.slug ?? ''}`}
-      onClose={() => setDeleteAdventureTarget(null)}
-      onDeleted={() => { if (deleteAdventureTarget) setSavedAdventures(a => a.filter(x => x.slug !== deleteAdventureTarget.slug)); }}
     />
     </>
   );

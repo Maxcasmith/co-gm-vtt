@@ -13,6 +13,21 @@ const STORAGE_DIR = path.resolve(__dir, '../../storage');
 
 export const SAVED_ADVENTURES_DIR = path.join(STORAGE_DIR, 'saved-adventures');
 
+export function slugifyAdventureName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+// Collision-avoidance for a new saved-adventure directory, scoped to SAVED_ADVENTURES_DIR.
+export function uniqueAdventureSlug(base: string): string {
+  let slug = base;
+  let n = 2;
+  while (existsSync(path.join(SAVED_ADVENTURES_DIR, slug))) {
+    slug = `${base}-${n}`;
+    n++;
+  }
+  return slug;
+}
+
 // Files that hold live-play state, never part of a reusable template.
 const PLAY_STATE_FILES = ['chat.json', 'encounter.json', 'world-state.json', 'nemeses.json', 'party-allies.json'];
 const PLAY_STATE_DIRS = ['party', 'sessions'];
@@ -91,6 +106,9 @@ export async function saveCampaignAsAdventure(campaignSlug: string, adventureSlu
     sourceType: worldMeta?.type ?? 'campaign',
     savedAt: new Date().toISOString(),
     hasDungeon,
+    ...(worldMeta?.scenarioSynopsis ? { scenarioSynopsis: worldMeta.scenarioSynopsis } : {}),
+    ...(worldMeta?.partySize !== undefined ? { partySize: worldMeta.partySize } : {}),
+    ...(worldMeta?.concept?.name ? { theme: worldMeta.concept.name } : {}),
     entityCount: await countEntities(path.join(dstDir, 'entities')),
   };
   await writeFile(path.join(dstDir, 'adventure.json'), JSON.stringify(meta, null, 2), 'utf-8');

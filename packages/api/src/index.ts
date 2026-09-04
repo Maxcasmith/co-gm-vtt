@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { configRouter } from './routes/config.ts';
 import { campaignsRouter } from './routes/campaigns.ts';
 import { compendiumRouter } from './routes/compendium.ts';
@@ -11,6 +12,8 @@ import { propsRouter } from './routes/props.ts';
 import { iconsRouter } from './routes/icons.ts';
 import { debugPerfRouter } from './routes/debugPerf.ts';
 import { licensesRouter } from './routes/licenses.ts';
+import authRouter from './presentation/routes/AuthRoutes.ts';
+import userRouter from './presentation/routes/UserRoutes.ts';
 import { initLicensesTable } from './licenses/db.ts';
 import { app, httpServer } from './state.ts';
 import { registerSocketHandlers } from './socketHandlers/index.ts';
@@ -29,6 +32,8 @@ app.use('/api/props', propsRouter);
 app.use('/api/icons', iconsRouter);
 app.use('/api/debug/perf-log', debugPerfRouter);
 app.use('/api/licenses', licensesRouter);
+app.use('/api', authRouter);
+app.use('/api', userRouter);
 
 registerSocketHandlers();
 

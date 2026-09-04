@@ -1,0 +1,10 @@
+.tag--gold {
+  color: black;
+  display: inline-block;
+  padding: 5px 10px;
+  box-sizing: border-box;
+  background: linear-gradient(to bottom right,
+      rgba(255, 255, 255, 0) 30%,
+      rgba(255, 255, 255, 0.2) 50%,
+      rgba(255, 255, 255, 0) 90%) #e0b24d;
+}

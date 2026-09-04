@@ -4,14 +4,13 @@ import type { Campaign } from 'shared';
 interface Props {
   open: boolean;
   campaign: Campaign | null;
-  password: string;
   onClose: () => void;
   onSaved: () => void;
 }
 
 const API = `http://${window.location.hostname}:3001`;
 
-export default function SaveAdventureModal({ open, campaign, password, onClose, onSaved }: Props) {
+export default function SaveAdventureModal({ open, campaign, onClose, onSaved }: Props) {
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
@@ -31,9 +30,9 @@ export default function SaveAdventureModal({ open, campaign, password, onClose, 
     setError('');
 
     try {
-      const res = await fetch(`${API}/api/admin/campaigns/${campaign.id}/save-adventure`, {
+      const res = await fetch(`${API}/api/campaigns/${campaign.id}/save-adventure`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name || undefined }),
       });
       const data = await res.json() as { ok?: boolean; error?: string };

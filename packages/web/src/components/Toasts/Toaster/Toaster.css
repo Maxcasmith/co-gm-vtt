@@ -1,0 +1,11 @@
+.toaster--wrapper {
+  position: absolute;
+  top: 0;
+  right: 0;
+  box-sizing: border-box;
+  padding: 1em;
+  max-width: 400px;
+  width: 100%;
+  max-height: 50%;
+  overflow-y: hidden;
+}

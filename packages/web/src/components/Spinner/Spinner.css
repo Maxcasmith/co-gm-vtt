@@ -1,0 +1,73 @@
+.spinner--wrapper {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  perspective: 1000px;
+  padding: 2rem;
+}
+
+.spinner--card {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  transform-style: preserve-3d;
+  animation: spin 3s linear infinite;
+}
+
+.spinner--front,
+.spinner--back {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  backface-visibility: hidden;
+}
+
+.spinner--front {
+  background: var(--gold, #c9a84c);
+}
+
+.spinner--back {
+  background: var(--platinum, #f0ebde);
+  transform: rotateY(180deg);
+}
+
+.spinner--text {
+  margin-top: 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.spinner--text::after {
+  content: "";
+  animation: dots 1.5s steps(4, end) infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotateY(0deg);
+  }
+  to {
+    transform: rotateY(360deg);
+  }
+}
+
+@keyframes dots {
+  0%,
+  25% {
+    content: "";
+  }
+  26%,
+  50% {
+    content: ".";
+  }
+  51%,
+  75% {
+    content: "..";
+  }
+  76%,
+  100% {
+    content: "...";
+  }
+}

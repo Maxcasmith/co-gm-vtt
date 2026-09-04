@@ -67,6 +67,14 @@
   mix-blend-mode: overlay;
 }
 
+.lobby-save-adventure {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  max-width: 600px;
+  margin: 24px auto 0;
+}
+
 .home-header {
   position: relative;
   display: flex;
@@ -126,6 +134,9 @@
   position: absolute;
   top: 0;
   right: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 /* ── skeleton ── */
@@ -264,6 +275,13 @@
 }
 
 /* ── game list ── */
+.home-create-cta {
+  display: flex;
+  justify-content: center;
+  max-width: 620px;
+  margin: 0 auto 24px;
+}
+
 .game-list {
   list-style: none;
   display: flex;
@@ -306,6 +324,15 @@
   background: linear-gradient(155deg, var(--surface-hover) 0%, var(--bg) 130%);
   transform: translateY(-2px);
   box-shadow: 0 14px 28px -14px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(201, 168, 76, 0.15);
+}
+
+.game-card-link {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  text-decoration: none;
+  color: inherit;
 }
 
 .game-card-sigil {
@@ -517,11 +544,13 @@
 
 .btn-primary,
 .btn-secondary {
+  display: inline-block;
   padding: 9px 22px;
   border-radius: 4px;
   font-family: 'Cinzel', serif;
   font-size: 11px;
   letter-spacing: 0.1em;
+  text-decoration: none;
   cursor: pointer;
   border: none;
   transition: opacity 0.15s, border-color 0.15s, box-shadow 0.2s, color 0.15s, transform 0.15s;
