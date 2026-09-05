@@ -1,17 +1,28 @@
 import { useState } from 'react';
-import AdminPage from './AdminPage.tsx';
-import AdminResourcesPage from './AdminResourcesPage.tsx';
+import SettingsSidebar from './SettingsSidebar.tsx';
+import AdminHomePage from './AdminHomePage.tsx';
+import AdminCampaignsPage from './AdminCampaignsPage.tsx';
+import AdminModulesPage from './AdminModulesPage.tsx';
+import AdminTilesPage from './AdminTilesPage.tsx';
+import AdminPropsPage from './AdminPropsPage.tsx';
+import AdminIconsPage from './AdminIconsPage.tsx';
+import AdminItemsPage from './AdminItemsPage.tsx';
+import AdminBestiaryPage from './AdminBestiaryPage.tsx';
+import AdminStoryboardPage from './AdminStoryboardPage.tsx';
+import AdminPlotHooksPage from './AdminPlotHooksPage.tsx';
 import './app.css';
 
 const API = `http://${window.location.hostname}:3001`;
 
-export type AdminTab = 'campaigns' | 'resources';
+export type AdminTab =
+  | 'home' | 'campaigns' | 'modules' | 'tiles' | 'props' | 'icons' | 'items' | 'bestiary' | 'storyboard' | 'plot-hooks';
 
 export default function AdminLayout({ initialTab }: { initialTab: AdminTab }) {
   const [password, setPassword] = useState('');
   const [authed, setAuthed]     = useState(false);
   const [error, setError]       = useState('');
   const [tab, setTab]           = useState<AdminTab>(initialTab);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   async function handleAuth() {
     const r = await fetch(`${API}/api/admin/auth`, {
@@ -31,7 +42,7 @@ export default function AdminLayout({ initialTab }: { initialTab: AdminTab }) {
 
   function goTo(next: AdminTab) {
     setTab(next);
-    window.history.pushState({}, '', next === 'resources' ? '/admin/resources' : '/admin');
+    window.history.pushState({}, '', next === 'home' ? '/admin' : `/admin/${next}`);
   }
 
   if (!authed) {
@@ -59,7 +70,22 @@ export default function AdminLayout({ initialTab }: { initialTab: AdminTab }) {
     );
   }
 
-  return tab === 'resources'
-    ? <AdminResourcesPage password={password} onBack={() => goTo('campaigns')} />
-    : <AdminPage password={password} onOpenResources={() => goTo('resources')} onPasswordChanged={setPassword} />;
+  const onHome = () => goTo('home');
+
+  return (
+    <>
+      {tab === 'home' && <AdminHomePage onNavigate={goTo} onOpenSettings={() => setSettingsOpen(true)} />}
+      {tab === 'campaigns' && <AdminCampaignsPage password={password} onHome={onHome} />}
+      {tab === 'modules' && <AdminModulesPage onHome={onHome} />}
+      {tab === 'tiles' && <AdminTilesPage password={password} onHome={onHome} />}
+      {tab === 'props' && <AdminPropsPage password={password} onHome={onHome} />}
+      {tab === 'icons' && <AdminIconsPage onHome={onHome} />}
+      {tab === 'items' && <AdminItemsPage password={password} onHome={onHome} />}
+      {tab === 'bestiary' && <AdminBestiaryPage password={password} onHome={onHome} />}
+      {tab === 'storyboard' && <AdminStoryboardPage password={password} onHome={onHome} />}
+      {tab === 'plot-hooks' && <AdminPlotHooksPage password={password} onHome={onHome} />}
+
+      <SettingsSidebar open={settingsOpen} password={password} onClose={() => setSettingsOpen(false)} onPasswordChanged={setPassword} />
+    </>
+  );
 }

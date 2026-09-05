@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Campaign, Character } from 'shared';
+import { useAppMeta } from './AppMetaContext.tsx';
 import './app.css';
 
 interface Game {
@@ -25,6 +26,7 @@ function readSessions(): Character[] {
 }
 
 export default function HomePage() {
+  const { platform } = useAppMeta();
   const [games, setGames] = useState<Game[] | null>(null);
   const [sessions] = useState<Character[]>(readSessions);
 
@@ -51,13 +53,13 @@ export default function HomePage() {
             <p className="home-tagline">Choose your table and step back into the story.</p>
           </div>
           <div className="home-header-actions">
-            <a className="btn-secondary" href="/saved-adventures">My Saved Adventures</a>
-            <a className="btn-secondary" href="/admin">Admin</a>
+            {platform === 'desktop' && <a className="btn-secondary" href="/admin">Admin</a>}
           </div>
         </header>
 
         <div className="home-create-cta">
           <a className="btn-primary" href="/create">+ Create New Game</a>
+          <a className="btn-secondary" href="/saved-adventures">My Saved Adventures</a>
         </div>
 
         {games === null && (

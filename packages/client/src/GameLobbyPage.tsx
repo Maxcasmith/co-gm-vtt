@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import type { Character, ScenarioStoryboard, StoryboardQueuePayload } from 'shared';
 import StoryboardOverlay from './StoryboardOverlay.tsx';
 import SaveAdventureModal from './SaveAdventureModal.tsx';
+import DeleteResourcesModal from './DeleteResourcesModal.tsx';
+import { useAppMeta } from './AppMetaContext.tsx';
 import './app.css';
 
 interface Props { campaignId: string }
@@ -9,6 +11,7 @@ interface Props { campaignId: string }
 const API = `http://${window.location.hostname}:3001`;
 
 export default function GameLobbyPage({ campaignId }: Props) {
+  const { platform } = useAppMeta();
   const [campaignName, setCampaignName] = useState('');
   // Dungeon-crawl worlds only — the rich scenario synopsis written before the dungeon itself (see
   // routes/campaigns.ts's dungeon-crawl branch). Absent for every other world type.
@@ -21,6 +24,7 @@ export default function GameLobbyPage({ campaignId }: Props) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [savingAdventure, setSavingAdventure] = useState(false);
+  const [deletingCampaign, setDeletingCampaign] = useState(false);
 
   // The game-level password gate — null while the silent empty-password check is still in
   // flight, so nothing else in the lobby renders until we know whether one is needed.
@@ -205,11 +209,21 @@ export default function GameLobbyPage({ campaignId }: Props) {
       <div className="lobby-save-adventure">
         <button className="btn-secondary" onClick={() => setSavingAdventure(true)}>Save Adventure</button>
       </div>
+      {platform === 'web' && (
+        <button className="btn-danger lobby-delete-campaign" onClick={() => setDeletingCampaign(true)}>Delete Game</button>
+      )}
       <SaveAdventureModal
         open={savingAdventure}
         campaign={{ id: campaignId, name: campaignName }}
         onClose={() => setSavingAdventure(false)}
         onSaved={() => {}}
+      />
+      <DeleteResourcesModal
+        open={deletingCampaign}
+        name={campaignName}
+        deleteUrl={`/api/campaigns/${campaignId}`}
+        onClose={() => setDeletingCampaign(false)}
+        onDeleted={() => { window.location.href = '/'; }}
       />
     </div>
   );

@@ -23,3 +23,4 @@ DB_USER=root
 DB_PASSWORD=your_password_here
 DB_NAME=ai-vtt
 
+DEPLOY_TARGET=saas

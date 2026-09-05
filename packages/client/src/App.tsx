@@ -5,17 +5,24 @@ import GamePage from './GamePage.tsx';
 import GameLobbyPage from './GameLobbyPage.tsx';
 import PlayerCreatePage from './PlayerCreatePage.tsx';
 import GameSettingsPage from './GameSettingsPage.tsx';
-import AdminLayout from './AdminLayout.tsx';
+import AdminLayout, { type AdminTab } from './AdminLayout.tsx';
 import LicenseGate from './LicenseGate.tsx';
+import { AppMetaProvider } from './AppMetaContext.tsx';
+
+const ADMIN_TABS: AdminTab[] = ['campaigns', 'modules', 'tiles', 'props', 'icons', 'items', 'bestiary', 'storyboard', 'plot-hooks'];
 
 export default function App() {
   const parts = window.location.pathname.split('/').filter(Boolean);
 
-  return <LicenseGate>{renderRoute(parts)}</LicenseGate>;
+  return <AppMetaProvider><LicenseGate>{renderRoute(parts)}</LicenseGate></AppMetaProvider>;
 }
 
 function renderRoute(parts: string[]) {
-  if (parts[0] === 'admin') return <AdminLayout initialTab={parts[1] === 'resources' ? 'resources' : 'campaigns'} />;
+  if (parts[0] === 'admin') {
+    const requested = parts[1] as AdminTab | undefined;
+    const initialTab = requested && ADMIN_TABS.includes(requested) ? requested : 'home';
+    return <AdminLayout initialTab={initialTab} />;
+  }
 
   if (parts[0] === 'create') return <CreateCampaignPage />;
 

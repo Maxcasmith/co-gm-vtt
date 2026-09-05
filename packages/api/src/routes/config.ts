@@ -9,9 +9,13 @@ export const configRouter = Router();
 
 // GamePage reads this unauthenticated to pick up narration settings, so the endpoint itself must
 // stay open — but the password is write-only from here on, never echoed back to any caller.
+// `platform` isn't part of the persisted AppConfig — it's derived from DEPLOY_TARGET (set only by
+// the web SaaS deployment; unset/anything else means the Electron app) so the client's
+// AppMetaProvider can tell which build it's running in without hardcoding it.
 configRouter.get('/', async (_req, res) => {
   const config = await getConfig();
-  res.json({ ...config, adminPassword: '' });
+  const platform = process.env.DEPLOY_TARGET === 'saas' ? 'web' : 'desktop';
+  res.json({ ...config, adminPassword: '', platform });
 });
 
 // Only the admin Settings UI issues PUTs, so gate the write side on the current admin password —

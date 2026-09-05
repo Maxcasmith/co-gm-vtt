@@ -10,7 +10,9 @@ import {
   getScenarioStoryboard,
   readCampaignFile, writeEntity,
   listEntitySlugs, readEntity, saveDungeon, saveDungeonAscii, writeManifest, readManifest, emptyManifest, readQuests, writeQuests,
+  loadDungeon,
 } from '../storage.ts';
+import { deleteUnusedResources, type ResourceCleanupRequest } from '../resourceUsage.ts';
 import { generateDungeon } from '../dungeon/index.ts';
 import { generateCharacterStoryboard, generateScenarioStoryboard, SLIDE_COUNT, SCENARIO_SLIDE_COUNT } from '../dungeon/storyboard.ts';
 import { calcMaxHp } from '../combat/dice.ts';
@@ -22,7 +24,7 @@ import { processSession, generateDmBrief } from '../session-processor/index.ts';
 import { processPortrait } from '../utils/image.ts';
 import { buildWorldMapPrompt } from '../session-processor/imagePrompts.ts';
 import { generateBattleMap } from '../providers/openai.ts';
-import { writeFile } from 'fs/promises';
+import { writeFile, rm } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { parseLlmJson } from '../utils/llmJson.ts';
@@ -69,6 +71,26 @@ campaignsRouter.get('/:id/world-map', (req, res) => {
   res.sendFile(`${req.params.id}/world-map.jpg`, { root: CAMPAIGNS_DIR }, err => {
     if (err) res.status(404).json({ error: 'No world map' });
   });
+});
+
+// Same delete as the admin panel's, but reachable from the game lobby, which has no admin
+// password — the lobby's own game-password gate is this route's only protection.
+campaignsRouter.delete('/:id', async (req, res) => {
+  const campaignId = req.params.id ?? '';
+  const campaignDir = path.join(CAMPAIGNS_DIR, campaignId);
+  try {
+    const { resources } = req.body as { resources?: ResourceCleanupRequest };
+    let messages: string[] = [];
+    if (resources && (resources.tiles || resources.creatures || resources.props)) {
+      const dungeon = await loadDungeon(campaignId);
+      if (dungeon) messages = await deleteUnusedResources(dungeon, resources, { excludeId: campaignId, excludeKind: 'campaign' });
+    }
+    if (existsSync(campaignDir)) await rm(campaignDir, { recursive: true });
+    res.json({ ok: true, messages });
+  } catch (err) {
+    logError('routes/campaigns:deleteCampaign', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
 });
 
 // ── campaign meta ─────────────────────────────────────────────────────────────
