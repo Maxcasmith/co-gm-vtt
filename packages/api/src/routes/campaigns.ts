@@ -29,7 +29,7 @@ import { existsSync } from 'fs';
 import path from 'path';
 import { parseLlmJson } from '../utils/llmJson.ts';
 import { logError } from '../logger.ts';
-import { authMiddleware } from '../presentation/middleware/AuthMiddleware/AuthMiddleware.ts';
+import { licenseOrJwtMiddleware } from '../presentation/middleware/AuthMiddleware/AuthMiddleware.ts';
 
 export const campaignsRouter = Router();
 
@@ -168,7 +168,7 @@ campaignsRouter.put('/:id/house-rules', async (req, res) => {
 
 // ── concept generation ────────────────────────────────────────────────────────
 
-campaignsRouter.post('/concepts', authMiddleware, async (req, res) => {
+campaignsRouter.post('/concepts', licenseOrJwtMiddleware, async (req, res) => {
   const { tags, type = 'campaign' } = req.body as { tags: string[]; type?: 'campaign' | 'one-shot' };
   if (!tags?.length) { res.status(400).json({ error: 'tags required' }); return; }
   const config = await getConfig();
@@ -184,7 +184,7 @@ campaignsRouter.post('/concepts', authMiddleware, async (req, res) => {
 
 // ── world generation (SSE) ────────────────────────────────────────────────────
 
-campaignsRouter.post('/generate', authMiddleware, async (req, res) => {
+campaignsRouter.post('/generate', licenseOrJwtMiddleware, async (req, res) => {
   const { tags, concept, name, type = 'campaign', partySize = 4 } = req.body as { tags: string[]; concept: WorldConcept; name: string; type?: 'campaign' | 'one-shot' | 'dungeon-crawl'; partySize?: number };
   if (!concept || !tags?.length) { res.status(400).json({ error: 'tags and concept required' }); return; }
 
@@ -364,7 +364,7 @@ campaignsRouter.post('/generate', authMiddleware, async (req, res) => {
 
 // ── create from module ────────────────────────────────────────────────────────
 
-campaignsRouter.post('/from-module', authMiddleware, async (req, res) => {
+campaignsRouter.post('/from-module', licenseOrJwtMiddleware, async (req, res) => {
   const { adventureSlug, campaignName } = req.body as { adventureSlug?: string; campaignName?: string };
   if (!adventureSlug || !campaignName) {
     res.status(400).json({ error: 'adventureSlug and campaignName are required' });
@@ -421,7 +421,7 @@ campaignsRouter.post('/from-module', authMiddleware, async (req, res) => {
 // No LLM calls: the template already carries a starting location, undiscovered quests, and a
 // reset dungeon — spinning up a copy is a plain filesystem clone, so no SSE progress is needed.
 
-campaignsRouter.post('/from-adventure', authMiddleware, async (req, res) => {
+campaignsRouter.post('/from-adventure', licenseOrJwtMiddleware, async (req, res) => {
   const { adventureSlug, campaignName } = req.body as { adventureSlug?: string; campaignName?: string };
   if (!adventureSlug || !campaignName) {
     res.status(400).json({ error: 'adventureSlug and campaignName are required' });

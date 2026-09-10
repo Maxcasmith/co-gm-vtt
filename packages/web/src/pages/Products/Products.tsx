@@ -1,4 +1,4 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/Button/Button';
 import { CheckIcon } from '../../components/icons/Icons';
 import { ParchmentLayout } from '../../components/ParchmentLayout/ParchmentLayout';
@@ -17,16 +17,7 @@ export function Products() {
 
   return (
     <ParchmentLayout
-      header={
-        <PageHeader
-          actions={
-            <>
-              <Link className="btn btn--outline btn--primary btn--md" to="/login">Log In</Link>
-              <Button onClick={() => navigate('/signup')}>Get Started</Button>
-            </>
-          }
-        />
-      }
+      header={<PageHeader />}
       skeleton={
         <>
           <div className="products--intro parchment-container">

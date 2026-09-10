@@ -1,0 +1,43 @@
+.license-modal {
+  position: relative;
+  width: min(420px, 100%);
+  box-sizing: border-box;
+  padding: 28px;
+  color: var(--ink);
+}
+
+.license-modal--title {
+  font-family: 'Playfair Display', serif;
+  font-size: 22px;
+  margin: 0 0 16px;
+}
+
+.license-modal--body {
+  font-family: 'Crimson Pro', Georgia, serif;
+  color: var(--ink-muted);
+  margin: 0 0 20px;
+}
+
+.license-modal--code-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.license-modal--code {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--parchment);
+  border: 1px solid var(--parchment-line);
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 10px 12px;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+}
+
+.license-modal--close {
+  width: 100%;
+}

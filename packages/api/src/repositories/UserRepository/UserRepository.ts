@@ -60,8 +60,8 @@ export class UserRepository implements IUserRepository {
     const id = randomUUID();
 
     const query = `
-      INSERT INTO users (id, email, firstName, lastName, mobile, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+      INSERT INTO users (id, email, firstName, lastName, mobile, password, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
     `;
 
     await db.execute(query, [
@@ -70,6 +70,7 @@ export class UserRepository implements IUserRepository {
       blueprints.firstName,
       blueprints.lastName,
       blueprints.mobile || null,
+      blueprints.password || null,
     ]);
 
     const user = await this.findById(id);
@@ -100,6 +101,10 @@ export class UserRepository implements IUserRepository {
     if (blueprints.data.mobile !== undefined) {
       updates.push("mobile = ?");
       values.push(blueprints.data.mobile);
+    }
+    if (blueprints.data.password) {
+      updates.push("password = ?");
+      values.push(blueprints.data.password);
     }
 
     if (updates.length === 0) {

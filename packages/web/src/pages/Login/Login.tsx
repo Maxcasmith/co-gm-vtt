@@ -1,4 +1,5 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/Button/Button';
 import { ContinueWithGoogleButton } from '../../components/Button/ContinueWithGoogle/ContinueWithGoogle';
 import { Submit } from '../../components/Button/Submit/Submit';
@@ -7,6 +8,7 @@ import { Input } from '../../components/Input/Input';
 import { ParchmentLayout } from '../../components/ParchmentLayout/ParchmentLayout';
 import { PageHeader } from '../../components/PageHeader/PageHeader';
 import { writeJourneySelection } from '../Signup/journeySession';
+import api from '../../api/client';
 import './Login.css';
 
 const defaultForm = { email: '', password: '' };
@@ -14,21 +16,24 @@ type LoginField = keyof typeof defaultForm;
 
 export function Login() {
   const navigate = useNavigate();
+  const [loginError, setLoginError] = useState('');
 
   async function submit(form: typeof defaultForm) {
-    console.log(form);
+    setLoginError('');
+    try {
+      await api.auth.login(form);
+      navigate('/profile');
+    } catch (error) {
+      console.error('Login failed:', error);
+      setLoginError('Invalid email or password');
+    }
   }
 
   return (
     <ParchmentLayout
       header={
         <PageHeader
-          actions={
-            <>
-              <Link className="btn btn--outline btn--primary btn--md" to="/">Back Home</Link>
-              <Button onClick={() => navigate('/signup')}>Sign Up</Button>
-            </>
-          }
+          actions={<Button onClick={() => navigate('/signup')}>Sign Up</Button>}
         />
       }
       skeleton={
@@ -55,6 +60,7 @@ export function Login() {
               <Input<LoginField> name="email" label="Email" type="email" placeholder="you@example.com" className="login--panel--input" />
               <Input<LoginField> name="password" label="Password" type="password" placeholder="••••••••" className="login--panel--input" />
             </div>
+            {loginError && <p className="login--panel--error">{loginError}</p>}
             <Submit className="login--panel--submit">Log In</Submit>
           </Form>
 

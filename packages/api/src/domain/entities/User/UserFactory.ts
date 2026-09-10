@@ -8,6 +8,7 @@ export class UserFactory {
       lastName: dto.lastName,
       mobile: dto.mobile,
       email: dto.email,
+      password: dto.password,
       createdAt: dto.createdAt,
       updatedAt: dto.updatedAt,
     });

@@ -30,15 +30,24 @@ function railStepsFor(source: Source, campaignType: 'campaign' | 'dungeon-crawl'
 
 function cacheKey(tags: string[]) { return [...tags].sort().join('|'); }
 
+// Web hands off tags via ?tags=a,b,c when redirecting a logged-in cloud user straight into
+// this page — cross-origin, so a URL param is the only handoff channel that survives the navigation.
+function tagsFromQuery(): string[] {
+  const raw = new URLSearchParams(window.location.search).get('tags');
+  if (!raw) return [];
+  return raw.split(',').map(t => t.trim()).filter(Boolean);
+}
+
 export default function CreateCampaignPage() {
   const conceptsCache = useRef<Map<string, WorldConcept[]>>(new Map());
+  const initialTags = tagsFromQuery();
 
-  const [step, setStep] = useState<Step>('choose');
-  const [choice, setChoice] = useState<Choice | null>(null);
+  const [step, setStep] = useState<Step>(initialTags.length ? 'prompts' : 'choose');
+  const [choice, setChoice] = useState<Choice | null>(initialTags.length ? { kind: 'type', type: 'campaign' } : null);
   const [source, setSource] = useState<Source>('new');
   const [campaignType, setCampaignType] = useState<'campaign' | 'dungeon-crawl'>('campaign');
   const [partySize, setPartySize] = useState(4);
-  const [tags, setTags] = useState<string[]>([]);
+  const [tags, setTags] = useState<string[]>(initialTags);
   const [loadingConcepts, setLoadingConcepts] = useState(false);
   const [concepts, setConcepts] = useState<WorldConcept[]>([]);
   const [selectedConcept, setSelectedConcept] = useState<WorldConcept | null>(null);

@@ -1,0 +1,42 @@
+.desktop-campaign-modal {
+  position: relative;
+  width: min(440px, 100%);
+  box-sizing: border-box;
+  padding: 28px;
+  color: var(--ink);
+  text-align: left;
+}
+
+.desktop-campaign-modal--title {
+  font-family: 'Playfair Display', serif;
+  font-size: 22px;
+  margin: 0 0 10px;
+}
+
+.desktop-campaign-modal--body {
+  font-family: 'Crimson Pro', Georgia, serif;
+  color: var(--ink-muted);
+  margin: 0 0 16px;
+}
+
+.desktop-campaign-modal--line {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--parchment);
+  border: 1px solid var(--parchment-line);
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 10px 12px;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.desktop-campaign-modal--steps {
+  font-family: 'Crimson Pro', Georgia, serif;
+  color: var(--ink);
+  margin: 0 0 22px;
+  padding-left: 20px;
+}
+
+.desktop-campaign-modal--steps li { margin-bottom: 6px; }

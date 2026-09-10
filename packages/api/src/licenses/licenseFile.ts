@@ -1,11 +1,11 @@
 import { readFile, writeFile, mkdir, rm } from 'fs/promises';
 import path from 'path';
 import { STORAGE_DIR } from '../storage.ts';
+import { findLicenseByCode, redeemLicense } from './repository.ts';
 
-// ponytail: real check is "fetch request validates the code against the MySQL server"
-// (see licenses/repository.ts findLicenseByCode). Stubbed to always true until that's wired up.
-async function matchesSqlServer(_code: string): Promise<boolean> {
-  return true;
+async function matchesSqlServer(code: string): Promise<boolean> {
+  const license = await findLicenseByCode(code);
+  return license !== null;
 }
 
 const LICENSE_FILE_PATH = path.join(STORAGE_DIR, 'license.json');
@@ -24,12 +24,14 @@ async function writeStoredCode(code: string): Promise<void> {
   await writeFile(LICENSE_FILE_PATH, JSON.stringify({ code }, null, 2), 'utf-8');
 }
 
-// User submits a code in the modal: validate it against the SQL server, and on success
-// write the license file so future boots don't need the modal again.
+// User submits a code in the modal: check it's unredeemed, redeem it in the DB, and on
+// success write the license file so future boots don't need the modal again.
 export async function redeemLicenseCode(code: string): Promise<boolean> {
-  const valid = await matchesSqlServer(code);
-  if (valid) await writeStoredCode(code);
-  return valid;
+  const result = await redeemLicense(code);
+  if (result === null || result === 'already_redeemed') return false;
+
+  await writeStoredCode(code);
+  return true;
 }
 
 // App boot: license file already exists, re-validate its code against the SQL server.

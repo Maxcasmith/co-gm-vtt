@@ -1,13 +1,13 @@
 import { Router, type Router as RouterType } from "express";
 import { Container } from "@/presentation/containers";
 import {
-  authMiddleware,
+  jwtMiddleware,
   type AuthenticatedRequest,
 } from "@/presentation/middleware/AuthMiddleware/AuthMiddleware";
 
 const router: RouterType = Router();
 
-router.get("/users/me", authMiddleware, async (req: AuthenticatedRequest, res) => {
+router.get("/users/me", jwtMiddleware, async (req: AuthenticatedRequest, res) => {
   if (!req.user) {
     res.status(401).json({ error: "User not authenticated" });
     return;
@@ -20,7 +20,9 @@ router.get("/users/me", authMiddleware, async (req: AuthenticatedRequest, res) =
     return;
   }
 
-  res.json(user.present());
+  const products = await Container.auth.userProductRepository.findCodesByUserId(req.user.sub);
+
+  res.json({ ...user.present(), products });
 });
 
 export default router;

@@ -1,0 +1,22 @@
+.profile--body {
+  min-height: 60vh;
+  padding-top: 40px;
+  padding-bottom: 60px;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+}
+
+.profile--section-title {
+  font-family: 'Playfair Display', serif;
+  font-size: 22px;
+  margin: 0 0 8px;
+  color: var(--ink);
+}
+
+.profile--section-body {
+  font-family: 'Crimson Pro', Georgia, serif;
+  color: var(--ink-muted);
+  margin: 0 0 16px;
+}

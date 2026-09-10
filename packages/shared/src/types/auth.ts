@@ -5,6 +5,26 @@ export const AuthSSOGoogleRequest = z.object({
   scope: z.string(),
 });
 
+export const AuthSignupRequest = z.object({
+  productId: z.string().optional(),
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  email: z.string().optional(),
+  password: z.string().optional(),
+  googleCode: z.string().optional(),
+  scope: z.string().optional(),
+});
+
+export const AuthLoginRequest = z.object({
+  email: z.string(),
+  password: z.string(),
+});
+
+export const ChangePasswordRequest = z.object({
+  currentPassword: z.string(),
+  newPassword: z.string(),
+});
+
 export const AuthSSOGoogleResponse = z.object({
   access_token: z.string(),
   refresh_token: z.string(),
@@ -28,4 +48,15 @@ export const FindUserResponse = z.object({
   mobile: z.string().nullable().optional(),
   createdAt: z.string().nullable().optional(),
   updatedAt: z.string().nullable().optional(),
+  products: z.array(z.string()),
+});
+
+// One row per open login chain (root through however many refresh rotations) — see
+// AuthController.getSessions in packages/api.
+export const GetSessionsResponse = z.object({
+  sessions: z.array(z.object({
+    id: z.string(),
+    createdAt: z.string(),
+    expiresAt: z.string(),
+  })),
 });

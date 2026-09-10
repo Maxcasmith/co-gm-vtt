@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { AiFeature, AiWorkflow, ModelTier, StoryProvider, ReasoningEffort } from 'shared';
 import { Button } from './components/Button/Button.tsx';
-import { STORY_PROVIDERS } from './SettingsSidebar.tsx';
+import { useModelCatalog, type ModelCatalog } from './useModelCatalog.ts';
 
 interface Props {
   open: boolean;
@@ -119,8 +119,8 @@ const EFFORT_LEVELS: { id: ReasoningEffort; label: string }[] = [
   { id: 'maximum', label: 'Maximum' },
 ];
 
-function supportsEffort(provider: StoryProvider, model: string): boolean {
-  return STORY_PROVIDERS.find(p => p.id === provider)?.models.find(m => m.id === model)?.supportsEffort ?? false;
+function supportsEffort(catalog: ModelCatalog, provider: StoryProvider, model: string): boolean {
+  return catalog.find(p => p.id === provider)?.models.find(m => m.id === model)?.supportsEffort ?? false;
 }
 
 function newWorkflow(): AiWorkflow {
@@ -130,6 +130,7 @@ function newWorkflow(): AiWorkflow {
 type NodeStatus = 'neutral' | 'testing' | 'ok' | 'fail';
 
 export default function ConfigureAiWorkflowsModal({ open, workflows, onCancel, onSave }: Props) {
+  const storyProviders = useModelCatalog();
   const [draft, setDraft] = useState<AiWorkflow[]>(workflows);
   const [selectedId, setSelectedId] = useState<string>(workflows[0]?.id ?? '');
   const [statuses, setStatuses] = useState<NodeStatus[]>([]);
@@ -185,9 +186,9 @@ export default function ConfigureAiWorkflowsModal({ open, workflows, onCancel, o
   }
 
   function addNode() {
-    const first = STORY_PROVIDERS[0]!;
+    const first = storyProviders[0]!;
     const model = first.models[0]!.id;
-    updateSelected(w => ({ ...w, models: [...w.models, { provider: first.id, model, ...(supportsEffort(first.id, model) ? { effort: 'high' as ReasoningEffort } : {}) }] }));
+    updateSelected(w => ({ ...w, models: [...w.models, { provider: first.id, model, ...(supportsEffort(storyProviders, first.id, model) ? { effort: 'high' as ReasoningEffort } : {}) }] }));
     setStatuses(s => [...s, 'neutral']);
     setSummary('');
   }
@@ -199,12 +200,12 @@ export default function ConfigureAiWorkflowsModal({ open, workflows, onCancel, o
   }
 
   function updateProvider(index: number, provider: StoryProvider) {
-    const models = STORY_PROVIDERS.find(p => p.id === provider)?.models ?? [];
+    const models = storyProviders.find(p => p.id === provider)?.models ?? [];
     const model = models[0]?.id ?? '';
     updateSelected(w => ({
       ...w,
       models: w.models.map((node, i) => i === index
-        ? { provider, model, ...(supportsEffort(provider, model) ? { effort: 'high' as ReasoningEffort } : {}) }
+        ? { provider, model, ...(supportsEffort(storyProviders, provider, model) ? { effort: 'high' as ReasoningEffort } : {}) }
         : node),
     }));
     setSummary('');
@@ -215,7 +216,7 @@ export default function ConfigureAiWorkflowsModal({ open, workflows, onCancel, o
       ...w,
       models: w.models.map((node, i) => {
         if (i !== index) return node;
-        if (!supportsEffort(node.provider, model)) {
+        if (!supportsEffort(storyProviders, node.provider, model)) {
           const { effort: _effort, ...rest } = node;
           return { ...rest, model };
         }
@@ -312,7 +313,7 @@ export default function ConfigureAiWorkflowsModal({ open, workflows, onCancel, o
 
             <div className="chain-row">
               {selected.models.map((node, i) => {
-                const provider = STORY_PROVIDERS.find(p => p.id === node.provider) ?? STORY_PROVIDERS[0]!;
+                const provider = storyProviders.find(p => p.id === node.provider) ?? storyProviders[0]!;
                 return (
                   <div className="chain-node-wrap" key={i}>
                     <div className={`chain-node chain-node--${statuses[i] ?? 'neutral'}`}>
@@ -322,7 +323,7 @@ export default function ConfigureAiWorkflowsModal({ open, workflows, onCancel, o
                         value={node.provider}
                         onChange={e => updateProvider(i, e.target.value as StoryProvider)}
                       >
-                        {STORY_PROVIDERS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                        {storyProviders.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
                       </select>
                       <select
                         className="modal-select chain-node-select"
@@ -331,7 +332,7 @@ export default function ConfigureAiWorkflowsModal({ open, workflows, onCancel, o
                       >
                         {provider.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                       </select>
-                      {supportsEffort(node.provider, node.model) && (
+                      {supportsEffort(storyProviders, node.provider, node.model) && (
                         <select
                           className="modal-select chain-node-select"
                           value={node.effort ?? 'high'}

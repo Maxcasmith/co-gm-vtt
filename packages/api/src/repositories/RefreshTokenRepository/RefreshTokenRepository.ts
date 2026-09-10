@@ -171,30 +171,33 @@ export class RefreshTokenRepository implements IRefreshTokenRepository {
   async findTokenChain(tokenId: string): Promise<RefreshToken[]> {
     const db = getDatabase();
 
-    // Use recursive CTE to find entire chain (predecessors and successors)
+    // Two separate one-directional walks, not one recursive CTE crossing both directions:
+    // a single recursive term that walks predecessors AND successors off the same growing
+    // table feeds itself — the forward branch rediscovers the node the backward branch just
+    // added, which the backward branch rediscovers again, oscillating forever with UNION ALL
+    // (it never dedupes between iterations). Each walk below is strictly monotonic in one
+    // direction (predecessors only get older, successors only get newer) so neither can cycle.
     const query = `
-      WITH RECURSIVE token_chain AS (
-        -- Start with the given token
+      WITH RECURSIVE predecessors AS (
         SELECT * FROM refresh_tokens WHERE id = ?
-
         UNION ALL
-
-        -- Get all predecessors (walk backwards)
         SELECT rt.*
         FROM refresh_tokens rt
-        INNER JOIN token_chain tc ON rt.id = tc.predecessorId
-
+        INNER JOIN predecessors p ON rt.id = p.predecessorId
+      ),
+      successors AS (
+        SELECT * FROM refresh_tokens WHERE id = ?
         UNION ALL
-
-        -- Get all successors (walk forwards)
         SELECT rt.*
         FROM refresh_tokens rt
-        INNER JOIN token_chain tc ON rt.predecessorId = tc.id
+        INNER JOIN successors s ON rt.predecessorId = s.id
       )
-      SELECT DISTINCT * FROM token_chain
+      SELECT * FROM predecessors
+      UNION
+      SELECT * FROM successors
     `;
 
-    const [rows] = await db.execute(query, [tokenId]);
+    const [rows] = await db.execute(query, [tokenId, tokenId]);
     const tokens = rows as any[];
 
     return tokens.map((row) => RefreshTokenFactory.create(row));

@@ -1,12 +1,24 @@
 import { Router } from 'express';
-import { createLicense, redeemLicense } from '../licenses/repository.ts';
+import { createLicense, redeemLicense, findLicenseByEmail } from '../licenses/repository.ts';
 import { redeemLicenseCode, checkStoredLicense } from '../licenses/licenseFile.ts';
+import { jwtMiddleware, type AuthenticatedRequest } from '../presentation/middleware/AuthMiddleware/AuthMiddleware.ts';
 
 export const licensesRouter = Router();
 
 // App boot: is there already a locally-stored, still-valid license? If so, skip the modal.
 licensesRouter.get('/status', async (req, res) => {
   res.json({ valid: await checkStoredLicense() });
+});
+
+// Web account view of "my license" — looked up by the JWT's email, not by userId (licenses
+// have no FK to users, see findLicenseByEmail).
+licensesRouter.get('/mine', jwtMiddleware, async (req: AuthenticatedRequest, res) => {
+  if (!req.user) {
+    res.status(401).json({ error: 'User not authenticated' });
+    return;
+  }
+  const license = await findLicenseByEmail(req.user.email);
+  res.json({ licenseCode: license?.licenseCode ?? null });
 });
 
 licensesRouter.post('/check', async (req, res) => {

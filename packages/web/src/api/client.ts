@@ -1,6 +1,7 @@
-import { toFormData, type FormDataValue } from "../helpers/toFormData";
+import type { FormDataValue } from "../helpers/apiTypes";
 import { AuthService } from "./services/authService/authService";
 import { OnboardingService } from "./services/onboardingService/onboardingService";
+import { LicenseService } from "./services/licenseService/licenseService";
 
 interface APIClientProps {
   base: string;
@@ -25,6 +26,7 @@ class APIClient implements IAPIClient {
 
   private _auth!: AuthService;
   private _onboarding!: OnboardingService;
+  private _licenses!: LicenseService;
 
   constructor(props: APIClientProps) {
     this._base = props.base;
@@ -42,6 +44,11 @@ class APIClient implements IAPIClient {
   get onboarding() {
     if (!this._onboarding) this._onboarding = new OnboardingService(this);
     return this._onboarding;
+  }
+
+  get licenses() {
+    if (!this._licenses) this._licenses = new LicenseService(this);
+    return this._licenses;
   }
 
   // Tokens and functions
@@ -97,12 +104,13 @@ class APIClient implements IAPIClient {
 
   async post(endpoint: string, body: Record<string, FormDataValue>) {
     const execute = async () => {
-      const payload = toFormData(body);
+      const headers = new Headers(this._headers);
+      headers.set("Content-Type", "application/json");
 
       const res = await fetch(`${this._base}/api/` + endpoint, {
         method: "POST",
-        headers: this._headers,
-        body: payload,
+        headers,
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {

@@ -60,6 +60,14 @@
   border-color: var(--maroon);
 }
 
+.login--panel--error {
+  color: red;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  margin: -8px 0 16px;
+  text-align: left;
+}
+
 .login--panel--submit {
   width: 100%;
 }

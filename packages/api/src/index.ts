@@ -12,6 +12,7 @@ import { propsRouter } from './routes/props.ts';
 import { iconsRouter } from './routes/icons.ts';
 import { debugPerfRouter } from './routes/debugPerf.ts';
 import { licensesRouter } from './routes/licenses.ts';
+import { modelsRouter } from './routes/models.ts';
 import authRouter from './presentation/routes/AuthRoutes.ts';
 import userRouter from './presentation/routes/UserRoutes.ts';
 import { initLicensesTable } from './licenses/db.ts';
@@ -32,6 +33,7 @@ app.use('/api/props', propsRouter);
 app.use('/api/icons', iconsRouter);
 app.use('/api/debug/perf-log', debugPerfRouter);
 app.use('/api/licenses', licensesRouter);
+app.use('/api/models', modelsRouter);
 app.use('/api', authRouter);
 app.use('/api', userRouter);
 

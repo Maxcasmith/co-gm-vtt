@@ -51,6 +51,13 @@ export async function findLicenseByCode(licenseCode: string): Promise<License | 
   return rows[0] ? toLicense(rows[0]) : null;
 }
 
+// Licenses aren't FK'd to users.id (see the seed comment — desktop-only, bought before or
+// without a web account) — email is the only link back to whoever redeemed it.
+export async function findLicenseByEmail(emailAddress: string): Promise<License | null> {
+  const [rows] = await pool.query<LicenseRow[]>('SELECT * FROM licenses WHERE email_address = ? ORDER BY created_at DESC LIMIT 1', [emailAddress]);
+  return rows[0] ? toLicense(rows[0]) : null;
+}
+
 // Returns null if the code doesn't exist, 'already_redeemed' if it's used, or the redeemed License.
 export async function redeemLicense(licenseCode: string): Promise<License | null | 'already_redeemed'> {
   const existing = await findLicenseByCode(licenseCode);

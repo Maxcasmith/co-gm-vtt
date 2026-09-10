@@ -40,6 +40,13 @@
   color: var(--ink);
 }
 
+.home--hero--prompt-desc {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--ink-muted);
+  margin: 2px 0 0;
+}
+
 .home--hero--tags {
   display: flex;
   flex-wrap: wrap;
@@ -131,9 +138,9 @@
   align-items: center;
   gap: 7px;
   background: transparent;
-  border: 1px solid var(--parchment-line);
+  border: 1px solid var(--maroon);
   border-radius: 999px;
-  color: var(--ink-muted);
+  color: var(--maroon);
   font-family: 'Crimson Pro', Georgia, serif;
   font-size: 13px;
   padding: 7px 14px;
@@ -142,8 +149,8 @@
 }
 
 .home--hero--chip:hover {
-  border-color: var(--maroon);
-  color: var(--ink);
+  background: var(--maroon);
+  color: var(--parchment);
 }
 
 .home--hero--chip--active {
@@ -170,7 +177,8 @@
 }
 
 /* ── skeleton ── */
-.home--skeleton--label { width: 260px; height: 15px; margin-bottom: 14px; }
+.home--skeleton--label { width: 260px; height: 15px; margin-bottom: 6px; }
+.home--skeleton--desc { width: 400px; height: 13px; margin-bottom: 14px; }
 .home--skeleton--input { flex: 1; height: 44px; }
 .home--skeleton--button { width: 190px; height: 44px; }
 .home--skeleton--chip { width: 90px; height: 31px; border-radius: 999px; }

@@ -1,0 +1,86 @@
+.settings--body {
+  min-height: 60vh;
+  padding-top: 40px;
+  padding-bottom: 60px;
+  max-width: 560px;
+}
+
+.settings--title {
+  font-family: 'Playfair Display', serif;
+  font-size: 30px;
+  font-weight: 700;
+  margin: 0 0 32px;
+  color: var(--ink);
+}
+
+.settings--section-title {
+  font-family: 'Playfair Display', serif;
+  font-size: 20px;
+  margin: 0 0 16px;
+  color: var(--ink);
+}
+
+.settings--password-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 360px;
+}
+
+.settings--password-error {
+  color: red;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  margin: -8px 0 0;
+}
+
+.settings--password-success {
+  color: var(--maroon);
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  margin: -8px 0 0;
+}
+
+.settings--divider {
+  border: none;
+  border-top: 1px solid var(--parchment-line);
+  margin: 40px 0;
+}
+
+.settings--sessions-empty {
+  font-family: 'Crimson Pro', Georgia, serif;
+  color: var(--ink-muted);
+}
+
+.settings--sessions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings--session-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border: 1px solid var(--parchment-line);
+  border-radius: 8px;
+}
+
+.settings--session-started {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 15px;
+  color: var(--ink);
+  margin: 0 0 2px;
+}
+
+.settings--session-expires {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--ink-muted);
+  margin: 0;
+}

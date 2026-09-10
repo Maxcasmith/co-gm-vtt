@@ -24,3 +24,27 @@ export const GAME_SYSTEMS: GameSystem[] = [
     ],
   },
 ];
+
+export interface UpcomingGameSystem {
+  name: string;
+  description: string;
+}
+
+export const UPCOMING_GAME_SYSTEMS: UpcomingGameSystem[] = [
+  {
+    name: 'GURPS Fourth Edition Revised',
+    description: 'A flexible, point-buy system built for any genre or setting.',
+  },
+  {
+    name: 'Pathfinder Second Edition',
+    description: 'A tactical, feat-driven descendant of 3.5e-style D&D.',
+  },
+  {
+    name: 'Vampire: The Masquerade Sixth Edition',
+    description: 'Gothic-punk horror centred on power, hunger, and humanity.',
+  },
+  {
+    name: 'Call of Cthulhu Seventh Edition',
+    description: 'Investigative cosmic horror inspired by the works of Lovecraft.',
+  },
+];

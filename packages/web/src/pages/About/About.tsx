@@ -1,5 +1,3 @@
-import { Link, useNavigate } from 'react-router-dom';
-import { Button } from '../../components/Button/Button';
 import { CloudIcon, D20Icon, SparkleIcon } from '../../components/icons/Icons';
 import { ParchmentLayout } from '../../components/ParchmentLayout/ParchmentLayout';
 import { PageHeader } from '../../components/PageHeader/PageHeader';
@@ -24,20 +22,9 @@ const PILLARS = [
 ];
 
 export function About() {
-  const navigate = useNavigate();
-
   return (
     <ParchmentLayout
-      header={
-        <PageHeader
-          actions={
-            <>
-              <Link className="btn btn--outline btn--primary btn--md" to="/login">Log In</Link>
-              <Button onClick={() => navigate('/signup')}>Get Started</Button>
-            </>
-          }
-        />
-      }
+      header={<PageHeader />}
       skeleton={
         <>
           <div className="about--intro parchment-container">

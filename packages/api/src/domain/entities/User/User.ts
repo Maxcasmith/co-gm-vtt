@@ -6,6 +6,7 @@ export interface UserInterface {
   lastName: string;
   email: string;
   mobile?: string | undefined;
+  password?: string | null | undefined;
   createdAt?: Date | undefined;
   updatedAt?: Date | undefined;
 }
@@ -16,6 +17,7 @@ export class User implements Entity {
   private readonly _lastName: string;
   private readonly _email: string;
   private readonly _mobile: string | undefined;
+  private readonly _password: string | null | undefined;
   private readonly _createdAt: Date | undefined;
   private readonly _updatedAt: Date | undefined;
 
@@ -25,6 +27,7 @@ export class User implements Entity {
     lastName,
     email,
     mobile,
+    password,
     createdAt,
     updatedAt,
   }: UserInterface) {
@@ -33,6 +36,7 @@ export class User implements Entity {
     this._lastName = lastName;
     this._email = email;
     this._mobile = mobile;
+    this._password = password;
     this._createdAt = createdAt;
     this._updatedAt = updatedAt;
   }
@@ -55,6 +59,10 @@ export class User implements Entity {
 
   get mobile() {
     return this._mobile;
+  }
+
+  get password() {
+    return this._password;
   }
 
   get createdAt() {

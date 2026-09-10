@@ -4,9 +4,15 @@
   "type": "module",
   "scripts": {
     "dev": "tsx --watch src/index.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "migrate": "tsx src/db/migrate.ts up",
+    "migrate:down": "tsx src/db/migrate.ts down",
+    "migrate:rollback": "tsx src/db/migrate.ts rollback",
+    "migrate:fresh": "tsx src/db/migrate.ts fresh",
+    "seed": "tsx src/db/seed.ts"
   },
   "dependencies": {
+    "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.4",
     "express": "^5.2.1",
@@ -21,6 +27,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",

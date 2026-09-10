@@ -40,14 +40,6 @@ export class RefreshTokenCommandHandler implements CommandHandler<
       throw new Error("REFRESH_TOKEN_EXPIRED");
     }
 
-    await this.refreshTokenRepository.update({
-      id: storedToken.id!,
-      data: {
-        inactive: true,
-        updatedAt: new Date(),
-      },
-    });
-
     const user = await this.userRepository.findById(storedToken.userId);
 
     if (!user) {
@@ -60,13 +52,34 @@ export class RefreshTokenCommandHandler implements CommandHandler<
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRE_DAYS);
 
-    await this.refreshTokenRepository.create({
-      userId: storedToken.userId,
-      refreshToken: newRefreshToken,
-      predecessorId: storedToken.id!,
-      expiresAt,
-      inactive: false,
-    });
+    try {
+      await this.refreshTokenRepository.update({
+        id: storedToken.id!,
+        data: {
+          inactive: true,
+          updatedAt: new Date(),
+        },
+      });
+
+      await this.refreshTokenRepository.create({
+        userId: storedToken.userId,
+        refreshToken: newRefreshToken,
+        predecessorId: storedToken.id!,
+        expiresAt,
+        inactive: false,
+      });
+    } catch (err) {
+      // storedToken.id can vanish between the read above and these writes if another
+      // request revokes this exact chain mid-refresh (e.g. Settings > Delete on the
+      // session currently being used) — that's a legitimate race, not a server error,
+      // so it should resolve to "log in again" rather than an unhandled 500.
+      const code = (err as { code?: string }).code;
+      const message = (err as Error).message ?? "";
+      if (code === "ER_NO_REFERENCED_ROW_2" || message.includes("not found")) {
+        throw new Error("INVALID_REFRESH_TOKEN");
+      }
+      throw err;
+    }
 
     return {
       access_token: newAccessToken,

@@ -23,6 +23,8 @@ export default function AdminCampaignsPage({ password, onHome }: Props) {
   const [saveAdventureCampaign, setSaveAdventureCampaign] = useState<Campaign | null>(null);
   const [deleteCampaignTarget, setDeleteCampaignTarget]   = useState<Campaign | null>(null);
   const [pageSize, setPageSize] = useState(10);
+  const [gamePasswords, setGamePasswords] = useState<Record<string, string>>({});
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
 
   function fetchCampaignsPage(page: number, size: number) {
     const start = (page - 1) * size;
@@ -55,6 +57,29 @@ export default function AdminCampaignsPage({ password, onHome }: Props) {
     setCampaigns(cs => cs.filter(c => c.id !== campaignId));
   }
 
+  async function toggleReveal(campaignId: string) {
+    if (!revealed[campaignId] && !(campaignId in gamePasswords)) {
+      const r = await fetch(`${API}/api/campaigns/${campaignId}/game-password`);
+      const { gamePassword } = await r.json() as { gamePassword?: string };
+      setGamePasswords(p => ({ ...p, [campaignId]: gamePassword ?? '' }));
+    }
+    setRevealed(r => ({ ...r, [campaignId]: !r[campaignId] }));
+  }
+
+  async function copyPassword(campaignId: string) {
+    let value = gamePasswords[campaignId];
+    if (value === undefined) {
+      const r = await fetch(`${API}/api/campaigns/${campaignId}/game-password`);
+      const { gamePassword } = await r.json() as { gamePassword?: string };
+      value = gamePassword ?? '';
+      setGamePasswords(p => ({ ...p, [campaignId]: value }));
+    }
+    void navigator.clipboard.writeText(value);
+    const key = `${campaignId}:copy`;
+    setFeedback(f => ({ ...f, [key]: 'Copied' }));
+    setTimeout(() => setFeedback(f => { const n = { ...f }; delete n[key]; return n; }), 2000);
+  }
+
   async function erase(campaignId: string, type: 'chat' | 'sessions') {
     const label = type === 'chat' ? 'chat history' : 'session notes';
     if (!window.confirm(`Permanently delete ${label} for "${campaignId}"? This cannot be undone.`)) return;
@@ -81,6 +106,7 @@ export default function AdminCampaignsPage({ password, onHome }: Props) {
               <thead>
                 <tr>
                   <th>Campaign</th>
+                  <th>Password</th>
                   <th>Chat History</th>
                   <th>Session Notes</th>
                   <th>Save as Adventure</th>
@@ -89,11 +115,25 @@ export default function AdminCampaignsPage({ password, onHome }: Props) {
               </thead>
               <tbody>
                 {pageItems.length === 0 && (
-                  <tr><td colSpan={5} className="admin-empty">No campaigns yet.</td></tr>
+                  <tr><td colSpan={6} className="admin-empty">No campaigns yet.</td></tr>
                 )}
                 {pageItems.map(c => (
                   <tr key={c.id}>
                     <td className="admin-campaign-name">{c.name}<span className="admin-campaign-id">{c.id}</span></td>
+                    <td>
+                      {revealed[c.id] && gamePasswords[c.id] === '' ? (
+                        <span className="admin-empty">No password</span>
+                      ) : (
+                        <div className="admin-password-cell">
+                          <Button variant="outline" color="secondary" onClick={() => void toggleReveal(c.id)}>
+                            {revealed[c.id] ? 'Hide' : 'Show'}
+                          </Button>
+                          <Button variant="outline" color="secondary" onClick={() => void copyPassword(c.id)}>Copy</Button>
+                          {revealed[c.id] && <span className="admin-campaign-id">{gamePasswords[c.id]}</span>}
+                          {feedback[`${c.id}:copy`] && <span className="admin-feedback">{feedback[`${c.id}:copy`]}</span>}
+                        </div>
+                      )}
+                    </td>
                     <td>
                       <Button variant="outline" color="danger" onClick={() => erase(c.id, 'chat')}>Erase</Button>
                       {feedback[`${c.id}:chat`] && <span className="admin-feedback">{feedback[`${c.id}:chat`]}</span>}

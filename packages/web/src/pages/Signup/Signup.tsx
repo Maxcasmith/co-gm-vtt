@@ -9,15 +9,45 @@ import { InfoStep } from './steps/InfoStep';
 import { PaymentStep } from './steps/PaymentStep';
 import { TermsStep } from './steps/TermsStep';
 import { STEPS, defaultSignupForm, type SignupForm } from './journeyForm';
-import { consumeJourneySelection } from './journeySession';
+import { consumeJourneySelection, consumePendingCampaignTags } from './journeySession';
+import { redirectToClientCreate } from '../../createCampaignHandoff';
+import api from '../../api/client';
 import '../../styles/parchment.css';
 import './Signup.css';
 
-async function submit(form: SignupForm) {
-  console.log(form);
-}
-
 export function Signup() {
+  const navigate = useNavigate();
+
+  async function submit(form: SignupForm) {
+    try {
+      await api.auth.signup({
+        productId: form.productId || undefined,
+        ...(form.googleCode
+          ? { googleCode: form.googleCode, scope: '' }
+          : {
+            firstName: form.firstName,
+            lastName: form.lastName,
+            email: form.email,
+            password: form.password,
+          }),
+      });
+
+      const pendingTags = consumePendingCampaignTags();
+      if (pendingTags.length && form.productId === 'cloud') {
+        redirectToClientCreate(pendingTags);
+        return;
+      }
+      if (pendingTags.length && form.productId === 'desktop') {
+        navigate('/profile', { state: { desktopCampaignTags: pendingTags } });
+        return;
+      }
+      navigate('/profile');
+    } catch (error) {
+      console.error('Signup failed:', error);
+      alert('Failed to complete signup');
+    }
+  }
+
   return (
     <Form defaultFormObject={defaultSignupForm} submitAction={submit}>
       <SignupJourney />

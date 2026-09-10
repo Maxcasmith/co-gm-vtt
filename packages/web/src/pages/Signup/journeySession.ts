@@ -23,3 +23,26 @@ export function consumeJourneySelection(): JourneySelection {
     return {};
   }
 }
+
+const PENDING_CAMPAIGN_TAGS_KEY = 'pending-campaign-tags';
+
+// Separate key from JourneySelection above: that one is consumed the moment the signup
+// journey mounts, but these tags need to survive the whole journey and are only read
+// once signup actually completes (see Signup.tsx submit()).
+export function writePendingCampaignTags(tags: string[]) {
+  try {
+    sessionStorage.setItem(PENDING_CAMPAIGN_TAGS_KEY, JSON.stringify(tags));
+  } catch {
+    // sessionStorage unavailable — the post-signup redirect just falls back to /profile
+  }
+}
+
+export function consumePendingCampaignTags(): string[] {
+  try {
+    const raw = sessionStorage.getItem(PENDING_CAMPAIGN_TAGS_KEY);
+    sessionStorage.removeItem(PENDING_CAMPAIGN_TAGS_KEY);
+    return raw ? JSON.parse(raw) as string[] : [];
+  } catch {
+    return [];
+  }
+}

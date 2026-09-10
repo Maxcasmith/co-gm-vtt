@@ -1,26 +1,13 @@
-import { Link, useNavigate } from 'react-router-dom';
-import { Button } from '../../components/Button/Button';
 import { CheckIcon, D20Icon } from '../../components/icons/Icons';
 import { ParchmentLayout } from '../../components/ParchmentLayout/ParchmentLayout';
 import { PageHeader } from '../../components/PageHeader/PageHeader';
-import { GAME_SYSTEMS } from '../../data/gameSystems';
+import { GAME_SYSTEMS, UPCOMING_GAME_SYSTEMS } from '../../data/gameSystems';
 import './GameSystems.css';
 
 export function GameSystems() {
-  const navigate = useNavigate();
-
   return (
     <ParchmentLayout
-      header={
-        <PageHeader
-          actions={
-            <>
-              <Link className="btn btn--outline btn--primary btn--md" to="/login">Log In</Link>
-              <Button onClick={() => navigate('/signup')}>Get Started</Button>
-            </>
-          }
-        />
-      }
+      header={<PageHeader />}
       skeleton={
         <>
           <div className="systems--intro parchment-container">
@@ -40,6 +27,18 @@ export function GameSystems() {
                 </div>
               </section>
             ))}
+          </div>
+          <div className="systems--upcoming parchment-container">
+            <span className="skeleton systems--skeleton--card-title" />
+            <div className="systems--upcoming--list">
+              {[0, 1, 2, 3].map(i => (
+                <div className="systems--upcoming--tile" key={i}>
+                  <span className="skeleton systems--skeleton--upcoming-name" />
+                  <span className="skeleton systems--skeleton--upcoming-desc" />
+                  <span className="skeleton systems--skeleton--upcoming-badge" />
+                </div>
+              ))}
+            </div>
           </div>
         </>
       }
@@ -70,6 +69,19 @@ export function GameSystems() {
             </ul>
           </section>
         ))}
+      </div>
+
+      <div className="systems--upcoming parchment-container">
+        <h2 className="systems--upcoming--title">Upcoming Support</h2>
+        <div className="systems--upcoming--list">
+          {UPCOMING_GAME_SYSTEMS.map(system => (
+            <div className="systems--upcoming--tile" key={system.name}>
+              <span className="systems--upcoming--tile-name">{system.name}</span>
+              <p className="systems--upcoming--tile-desc">{system.description}</p>
+              <span className="systems--card--badge systems--card--badge--not-supported">Not Supported</span>
+            </div>
+          ))}
+        </div>
       </div>
     </ParchmentLayout>
   );
