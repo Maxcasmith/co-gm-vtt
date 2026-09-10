@@ -61,6 +61,7 @@ export default function CreateCampaignPage() {
   const [done, setDone] = useState(false);
   const [campaignId, setCampaignId] = useState('');
   const [error, setError] = useState('');
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   async function generateConcepts(force = false) {
     if (!tags.length) return;
@@ -427,7 +428,7 @@ export default function CreateCampaignPage() {
         </div>
 
         <footer className="create-page-footer">
-          <Button variant="outline" color="danger" navigate="/">Cancel</Button>
+          <Button variant="outline" color="danger" onClick={() => setShowCancelConfirm(true)}>Cancel</Button>
           <div className="create-page-footer-actions">
             {step !== 'generating' && (
               <Button variant="outline" color="secondary" onClick={handleBack} disabled={step === 'choose'}>Back</Button>
@@ -447,6 +448,23 @@ export default function CreateCampaignPage() {
             )}
           </div>
         </footer>
+
+        {showCancelConfirm && (
+          <div className="modal-overlay" onClick={() => setShowCancelConfirm(false)}>
+            <dialog className="modal campaign-modal" open onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <h2 className="modal-title">Cancel campaign creation?</h2>
+                <p className="modal-hint">Your progress on this page will be lost.</p>
+              </div>
+              <div className="modal-actions">
+                <Button variant="outline" color="secondary" onClick={() => setShowCancelConfirm(false)}>
+                  Keep Going
+                </Button>
+                <Button variant="outline" color="danger" navigate="/">Discard</Button>
+              </div>
+            </dialog>
+          </div>
+        )}
       </div>
     </div>
   );
