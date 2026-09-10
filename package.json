@@ -5,6 +5,12 @@
   "scripts": {
     "api": "pnpm --filter api dev",
     "client": "pnpm --filter client dev",
+    "web": "pnpm --filter web dev",
+    "migrate": "pnpm --filter api migrate",
+    "migrate:down": "pnpm --filter api migrate:down",
+    "migrate:rollback": "pnpm --filter api migrate:rollback",
+    "migrate:fresh": "pnpm --filter api migrate:fresh",
+    "seed": "pnpm --filter api seed",
     "dev": "turbo dev --ui=tui",
     "build": "turbo build"
   },
