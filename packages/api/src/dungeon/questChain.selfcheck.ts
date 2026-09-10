@@ -3,10 +3,8 @@
 // quests.json under a throwaway campaign slug (never touches a real campaign), populates the
 // in-memory `dungeons` map directly (checkQuestChainTriggers reads live dungeon state, not
 // storage), exercises the actual code path, then deletes the throwaway campaign directory.
-import { rm } from 'fs/promises';
-import path from 'path';
 import type { Dungeon } from 'shared';
-import { CAMPAIGNS_DIR, writeQuests, readQuests } from '../storage.ts';
+import { deleteCampaign, writeQuests, readQuests } from '../storage.ts';
 import { dungeons } from '../state.ts';
 import { checkQuestChainTriggers } from './questChain.ts';
 
@@ -75,5 +73,5 @@ main()
   .catch(err => { console.error(err); process.exitCode = 1; })
   .finally(async () => {
     dungeons.delete(SLUG);
-    await rm(path.join(CAMPAIGNS_DIR, SLUG), { recursive: true, force: true });
+    await deleteCampaign(SLUG);
   });

@@ -10,8 +10,9 @@ import {
   getScenarioStoryboard,
   readCampaignFile, writeEntity,
   listEntitySlugs, readEntity, saveDungeon, saveDungeonAscii, writeManifest, readManifest, emptyManifest, readQuests, writeQuests,
-  loadDungeon,
+  loadDungeon, deleteCampaign,
 } from '../storage.ts';
+import { getTextStore, getMediaStore } from '../storage/index.ts';
 import { deleteUnusedResources, type ResourceCleanupRequest } from '../resourceUsage.ts';
 import { generateDungeon } from '../dungeon/index.ts';
 import { generateCharacterStoryboard, generateScenarioStoryboard, SLIDE_COUNT, SCENARIO_SLIDE_COUNT } from '../dungeon/storyboard.ts';
@@ -24,8 +25,6 @@ import { processSession, generateDmBrief } from '../session-processor/index.ts';
 import { processPortrait } from '../utils/image.ts';
 import { buildWorldMapPrompt } from '../session-processor/imagePrompts.ts';
 import { generateBattleMap } from '../providers/openai.ts';
-import { writeFile, rm } from 'fs/promises';
-import { existsSync } from 'fs';
 import path from 'path';
 import { parseLlmJson } from '../utils/llmJson.ts';
 import { logError } from '../logger.ts';
@@ -39,10 +38,10 @@ function slugify(name: string): string {
 
 // Regenerating with the same name/tags previously overwrote the prior campaign in place — bump a
 // numeric suffix until the directory is free instead of silently clobbering it.
-function uniqueSlug(base: string): string {
+async function uniqueSlug(base: string): Promise<string> {
   let slug = base;
   let n = 2;
-  while (existsSync(path.join(CAMPAIGNS_DIR, slug))) {
+  while (await getTextStore().exists(path.join(CAMPAIGNS_DIR, slug, 'world.json'))) {
     slug = `${base}-${n}`;
     n++;
   }
@@ -67,17 +66,16 @@ campaignsRouter.get('/', async (_req, res) => {
   res.json(await listCampaigns());
 });
 
-campaignsRouter.get('/:id/world-map', (req, res) => {
-  res.sendFile(`${req.params.id}/world-map.jpg`, { root: CAMPAIGNS_DIR }, err => {
-    if (err) res.status(404).json({ error: 'No world map' });
-  });
+campaignsRouter.get('/:id/world-map', async (req, res) => {
+  const data = await getMediaStore().get(path.join(CAMPAIGNS_DIR, req.params.id ?? '', 'world-map.jpg'));
+  if (!data) { res.status(404).json({ error: 'No world map' }); return; }
+  res.type('.jpg').send(data);
 });
 
 // Same delete as the admin panel's, but reachable from the game lobby, which has no admin
 // password — the lobby's own game-password gate is this route's only protection.
 campaignsRouter.delete('/:id', async (req, res) => {
   const campaignId = req.params.id ?? '';
-  const campaignDir = path.join(CAMPAIGNS_DIR, campaignId);
   try {
     const { resources } = req.body as { resources?: ResourceCleanupRequest };
     let messages: string[] = [];
@@ -85,7 +83,7 @@ campaignsRouter.delete('/:id', async (req, res) => {
       const dungeon = await loadDungeon(campaignId);
       if (dungeon) messages = await deleteUnusedResources(dungeon, resources, { excludeId: campaignId, excludeKind: 'campaign' });
     }
-    if (existsSync(campaignDir)) await rm(campaignDir, { recursive: true });
+    await deleteCampaign(campaignId);
     res.json({ ok: true, messages });
   } catch (err) {
     logError('routes/campaigns:deleteCampaign', err);
@@ -102,9 +100,8 @@ campaignsRouter.get('/:id', async (req, res) => {
   const { gamePassword: _pw, ...safeMeta } = meta;
   // merge tags from meta.json if present
   try {
-    const { readFile } = await import('fs/promises');
-    const raw = await readFile(`${CAMPAIGNS_DIR}/${slug}/meta.json`, 'utf-8');
-    const campaign = JSON.parse(raw) as { tags?: string[] };
+    const raw = await getTextStore().get(path.join(CAMPAIGNS_DIR, slug, 'meta.json'));
+    const campaign = raw === null ? {} : (JSON.parse(raw) as { tags?: string[] });
     res.json({ ...safeMeta, tags: campaign.tags ?? [], houseRules: meta.houseRules ?? DEFAULT_HOUSE_RULES });
   } catch (err) {
     logError('routes/campaigns:getById', err);
@@ -146,7 +143,7 @@ campaignsRouter.post('/:id/save-adventure', async (req, res) => {
     const meta = await getWorldMeta(campaignSlug);
     if (!meta) { res.status(404).json({ error: 'Campaign not found' }); return; }
     const adventureName = name || meta.name || campaignSlug;
-    const adventureSlug = uniqueAdventureSlug(slugifyAdventureName(adventureName));
+    const adventureSlug = await uniqueAdventureSlug(slugifyAdventureName(adventureName));
     await saveCampaignAsAdventure(campaignSlug, adventureSlug, adventureName);
     res.json({ ok: true, slug: adventureSlug });
   } catch (err) {
@@ -215,7 +212,7 @@ campaignsRouter.post('/generate', licenseOrJwtMiddleware, async (req, res) => {
       // it — so an explicitly-provided name wins over whatever this stream invented.
       if (name) title = name;
 
-      const slug = uniqueSlug(slugify(title));
+      const slug = await uniqueSlug(slugify(title));
       await writeCampaignFile(slug, 'world.md', `# ${title}\n\n${premise.trim()}`);
 
       // Separate from the short premise above (that one stays a campaign-record blurb, untouched)
@@ -294,7 +291,7 @@ campaignsRouter.post('/generate', licenseOrJwtMiddleware, async (req, res) => {
       return;
     }
 
-    const slug = uniqueSlug(slugify(name || concept.name));
+    const slug = await uniqueSlug(slugify(name || concept.name));
 
     let accumulated = '';
     send({ type: 'progress', message: 'Generating world…' });
@@ -345,7 +342,7 @@ campaignsRouter.post('/generate', licenseOrJwtMiddleware, async (req, res) => {
           });
           const prompt = buildWorldMapPrompt(worldMd, locations, tags);
           const buffer = await generateBattleMap(prompt, apiKey, config.image.model);
-          await writeFile(path.join(CAMPAIGNS_DIR, slug, 'world-map.jpg'), buffer);
+          await getMediaStore().put(path.join(CAMPAIGNS_DIR, slug, 'world-map.jpg'), buffer);
           console.log('[world-map] generated for:', slug);
         } catch (err) {
           logError('routes/campaigns:generate:worldMap', err);
@@ -377,7 +374,7 @@ campaignsRouter.post('/from-module', licenseOrJwtMiddleware, async (req, res) =>
 
   function send(data: object) { res.write(`data: ${JSON.stringify(data)}\n\n`); }
 
-  const slug = uniqueSlug(slugify(campaignName));
+  const slug = await uniqueSlug(slugify(campaignName));
   try {
     send({ type: 'progress', message: 'Copying module entities…' });
     await copyCompendiumToCampaign(adventureSlug, slug, campaignName);
@@ -402,7 +399,7 @@ campaignsRouter.post('/from-module', licenseOrJwtMiddleware, async (req, res) =>
     }
 
     await Promise.all([
-      writeFile(path.join(CAMPAIGNS_DIR, slug, 'dm-brief.md'), brief.dmBrief, 'utf-8'),
+      writeCampaignFile(slug, 'dm-brief.md', brief.dmBrief),
       writeManifest(slug, manifest),
       writeQuests(slug, initialQuests),
       writeCampaignFile(slug, 'acts.json', JSON.stringify(brief.acts ?? [], null, 2)),
@@ -428,7 +425,7 @@ campaignsRouter.post('/from-adventure', licenseOrJwtMiddleware, async (req, res)
     return;
   }
 
-  const slug = uniqueSlug(slugify(campaignName));
+  const slug = await uniqueSlug(slugify(campaignName));
   try {
     await copyAdventureToCampaign(adventureSlug, slug, campaignName);
     res.json({ id: slug, name: campaignName });
@@ -597,21 +594,22 @@ campaignsRouter.patch('/:id/party/:charId', async (req, res) => {
   res.json({ ok: true });
 });
 
-campaignsRouter.get('/:id/party/:charId/portrait', (req, res) => {
+campaignsRouter.get('/:id/party/:charId/portrait', async (req, res) => {
   const { id, charId } = req.params as { id: string; charId: string };
+  const store = getMediaStore();
   // try .jpg first (new), fall back to .png (legacy)
-  res.sendFile(`${id}/party/${charId}/portrait.jpg`, { root: CAMPAIGNS_DIR }, err => {
-    if (err) res.sendFile(`${id}/party/${charId}/portrait.png`, { root: CAMPAIGNS_DIR }, err2 => {
-      if (err2) res.status(404).json({ error: 'Portrait not found' });
-    });
-  });
+  const jpg = await store.get(path.join(CAMPAIGNS_DIR, id, 'party', charId, 'portrait.jpg'));
+  if (jpg) { res.type('.jpg').send(jpg); return; }
+  const png = await store.get(path.join(CAMPAIGNS_DIR, id, 'party', charId, 'portrait.png'));
+  if (!png) { res.status(404).json({ error: 'Portrait not found' }); return; }
+  res.type('.png').send(png);
 });
 
-campaignsRouter.get('/:id/party/:charId/token', (req, res) => {
+campaignsRouter.get('/:id/party/:charId/token', async (req, res) => {
   const { id, charId } = req.params as { id: string; charId: string };
-  res.sendFile(`${id}/party/${charId}/token.png`, { root: CAMPAIGNS_DIR }, err => {
-    if (err) res.status(404).json({ error: 'Token not found' });
-  });
+  const data = await getMediaStore().get(path.join(CAMPAIGNS_DIR, id, 'party', charId, 'token.png'));
+  if (!data) { res.status(404).json({ error: 'Token not found' }); return; }
+  res.type('.png').send(data);
 });
 
 // Manifest (slide URLs + captions) as JSON — for an on-demand single-viewer "Play" fetch, distinct
@@ -623,12 +621,12 @@ campaignsRouter.get('/:id/party/:charId/storyboard', async (req, res) => {
   res.json(storyboard);
 });
 
-campaignsRouter.get('/:id/party/:charId/storyboard/:n', (req, res) => {
+campaignsRouter.get('/:id/party/:charId/storyboard/:n', async (req, res) => {
   const { id, charId, n } = req.params as { id: string; charId: string; n: string };
   if (!new RegExp(`^[1-${SLIDE_COUNT}]$`).test(n)) { res.status(400).json({ error: 'Invalid slide number' }); return; }
-  res.sendFile(`${id}/party/${charId}/storyboard_slide_${n}.jpg`, { root: CAMPAIGNS_DIR }, err => {
-    if (err) res.status(404).json({ error: 'Storyboard slide not found' });
-  });
+  const data = await getMediaStore().get(path.join(CAMPAIGNS_DIR, id, 'party', charId, `storyboard_slide_${n}.jpg`));
+  if (!data) { res.status(404).json({ error: 'Storyboard slide not found' }); return; }
+  res.type('.jpg').send(data);
 });
 
 // Dungeon-crawl worlds only — campaign-root equivalent of the two routes above, for the scenario
@@ -640,12 +638,12 @@ campaignsRouter.get('/:id/scenario-storyboard', async (req, res) => {
   res.json(storyboard);
 });
 
-campaignsRouter.get('/:id/scenario-storyboard/:n', (req, res) => {
+campaignsRouter.get('/:id/scenario-storyboard/:n', async (req, res) => {
   const { id, n } = req.params as { id: string; n: string };
   if (!new RegExp(`^[1-${SCENARIO_SLIDE_COUNT}]$`).test(n)) { res.status(400).json({ error: 'Invalid slide number' }); return; }
-  res.sendFile(`${id}/scenario-storyboard_slide_${n}.jpg`, { root: CAMPAIGNS_DIR }, err => {
-    if (err) res.status(404).json({ error: 'Scenario storyboard slide not found' });
-  });
+  const data = await getMediaStore().get(path.join(CAMPAIGNS_DIR, id, `scenario-storyboard_slide_${n}.jpg`));
+  if (!data) { res.status(404).json({ error: 'Scenario storyboard slide not found' }); return; }
+  res.type('.jpg').send(data);
 });
 
 campaignsRouter.post('/:id/party/auth', async (req, res) => {

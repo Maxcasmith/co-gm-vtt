@@ -57,7 +57,7 @@ export default function AdminStoryboardPage({ password, onHome }: Props) {
       )}
 
       {storyboardRecord && (
-        <div className="admin-table-card">
+        <div className="admin-table-card admin-table-card--form">
           <div className="admin-modules-header">
             <h3 className="tiles-accordion-name">{storyboardRecord.name}</h3>
             <div className="admin-modules-header-actions">

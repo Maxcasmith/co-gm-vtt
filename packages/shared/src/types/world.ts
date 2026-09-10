@@ -9,6 +9,11 @@ export interface WorldConcept {
 export interface Campaign {
   id: string;
   name: string;
+  type: WorldMeta["type"];
+  concept?: { name: string; description: string };
+  tags?: string[];
+  scenarioSynopsis?: string;
+  partySize?: number;
 }
 
 export interface WorldMeta {

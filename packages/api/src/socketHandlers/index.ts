@@ -3,6 +3,7 @@ import { registerJoin, registerDisconnectHandler } from './connection.ts';
 import { registerSessionHandlers } from './session.ts';
 import { registerRollHandlers } from './rolls.ts';
 import { registerChatHandlers } from './chat.ts';
+import { registerNoteHandlers } from './notes.ts';
 import { registerCombatHandlers } from './combat.ts';
 import { registerInventoryHandlers } from './inventory.ts';
 import { registerRestHandlers } from './rest.ts';
@@ -16,6 +17,7 @@ export function registerSocketHandlers(): void {
       registerSessionHandlers(ctx);
       registerRollHandlers(ctx);
       registerChatHandlers(ctx);
+      registerNoteHandlers(ctx);
       registerCombatHandlers(ctx);
       registerInventoryHandlers(ctx);
       registerRestHandlers(ctx);

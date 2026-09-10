@@ -17,10 +17,22 @@ GOOGLE_CLIENT_SECRET=your-google-client-secret-from-google-cloud-console
 GOOGLE_REDIRECT_URI=postmessage
 
 # Database Configuration
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=your_password_here
-DB_NAME=ai-vtt
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=your_password_here
+MYSQL_DATABASE=ai-vtt
 
 DEPLOY_TARGET=saas
+
+# Admin panel password fallback — only used if no admin password is set in-app (Settings)
+ADMIN_PASSWORD=admin
+
+# Storage backend — 'local' (default), 's3', or 'rds', set independently per store
+STORAGE_TEXT_BACKEND=local
+STORAGE_MEDIA_BACKEND=local
+
+# Required only when STORAGE_TEXT_BACKEND/STORAGE_MEDIA_BACKEND=s3
+AWS_REGION=us-east-1
+S3_TEXT_BUCKET=your-text-bucket-name
+S3_MEDIA_BUCKET=your-media-bucket-name

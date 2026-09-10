@@ -1,9 +1,10 @@
-import { mkdir, writeFile, readFile } from 'fs/promises';
+import { readFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import sharp from 'sharp';
 import { iconSlug } from 'shared';
 import { ICONS_DIR } from '../storage.ts';
+import { getMediaStore } from '../storage/index.ts';
 import { generateTilesetAtlas, describeImage } from '../providers/openai.ts';
 import { buildIconAtlasPrompt } from '../session-processor/imagePrompts.ts';
 import { computeGridRects } from './tilesets.ts';
@@ -68,9 +69,8 @@ async function generateIconBatch(batch: PendingIcon[], frameDescription: string,
   // saves. Icons have no per-batch slug to nest under, so these collect flat under _source.
   const sourceExt = rawMeta.format === 'png' ? 'png' : 'jpg';
   const sourceDir = path.join(ICONS_DIR, '_source');
-  await mkdir(sourceDir, { recursive: true });
   const sourceFile = `icons_${Date.now()}.${sourceExt}`;
-  await writeFile(path.join(sourceDir, sourceFile), rawAtlas);
+  await getMediaStore().put(path.join(sourceDir, sourceFile), rawAtlas);
   report(`saved source atlas for review: /api/icons/_source/${sourceFile}`);
 
   report(`resizing atlas to ${ATLAS_SIZE}x${ATLAS_SIZE} (${CELL_SIZE}x${CELL_SIZE} icons)…`);
@@ -85,9 +85,8 @@ async function generateIconBatch(batch: PendingIcon[], frameDescription: string,
   await Promise.all(rects.map(async rect => {
     if (rect.width <= 0 || rect.height <= 0) return;
     const dir = path.join(ICONS_DIR, rect.material);
-    await mkdir(dir, { recursive: true });
     const icon = await sharp(atlas).extract({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }).jpeg({ quality: 90 }).toBuffer();
-    await writeFile(path.join(dir, 'icon.jpg'), icon);
+    await getMediaStore().put(path.join(dir, 'icon.jpg'), icon);
   }));
   report(`wrote ${rects.length} icons to storage/icons/`);
 }

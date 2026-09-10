@@ -1,9 +1,8 @@
-import { readFile, readdir, rm } from 'fs/promises';
-import { existsSync } from 'fs';
 import path from 'path';
 import type { Dungeon } from 'shared';
 import { slugifyTheme } from 'shared';
 import { CAMPAIGNS_DIR, TILESETS_DIR, CREATURES_DIR, PROPS_DIR, getWorldMeta, loadDungeon } from './storage.ts';
+import { getTextStore, getMediaStore } from './storage/index.ts';
 import { SAVED_ADVENTURES_DIR, listSavedAdventures } from './adventures/storage.ts';
 import { logError } from './logger.ts';
 
@@ -40,22 +39,21 @@ export function collectResourceSlugs(dungeon: Dungeon): ResourceSlugs {
 async function allDungeonRefs(): Promise<{ ref: ResourceUsageRef; slugs: ResourceSlugs }[]> {
   const out: { ref: ResourceUsageRef; slugs: ResourceSlugs }[] = [];
 
-  if (existsSync(CAMPAIGNS_DIR)) {
-    const entries = await readdir(CAMPAIGNS_DIR, { withFileTypes: true });
-    await Promise.all(entries.filter(e => e.isDirectory()).map(async e => {
-      const [meta, dungeon] = await Promise.all([getWorldMeta(e.name), loadDungeon(e.name)]);
-      if (!meta || !dungeon) return;
-      out.push({ ref: { kind: 'campaign', id: e.name, name: meta.name }, slugs: collectResourceSlugs(dungeon) });
-    }));
-  }
+  const campaignSlugs = await getTextStore().list(CAMPAIGNS_DIR);
+  await Promise.all(campaignSlugs.map(async slug => {
+    const [meta, dungeon] = await Promise.all([getWorldMeta(slug), loadDungeon(slug)]);
+    if (!meta || !dungeon) return;
+    out.push({ ref: { kind: 'campaign', id: slug, name: meta.name }, slugs: collectResourceSlugs(dungeon) });
+  }));
 
   for (const adv of await listSavedAdventures()) {
     try {
-      const raw = await readFile(path.join(SAVED_ADVENTURES_DIR, adv.slug, 'dungeon.json'), 'utf-8');
+      const raw = await getTextStore().get(path.join(SAVED_ADVENTURES_DIR, adv.slug, 'dungeon.json'));
+      if (raw === null) continue;
       const dungeon = JSON.parse(raw) as Dungeon;
       out.push({ ref: { kind: 'saved-adventure', id: adv.slug, name: adv.name }, slugs: collectResourceSlugs(dungeon) });
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') logError('resourceUsage:allDungeonRefs', err);
+      logError('resourceUsage:allDungeonRefs', err);
     }
   }
 
@@ -106,14 +104,17 @@ export async function deleteUnusedResources(dungeon: Dungeon, requested: Resourc
   if (requested.tiles && slugs.tilesetSlug) {
     const usage = await findTilesetUsage(slugs.tilesetSlug, owner);
     if (usage.length) messages.push(`Tileset "${slugs.tilesetSlug}" kept — still used in ${describeUsage(usage)}.`);
-    else await rm(path.join(TILESETS_DIR, slugs.tilesetSlug), { recursive: true, force: true });
+    else await getMediaStore().deletePrefix(path.join(TILESETS_DIR, slugs.tilesetSlug));
   }
 
   if (requested.creatures) {
     for (const slug of slugs.creatureSlugs) {
       const usage = await findCreatureUsage(slug, owner);
       if (usage.length) messages.push(`Creature "${slug}" kept — still used in ${describeUsage(usage)}.`);
-      else await rm(path.join(CREATURES_DIR, slug), { recursive: true, force: true });
+      else {
+        const dir = path.join(CREATURES_DIR, slug);
+        await Promise.all([getTextStore().deletePrefix(dir), getMediaStore().deletePrefix(dir)]);
+      }
     }
   }
 
@@ -121,7 +122,7 @@ export async function deleteUnusedResources(dungeon: Dungeon, requested: Resourc
     for (const slug of slugs.propSlugs) {
       const usage = await findPropUsage(slug, owner);
       if (usage.length) messages.push(`Prop "${slug}" kept — still used in ${describeUsage(usage)}.`);
-      else await rm(path.join(PROPS_DIR, slug), { recursive: true, force: true });
+      else await getMediaStore().deletePrefix(path.join(PROPS_DIR, slug));
     }
   }
 

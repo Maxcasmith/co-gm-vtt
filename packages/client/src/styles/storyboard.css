@@ -1,6 +1,9 @@
 /* ── Character storyboard slideshow (cold-open cutscene) ─────────────────── */
 
 .storyboard-overlay {
+  /* Highest in the app — cold-open cutscene must sit above every other fixed-position UI
+     (chat/journal at 850, end-screens/reaction-prompt at 9500, item toasts at 99999). */
+  z-index: 100000;
   background: #000;
   overflow: hidden;
 }

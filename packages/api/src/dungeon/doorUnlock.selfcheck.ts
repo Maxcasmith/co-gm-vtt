@@ -3,10 +3,8 @@
 // Populates the in-memory `dungeons`/`tokenPositions` maps directly (both functions read live
 // dungeon state, not storage) and writes real dungeon.json under a throwaway campaign slug, then
 // deletes it whether the checks pass or throw.
-import { rm } from 'fs/promises';
-import path from 'path';
 import type { Dungeon } from 'shared';
-import { CAMPAIGNS_DIR } from '../storage.ts';
+import { deleteCampaign } from '../storage.ts';
 import { dungeons, tokenPositions } from '../state.ts';
 import { toggleDoor, unlockDoorNear } from './runtime.ts';
 
@@ -70,5 +68,5 @@ main()
   .finally(async () => {
     dungeons.delete(SLUG);
     tokenPositions.delete(SLUG);
-    await rm(path.join(CAMPAIGNS_DIR, SLUG), { recursive: true, force: true });
+    await deleteCampaign(SLUG);
   });

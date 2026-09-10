@@ -1,15 +1,14 @@
 import path from 'path';
-import { readdir, readFile } from 'fs/promises';
-import { existsSync } from 'fs';
 import {
   readChatLog, listEntitySlugs, readEntity, writeEntity, archiveChatLog,
   getCharacter, getWorldMeta, writeWorldMeta, CAMPAIGNS_DIR, readManifest, writeManifest,
   readQuests, writeQuests, readCampaignFile,
   readPlotHooks, readPlotArcs, writePlotArcs, markPlotHookUsed,
 } from '../storage.ts';
+import { getTextStore } from '../storage/index.ts';
 import { getConfig } from '../storage.ts';
 import { getFeatureProvider, type ChatMessage } from '../providers/index.ts';
-import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDungeonNarrationPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, buildPlotHookCandidatePrompt, buildDungeonQuestPrompt, buildStoryTagsPrompt, type EntityType } from './prompts.ts';
+import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDungeonNarrationPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, buildPlotHookCandidatePrompt, buildDungeonQuestPrompt, buildStoryTagsPrompt, buildSessionNotesPrompt, type EntityType } from './prompts.ts';
 import { PLOT_HOOK_TAGS } from 'shared';
 import type { AppConfig, ChatPayload, Character, CurrencyDenomination, Dungeon, Quest, PlotHook, ActivePlotArc, PlotHookTag } from 'shared';
 import { logError } from '../logger.ts';
@@ -44,6 +43,17 @@ function parseTriageYaml(raw: string): { touched: TriageEntity[]; new: TriageEnt
   return result;
 }
 
+function parseSessionNotesYaml(raw: string): string[] {
+  const notes: string[] = [];
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('- ')) continue;
+    const text = trimmed.slice(2).trim().replace(/^"|"$/g, '');
+    if (text) notes.push(text);
+  }
+  return notes;
+}
+
 function parseCascadeYaml(raw: string): TriageEntity[] {
   const items: TriageEntity[] = [];
   let item: Partial<TriageEntity> = {};
@@ -67,11 +77,8 @@ function parseCascadeYaml(raw: string): TriageEntity[] {
 
 async function getPartyCharacters(campaignSlug: string): Promise<Character[]> {
   const partyPath = path.join(CAMPAIGNS_DIR, campaignSlug, 'party');
-  if (!existsSync(partyPath)) return [];
-  const entries = await readdir(partyPath, { withFileTypes: true });
-  const chars = await Promise.all(
-    entries.filter(e => e.isDirectory()).map(e => getCharacter(campaignSlug, e.name)),
-  );
+  const ids = await getTextStore().list(partyPath);
+  const chars = await Promise.all(ids.map(id => getCharacter(campaignSlug, id)));
   return chars.filter((c): c is Character => c !== null);
 }
 
@@ -135,7 +142,7 @@ async function resolveEntity(
 
 async function readWorldFile(campaignSlug: string, filename: string): Promise<string | null> {
   try {
-    return await readFile(path.join(CAMPAIGNS_DIR, campaignSlug, filename), 'utf-8');
+    return await getTextStore().get(path.join(CAMPAIGNS_DIR, campaignSlug, filename));
   } catch (err) {
     logError('session-processor/index:readWorldFile', err);
     return null;
@@ -534,11 +541,12 @@ export interface ProcessResult {
   updated: string[];
   created: string[];
   cascaded: string[];
+  notes: string[];
 }
 
 export async function processSession(campaignSlug: string): Promise<ProcessResult> {
   const log = await readChatLog(campaignSlug);
-  if (log.length === 0) return { skipped: true, updated: [], created: [], cascaded: [] };
+  if (log.length === 0) return { skipped: true, updated: [], created: [], cascaded: [], notes: [] };
 
   const config = await getConfig();
   const provider = getFeatureProvider(config, 'sessionTriage');
@@ -643,5 +651,14 @@ export async function processSession(campaignSlug: string): Promise<ProcessResul
     logError('session-processor/index:storyTags', err);
   }
 
-  return { updated, created, cascaded };
+  // VDM session notes — best-effort, never blocks session end if the LLM call fails.
+  let notes: string[] = [];
+  try {
+    const notesRaw = await provider.complete(buildSessionNotesPrompt(chatLogText));
+    notes = parseSessionNotesYaml(notesRaw);
+  } catch (err) {
+    logError('session-processor/index:sessionNotes', err);
+  }
+
+  return { updated, created, cascaded, notes };
 }

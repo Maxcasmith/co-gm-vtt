@@ -1,8 +1,8 @@
-import { readFile } from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
 import type { AppConfig, Character, CharacterStoryboard, ScenarioStoryboard, StoryboardQueuePayload } from 'shared';
 import { CAMPAIGNS_DIR, getConfig, writeCharacterImage, writeCampaignImage, getCharacterStoryboard, getScenarioStoryboard, listCharacters } from '../storage.ts';
+import { getMediaStore } from '../storage/index.ts';
 import { generateTilesetAtlas, describeImage } from '../providers/openai.ts';
 import { getFeatureProvider } from '../providers/index.ts';
 import { buildStoryboardPrompt, buildStoryboardBeatsPrompt, buildScenarioStoryboardPrompt, buildScenarioStoryboardBeatsPrompt } from '../session-processor/imagePrompts.ts';
@@ -154,7 +154,7 @@ export async function generateCharacterStoryboard(campaignId: string, character:
     if (!config.image.generateStoryboard) return;
     if (!config.apiKeys.openai || !character.backstory?.trim()) return;
 
-    const portraitBuffer = await readFile(path.join(CAMPAIGNS_DIR, character.portraitPath)).catch(() => null);
+    const portraitBuffer = await getMediaStore().get(path.join(CAMPAIGNS_DIR, character.portraitPath));
     const { slides: results } = await runStoryboardPipeline(character, portraitBuffer, config);
 
     const slides = await Promise.all(results.map(async ({ buffer, caption }, i) => {

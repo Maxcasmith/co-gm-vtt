@@ -1,10 +1,9 @@
-import { existsSync } from 'fs';
-import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
 import type { AppConfig, DungeonEntity, PropSpec } from 'shared';
 import { slugifyTheme } from 'shared';
 import { PROPS_DIR } from '../storage.ts';
+import { getMediaStore } from '../storage/index.ts';
 import { generateTilesetAtlas } from '../providers/openai.ts';
 import { buildPropSpritePrompt } from '../session-processor/imagePrompts.ts';
 import type { GridRect } from './tilesets.ts';
@@ -33,8 +32,8 @@ function propUrl(slug: string): string {
   return `/api/props/${slug}/sprite_01.png`;
 }
 
-function hasPropSprite(slug: string): boolean {
-  return existsSync(path.join(PROPS_DIR, slug, 'sprite_01.png'));
+function hasPropSprite(slug: string): Promise<boolean> {
+  return getMediaStore().exists(path.join(PROPS_DIR, slug, 'sprite_01.png'));
 }
 
 function titleCase(s: string): string {
@@ -166,8 +165,9 @@ export async function previewGridCells(sourceBuffer: Buffer): Promise<Buffer[]> 
 export async function generatePropSprites(propSpecs: PropSpec[], config: AppConfig): Promise<void> {
   if (!config.image.generatePropImages) return;
 
+  const exists = await Promise.all(propSpecs.map(spec => hasPropSprite(spec.key)));
   const needed: PendingProp[] = propSpecs
-    .filter(spec => !hasPropSprite(spec.key))
+    .filter((_spec, i) => !exists[i])
     .map(spec => ({ slug: spec.key, name: titleCase(spec.key), description: spec.description }));
 
   const apiKey = config.apiKeys.openai;
@@ -218,9 +218,8 @@ export async function generatePropSpriteBatch(batch: PendingProp[], apiKey: stri
   const rawMeta = await sharp(rawAtlas).metadata();
   const sourceExt = rawMeta.format === 'png' ? 'png' : 'jpg';
   const sourceDir = path.join(PROPS_DIR, '_source');
-  await mkdir(sourceDir, { recursive: true });
   const sourceFile = `props_${Date.now()}.${sourceExt}`;
-  await writeFile(path.join(sourceDir, sourceFile), rawAtlas);
+  await getMediaStore().put(path.join(sourceDir, sourceFile), rawAtlas);
   report(`saved source atlas for review: /api/props/_source/${sourceFile}`);
 
   const atlas = await sharp(rawAtlas).resize(ATLAS_SIZE, ATLAS_SIZE, { fit: 'fill' }).toBuffer();
@@ -246,9 +245,8 @@ export async function generatePropSpriteBatch(batch: PendingProp[], apiKey: stri
   await Promise.all(rects.map(async rect => {
     if (rect.width <= 0 || rect.height <= 0) return;
     const dir = path.join(PROPS_DIR, rect.material);
-    await mkdir(dir, { recursive: true });
     const final = await cropCell(atlas, rect, transparent);
-    await writeFile(path.join(dir, 'sprite_01.png'), final);
+    await getMediaStore().put(path.join(dir, 'sprite_01.png'), final);
   }));
   console.log(`[props] wrote ${batch.length} sprites to storage/props/`);
 }

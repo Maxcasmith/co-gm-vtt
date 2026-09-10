@@ -205,6 +205,16 @@
   background: var(--border);
 }
 
+.journal-pin-btn {
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.journal-msg:hover .journal-pin-btn {
+  opacity: 1;
+}
+
 .journal-roll-btn:disabled {
   opacity: 0.5;
   cursor: default;
@@ -253,4 +263,12 @@
   transition: border-color 80ms;
 }
 .journal-input:focus { border-color: var(--gold); }
+
+.notes-input {
+  resize: none;
+  overflow-y: auto;
+  max-height: 160px;
+  line-height: 1.4;
+  font-family: inherit;
+}
 

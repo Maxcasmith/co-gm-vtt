@@ -2,10 +2,8 @@
 // one runnable check: `tsx src/resourceUsage.selfcheck.ts` from packages/api. Writes a real
 // throwaway campaign (world.json + dungeon.json) under a fixture slug, exercises the actual
 // findCreatureUsage/findTilesetUsage/findPropUsage code paths, then deletes the fixture campaign.
-import { rm } from 'fs/promises';
-import path from 'path';
 import type { Dungeon } from 'shared';
-import { CAMPAIGNS_DIR, writeWorldMeta, saveDungeon } from './storage.ts';
+import { deleteCampaign, writeWorldMeta, saveDungeon } from './storage.ts';
 import { findCreatureUsage, findTilesetUsage, findPropUsage, collectResourceSlugs } from './resourceUsage.ts';
 
 const SLUG = '__selfcheck-resourceusage__';
@@ -55,5 +53,5 @@ main()
   .then(() => console.log('resourceUsage selfcheck: OK — slug collection, usage lookup, and exclude filtering all behave.'))
   .catch(err => { console.error(err); process.exitCode = 1; })
   .finally(async () => {
-    await rm(path.join(CAMPAIGNS_DIR, SLUG), { recursive: true, force: true });
+    await deleteCampaign(SLUG);
   });

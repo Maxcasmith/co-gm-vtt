@@ -16,6 +16,15 @@ export interface ChatPayload {
   checkRequests?: CheckRequest[];
 }
 
+export interface NotePayload {
+  text: string;
+  authorName: string;
+  timestamp: number;
+  /** Set when this note was pinned from the Adventure Log rather than typed directly — the
+   * character who pinned it. `authorName` stays whoever originally wrote the pinned message. */
+  pinnedBy?: string;
+}
+
 export interface BattleMap {
   id: string;
   createdAt: string;
@@ -83,6 +92,8 @@ export interface ServerToClientEvents {
   "roll:result": (result: RollResult) => void;
   "chat:message": (payload: ChatPayload) => void;
   "chat:history": (messages: ChatPayload[]) => void;
+  "note:added": (payload: NotePayload) => void;
+  "note:history": (notes: NotePayload[]) => void;
   "session:state": (active: boolean) => void;
   "session:recap": (payload: {
     text: string;
@@ -295,6 +306,7 @@ export interface ClientToServerEvents {
     spellName: string;
   }) => void;
   "chat:message": (payload: { text: string; senderName: string }) => void;
+  "note:add": (payload: { text: string; authorName: string; pinnedBy?: string }) => void;
   "session:start": (payload: { campaignId: string }) => void;
   "session:end": (payload: { campaignId: string }) => void;
   "token:move": (pos: TokenPosition) => void;

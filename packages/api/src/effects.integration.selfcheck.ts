@@ -4,9 +4,7 @@
 // Writes real character.json files under a throwaway campaign slug (never touches a real
 // campaign), exercises the actual storage-backed code path (not a mock), then deletes the
 // throwaway campaign directory whether the checks pass or throw.
-import { rm } from 'fs/promises';
-import path from 'path';
-import { CAMPAIGNS_DIR, writeCharacter, getCharacter } from './storage.ts';
+import { deleteCampaign, writeCharacter, getCharacter } from './storage.ts';
 import { resolveSpellCast, applyEffects } from './effects.ts';
 
 const SLUG = '__selfcheck-effects__';
@@ -72,4 +70,4 @@ async function main() {
 main()
   .then(() => console.log('effects.integration selfcheck: OK — spell slot spends/blocks/cantrip-frees correctly on real storage, currency writes the denomination field directly, never inventory.'))
   .catch(err => { console.error(err); process.exitCode = 1; })
-  .finally(() => rm(path.join(CAMPAIGNS_DIR, SLUG), { recursive: true, force: true }));
+  .finally(() => deleteCampaign(SLUG));

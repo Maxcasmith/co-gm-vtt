@@ -1,13 +1,12 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { rm, readdir, readFile } from 'fs/promises';
-import { existsSync } from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import sharp from 'sharp';
 import { slugifyTheme, iconSlug } from 'shared';
 import type { Dungeon, DungeonMaterialSpec, StoryboardTestRecord, PlotHook } from 'shared';
-import { CAMPAIGNS_DIR, PROPS_DIR, TILESETS_DIR, CREATURES_DIR, ICONS_DIR, STORYBOARD_TEST_DIR, getConfig, getWorldMeta, listCampaigns, loadDungeon, writeStoryboardTestFile, getStoryboardTestRecord, readPlotHooks, writePlotHooks } from '../storage.ts';
+import { CAMPAIGNS_DIR, PROPS_DIR, TILESETS_DIR, CREATURES_DIR, ICONS_DIR, STORYBOARD_TEST_DIR, getConfig, getWorldMeta, listCampaigns, loadDungeon, writeStoryboardTestFile, getStoryboardTestRecord, readPlotHooks, writePlotHooks, deleteCampaign } from '../storage.ts';
+import { getTextStore, getMediaStore } from '../storage/index.ts';
 import { saveCampaignAsAdventure, slugifyAdventureName, uniqueAdventureSlug, SAVED_ADVENTURES_DIR } from '../adventures/storage.ts';
 import { findCreatureUsage, deleteUnusedResources, type ResourceCleanupRequest } from '../resourceUsage.ts';
 import { generateExtendedTileset } from '../dungeon/tilesets.ts';
@@ -51,7 +50,6 @@ adminRouter.get('/campaigns', async (req, res) => {
 adminRouter.delete('/campaigns/:id', async (req, res) => {
   if (!(await requireAdmin(req, res))) return;
   const campaignId = req.params['id']!;
-  const campaignDir = path.join(CAMPAIGNS_DIR, campaignId);
   try {
     const { resources } = req.body as { resources?: ResourceCleanupRequest };
     let messages: string[] = [];
@@ -59,7 +57,7 @@ adminRouter.delete('/campaigns/:id', async (req, res) => {
       const dungeon = await loadDungeon(campaignId);
       if (dungeon) messages = await deleteUnusedResources(dungeon, resources, { excludeId: campaignId, excludeKind: 'campaign' });
     }
-    if (existsSync(campaignDir)) await rm(campaignDir, { recursive: true });
+    await deleteCampaign(campaignId);
     res.json({ ok: true, messages });
   } catch (err) {
     logError('routes/admin:deleteCampaign', err);
@@ -80,7 +78,7 @@ adminRouter.delete('/creatures/:slug', async (req, res) => {
       return;
     }
     const dir = path.join(CREATURES_DIR, slug);
-    if (existsSync(dir)) await rm(dir, { recursive: true });
+    await Promise.all([getTextStore().deletePrefix(dir), getMediaStore().deletePrefix(dir)]);
     res.json({ ok: true });
   } catch (err) {
     logError('routes/admin:deleteCreature', err);
@@ -90,9 +88,9 @@ adminRouter.delete('/creatures/:slug', async (req, res) => {
 
 adminRouter.delete('/campaigns/:id/chat', async (req, res) => {
   if (!(await requireAdmin(req, res))) return;
-  const chatPath = path.join(CAMPAIGNS_DIR, req.params['id']!, 'chat.json');
+  const chatKey = path.join(CAMPAIGNS_DIR, req.params['id']!, 'chat.json');
   try {
-    if (existsSync(chatPath)) await rm(chatPath);
+    await getTextStore().delete(chatKey);
     res.json({ ok: true });
   } catch (err) {
     logError('routes/admin:deleteChat', err);
@@ -107,7 +105,7 @@ adminRouter.post('/campaigns/:id/save-adventure', async (req, res) => {
   try {
     const meta = await getWorldMeta(campaignSlug);
     const adventureName = name || meta?.name || campaignSlug;
-    const adventureSlug = uniqueAdventureSlug(slugifyAdventureName(adventureName));
+    const adventureSlug = await uniqueAdventureSlug(slugifyAdventureName(adventureName));
     await saveCampaignAsAdventure(campaignSlug, adventureSlug, adventureName);
     res.json({ ok: true, slug: adventureSlug });
   } catch (err) {
@@ -120,10 +118,7 @@ adminRouter.delete('/campaigns/:id/sessions', async (req, res) => {
   if (!(await requireAdmin(req, res))) return;
   const sessionsDir = path.join(CAMPAIGNS_DIR, req.params['id']!, 'sessions');
   try {
-    if (existsSync(sessionsDir)) {
-      const files = await readdir(sessionsDir);
-      await Promise.all(files.map(f => rm(path.join(sessionsDir, f))));
-    }
+    await getTextStore().deletePrefix(sessionsDir);
     res.json({ ok: true });
   } catch (err) {
     logError('routes/admin:deleteSessions', err);
@@ -178,7 +173,7 @@ adminRouter.delete('/tilesets/:theme', async (req, res) => {
   }
   const dir = path.join(TILESETS_DIR, theme);
   try {
-    if (existsSync(dir)) await rm(dir, { recursive: true });
+    await getMediaStore().deletePrefix(dir);
     res.json({ ok: true });
   } catch (err) {
     logError('routes/admin:deleteTileset', err);
@@ -203,7 +198,8 @@ function placeholderDescription(name: string): string {
 adminRouter.get('/props/test-manifest', async (req, res) => {
   if (!(await requireAdmin(req, res))) return;
   try {
-    const raw = await readFile(path.join(SAVED_ADVENTURES_DIR, PROP_TEST_ADVENTURE_SLUG, 'dungeon.json'), 'utf-8');
+    const raw = await getTextStore().get(path.join(SAVED_ADVENTURES_DIR, PROP_TEST_ADVENTURE_SLUG, 'dungeon.json'));
+    if (raw === null) throw new Error('Prop test adventure dungeon.json not found');
     const dungeon = JSON.parse(raw) as Dungeon;
     const seen = new Set<string>();
     const props: PendingProp[] = [];
@@ -306,7 +302,7 @@ adminRouter.delete('/icons/:slug', async (req, res) => {
   }
   const dir = path.join(ICONS_DIR, slug);
   try {
-    if (existsSync(dir)) await rm(dir, { recursive: true });
+    await getMediaStore().deletePrefix(dir);
     res.json({ ok: true });
   } catch (err) {
     logError('routes/admin:deleteIcon', err);
@@ -325,7 +321,8 @@ adminRouter.get('/props/preview-cells/:file', async (req, res) => {
     return;
   }
   try {
-    const sourceBuffer = await readFile(path.join(PROPS_DIR, '_source', file));
+    const sourceBuffer = await getMediaStore().get(path.join(PROPS_DIR, '_source', file));
+    if (!sourceBuffer) throw new Error('Source atlas not found');
     const cells = await previewGridCells(sourceBuffer);
     res.json({ cells: cells.map(c => `data:image/png;base64,${c.toString('base64')}`) });
   } catch (err) {
@@ -369,7 +366,7 @@ adminRouter.post('/storyboard-test/generate', async (req, res) => {
     // the whole point of persisting this sandbox is not having to redo every input each time.
     const portraitBuffer = portraitBase64?.trim()
       ? await sharp(Buffer.from(portraitBase64, 'base64')).jpeg().toBuffer()
-      : await readFile(path.join(STORYBOARD_TEST_DIR, 'portrait.jpg')).catch(() => null);
+      : await getMediaStore().get(path.join(STORYBOARD_TEST_DIR, 'portrait.jpg'));
     if (!portraitBuffer) {
       send({ type: 'error', message: 'A portrait image is required' });
       return;
@@ -396,7 +393,7 @@ adminRouter.post('/storyboard-test/generate', async (req, res) => {
       generatedAt: new Date().toISOString(),
       sourceUrl: `/api/admin/storyboard-test/source?v=${v}`,
     };
-    await writeStoryboardTestFile('record.json', Buffer.from(JSON.stringify(record, null, 2)));
+    await getTextStore().put(path.join(STORYBOARD_TEST_DIR, 'record.json'), JSON.stringify(record, null, 2));
     send({ type: 'complete', record });
   } catch (err) {
     logError('routes/admin:storyboardTestGenerate', err);
@@ -408,30 +405,30 @@ adminRouter.post('/storyboard-test/generate', async (req, res) => {
 
 // Unguarded, same as routes/props.ts's sprite serving — imagery is fetched by plain <img src>,
 // which can't attach the admin password header.
-adminRouter.get('/storyboard-test/portrait', (_req, res) => {
-  res.sendFile('portrait.jpg', { root: STORYBOARD_TEST_DIR }, err => {
-    if (err) res.status(404).json({ error: 'Portrait not found' });
-  });
+adminRouter.get('/storyboard-test/portrait', async (_req, res) => {
+  const data = await getMediaStore().get(path.join(STORYBOARD_TEST_DIR, 'portrait.jpg'));
+  if (!data) { res.status(404).json({ error: 'Portrait not found' }); return; }
+  res.type('.jpg').send(data);
 });
 
-adminRouter.get('/storyboard-test/source', (_req, res) => {
-  res.sendFile('source.jpg', { root: STORYBOARD_TEST_DIR }, err => {
-    if (err) res.status(404).json({ error: 'Source atlas not found' });
-  });
+adminRouter.get('/storyboard-test/source', async (_req, res) => {
+  const data = await getMediaStore().get(path.join(STORYBOARD_TEST_DIR, 'source.jpg'));
+  if (!data) { res.status(404).json({ error: 'Source atlas not found' }); return; }
+  res.type('.jpg').send(data);
 });
 
-adminRouter.get('/storyboard-test/slide/:n', (req, res) => {
+adminRouter.get('/storyboard-test/slide/:n', async (req, res) => {
   const n = req.params['n']!;
   if (!new RegExp(`^[1-${SLIDE_COUNT}]$`).test(n)) { res.status(400).json({ error: 'Invalid slide number' }); return; }
-  res.sendFile(`slide_${n}.jpg`, { root: STORYBOARD_TEST_DIR }, err => {
-    if (err) res.status(404).json({ error: 'Slide not found' });
-  });
+  const data = await getMediaStore().get(path.join(STORYBOARD_TEST_DIR, `slide_${n}.jpg`));
+  if (!data) { res.status(404).json({ error: 'Slide not found' }); return; }
+  res.type('.jpg').send(data);
 });
 
 adminRouter.delete('/storyboard-test', async (req, res) => {
   if (!(await requireAdmin(req, res))) return;
   try {
-    if (existsSync(STORYBOARD_TEST_DIR)) await rm(STORYBOARD_TEST_DIR, { recursive: true });
+    await Promise.all([getTextStore().deletePrefix(STORYBOARD_TEST_DIR), getMediaStore().deletePrefix(STORYBOARD_TEST_DIR)]);
     res.json({ ok: true });
   } catch (err) {
     logError('routes/admin:deleteStoryboardTest', err);

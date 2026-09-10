@@ -9,7 +9,8 @@ const SHORTCUTS: { keys: string; description: string }[] = [
   { keys: 'Space Space',  description: 'Open command palette' },
   { keys: 'Space C',      description: 'Quick chat' },
   { keys: 'Space Q',      description: 'Toggle quest log' },
-  { keys: 'Space J',      description: 'Toggle journal' },
+  { keys: 'Space J',      description: 'Toggle adventure log' },
+  { keys: 'Space N',      description: 'Toggle notes' },
   { keys: 'Escape',       description: 'Close any overlay' },
 ];
 

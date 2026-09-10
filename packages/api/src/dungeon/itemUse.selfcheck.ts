@@ -6,10 +6,8 @@
 // randomized systems in this repo. Writes a real character.json under a throwaway campaign slug,
 // populates the in-memory dungeons/tokenPositions maps directly, deletes both whether checks pass
 // or throw.
-import { rm } from 'fs/promises';
-import path from 'path';
 import type { Dungeon } from 'shared';
-import { CAMPAIGNS_DIR, writeCharacter } from '../storage.ts';
+import { deleteCampaign, writeCharacter } from '../storage.ts';
 import { dungeons, tokenPositions } from '../state.ts';
 import { resolveLockpickAttempt, resolveTrapDisarmAttempt } from './runtime.ts';
 
@@ -80,5 +78,5 @@ main()
   .finally(async () => {
     dungeons.delete(SLUG);
     tokenPositions.delete(SLUG);
-    await rm(path.join(CAMPAIGNS_DIR, SLUG), { recursive: true, force: true });
+    await deleteCampaign(SLUG);
   });

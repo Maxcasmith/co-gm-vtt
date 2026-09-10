@@ -829,6 +829,22 @@ If there are no touched or new entities for a category, output an empty list (to
 Important: if something in the log seems to match an existing entity by description (even if called by a slightly different name), use the existing slug — do not create a duplicate.`;
 }
 
+export function buildSessionNotesPrompt(chatLog: string): string {
+  return `You are the Virtual DM reviewing a tabletop RPG session that just ended.
+
+Read the session chat log below and pull out the handful of facts a player would want jotted down for later — new leads, promises made, items found, names or places worth remembering, unresolved threads. Skip small talk and mechanics-only lines (dice rolls, HP totals).
+
+Session log:
+${chatLog}
+
+Respond with ONLY valid YAML in this exact format — no prose, no markdown fences:
+
+notes:
+  - "<one note-worthy fact, one sentence>"
+
+If nothing is worth noting, output notes: []`;
+}
+
 export function buildResolvePrompt(
   type: EntityType,
   slug: string,

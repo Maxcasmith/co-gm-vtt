@@ -285,10 +285,10 @@ export default function CharacterSheetOverlay({
           </div>
           <Button
             variant="ghost"
-            className={`sheet-rest-btn${combatActive ? " sheet-rest-btn--disabled" : ""}`}
-            disabled={combatActive}
+            className={`sheet-rest-btn${combatActive || !sessionActive ? " sheet-rest-btn--disabled" : ""}`}
+            disabled={combatActive || !sessionActive}
             onClick={
-              combatActive
+              combatActive || !sessionActive
                 ? undefined
                 : () => {
                   dispatch("vtt:sheet:closed", {});

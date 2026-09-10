@@ -162,7 +162,7 @@
 
 .skeleton-line--title { width: 55%; height: 13px; }
 .skeleton-line--meta  { width: 30%; height: 11px; margin-top: 4px; }
-.skeleton-line--sigil { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; }
+.skeleton-line--cover { width: 100%; aspect-ratio: 16 / 9; border-radius: 6px 6px 0 0; }
 
 .game-card--skeleton { cursor: default; pointer-events: none; }
 
@@ -291,36 +291,34 @@
   margin: 0 auto 24px;
 }
 
-.game-list {
+.game-grid {
   list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-width: 620px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 20px;
+  max-width: 960px;
   margin: 0 auto;
 }
 
 .game-card {
   position: relative;
   display: flex;
-  align-items: center;
-  gap: 18px;
+  flex-direction: column;
   background: linear-gradient(155deg, var(--surface) 0%, var(--bg) 130%);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--border);
-  border-radius: 6px;
-  padding: 18px 24px;
+  border-radius: 8px;
+  overflow: hidden;
   cursor: pointer;
   box-shadow: 0 8px 20px -12px rgba(0, 0, 0, 0.6);
   transition: border-color 0.2s, background 0.2s, transform 0.2s, box-shadow 0.2s;
   animation: game-card-in 0.35s ease backwards;
 }
 
-.game-list li:nth-child(1) { animation-delay: 0.03s; }
-.game-list li:nth-child(2) { animation-delay: 0.07s; }
-.game-list li:nth-child(3) { animation-delay: 0.11s; }
-.game-list li:nth-child(4) { animation-delay: 0.15s; }
-.game-list li:nth-child(5) { animation-delay: 0.19s; }
+.game-grid li:nth-child(1) { animation-delay: 0.03s; }
+.game-grid li:nth-child(2) { animation-delay: 0.07s; }
+.game-grid li:nth-child(3) { animation-delay: 0.11s; }
+.game-grid li:nth-child(4) { animation-delay: 0.15s; }
+.game-grid li:nth-child(5) { animation-delay: 0.19s; }
 
 @keyframes game-card-in {
   from { opacity: 0; transform: translateY(6px); }
@@ -329,7 +327,6 @@
 
 .game-card:hover {
   border-color: var(--gold);
-  border-left-color: var(--gold);
   background: linear-gradient(155deg, var(--surface-hover) 0%, var(--bg) 130%);
   transform: translateY(-2px);
   box-shadow: 0 14px 28px -14px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(201, 168, 76, 0.15);
@@ -337,38 +334,48 @@
 
 .game-card-link {
   display: flex;
-  align-items: center;
-  gap: 18px;
+  flex-direction: column;
   width: 100%;
   text-decoration: none;
   color: inherit;
 }
 
-.game-card-sigil {
+.game-card-cover {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
   flex-shrink: 0;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
+  border-bottom: 1px solid var(--border);
+}
+
+.game-card-cover--fallback {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg);
-  border: 1px solid var(--border);
   font-family: 'Cinzel', serif;
-  font-size: 16px;
-  color: var(--gold);
-  transition: border-color 0.2s, box-shadow 0.2s;
+  font-size: 32px;
+  color: var(--text);
 }
 
-.game-card:hover .game-card-sigil {
-  border-color: var(--gold);
-  box-shadow: 0 0 14px rgba(201, 168, 76, 0.3);
-}
+/* Fantasy metal-tone gradients, cycled by campaign id hash — no per-item inline color. */
+.game-card-cover--g0 { background: linear-gradient(155deg, var(--gold) 0%, var(--bronze) 100%); }
+.game-card-cover--g1 { background: linear-gradient(155deg, var(--electrum) 0%, var(--surface) 100%); }
+.game-card-cover--g2 { background: linear-gradient(155deg, var(--cyan) 0%, var(--bg) 100%); }
+.game-card-cover--g3 { background: linear-gradient(155deg, var(--bronze) 0%, var(--bg) 100%); }
+.game-card-cover--g4 { background: linear-gradient(155deg, var(--silver) 0%, var(--surface) 100%); }
 
-.game-card-info {
+.game-card-body {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 8px;
+  padding: 16px 18px 18px;
+}
+
+.game-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .game-name {
@@ -379,23 +386,17 @@
   color: var(--text);
 }
 
-.game-meta {
+.game-card-synopsis {
   font-family: 'Crimson Pro', Georgia, serif;
-  font-size: 14px;
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.5;
   color: var(--text-muted);
+  margin: 0;
 }
 
-.game-arrow {
-  margin-left: auto;
-  font-size: 22px;
-  color: var(--text-muted);
-  transition: color 0.2s, transform 0.2s;
-  line-height: 1;
-}
-
-.game-card:hover .game-arrow {
-  color: var(--gold);
-  transform: translateX(3px);
+.game-card-tags {
+  margin-top: 2px;
 }
 
 /* ── modal ── */

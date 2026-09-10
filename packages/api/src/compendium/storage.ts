@@ -1,26 +1,19 @@
-import { readFile, writeFile, mkdir, readdir, cp } from 'fs/promises';
-import { existsSync } from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import type { CompendiumMeta, WorldMeta } from 'shared';
 import { CAMPAIGNS_DIR, emptyManifest } from '../storage.ts';
+import { getTextStore } from '../storage/index.ts';
 import { logError } from '../logger.ts';
+import path from 'path';
 
-const __dir = path.dirname(fileURLToPath(import.meta.url));
-const STORAGE_DIR = path.resolve(__dir, '../../storage');
-
-export const COMPENDIUM_DIR = path.join(STORAGE_DIR, 'compendium', 'adventures');
+export const COMPENDIUM_DIR = path.join('compendium', 'adventures');
 
 export async function saveCompendiumMeta(slug: string, meta: CompendiumMeta): Promise<void> {
-  const dir = path.join(COMPENDIUM_DIR, slug);
-  await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf-8');
+  await getTextStore().put(path.join(COMPENDIUM_DIR, slug, 'meta.json'), JSON.stringify(meta, null, 2));
 }
 
 export async function loadCompendiumMeta(slug: string): Promise<CompendiumMeta | null> {
   try {
-    const raw = await readFile(path.join(COMPENDIUM_DIR, slug, 'meta.json'), 'utf-8');
-    return JSON.parse(raw) as CompendiumMeta;
+    const raw = await getTextStore().get(path.join(COMPENDIUM_DIR, slug, 'meta.json'));
+    return raw === null ? null : (JSON.parse(raw) as CompendiumMeta);
   } catch (err) {
     logError('compendium/storage:loadCompendiumMeta', err);
     return null;
@@ -28,23 +21,18 @@ export async function loadCompendiumMeta(slug: string): Promise<CompendiumMeta |
 }
 
 export async function listCompendiumAdventures(): Promise<CompendiumMeta[]> {
-  if (!existsSync(COMPENDIUM_DIR)) return [];
-  const entries = await readdir(COMPENDIUM_DIR, { withFileTypes: true });
-  const results = await Promise.all(
-    entries.filter(e => e.isDirectory()).map(e => loadCompendiumMeta(e.name)),
-  );
+  const slugs = await getTextStore().list(COMPENDIUM_DIR);
+  const results = await Promise.all(slugs.map(slug => loadCompendiumMeta(slug)));
   return results.filter((r): r is CompendiumMeta => r !== null);
 }
 
 export async function saveCompendiumRaw(slug: string, markdown: string): Promise<void> {
-  const dir = path.join(COMPENDIUM_DIR, slug);
-  await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, 'raw.md'), markdown, 'utf-8');
+  await getTextStore().put(path.join(COMPENDIUM_DIR, slug, 'raw.md'), markdown);
 }
 
 export async function loadCompendiumRaw(slug: string): Promise<string | null> {
   try {
-    return await readFile(path.join(COMPENDIUM_DIR, slug, 'raw.md'), 'utf-8');
+    return await getTextStore().get(path.join(COMPENDIUM_DIR, slug, 'raw.md'));
   } catch (err) {
     logError('compendium/storage:loadCompendiumRaw', err);
     return null;
@@ -91,29 +79,29 @@ export async function saveCompendiumEntity(
   appendedOnce: Set<string>,
 ): Promise<void> {
   const dir = path.join(COMPENDIUM_DIR, slug, 'entities', type);
-  await mkdir(dir, { recursive: true });
+  const store = getTextStore();
 
-  const resolvedSlug = existsSync(path.join(dir, `${entitySlug}.md`))
+  const resolvedSlug = (await store.exists(path.join(dir, `${entitySlug}.md`)))
     ? entitySlug
     : (await findSimilarSlug(entitySlug, dir)) ?? entitySlug;
 
-  const filePath = path.join(dir, `${resolvedSlug}.md`);
+  const fileKey = path.join(dir, `${resolvedSlug}.md`);
   const key = `${type}/${resolvedSlug}`;
 
-  if (existsSync(filePath)) {
+  if (await store.exists(fileKey)) {
     if (!appendedOnce.has(key)) {
       const prose = stripFrontmatter(content);
       if (prose.trim()) {
-        const existing = await readFile(filePath, 'utf-8');
+        const existing = (await store.get(fileKey))!;
         const merged = type === 'location'
           ? mergeLocationContent(existing, prose)
           : `${existing.trimEnd()}\n\n${prose.trim()}`;
-        await writeFile(filePath, merged, 'utf-8');
+        await store.put(fileKey, merged);
         appendedOnce.add(key);
       }
     }
   } else {
-    await writeFile(filePath, content, 'utf-8');
+    await store.put(fileKey, content);
   }
 }
 
@@ -123,27 +111,27 @@ export async function saveCompendiumEntity(
 // it here. Prefers the longest matching location name so e.g. "Village of Barovia" wins
 // over a shorter "Barovia" location that's also a substring match.
 export async function reconcileLocationInhabitants(slug: string): Promise<void> {
+  const store = getTextStore();
   const entitiesDir = path.join(COMPENDIUM_DIR, slug, 'entities');
   const locationsDir = path.join(entitiesDir, 'location');
-  if (!existsSync(locationsDir)) return;
 
-  const locationFiles = (await readdir(locationsDir)).filter(f => f.endsWith('.md'));
+  const locationFiles = (await store.list(locationsDir)).filter(f => f.endsWith('.md'));
   const locations = await Promise.all(locationFiles.map(async f => {
     const locSlug = f.slice(0, -3);
     const filePath = path.join(locationsDir, f);
-    const content = await readFile(filePath, 'utf-8');
+    const content = (await store.get(filePath))!;
     const name = content.match(/^name:\s*(.+)$/m)?.[1]?.trim() ?? locSlug;
     return { slug: locSlug, name, filePath, content };
   }));
+  if (locations.length === 0) return;
 
   for (const type of ['npc', 'creature'] as const) {
     const typeDir = path.join(entitiesDir, type);
-    if (!existsSync(typeDir)) continue;
     const linkTag = type === 'npc' ? 'NPC' : 'Creature';
 
-    for (const f of (await readdir(typeDir)).filter(f => f.endsWith('.md'))) {
+    for (const f of (await store.list(typeDir)).filter(f => f.endsWith('.md'))) {
       const entitySlug = f.slice(0, -3);
-      const content = await readFile(path.join(typeDir, f), 'utf-8');
+      const content = (await store.get(path.join(typeDir, f)))!;
       const locationText = content.match(/^location:\s*(.+)$/m)?.[1]?.trim().toLowerCase();
       if (!locationText) continue;
 
@@ -157,7 +145,7 @@ export async function reconcileLocationInhabitants(slug: string): Promise<void> 
       const { links, rest } = extractLinkSection(match.content, 'Inhabitants');
       const inhabitantsBlock = `\n## Inhabitants\n${[...links, link].join('\n')}\n`;
       match.content = `${rest.trimEnd()}\n${inhabitantsBlock}`.trim();
-      await writeFile(match.filePath, match.content, 'utf-8');
+      await store.put(match.filePath, match.content);
     }
   }
 }
@@ -182,8 +170,7 @@ function normalizePlural(s: string): string {
 }
 
 async function findSimilarSlug(newSlug: string, dir: string): Promise<string | null> {
-  if (!existsSync(dir)) return null;
-  const existing = (await readdir(dir)).filter(f => f.endsWith('.md')).map(f => f.slice(0, -3));
+  const existing = (await getTextStore().list(dir)).filter(f => f.endsWith('.md')).map(f => f.slice(0, -3));
 
   // 1. Prefix: "strahd" ↔ "strahd-von-zarovich"
   for (const s of existing) {
@@ -205,11 +192,7 @@ async function findSimilarSlug(newSlug: string, dir: string): Promise<string | n
 }
 
 export async function deleteCompendiumAdventure(slug: string): Promise<void> {
-  const dir = path.join(COMPENDIUM_DIR, slug);
-  if (existsSync(dir)) {
-    const { rm } = await import('fs/promises');
-    await rm(dir, { recursive: true, force: true });
-  }
+  await getTextStore().deletePrefix(path.join(COMPENDIUM_DIR, slug));
 }
 
 export async function countCompendiumEntities(
@@ -218,9 +201,7 @@ export async function countCompendiumEntities(
   const types = ['npc', 'creature', 'faction', 'location'] as const;
   const counts = await Promise.all(
     types.map(async type => {
-      const dir = path.join(COMPENDIUM_DIR, slug, 'entities', type);
-      if (!existsSync(dir)) return 0;
-      const entries = await readdir(dir);
+      const entries = await getTextStore().list(path.join(COMPENDIUM_DIR, slug, 'entities', type));
       return entries.filter(f => f.endsWith('.md')).length;
     }),
   );
@@ -232,13 +213,11 @@ export async function copyCompendiumToCampaign(
   campaignSlug: string,
   campaignName: string,
 ): Promise<void> {
+  const store = getTextStore();
   const srcEntities = path.join(COMPENDIUM_DIR, adventureSlug, 'entities');
   const dstDir = path.join(CAMPAIGNS_DIR, campaignSlug);
-  await mkdir(dstDir, { recursive: true });
 
-  if (existsSync(srcEntities)) {
-    await cp(srcEntities, path.join(dstDir, 'entities'), { recursive: true });
-  }
+  await store.copyPrefix(srcEntities, path.join(dstDir, 'entities'));
 
   const meta = await loadCompendiumMeta(adventureSlug);
   const worldMeta: WorldMeta = {
@@ -249,8 +228,8 @@ export async function copyCompendiumToCampaign(
     adventureSlug,
     ...(meta && { concept: { name: meta.name, description: meta.source } }),
   };
-  await writeFile(path.join(dstDir, 'world.json'), JSON.stringify(worldMeta, null, 2), 'utf-8');
-  await writeFile(path.join(dstDir, 'manifest.json'), JSON.stringify(emptyManifest(), null, 2), 'utf-8');
+  await store.put(path.join(dstDir, 'world.json'), JSON.stringify(worldMeta, null, 2));
+  await store.put(path.join(dstDir, 'manifest.json'), JSON.stringify(emptyManifest(), null, 2));
 }
 
 function stripFrontmatter(content: string): string {

@@ -1,5 +1,5 @@
 import { characterLightRangeFt } from 'shared';
-import { readChatLog, readQuests, readManifest, listCharacters, loadDungeon, loadEncounter } from '../storage.ts';
+import { readChatLog, readNotes, readQuests, readManifest, listCharacters, loadDungeon, loadEncounter } from '../storage.ts';
 import { toClientDungeon } from '../dungeon/index.ts';
 import { io, ROOM, connected, playerSocketIds, campaignPlayers, sessionState, combatState, dungeons, tokenPositions, microDungeons, encounters, enemiesReady, withLivePositions } from '../state.ts';
 import { maybeResolveRest, broadcastRestProgress } from './rest.ts';
@@ -21,6 +21,7 @@ export function registerJoin(ctx: JoinContext): void {
   // for a player's chat log, same convention as [COMBAT END]/[Roll Result] elsewhere.
   void readChatLog(campaignId).then(history =>
     socket.emit('chat:history', history.filter(m => !(m.senderName === 'System' && /^\[.*\]$/.test(m.text)))));
+  void readNotes(campaignId).then(notes => socket.emit('note:history', notes));
   socket.emit('session:state', sessionState.get(campaignId) ?? false);
   socket.emit('combat:state', combatState.get(campaignId) ?? false);
   void Promise.all([readQuests(campaignId), readManifest(campaignId)]).then(([quests, manifest]) => {

@@ -206,7 +206,7 @@ Return ONLY valid JSON, no markdown fences, no explanation:
 {
   "structureType": "building|organic",
   "theme": "string — a short lowercase keyword for this location's overall art style/setting, e.g. high_fantasy. Pick whatever actually fits the genre; if nothing fits, use high_fantasy.",
-  "illumination": "number 0-1 — this location's ambient light level. 1 = well lit throughout (daylight, torches/lamps everywhere), 0.5 = dim (dusk, sparse torchlight, moonlight), 0 = pitch black (unlit cave/crypt, no ambient light source). Judge from what the location actually is, not from genre alone.",
+  "illumination": "number 0-1 — this location's ambient light level, on a continuous scale, not a pick between a few fixed labels. 1.0 = full daylight or lamps/torches everywhere, 0.9 = bright interior with a few shadowed corners, 0.7 = overcast daylight or a well-lit room with some unlit spots, 0.55 = dusk or scattered torchlight, 0.4 = single flickering light source in an otherwise dark room, 0.2 = deep dusk or moonlight only, 0.05 = almost no light, a sliver under a door, 0.0 = pitch black, no ambient light source at all. Weigh the location's actual light sources (windows, torches, time of day, depth underground) and land on the specific number those imply — don't default to the midpoint.",
   "rooms": [
     {
       "name": "string",

@@ -1,25 +1,28 @@
-import { readFile, writeFile, mkdir, readdir, rm } from 'fs/promises';
-import { existsSync } from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, BattleMap, WorldState, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord, CharacterStoryboard, ScenarioStoryboard, StoryboardTestRecord, HouseRules, PlotHook, ActivePlotArc } from 'shared';
+import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, NotePayload, BattleMap, WorldState, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord, CharacterStoryboard, ScenarioStoryboard, StoryboardTestRecord, HouseRules, PlotHook, ActivePlotArc } from 'shared';
 import { DEFAULT_HOUSE_RULES } from 'shared';
 import { Encounter } from './domain/encounter.ts';
 import { renderDungeonAscii } from './dungeon/index.ts';
 import { logError } from './logger.ts';
+import { getTextStore, getMediaStore, STORAGE_ROOT } from './storage/index.ts';
 
-const __dir = path.dirname(fileURLToPath(import.meta.url));
-export const STORAGE_DIR = path.resolve(__dir, '../storage');
-const CONFIG_PATH = path.join(STORAGE_DIR, 'config.json');
-const PLOT_HOOKS_PATH = path.join(STORAGE_DIR, 'plot-hooks.json');
+// Local-disk-only, install-level state (the license cache) that never becomes part of a campaign
+// a player downloads/uploads — deliberately kept off the TextStore/MediaStore abstraction. See
+// licenses/licenseFile.ts, the only other direct consumer of STORAGE_DIR.
+export const STORAGE_DIR = STORAGE_ROOT;
+const CONFIG_KEY = 'config.json';
+const PLOT_HOOKS_KEY = 'plot-hooks.json';
 
-export const CAMPAIGNS_DIR = path.join(STORAGE_DIR, 'campaigns');
-export const PREMADE_DIR   = path.join(STORAGE_DIR, 'premade');
-export const TILESETS_DIR  = path.join(STORAGE_DIR, 'tilesets');
-export const CREATURES_DIR = path.join(STORAGE_DIR, 'creatures');
-export const PROPS_DIR      = path.join(STORAGE_DIR, 'props');
-export const ICONS_DIR      = path.join(STORAGE_DIR, 'icons');
-export const STORYBOARD_TEST_DIR = path.join(STORAGE_DIR, 'storyboard-test');
+// Key prefixes for the TextStore/MediaStore abstraction below — same relative shape the old
+// flat on-disk layout always used, now backend-agnostic (local disk, S3, or RDS depending on
+// STORAGE_TEXT_BACKEND/STORAGE_MEDIA_BACKEND).
+export const CAMPAIGNS_DIR = 'campaigns';
+export const PREMADE_DIR   = 'premade';
+export const TILESETS_DIR  = 'tilesets';
+export const CREATURES_DIR = 'creatures';
+export const PROPS_DIR      = 'props';
+export const ICONS_DIR      = 'icons';
+export const STORYBOARD_TEST_DIR = 'storyboard-test';
 
 const NARRATIVE_FEATURES: AppConfig['workflows'][number]['features'] = [
   'campaignConcepts', 'dungeonPremise', 'dungeonScenarioSynopsis', 'backstoryGeneration', 'backstoryCheck', 'worldLoreSync', 'storyboardCaptions',
@@ -58,7 +61,8 @@ function migrateLegacyConfig(raw: Record<string, unknown>): AppConfig {
 
 export async function getConfig(): Promise<AppConfig> {
   try {
-    const raw = await readFile(CONFIG_PATH, 'utf-8');
+    const raw = await getTextStore().get(CONFIG_KEY);
+    if (raw === null) return DEFAULT_CONFIG;
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if ('tiers' in parsed && !('workflows' in parsed)) return migrateLegacyConfig(parsed);
     return { ...DEFAULT_CONFIG, ...parsed } as AppConfig;
@@ -69,15 +73,14 @@ export async function getConfig(): Promise<AppConfig> {
 }
 
 export async function saveConfig(config: AppConfig): Promise<void> {
-  await mkdir(STORAGE_DIR, { recursive: true });
-  await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+  await getTextStore().put(CONFIG_KEY, JSON.stringify(config, null, 2));
 }
 
-// Global pool, not per-campaign — same single-JSON-file shape as config.json above.
+// Global pool, not per-campaign — same single-document shape as config.json above.
 export async function readPlotHooks(): Promise<PlotHook[]> {
   try {
-    const raw = await readFile(PLOT_HOOKS_PATH, 'utf-8');
-    return JSON.parse(raw) as PlotHook[];
+    const raw = await getTextStore().get(PLOT_HOOKS_KEY);
+    return raw === null ? [] : (JSON.parse(raw) as PlotHook[]);
   } catch (err) {
     logError('storage:readPlotHooks', err);
     return [];
@@ -85,20 +88,17 @@ export async function readPlotHooks(): Promise<PlotHook[]> {
 }
 
 export async function writePlotHooks(hooks: PlotHook[]): Promise<void> {
-  await mkdir(STORAGE_DIR, { recursive: true });
-  await writeFile(PLOT_HOOKS_PATH, JSON.stringify(hooks, null, 2), 'utf-8');
+  await getTextStore().put(PLOT_HOOKS_KEY, JSON.stringify(hooks, null, 2));
 }
 
 export async function writeCampaignFile(slug: string, filename: string, content: string): Promise<void> {
-  const dir = path.join(CAMPAIGNS_DIR, slug);
-  await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, filename), content, 'utf-8');
+  await getTextStore().put(path.join(campaignDir(slug), filename), content);
 }
 
 export async function getWorldMeta(slug: string): Promise<WorldMeta | null> {
   try {
-    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'world.json'), 'utf-8');
-    return JSON.parse(raw) as WorldMeta;
+    const raw = await getTextStore().get(path.join(campaignDir(slug), 'world.json'));
+    return raw === null ? null : (JSON.parse(raw) as WorldMeta);
   } catch (err) {
     logError('storage:getWorldMeta', err);
     return null;
@@ -115,13 +115,17 @@ export async function getHouseRules(slug: string): Promise<HouseRules> {
 }
 
 export async function listCampaigns(): Promise<Campaign[]> {
-  if (!existsSync(CAMPAIGNS_DIR)) return [];
-  const entries = await readdir(CAMPAIGNS_DIR, { withFileTypes: true });
+  const names = await getTextStore().list(CAMPAIGNS_DIR);
   const results = await Promise.all(
-    entries.filter(e => e.isDirectory()).map(async e => {
-      const meta = await getWorldMeta(e.name);
-      if (!meta) return null; // skip directories without world.json (e.g. stray upload dirs)
-      return { id: e.name, name: meta.name };
+    names.map(async name => {
+      const meta = await getWorldMeta(name);
+      if (!meta) return null; // skip entries without world.json (e.g. stray upload dirs)
+      const campaign: Campaign = { id: name, name: meta.name, type: meta.type };
+      if (meta.concept !== undefined) campaign.concept = meta.concept;
+      if (meta.tags !== undefined) campaign.tags = meta.tags;
+      if (meta.scenarioSynopsis !== undefined) campaign.scenarioSynopsis = meta.scenarioSynopsis;
+      if (meta.partySize !== undefined) campaign.partySize = meta.partySize;
+      return campaign;
     })
   );
   return results.filter((r): r is Campaign => r !== null);
@@ -136,15 +140,13 @@ export function partyDir(slug: string, charId: string): string {
 }
 
 export async function writeCharacter(slug: string, charId: string, data: Character): Promise<void> {
-  const dir = partyDir(slug, charId);
-  await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, 'character.json'), JSON.stringify(data, null, 2), 'utf-8');
+  await getTextStore().put(path.join(partyDir(slug, charId), 'character.json'), JSON.stringify(data, null, 2));
 }
 
 export async function getCharacter(slug: string, charId: string): Promise<Character | null> {
   try {
-    const raw = await readFile(path.join(partyDir(slug, charId), 'character.json'), 'utf-8');
-    return JSON.parse(raw) as Character;
+    const raw = await getTextStore().get(path.join(partyDir(slug, charId), 'character.json'));
+    return raw === null ? null : (JSON.parse(raw) as Character);
   } catch (err) {
     logError('storage:getCharacter', err);
     return null;
@@ -171,22 +173,15 @@ export async function updateCharacter(
 }
 
 export async function listCharacters(slug: string): Promise<Character[]> {
-  const partyPath = path.join(CAMPAIGNS_DIR, slug, 'party');
-  if (!existsSync(partyPath)) return [];
-  const entries = await readdir(partyPath, { withFileTypes: true });
-  const chars = await Promise.all(
-    entries.filter(e => e.isDirectory()).map(e => getCharacter(slug, e.name)),
-  );
+  const ids = await getTextStore().list(path.join(CAMPAIGNS_DIR, slug, 'party'));
+  const chars = await Promise.all(ids.map(id => getCharacter(slug, id)));
   return chars.filter((c): c is Character => c !== null);
 }
 
 export async function findCharacterByPassword(slug: string, password: string): Promise<Character | null> {
-  const partyPath = path.join(CAMPAIGNS_DIR, slug, 'party');
-  if (!existsSync(partyPath)) return null;
-  const entries = await readdir(partyPath, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const char = await getCharacter(slug, entry.name);
+  const ids = await getTextStore().list(path.join(CAMPAIGNS_DIR, slug, 'party'));
+  for (const id of ids) {
+    const char = await getCharacter(slug, id);
     if (char?.password === password) return char;
   }
   return null;
@@ -194,8 +189,8 @@ export async function findCharacterByPassword(slug: string, password: string): P
 
 export async function readChatLog(slug: string): Promise<ChatPayload[]> {
   try {
-    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'chat.json'), 'utf-8');
-    return JSON.parse(raw) as ChatPayload[];
+    const raw = await getTextStore().get(path.join(campaignDir(slug), 'chat.json'));
+    return raw === null ? [] : (JSON.parse(raw) as ChatPayload[]);
   } catch (err) {
     logError('storage:readChatLog', err);
     return [];
@@ -208,64 +203,61 @@ export async function appendChatLog(slug: string, message: ChatPayload): Promise
   await writeCampaignFile(slug, 'chat.json', JSON.stringify(log, null, 2));
 }
 
+export async function readNotes(slug: string): Promise<NotePayload[]> {
+  try {
+    const raw = await getTextStore().get(path.join(campaignDir(slug), 'notes.json'));
+    return raw === null ? [] : (JSON.parse(raw) as NotePayload[]);
+  } catch (err) {
+    logError('storage:readNotes', err);
+    return [];
+  }
+}
+
+export async function appendNote(slug: string, note: NotePayload): Promise<void> {
+  const notes = await readNotes(slug);
+  notes.push(note);
+  await writeCampaignFile(slug, 'notes.json', JSON.stringify(notes, null, 2));
+}
+
 export async function writeCharacterImage(slug: string, charId: string, filename: string, data: Buffer): Promise<void> {
-  const dir = partyDir(slug, charId);
-  await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, filename), data);
+  await getMediaStore().put(path.join(partyDir(slug, charId), filename), data);
 }
 
 export async function getCharacterStoryboard(slug: string, charId: string): Promise<CharacterStoryboard | null> {
-  try {
-    const raw = await readFile(path.join(partyDir(slug, charId), 'storyboard.json'), 'utf-8');
-    return JSON.parse(raw) as CharacterStoryboard;
-  } catch {
-    return null;
-  }
+  const raw = await getTextStore().get(path.join(partyDir(slug, charId), 'storyboard.json'));
+  return raw === null ? null : (JSON.parse(raw) as CharacterStoryboard);
 }
 
 // Campaign-root equivalent of writeCharacterImage — for images that belong to the campaign itself
 // rather than any one character (currently just the scenario storyboard's atlas slides).
 export async function writeCampaignImage(slug: string, filename: string, data: Buffer): Promise<void> {
-  const dir = campaignDir(slug);
-  await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, filename), data);
+  await getMediaStore().put(path.join(campaignDir(slug), filename), data);
 }
 
 export async function getScenarioStoryboard(slug: string): Promise<ScenarioStoryboard | null> {
-  try {
-    const raw = await readFile(path.join(campaignDir(slug), 'scenario-storyboard.json'), 'utf-8');
-    return JSON.parse(raw) as ScenarioStoryboard;
-  } catch {
-    return null;
-  }
+  const raw = await getTextStore().get(path.join(campaignDir(slug), 'scenario-storyboard.json'));
+  return raw === null ? null : (JSON.parse(raw) as ScenarioStoryboard);
 }
 
 // Admin Resources "storyboard test" sandbox — a single scratch record, not tied to any campaign
 // or character, so the storyboard pipeline can be exercised without spending a real character slot.
 export async function writeStoryboardTestFile(filename: string, data: Buffer): Promise<void> {
-  await mkdir(STORYBOARD_TEST_DIR, { recursive: true });
-  await writeFile(path.join(STORYBOARD_TEST_DIR, filename), data);
+  await getMediaStore().put(path.join(STORYBOARD_TEST_DIR, filename), data);
 }
 
 export async function getStoryboardTestRecord(): Promise<StoryboardTestRecord | null> {
-  try {
-    const raw = await readFile(path.join(STORYBOARD_TEST_DIR, 'record.json'), 'utf-8');
-    return JSON.parse(raw) as StoryboardTestRecord;
-  } catch {
-    return null;
-  }
+  const raw = await getTextStore().get(path.join(STORYBOARD_TEST_DIR, 'record.json'));
+  return raw === null ? null : (JSON.parse(raw) as StoryboardTestRecord);
 }
 
 export async function listEntitySlugs(slug: string, type: string): Promise<string[]> {
-  const dir = path.join(CAMPAIGNS_DIR, slug, 'entities', type);
-  if (!existsSync(dir)) return [];
-  const entries = await readdir(dir, { withFileTypes: true });
-  return entries.filter(e => e.isFile() && e.name.endsWith('.md')).map(e => e.name.replace(/\.md$/, ''));
+  const names = await getTextStore().list(path.join(CAMPAIGNS_DIR, slug, 'entities', type));
+  return names.filter(n => n.endsWith('.md')).map(n => n.replace(/\.md$/, ''));
 }
 
 export async function readEntity(slug: string, type: string, entitySlug: string): Promise<string | null> {
   try {
-    return await readFile(path.join(CAMPAIGNS_DIR, slug, 'entities', type, `${entitySlug}.md`), 'utf-8');
+    return await getTextStore().get(path.join(CAMPAIGNS_DIR, slug, 'entities', type, `${entitySlug}.md`));
   } catch (err) {
     logError('storage:readEntity', err);
     return null;
@@ -273,35 +265,33 @@ export async function readEntity(slug: string, type: string, entitySlug: string)
 }
 
 export async function writeEntity(slug: string, type: string, entitySlug: string, content: string): Promise<void> {
-  const dir = path.join(CAMPAIGNS_DIR, slug, 'entities', type);
-  await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, `${entitySlug}.md`), content, 'utf-8');
+  await getTextStore().put(path.join(CAMPAIGNS_DIR, slug, 'entities', type, `${entitySlug}.md`), content);
 }
 
 export async function listPremadeMaps(): Promise<string[]> {
-  if (!existsSync(PREMADE_DIR)) return [];
-  const entries = await readdir(PREMADE_DIR);
-  return entries.filter(f => f.endsWith('.jpg')).map(f => f.replace(/\.jpg$/, ''));
+  const names = await getMediaStore().list(PREMADE_DIR);
+  return names.filter(f => f.endsWith('.jpg')).map(f => f.replace(/\.jpg$/, ''));
 }
 
 export async function saveMap(slug: string, mapId: string, buffer: Buffer): Promise<void> {
-  const dir = path.join(CAMPAIGNS_DIR, slug, 'maps');
-  await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, `${mapId}.jpg`), buffer);
+  await getMediaStore().put(path.join(CAMPAIGNS_DIR, slug, 'maps', `${mapId}.jpg`), buffer);
 }
 
 export async function appendMapIndex(slug: string, entry: BattleMap): Promise<void> {
-  const indexPath = path.join(CAMPAIGNS_DIR, slug, 'maps', 'index.json');
+  const indexKey = path.join(CAMPAIGNS_DIR, slug, 'maps', 'index.json');
   let index: BattleMap[] = [];
-  try { index = JSON.parse(await readFile(indexPath, 'utf-8')) as BattleMap[]; } catch (err) { logError('storage:appendMapIndex', err); }
+  try {
+    const raw = await getTextStore().get(indexKey);
+    if (raw !== null) index = JSON.parse(raw) as BattleMap[];
+  } catch (err) { logError('storage:appendMapIndex', err); }
   index.push(entry);
-  await writeFile(indexPath, JSON.stringify(index, null, 2), 'utf-8');
+  await getTextStore().put(indexKey, JSON.stringify(index, null, 2));
 }
 
 export async function listMaps(slug: string): Promise<BattleMap[]> {
   try {
-    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'maps', 'index.json'), 'utf-8');
-    return JSON.parse(raw) as BattleMap[];
+    const raw = await getTextStore().get(path.join(CAMPAIGNS_DIR, slug, 'maps', 'index.json'));
+    return raw === null ? [] : (JSON.parse(raw) as BattleMap[]);
   } catch (err) {
     logError('storage:listMaps', err);
     return [];
@@ -314,8 +304,8 @@ export async function saveEncounter(slug: string, encounter: Encounter): Promise
 
 export async function loadEncounter(slug: string): Promise<Encounter | null> {
   try {
-    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'encounter.json'), 'utf-8');
-    return Encounter.fromJSON(JSON.parse(raw));
+    const raw = await getTextStore().get(path.join(campaignDir(slug), 'encounter.json'));
+    return raw === null ? null : Encounter.fromJSON(JSON.parse(raw));
   } catch (err) {
     logError('storage:loadEncounter', err);
     return null;
@@ -323,14 +313,17 @@ export async function loadEncounter(slug: string): Promise<Encounter | null> {
 }
 
 export async function clearEncounter(slug: string): Promise<void> {
-  const p = path.join(CAMPAIGNS_DIR, slug, 'encounter.json');
-  try { if (existsSync(p)) await writeFile(p, JSON.stringify({ enemies: [] }), 'utf-8'); } catch (err) { logError('storage:clearEncounter', err); }
+  try {
+    if (await getTextStore().exists(path.join(campaignDir(slug), 'encounter.json'))) {
+      await getTextStore().put(path.join(campaignDir(slug), 'encounter.json'), JSON.stringify({ enemies: [] }));
+    }
+  } catch (err) { logError('storage:clearEncounter', err); }
 }
 
 export async function readWorldState(slug: string): Promise<WorldState | null> {
   try {
-    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'world-state.json'), 'utf-8');
-    return JSON.parse(raw) as WorldState;
+    const raw = await getTextStore().get(path.join(campaignDir(slug), 'world-state.json'));
+    return raw === null ? null : (JSON.parse(raw) as WorldState);
   } catch (err) { logError('storage:readWorldState', err); return null; }
 }
 
@@ -340,20 +333,19 @@ export async function writeWorldState(slug: string, state: WorldState): Promise<
 
 export async function readCampaignFile(slug: string, filename: string): Promise<string | null> {
   try {
-    return await readFile(path.join(CAMPAIGNS_DIR, slug, filename), 'utf-8');
+    return await getTextStore().get(path.join(campaignDir(slug), filename));
   } catch (err) { logError('storage:readCampaignFile', err); return null; }
 }
 
 export async function loadPartyAllies(slug: string): Promise<EnemyStatBlock[]> {
   try {
-    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'party-allies.json'), 'utf-8');
-    return JSON.parse(raw) as EnemyStatBlock[];
+    const raw = await getTextStore().get(path.join(CAMPAIGNS_DIR, slug, 'party-allies.json'));
+    return raw === null ? [] : (JSON.parse(raw) as EnemyStatBlock[]);
   } catch (err) { logError('storage:loadPartyAllies', err); return []; }
 }
 
 export async function savePartyAllies(slug: string, allies: EnemyStatBlock[]): Promise<void> {
-  await mkdir(path.join(CAMPAIGNS_DIR, slug), { recursive: true });
-  await writeFile(path.join(CAMPAIGNS_DIR, slug, 'party-allies.json'), JSON.stringify(allies, null, 2), 'utf-8');
+  await getTextStore().put(path.join(CAMPAIGNS_DIR, slug, 'party-allies.json'), JSON.stringify(allies, null, 2));
 }
 
 export async function saveDungeon(slug: string, dungeon: Dungeon): Promise<void> {
@@ -368,19 +360,19 @@ export async function saveDungeonAscii(slug: string, dungeon: Dungeon): Promise<
 
 export async function loadDungeon(slug: string): Promise<Dungeon | null> {
   try {
-    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'dungeon.json'), 'utf-8');
-    return JSON.parse(raw) as Dungeon;
+    const raw = await getTextStore().get(path.join(campaignDir(slug), 'dungeon.json'));
+    return raw === null ? null : (JSON.parse(raw) as Dungeon);
   } catch (err) { logError('storage:loadDungeon', err); return null; }
 }
 
 export async function clearDungeon(slug: string): Promise<void> {
-  await rm(path.join(CAMPAIGNS_DIR, slug, 'dungeon.json'), { force: true });
+  await getTextStore().delete(path.join(campaignDir(slug), 'dungeon.json'));
 }
 
 export async function readManifest(slug: string): Promise<SessionManifest | null> {
   try {
-    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'manifest.json'), 'utf-8');
-    return JSON.parse(raw) as SessionManifest;
+    const raw = await getTextStore().get(path.join(campaignDir(slug), 'manifest.json'));
+    return raw === null ? null : (JSON.parse(raw) as SessionManifest);
   } catch (err) { logError('storage:readManifest', err); return null; }
 }
 
@@ -394,8 +386,8 @@ export function emptyManifest(): SessionManifest {
 
 export async function readNemeses(slug: string): Promise<NemesisRecord[]> {
   try {
-    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'nemeses.json'), 'utf-8');
-    return JSON.parse(raw) as NemesisRecord[];
+    const raw = await getTextStore().get(path.join(campaignDir(slug), 'nemeses.json'));
+    return raw === null ? [] : (JSON.parse(raw) as NemesisRecord[]);
   } catch (err) { logError('storage:readNemeses', err); return []; }
 }
 
@@ -405,8 +397,8 @@ export async function writeNemeses(slug: string, records: NemesisRecord[]): Prom
 
 export async function readQuests(slug: string): Promise<Quest[]> {
   try {
-    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'quests.json'), 'utf-8');
-    return JSON.parse(raw) as Quest[];
+    const raw = await getTextStore().get(path.join(campaignDir(slug), 'quests.json'));
+    return raw === null ? [] : (JSON.parse(raw) as Quest[]);
   } catch (err) { logError('storage:readQuests', err); return []; }
 }
 
@@ -418,8 +410,8 @@ export async function writeQuests(slug: string, quests: Quest[]): Promise<void> 
 // quest (see plotArcs.ts's advancePlotArc); the rest live only here until their turn comes.
 export async function readPlotArcs(slug: string): Promise<ActivePlotArc[]> {
   try {
-    const raw = await readFile(path.join(CAMPAIGNS_DIR, slug, 'plot-arcs.json'), 'utf-8');
-    return JSON.parse(raw) as ActivePlotArc[];
+    const raw = await getTextStore().get(path.join(campaignDir(slug), 'plot-arcs.json'));
+    return raw === null ? [] : (JSON.parse(raw) as ActivePlotArc[]);
   } catch (err) { logError('storage:readPlotArcs', err); return []; }
 }
 
@@ -447,16 +439,24 @@ export function parseEntityLinks(content: string): { npcs: string[]; locations: 
 }
 
 export async function archiveChatLog(slug: string): Promise<void> {
-  const chatPath = path.join(CAMPAIGNS_DIR, slug, 'chat.json');
-  const sessionsDir = path.join(CAMPAIGNS_DIR, slug, 'sessions');
-  await mkdir(sessionsDir, { recursive: true });
+  const chatKey = path.join(campaignDir(slug), 'chat.json');
+  const sessionsDir = path.join(campaignDir(slug), 'sessions');
   try {
-    const raw = await readFile(chatPath, 'utf-8');
-    const date = new Date().toISOString().slice(0, 10);
-    const existing = await readdir(sessionsDir);
-    const count = existing.filter(f => f.startsWith(date)).length;
-    const archiveName = `${date}-${String(count + 1).padStart(3, '0')}.json`;
-    await writeFile(path.join(sessionsDir, archiveName), raw, 'utf-8');
+    const raw = await getTextStore().get(chatKey);
+    if (raw !== null) {
+      const date = new Date().toISOString().slice(0, 10);
+      const existing = await getTextStore().list(sessionsDir);
+      const count = existing.filter(f => f.startsWith(date)).length;
+      const archiveName = `${date}-${String(count + 1).padStart(3, '0')}.json`;
+      await getTextStore().put(path.join(sessionsDir, archiveName), raw);
+    }
   } catch (err) { logError('storage:archiveChatLog', err); }
-  await writeFile(chatPath, '[]', 'utf-8');
+  await getTextStore().put(chatKey, '[]');
+}
+
+// Deletes every text and media object under a campaign's key prefix — the abstraction-layer
+// equivalent of `rm -r` on its old on-disk directory, works the same regardless of backend.
+export async function deleteCampaign(slug: string): Promise<void> {
+  const dir = campaignDir(slug);
+  await Promise.all([getTextStore().deletePrefix(dir), getMediaStore().deletePrefix(dir)]);
 }

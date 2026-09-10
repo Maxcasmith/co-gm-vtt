@@ -195,7 +195,7 @@ export function emitTurn(cid: string) {
   } else {
     void (async () => {
       const char = await getCharacter(cid, actor.id);
-      if (char?.aiControlled) setTimeout(() => void runPlayerTactics(cid, actor), 800);
+      if (char?.aiControlled && !connected.has(actor.name)) setTimeout(() => void runPlayerTactics(cid, actor), 800);
     })();
   }
 }

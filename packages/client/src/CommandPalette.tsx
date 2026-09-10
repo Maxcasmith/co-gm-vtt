@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Button } from './components/Button/Button.tsx';
+import { ContextMenuItem } from './components/ContextMenuItem/ContextMenuItem.tsx';
 
 export interface PaletteItem {
   label: string;
   description?: string;
+  disabled?: boolean;
   onSelect: () => void;
 }
 
@@ -26,7 +27,11 @@ export default function CommandPalette({ open, onClose, items, header }: Props) 
       if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
       if (e.key === 'ArrowDown') { e.preventDefault(); setActive(a => (a + 1) % items.length); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); setActive(a => (a - 1 + items.length) % items.length); return; }
-      if (e.key === 'Enter') { e.preventDefault(); items[active]?.onSelect(); onClose(); }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const item = items[active];
+        if (item && !item.disabled) { item.onSelect(); onClose(); }
+      }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -39,16 +44,15 @@ export default function CommandPalette({ open, onClose, items, header }: Props) 
       <div className="palette" onClick={e => e.stopPropagation()}>
         {header && <div className="palette-header">{header}</div>}
         {items.map((item, i) => (
-          <Button
+          <ContextMenuItem
             key={item.label}
-            variant="ghost"
-            className={`palette-item${i === active ? ' palette-item--active' : ''}`}
-            onMouseEnter={() => setActive(i)}
-            onClick={() => { item.onSelect(); onClose(); }}
-          >
-            <span className="palette-item-label">{item.label}</span>
-            {item.description && <span className="palette-item-desc">{item.description}</span>}
-          </Button>
+            label={item.label}
+            description={item.description}
+            active={i === active}
+            disabled={item.disabled}
+            onHover={() => setActive(i)}
+            onSelect={() => { item.onSelect(); onClose(); }}
+          />
         ))}
       </div>
     </div>

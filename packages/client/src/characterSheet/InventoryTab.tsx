@@ -428,6 +428,7 @@ export function InventoryTab({
               <div className="sheet-inventory">
                 {bucket.map((item) => {
                   const isWeaponCard = section.label === "Weapons";
+                  const isArmourCard = section.label === "Armour";
                   const isConsumableCard = section.label === "Consumables";
                   const itemKind: DragItem["kind"] | null = isWeapon(item)
                     ? "weapon"
@@ -439,7 +440,7 @@ export function InventoryTab({
                   return (
                     <div
                       key={item.id}
-                      className={`sheet-inv-card${isWeaponCard ? " sheet-inv-card--weapon" : ""}${isConsumableCard ? " sheet-inv-card--consumable" : ""}${selected?.id === item.id ? " sheet-inv-card--spell-active" : ""}`}
+                      className={`sheet-inv-card${isWeaponCard ? " sheet-inv-card--weapon" : ""}${isArmourCard ? " sheet-inv-card--armor" : ""}${isConsumableCard ? " sheet-inv-card--consumable" : ""}${selected?.id === item.id ? " sheet-inv-card--spell-active" : ""}`}
                       onClick={() =>
                         setSelected((s) => (s?.id === item.id ? null : item))
                       }

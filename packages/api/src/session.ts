@@ -1,7 +1,6 @@
-import { readdir, readFile } from 'fs/promises';
-import { existsSync } from 'fs';
 import path from 'path';
-import { CAMPAIGNS_DIR, listEntitySlugs, readEntity, getWorldMeta, getConfig, saveDungeon, loadDungeon, readManifest, writeManifest, emptyManifest, readQuests, appendChatLog, readChatLog } from './storage.ts';
+import { CAMPAIGNS_DIR, listEntitySlugs, readEntity, getWorldMeta, getConfig, saveDungeon, loadDungeon, readManifest, writeManifest, emptyManifest, readQuests, appendChatLog, readChatLog, appendNote } from './storage.ts';
+import { getTextStore } from './storage/index.ts';
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
 import { buildRecapPrompt, buildDungeonRecapPrompt } from './session-processor/prompts.ts';
 import { processSession, getDMResponse, getDungeonNarrationResponse } from './session-processor/index.ts';
@@ -39,6 +38,14 @@ export function endSession(cid: string): void {
     io.to(ROOM).emit('chat:message', { text, senderName: 'System', timestamp: Date.now() });
     const [quests, manifest] = await Promise.all([readQuests(cid), readManifest(cid)]);
     io.to(ROOM).emit('quest:update', { quests, act: manifest?.act ?? 1 });
+
+    for (const noteText of result.notes ?? []) {
+      try {
+        const payload = { text: noteText, authorName: 'Virtual DM', timestamp: Date.now() };
+        await appendNote(cid, payload);
+        io.to(ROOM).emit('note:added', payload);
+      } catch (err) { logError('session:endSession:note', err); }
+    }
   });
 }
 
@@ -48,8 +55,8 @@ async function buildEntitySummaries(campaignId: string): Promise<string> {
   // World bible — generated campaigns; absent for modules, that's fine
   for (const filename of ['world.md', 'factions.md']) {
     try {
-      const content = await readFile(path.join(CAMPAIGNS_DIR, campaignId, filename), 'utf-8');
-      lines.push(`### ${filename}\n${content.slice(0, 1000)}`);
+      const content = await getTextStore().get(path.join(CAMPAIGNS_DIR, campaignId, filename));
+      if (content !== null) lines.push(`### ${filename}\n${content.slice(0, 1000)}`);
     } catch (err) { logError('index:buildEntitySummaries', err); }
   }
 
@@ -89,7 +96,7 @@ async function buildEntitySummaries(campaignId: string): Promise<string> {
 
 export async function isFirstSession(campaignId: string): Promise<boolean> {
   const sessionsDir = path.join(CAMPAIGNS_DIR, campaignId, 'sessions');
-  return !existsSync(sessionsDir) || (await readdir(sessionsDir)).length === 0;
+  return (await getTextStore().list(sessionsDir)).length === 0;
 }
 
 export async function runRecap(campaignId: string): Promise<{ text: string; isFirstSession: boolean }> {
@@ -98,12 +105,12 @@ export async function runRecap(campaignId: string): Promise<{ text: string; isFi
 
   let lastSessionText: string | null = null;
   if (!firstSession) {
-    const files = (await readdir(sessionsDir)).sort();
+    const files = (await getTextStore().list(sessionsDir)).sort();
     const last = files[files.length - 1];
     if (last) {
       try {
-        const raw = await readFile(path.join(sessionsDir, last), 'utf-8');
-        const msgs = JSON.parse(raw) as Array<{ senderName: string; text: string }>;
+        const raw = await getTextStore().get(path.join(sessionsDir, last));
+        const msgs = raw === null ? [] : (JSON.parse(raw) as Array<{ senderName: string; text: string }>);
         lastSessionText = msgs.map(m => `[${m.senderName}]: ${m.text}`).join('\n');
       } catch (err) { logError('index:runRecap', err); }
     }

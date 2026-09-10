@@ -1,11 +1,10 @@
-import { existsSync } from 'fs';
-import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
 import type { AppConfig, DungeonEntity, EnemyStatBlock } from 'shared';
 import { slugifyTheme } from 'shared';
 import type { GridRect } from './tilesets.ts';
 import { CREATURES_DIR } from '../storage.ts';
+import { getTextStore, getMediaStore } from '../storage/index.ts';
 import { generateTilesetAtlas } from '../providers/openai.ts';
 import { buildCreaturePortraitPrompt } from '../session-processor/imagePrompts.ts';
 import { detectGridBoundaries } from './gridDetect.ts';
@@ -53,8 +52,8 @@ function portraitUrl(slug: string): string {
   return `/api/creatures/${slug}/portrait_01.jpg`;
 }
 
-function hasPortrait(slug: string): boolean {
-  return existsSync(path.join(CREATURES_DIR, slug, 'portrait_01.jpg'));
+function hasPortrait(slug: string): Promise<boolean> {
+  return getMediaStore().exists(path.join(CREATURES_DIR, slug, 'portrait_01.jpg'));
 }
 
 // Sidecar next to the portrait — the bestiary manifest reads storage/creatures/<slug>/stats.json
@@ -63,11 +62,10 @@ function hasPortrait(slug: string): boolean {
 // per-encounter runtime state) — first-seen wins, same global-reuse contract as the portrait itself,
 // so a "Skeleton" from one dungeon's stat block is what every future encounter's bestiary entry shows.
 async function writeStatsIfMissing(slug: string, statBlock: EnemyStatBlock): Promise<void> {
-  const statsPath = path.join(CREATURES_DIR, slug, 'stats.json');
-  if (existsSync(statsPath)) return;
+  const statsKey = path.join(CREATURES_DIR, slug, 'stats.json');
+  if (await getTextStore().exists(statsKey)) return;
   const { name, cr, creatureType, hp, ac, speed, stats, attacks, actions, appearance, role, damageResistances, damageVulnerabilities, damageImmunities } = statBlock;
-  await mkdir(path.join(CREATURES_DIR, slug), { recursive: true });
-  await writeFile(statsPath, JSON.stringify({ name, cr, creatureType, hp, ac, speed, stats, attacks, actions, appearance, role, damageResistances, damageVulnerabilities, damageImmunities }, null, 2), 'utf-8');
+  await getTextStore().put(statsKey, JSON.stringify({ name, cr, creatureType, hp, ac, speed, stats, attacks, actions, appearance, role, damageResistances, damageVulnerabilities, damageImmunities }, null, 2));
 }
 
 // Synchronous, deterministic — sets every creature entity's portraitSrc to where its portrait
@@ -113,7 +111,7 @@ export async function generateCreaturePortraits(entities: DungeonEntity[], confi
     if (entity.type !== 'creature' || !entity.statBlock) continue;
     const slug = portraitSlug(entity.statBlock.name);
     statsWrites.push(writeStatsIfMissing(slug, entity.statBlock));
-    if (!entity.statBlock.appearance || seen.has(slug) || hasPortrait(slug)) continue;
+    if (!entity.statBlock.appearance || seen.has(slug) || await hasPortrait(slug)) continue;
     seen.add(slug);
     needed.push({ slug, name: entity.statBlock.name, appearance: entity.statBlock.appearance, isBoss: entity.statBlock.isBoss });
   }
@@ -158,8 +156,7 @@ async function generateBatch(batch: PendingPortrait[], apiKey: string, model: st
     const rawMeta = await sharp(rawAtlas).metadata();
     const sourceExt = rawMeta.format === 'png' ? 'png' : 'jpg';
     const sourceDir = path.join(CREATURES_DIR, '_source');
-    await mkdir(sourceDir, { recursive: true });
-    await writeFile(path.join(sourceDir, `portraits_${Date.now()}.${sourceExt}`), rawAtlas);
+    await getMediaStore().put(path.join(sourceDir, `portraits_${Date.now()}.${sourceExt}`), rawAtlas);
 
     // Force-resized to a fixed size before detection/cropping, same as props.ts — the model doesn't
     // always return exactly the requested size, but the grid must still be evenly 4x4 for tileSize math.
@@ -205,7 +202,6 @@ async function generateBatch(batch: PendingPortrait[], apiKey: string, model: st
   await Promise.all(rects.map(async rect => {
     if (rect.width <= 0 || rect.height <= 0) return;
     const dir = path.join(CREATURES_DIR, rect.material);
-    await mkdir(dir, { recursive: true });
     const insetX = Math.round(rect.width * INSET_FRACTION);
     const insetY = Math.round(rect.height * INSET_FRACTION);
     const tile = await sharp(atlas).extract({
@@ -214,7 +210,7 @@ async function generateBatch(batch: PendingPortrait[], apiKey: string, model: st
       width: rect.width - insetX * 2,
       height: rect.height - insetY * 2,
     }).jpeg({ quality: 90 }).toBuffer();
-    await writeFile(path.join(dir, 'portrait_01.jpg'), tile);
+    await getMediaStore().put(path.join(dir, 'portrait_01.jpg'), tile);
   }));
   console.log(`[creaturePortraits] wrote ${rects.length} portraits to storage/creatures/`);
 }

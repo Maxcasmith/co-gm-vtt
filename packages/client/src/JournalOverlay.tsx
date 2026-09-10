@@ -26,6 +26,7 @@ function reqStat(req: CheckRequest): string {
 
 interface Props {
   open: boolean;
+  variant?: 'full' | 'side';
   onClose: () => void;
   character: Character;
   sessionActive: boolean;
@@ -38,7 +39,7 @@ function formatSender(name: string): React.ReactNode {
   return <>{match[1]} <span className="vdm-tag">(Virtual DM)</span></>;
 }
 
-export default function JournalOverlay({ open, onClose, character, sessionActive, dmThinking }: Props) {
+export default function JournalOverlay({ open, variant = 'full', onClose, character, sessionActive, dmThinking }: Props) {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -47,6 +48,7 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
   const [messages, setMessages] = useState<ChatMessageReceivedPayload[]>([]);
   const [rollingKeys, setRollingKeys] = useState<Set<string>>(new Set());
   const [doneKeys, setDoneKeys] = useState<Set<string>>(new Set());
+  const [pinnedKeys, setPinnedKeys] = useState<Set<string>>(new Set());
   // Origin feat Lucky — which pending roll requests are armed to spend a Luck Point for Advantage.
   const [luckKeys, setLuckKeys] = useState<Set<string>>(new Set());
   // Which pending roll requests are armed to spend Heroic Inspiration for Advantage.
@@ -105,6 +107,16 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
     setInput('');
   }
 
+  function pinMessage(key: string, msg: ChatMessageReceivedPayload) {
+    dispatch('vtt:note:add', { text: msg.text, authorName: msg.senderName, pinnedBy: character.name });
+    setPinnedKeys(prev => new Set([...prev, key]));
+    setTimeout(() => setPinnedKeys(prev => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    }), 2000);
+  }
+
   function rollRequest(timestamp: number, req: CheckRequest) {
     const key = reqKey(timestamp, req);
     setRollingKeys(prev => new Set([...prev, key]));
@@ -116,11 +128,13 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
     else dispatch('vtt:roll:save', base);
   }
 
+  if (variant === 'full' && !open) return null;
+
   return (
-    <div className={`journal-dock${open ? ' journal-dock--open' : ''}`} aria-hidden={!open}>
+    <div className={variant === 'side' ? `journal-dock${open ? ' journal-dock--open' : ''}` : 'journal-scrim'} aria-hidden={variant === 'side' ? !open : undefined}>
       <div className="journal-panel">
         <div className="journal-header">
-          <h2 className="journal-title">Journal</h2>
+          <h2 className="journal-title">Adventure Log</h2>
           <Button variant="outline" color="secondary" className="sheet-close" onClick={onClose} aria-label="Close">×</Button>
         </div>
 
@@ -140,6 +154,14 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
                     <span className="journal-msg-time">
                       {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
+                    <Button
+                      variant="ghost"
+                      className="journal-roll-btn journal-pin-btn"
+                      onClick={() => pinMessage(`${msg.timestamp}:${i}`, msg)}
+                      disabled={pinnedKeys.has(`${msg.timestamp}:${i}`)}
+                    >
+                      {pinnedKeys.has(`${msg.timestamp}:${i}`) ? 'Pinned' : 'Pin'}
+                    </Button>
                   </div>
                   <div className="journal-msg-text">{msg.text}</div>
                   {myRequests.length > 0 && (

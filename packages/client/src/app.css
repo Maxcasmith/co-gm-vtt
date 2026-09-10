@@ -8,6 +8,7 @@
 @import './styles/command-palette.css';
 @import './styles/character-sheet-overlay.css';
 @import './styles/journal.css';
+@import './styles/notes.css';
 @import './styles/combat-log.css';
 @import './styles/chat.css';
 @import './styles/end-screens.css';

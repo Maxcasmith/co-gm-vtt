@@ -11,6 +11,19 @@ export interface ChatMessageSentPayload {
   timestamp: number;
 }
 
+export interface NoteAddPayload {
+  text: string;
+  authorName: string;
+  pinnedBy?: string;
+}
+
+export interface NoteReceivedPayload {
+  text: string;
+  authorName: string;
+  timestamp: number;
+  pinnedBy?: string;
+}
+
 export interface SheetItemInspectedPayload {
   /** Broad category of the item — drives how the canvas and other listeners respond. */
   itemType: 'ability' | 'skill' | 'feature' | 'spell' | 'equipment';
@@ -191,6 +204,8 @@ export type RollResultPayload = RollResult;
 export interface VTTEventMap {
   'vtt:chat:message-sent':      ChatMessageSentPayload;
   'vtt:chat:message-received':  ChatMessageReceivedPayload;
+  'vtt:note:add':                NoteAddPayload;
+  'vtt:note:received':           NoteReceivedPayload;
   'vtt:sheet:item-inspected':   SheetItemInspectedPayload;
   'vtt:sheet:opened':           SheetOpenedPayload;
   'vtt:sheet:closed':           SheetClosedPayload;

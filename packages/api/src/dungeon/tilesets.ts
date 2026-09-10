@@ -1,11 +1,10 @@
-import { existsSync } from 'fs';
-import { mkdir, writeFile } from 'fs/promises';
 import { createHash } from 'crypto';
 import path from 'path';
 import sharp from 'sharp';
 import type { AppConfig, DungeonMaterialSpec } from 'shared';
 import { DUNGEON_STYLE_PACKS, slugifyTheme } from 'shared';
 import { TILESETS_DIR } from '../storage.ts';
+import { getMediaStore } from '../storage/index.ts';
 import { generateTilesetAtlas } from '../providers/openai.ts';
 import { buildDynamicTilesetPrompt } from '../session-processor/imagePrompts.ts';
 import { logError } from '../logger.ts';
@@ -121,8 +120,7 @@ async function runTilesetPipeline(opts: PipelineOpts): Promise<void> {
   // every other tile uses, with no extra plumbing.
   const sourceExt = rawMeta.format === 'png' ? 'png' : 'jpg';
   const sourceDir = path.join(TILESETS_DIR, slug, opts.sourceFolder);
-  await mkdir(sourceDir, { recursive: true });
-  await writeFile(path.join(sourceDir, `${opts.sourceFolder}_01.${sourceExt}`), rawAtlas);
+  await getMediaStore().put(path.join(sourceDir, `${opts.sourceFolder}_01.${sourceExt}`), rawAtlas);
   report('Saved source atlas for review.');
 
   // Whatever size the model actually returned, force it down to a fixed size before cropping —
@@ -148,11 +146,10 @@ async function runTilesetPipeline(opts: PipelineOpts): Promise<void> {
   await Promise.all(rects.map(async rect => {
     if (rect.width <= 0 || rect.height <= 0) return;
     const dir = path.join(TILESETS_DIR, slug, rect.material);
-    await mkdir(dir, { recursive: true });
     const n = (counts.get(rect.material) ?? 0) + 1;
     counts.set(rect.material, n);
     const tile = await sharp(atlas).extract({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }).jpeg({ quality: 90 }).toBuffer();
-    await writeFile(path.join(dir, `${rect.material}_${String(n).padStart(2, '0')}.jpg`), tile);
+    await getMediaStore().put(path.join(dir, `${rect.material}_${String(n).padStart(2, '0')}.jpg`), tile);
   }));
   report(`Wrote tiles to storage/tilesets/${slug}/`);
   report(`Generated tileset in ${formatElapsed(Date.now() - startedAt)}.`);
@@ -207,7 +204,7 @@ export async function ensureTilesetSupport(theme: string, materials: DungeonMate
   if (!materials.length) return slug;
 
   const tilesetSlug = `${slug}--${hashMaterials(materials)}`;
-  if (existsSync(path.join(TILESETS_DIR, tilesetSlug))) return tilesetSlug;
+  if ((await getMediaStore().list(path.join(TILESETS_DIR, tilesetSlug))).length > 0) return tilesetSlug;
   if (!config.image.generateTilesets) return slug;
   const apiKey = config.apiKeys.openai;
   if (!apiKey) return slug;

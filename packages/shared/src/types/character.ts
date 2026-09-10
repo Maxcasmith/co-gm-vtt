@@ -144,17 +144,18 @@ function level1SlotsForCasterLevel(casterLevel: number): number {
   return 4; // caps at 4 from caster level 3 onward, permanently
 }
 
-// Each class's contribution to combined multiclass caster level, per the Multiclass Spellcaster
-// rule: full casters (Bard/Cleric/Druid/Sorcerer/Wizard) add their whole level; Paladin/Ranger
-// (half casters) add half rounded down; Artificer is the one official exception, adding half
-// rounded UP. Warlock never contributes — Pact Magic is an entirely separate pool (see
-// warlockSlotsForLevel). Eldritch Knight/Arcane Trickster third-caster subclasses would add a
-// third of their Fighter/Rogue level, but this app tracks no subclasses, so Fighter/Rogue always
-// contribute 0 here regardless of what a player might narratively be playing.
+// Each class's contribution to combined multiclass caster level, per the 2024 (5.5e) Multiclass
+// Spellcaster rule: full casters (Bard/Cleric/Druid/Sorcerer/Wizard) add their whole level;
+// half casters (Paladin/Ranger/Artificer) add half rounded UP — the 2024 revision moved
+// Paladin/Ranger Spellcasting to a level-1 feature (2014 had it at level 2, rounded down), so all
+// three half casters now share the same round-up formula. Warlock never contributes — Pact Magic
+// is an entirely separate pool (see warlockSlotsForLevel). Eldritch Knight/Arcane Trickster
+// third-caster subclasses would add a third of their Fighter/Rogue level, but this app tracks no
+// subclasses, so Fighter/Rogue always contribute 0 here regardless of what a player might
+// narratively be playing.
 function casterLevelContribution(className: string, level: number): number {
   if (className === "Warlock") return 0;
-  if (className === "Paladin" || className === "Ranger") return Math.floor(level / 2);
-  if (className === "Artificer") return Math.ceil(level / 2);
+  if (className === "Paladin" || className === "Ranger" || className === "Artificer") return Math.ceil(level / 2);
   return className in CLASS_SPELLCASTING_ABILITY ? level : 0;
 }
 

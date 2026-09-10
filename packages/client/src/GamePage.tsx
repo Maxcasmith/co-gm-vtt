@@ -15,6 +15,7 @@ import CharacterSheetOverlay from './CharacterSheetOverlay.tsx';
 import JournalOverlay from './JournalOverlay.tsx';
 import QuestLog from './QuestLog.tsx';
 import CombatLogOverlay from './CombatLogOverlay.tsx';
+import NotesOverlay from './NotesOverlay.tsx';
 import ChatWidget from './ChatWidget.tsx';
 import QuickChat from './QuickChat.tsx';
 import ShortcutsOverlay from './ShortcutsOverlay.tsx';
@@ -64,7 +65,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [connected, setConnected] = useState<Player[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [journalOpen, setJournalOpen] = useState(false);
+  const [journalVariant, setJournalVariant] = useState<'full' | 'side'>('side');
   const [combatLogOpen, setCombatLogOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
   const [quickChatOpen, setQuickChatOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [devModalOpen, setDevModalOpen] = useState(false);
@@ -331,6 +334,15 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       dispatch('vtt:chat:message-received', payload);
     });
 
+    // Replay persisted notes on join, bridge outgoing/incoming like chat
+    socket.on('note:history', notes => {
+      notes.forEach(note => dispatch('vtt:note:received', note));
+    });
+    const unsubNoteAdd = on('vtt:note:add', payload => socket.emit('note:add', payload));
+    socket.on('note:added', payload => {
+      dispatch('vtt:note:received', payload);
+    });
+
     socket.on('session:state', setSessionActive);
     socket.on('storyboard:queue', setStoryboardQueue);
     socket.on('dm:thinking', setDmThinking);
@@ -478,6 +490,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       unsubSave();
       unsubCastExploration();
       unsubChat();
+      unsubNoteAdd();
       unsubTokenMove();
       unsubTurnEnd();
       unsubInitRoll();
@@ -498,6 +511,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       unsubStairsUse();
     };
   }, [character.name]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => on('vtt:rest:open', () => {
+    setJournalOpen(o => o && journalVariant === 'side' ? false : o);
+  }), [journalVariant]);
 
   useEffect(() => on('vtt:combat:state', ({ active }) => {
     setCombatActive(active);
@@ -605,6 +622,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     function onKey(e: KeyboardEvent) {
       if (e.repeat) return;
       if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) return;
+      if (storyboardQueue) return; // cold-open cutscene playing — no shortcuts while it holds the screen
       const now = Date.now();
       if (e.code === 'Space') {
         if (now - lastSpaceRef.current < DOUBLE_TAP_MS) {
@@ -621,14 +639,18 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         setQuestLogOpen(o => !o);
       } else if (e.key === 'j' && now - lastSpaceRef.current < DOUBLE_TAP_MS) {
         lastSpaceRef.current = 0;
+        setJournalVariant('side');
         setJournalOpen(o => !o);
+      } else if (e.key === 'n' && now - lastSpaceRef.current < DOUBLE_TAP_MS) {
+        lastSpaceRef.current = 0;
+        setNotesOpen(o => !o);
       } else if (e.key === 'D' && e.shiftKey) {
         setDevModalOpen(o => !o);
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [journalOpen]);
+  }, [journalOpen, storyboardQueue]);
 
   const paletteItems = [
     {
@@ -636,15 +658,21 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       description: 'View your full character',
       onSelect: () => dispatch('vtt:sheet:opened', { characterId: character.id }),
     },
+    {
+      label: 'Adventure Log',
+      description: 'Session log and party chat',
+      onSelect: () => { setJournalVariant('full'); setJournalOpen(true); },
+    },
     ...(!combatActive ? [{
       label: 'Rest',
-      description: 'Take a short or long rest',
+      description: sessionActive ? 'Take a short or long rest' : 'Session hasn\'t started yet',
+      disabled: !sessionActive,
       onSelect: () => socketRef.current?.emit('rest:open'),
     }] : []),
     {
-      label: 'Journal',
-      description: 'Session log and party chat',
-      onSelect: () => setJournalOpen(true),
+      label: 'Notes',
+      description: 'Shared party notes',
+      onSelect: () => setNotesOpen(true),
     },
     {
       label: 'Quest Log',
@@ -751,9 +779,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         currentSpellSlots1={playerSlotsState?.current} maxSpellSlots1={playerSlotsState?.max}
         sessionActive={sessionActive}
       />
-      <JournalOverlay open={journalOpen} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} />
+      <JournalOverlay open={journalOpen} variant={journalVariant} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} />
       <QuestLog open={questLogOpen} onClose={() => setQuestLogOpen(false)} quests={quests} act={act} />
       <CombatLogOverlay open={combatLogOpen} onClose={() => setCombatLogOpen(false)} />
+      <NotesOverlay open={notesOpen} onClose={() => setNotesOpen(false)} character={character} />
       <DevModal open={devModalOpen} onClose={() => setDevModalOpen(false)} />
       {!journalOpen && <ChatWidget />}
       <QuickChat open={quickChatOpen} onClose={() => setQuickChatOpen(false)} senderName={character.name} sessionActive={sessionActive} disabled={combatActive && !isMyTurn} />

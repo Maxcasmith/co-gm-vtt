@@ -2,19 +2,37 @@ import { useEffect, useState } from 'react';
 import type { Campaign, Character } from 'shared';
 import { useAppMeta } from './AppMetaContext.tsx';
 import { Button } from './components/Button/Button.tsx';
+import Badge from './create-campaign/Badge.tsx';
+import TypeBadge from './create-campaign/TypeBadge.tsx';
+import { truncate } from './create-campaign/textUtils.ts';
 import HomePageShell from './HomePageShell.tsx';
 import './app.css';
 
 interface Game {
   id: string;
   name: string;
-  system: string;
+  type: Campaign['type'];
+  synopsis?: string;
+  tags?: string[];
 }
 
 const API = `http://${window.location.hostname}:3001`;
+const COVER_GRADIENTS = 5;
 
 function campaignToGame(c: Campaign): Game {
-  return { id: c.id, name: c.name, system: 'Custom' };
+  return {
+    id: c.id,
+    name: c.name,
+    type: c.type,
+    synopsis: c.scenarioSynopsis ?? c.concept?.description,
+    tags: c.tags,
+  };
+}
+
+function coverGradientClass(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return `game-card-cover--g${Math.abs(hash) % COVER_GRADIENTS}`;
 }
 
 function readSessions(): Character[] {
@@ -31,6 +49,7 @@ export default function HomePage() {
   const { platform } = useAppMeta();
   const [games, setGames] = useState<Game[] | null>(null);
   const [sessions] = useState<Character[]>(readSessions);
+  const [coverErrors, setCoverErrors] = useState<Set<string>>(new Set());
 
   function fetchCampaigns() {
     fetch(`${API}/api/campaigns`)
@@ -54,11 +73,11 @@ export default function HomePage() {
         </div>
 
         {games === null && (
-          <ul className="game-list">
+          <ul className="game-grid">
             {[0, 1, 2].map(i => (
               <li key={i} className="game-card game-card--skeleton">
-                <span className="game-card-sigil skeleton-line skeleton-line--sigil" />
-                <div className="game-card-info">
+                <span className="game-card-cover skeleton-line skeleton-line--cover" />
+                <div className="game-card-body">
                   <span className="skeleton-line skeleton-line--title" />
                   <span className="skeleton-line skeleton-line--meta" />
                 </div>
@@ -75,16 +94,34 @@ export default function HomePage() {
         )}
 
         {games !== null && games.length > 0 && (
-          <ul className="game-list">
-            {games.map((game, i) => (
-              <li key={i} className="game-card">
+          <ul className="game-grid">
+            {games.map(game => (
+              <li key={game.id} className="game-card">
                 <a className="game-card-link" href={`/${game.id}/lobby`}>
-                  <span className="game-card-sigil">{game.name[0]?.toUpperCase()}</span>
-                  <div className="game-card-info">
-                    <span className="game-name">{game.name}</span>
-                    <span className="game-meta">{game.system}</span>
+                  {coverErrors.has(game.id) ? (
+                    <div className={`game-card-cover game-card-cover--fallback ${coverGradientClass(game.id)}`}>
+                      {game.name[0]?.toUpperCase()}
+                    </div>
+                  ) : (
+                    <img
+                      className="game-card-cover"
+                      src={`${API}/api/campaigns/${game.id}/world-map`}
+                      alt=""
+                      onError={() => setCoverErrors(prev => new Set(prev).add(game.id))}
+                    />
+                  )}
+                  <div className="game-card-body">
+                    <div className="game-card-header">
+                      <span className="game-name">{game.name}</span>
+                      <TypeBadge sourceType={game.type} />
+                    </div>
+                    {game.synopsis && <p className="game-card-synopsis">{truncate(game.synopsis, 120)}</p>}
+                    {game.tags && game.tags.length > 0 && (
+                      <div className="create-badge-row game-card-tags">
+                        {game.tags.slice(0, 4).map(tag => <Badge key={tag}>{tag}</Badge>)}
+                      </div>
+                    )}
                   </div>
-                  <span className="game-arrow">›</span>
                 </a>
               </li>
             ))}
