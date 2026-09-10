@@ -4,6 +4,7 @@ import { hasOriginFeat, resourceCurrent, FAST_CRAFTING_TABLE } from 'shared';
 import { on, dispatch } from './events.ts';
 import type { RestResultPayload } from './events.ts';
 import { HIT_DICE } from './character-creation/srd.ts';
+import { Button } from './components/Button/Button.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
 
@@ -82,7 +83,7 @@ export default function RestModal({ character }: Props) {
       <div className="rest-modal">
         <div className="rest-modal-header">
           <span className="rest-modal-title">{result.restType === 'long' ? 'Long Rest' : 'Short Rest'}</span>
-          <button className="rest-modal-close" onClick={() => setOpen(false)}>×</button>
+          <Button variant="ghost" className="rest-modal-close" onClick={() => setOpen(false)}>×</Button>
         </div>
 
         <div className="rest-result">
@@ -110,7 +111,7 @@ export default function RestModal({ character }: Props) {
         </div>
 
         <div className="rest-footer">
-          <button className="btn-primary" onClick={() => setOpen(false)}>Continue</button>
+          <Button onClick={() => setOpen(false)}>Continue</Button>
         </div>
       </div>
     );
@@ -121,7 +122,7 @@ export default function RestModal({ character }: Props) {
     <div className="rest-modal">
       <div className="rest-modal-header">
         <span className="rest-modal-title">Rest</span>
-        <button className="rest-modal-close" onClick={() => setOpen(false)}>×</button>
+        <Button variant="ghost" className="rest-modal-close" onClick={() => setOpen(false)}>×</Button>
       </div>
 
       <p className="rest-modal-desc">
@@ -147,12 +148,12 @@ export default function RestModal({ character }: Props) {
                 {isSelf && (
                   <div className="rest-controls">
                     <div className="rest-toggle-group">
-                      <button className={`rest-toggle${resting ? ' rest-toggle--active' : ''}`} onClick={() => setResting(true)}>On</button>
-                      <button className={`rest-toggle${!resting ? ' rest-toggle--active' : ''}`} onClick={() => setResting(false)}>Off</button>
+                      <Button variant="ghost" className={`rest-toggle${resting ? ' rest-toggle--active' : ''}`} onClick={() => setResting(true)}>On</Button>
+                      <Button variant="ghost" className={`rest-toggle${!resting ? ' rest-toggle--active' : ''}`} onClick={() => setResting(false)}>Off</Button>
                     </div>
                     <div className="rest-toggle-group">
-                      <button className={`rest-toggle${resting && restType === 'short' ? ' rest-toggle--active' : ''}`} onClick={() => setRestType('short')} disabled={!resting}>Short</button>
-                      <button className={`rest-toggle${resting && restType === 'long' ? ' rest-toggle--active' : ''}`} onClick={() => setRestType('long')} disabled={!resting}>Long</button>
+                      <Button variant="ghost" className={`rest-toggle${resting && restType === 'short' ? ' rest-toggle--active' : ''}`} onClick={() => setRestType('short')} disabled={!resting}>Short</Button>
+                      <Button variant="ghost" className={`rest-toggle${resting && restType === 'long' ? ' rest-toggle--active' : ''}`} onClick={() => setRestType('long')} disabled={!resting}>Long</Button>
                     </div>
                   </div>
                 )}
@@ -161,9 +162,9 @@ export default function RestModal({ character }: Props) {
                   <div className="rest-hitdice">
                     <span className="rest-hitdice-label">Hit Dice (d{dieSize}{conMod >= 0 ? `+${conMod}` : conMod} each)</span>
                     <div className="rest-hitdice-controls">
-                      <button className="rest-hitdice-btn" onClick={() => setHitDiceSpent(Math.max(0, hitDiceSpent - 1))}>−</button>
+                      <Button variant="ghost" className="rest-hitdice-btn" onClick={() => setHitDiceSpent(Math.max(0, hitDiceSpent - 1))}>−</Button>
                       <span className="rest-hitdice-count">{hitDiceSpent}</span>
-                      <button className="rest-hitdice-btn" onClick={() => setHitDiceSpent(Math.min(hitDiceRemaining, hitDiceSpent + 1))}>+</button>
+                      <Button variant="ghost" className="rest-hitdice-btn" onClick={() => setHitDiceSpent(Math.min(hitDiceRemaining, hitDiceSpent + 1))}>+</Button>
                       <span className="rest-hitdice-max">/ {hitDiceRemaining}</span>
                     </div>
                   </div>
@@ -181,12 +182,13 @@ export default function RestModal({ character }: Props) {
 
                 {isSelf && resting && hasOriginFeat(character, 'Musician') && resourceCurrent(character, 'musicianPerformance') > 0 && (
                   <div className="rest-feat-option">
-                    <button
+                    <Button
+                      variant="ghost"
                       className={`rest-toggle${grantInspiration ? ' rest-toggle--active' : ''}`}
                       onClick={() => setGrantInspiration(prev => !prev)}
                     >
                       Play Instrument (grant Inspiration)
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>
@@ -198,13 +200,13 @@ export default function RestModal({ character }: Props) {
       </div>
 
       <div className="rest-footer">
-        <button className="btn-primary" onClick={handleStart} disabled={waiting}>
+        <Button onClick={handleStart} disabled={waiting}>
           {waiting ? 'Waiting for other players' : 'Start Rest'}
-        </button>
+        </Button>
         {waiting && (
-          <button className="btn-secondary" onClick={handleCancel} disabled={allCommitted}>
+          <Button variant="outline" color="secondary" onClick={handleCancel} disabled={allCommitted}>
             Changed my mind
-          </button>
+          </Button>
         )}
       </div>
     </div>

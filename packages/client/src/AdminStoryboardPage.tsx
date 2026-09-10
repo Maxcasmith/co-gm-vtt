@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { StoryboardTestRecord, StoryboardQueuePayload } from 'shared';
+import { Button } from './components/Button/Button.tsx';
 import AdminPageShell from './AdminPageShell.tsx';
 import StoryboardTestModal from './StoryboardTestModal.tsx';
 import StoryboardOverlay from './StoryboardOverlay.tsx';
@@ -48,7 +49,7 @@ export default function AdminStoryboardPage({ password, onHome }: Props) {
     <AdminPageShell title="Storyboard" onHome={onHome}>
       <div className="admin-modules-header">
         <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">🎬</span>Character Storyboard</h2>
-        <button className="btn-primary" onClick={() => setStoryboardTestOpen(true)}>+ Test Storyboard</button>
+        <Button onClick={() => setStoryboardTestOpen(true)}>+ Test Storyboard</Button>
       </div>
 
       {!storyboardRecord && (
@@ -60,8 +61,8 @@ export default function AdminStoryboardPage({ password, onHome }: Props) {
           <div className="admin-modules-header">
             <h3 className="tiles-accordion-name">{storyboardRecord.name}</h3>
             <div className="admin-modules-header-actions">
-              <button className="btn-play" onClick={() => setStoryboardPlaying(true)}>▶ Play</button>
-              <button className="btn-danger" onClick={() => setStoryboardEraseConfirm(true)}>Erase</button>
+              <Button variant="outline" onClick={() => setStoryboardPlaying(true)}>▶ Play</Button>
+              <Button variant="outline" color="danger" onClick={() => setStoryboardEraseConfirm(true)}>Erase</Button>
             </div>
           </div>
           {storyboardRecord.sourceUrl && (
@@ -114,10 +115,10 @@ export default function AdminStoryboardPage({ password, onHome }: Props) {
             </p>
           </div>
           <div className="modal-actions">
-            <button className="btn-secondary" onClick={() => setStoryboardEraseConfirm(false)} disabled={storyboardErasing}>Cancel</button>
-            <button className="btn-danger" onClick={() => void confirmEraseStoryboard()} disabled={storyboardErasing}>
+            <Button variant="outline" color="secondary" onClick={() => setStoryboardEraseConfirm(false)} disabled={storyboardErasing}>Cancel</Button>
+            <Button variant="outline" color="danger" onClick={() => void confirmEraseStoryboard()} disabled={storyboardErasing}>
               {storyboardErasing ? 'Erasing…' : 'Erase'}
-            </button>
+            </Button>
           </div>
         </dialog>
       </div>

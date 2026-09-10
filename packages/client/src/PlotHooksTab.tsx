@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { PlotHook } from 'shared';
 import Paginated, { PageSizeSelect } from './Paginated.tsx';
+import { Button } from './components/Button/Button.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
 
@@ -108,9 +109,9 @@ export default function PlotHooksTab({ password }: PlotHooksTabProps) {
         </div>
         {error && <p className="admin-error">{error}</p>}
         <div className="modal-actions">
-          <button className="btn-primary" onClick={() => void createHook()} disabled={!newText.trim() || creating}>
+          <Button onClick={() => void createHook()} disabled={!newText.trim() || creating}>
             {creating ? 'Normalizing…' : 'Normalize & Save'}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -124,12 +125,12 @@ export default function PlotHooksTab({ password }: PlotHooksTabProps) {
               return (
                 <div key={hook.id} className="tiles-accordion-item">
                   <div className="tiles-accordion-header">
-                    <button className="tiles-accordion-toggle" onClick={() => toggle(hook.id, hook.rawText)} aria-expanded={isOpen}>
+                    <Button variant="ghost" className="tiles-accordion-toggle" onClick={() => toggle(hook.id, hook.rawText)} aria-expanded={isOpen}>
                       <span className="tiles-accordion-caret">{isOpen ? '▾' : '▸'}</span>
                       <span className="tiles-accordion-name">{hook.title}</span>
                       <span className="admin-module-counts">{hook.beats.length} beat{hook.beats.length === 1 ? '' : 's'} · {hook.usedIn.length} use{hook.usedIn.length === 1 ? '' : 's'}</span>
-                    </button>
-                    <button className="btn-danger tiles-accordion-delete" onClick={() => void deleteHook(hook.id)}>Delete</button>
+                    </Button>
+                    <Button variant="outline" color="danger" className="tiles-accordion-delete" onClick={() => void deleteHook(hook.id)}>Delete</Button>
                   </div>
                   {isOpen && (
                     <div className="tiles-accordion-body">
@@ -154,13 +155,14 @@ export default function PlotHooksTab({ password }: PlotHooksTabProps) {
                         </label>
                       </div>
                       <div className="modal-actions">
-                        <button
-                          className="btn-secondary"
+                        <Button
+                          variant="outline"
+                          color="secondary"
                           onClick={() => void saveHook(hook.id)}
                           disabled={savingId === hook.id || (drafts[hook.id] ?? hook.rawText) === hook.rawText}
                         >
                           {savingId === hook.id ? 'Re-normalizing…' : 'Save & Re-normalize'}
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   )}

@@ -4,6 +4,7 @@ import StoryboardOverlay from './StoryboardOverlay.tsx';
 import SaveAdventureModal from './SaveAdventureModal.tsx';
 import DeleteResourcesModal from './DeleteResourcesModal.tsx';
 import { useAppMeta } from './AppMetaContext.tsx';
+import { Button } from './components/Button/Button.tsx';
 import './app.css';
 
 interface Props { campaignId: string }
@@ -25,6 +26,13 @@ export default function GameLobbyPage({ campaignId }: Props) {
   const [loading, setLoading] = useState(false);
   const [savingAdventure, setSavingAdventure] = useState(false);
   const [deletingCampaign, setDeletingCampaign] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  function copyLobbyLink() {
+    void navigator.clipboard.writeText(window.location.href);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  }
 
   // The game-level password gate — null while the silent empty-password check is still in
   // flight, so nothing else in the lobby renders until we know whether one is needed.
@@ -131,10 +139,10 @@ export default function GameLobbyPage({ campaignId }: Props) {
           </label>
           {gameAuthError && <p className="modal-error">{gameAuthError}</p>}
           <div className="auth-gate-actions">
-            <a className="btn-secondary" href="/">&larr; Back to Game List</a>
-            <button className="btn-primary" onClick={() => void handleGameAuth()} disabled={checkingGameAuth}>
+            <Button variant="outline" color="secondary" navigate="/">&larr; Back to Game List</Button>
+            <Button onClick={() => void handleGameAuth()} disabled={checkingGameAuth}>
               {checkingGameAuth ? 'Checking…' : 'Enter'}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -153,14 +161,14 @@ export default function GameLobbyPage({ campaignId }: Props) {
       <div className="home-atmosphere" aria-hidden="true" />
       <div className="game-settings-page">
         <div className="settings-sidebar-header">
-          <a className="btn-secondary" href="/">&larr; Back</a>
+          <Button variant="outline" color="secondary" navigate="/">&larr; Back</Button>
           <h2 className="settings-title">{campaignName}</h2>
         </div>
 
         <div className="settings-body">
           {synopsis && <p className="lobby-synopsis">{synopsis}</p>}
           {scenarioStoryboard && (
-            <button className="btn-play lobby-synopsis-play" onClick={() => setPlayingStoryboard(true)}>▶ Play Storyboard</button>
+            <Button variant="outline" className="lobby-synopsis-play" onClick={() => setPlayingStoryboard(true)}>▶ Play Storyboard</Button>
           )}
           {party.length === 0 && (
             <p className="party-empty">There are currently no adventurers in the party.</p>
@@ -197,20 +205,21 @@ export default function GameLobbyPage({ campaignId }: Props) {
         </div>
 
         <div className="modal-actions modal-actions--split settings-footer">
-          <a className="btn-create-player-link" href={`/${campaignId}/player/create`}>
-            New here? Create a character
-          </a>
+          <Button variant="ghost" className="btn-create-player-link" navigate={`/${campaignId}/player/create`}>
+            Create a character
+          </Button>
           <div className="modal-action-btns">
-            <a className="btn-secondary" href={`/${campaignId}/game-settings`}>Game Settings</a>
-            <button className="btn-primary" onClick={() => void handleJoin()} disabled={!password || loading}>Join</button>
+            <Button variant="outline" color="secondary" onClick={copyLobbyLink}>{linkCopied ? '✓ Copied' : '🔗 Copy Link'}</Button>
+            <Button variant="outline" color="secondary" navigate={`/${campaignId}/game-settings`}>Game Settings</Button>
+            <Button onClick={() => void handleJoin()} disabled={!password || loading}>Join</Button>
           </div>
         </div>
       </div>
       <div className="lobby-save-adventure">
-        <button className="btn-secondary" onClick={() => setSavingAdventure(true)}>Save Adventure</button>
+        <Button variant="outline" color="secondary" onClick={() => setSavingAdventure(true)}>Save Adventure</Button>
       </div>
       {platform === 'web' && (
-        <button className="btn-danger lobby-delete-campaign" onClick={() => setDeletingCampaign(true)}>Delete Game</button>
+        <Button variant="outline" color="danger" className="lobby-delete-campaign" onClick={() => setDeletingCampaign(true)}>Delete Game</Button>
       )}
       <SaveAdventureModal
         open={savingAdventure}

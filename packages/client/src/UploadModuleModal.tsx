@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { CompendiumMeta } from 'shared';
+import { Button } from './components/Button/Button.tsx';
 
 interface Props {
   open: boolean;
@@ -179,26 +180,25 @@ export default function UploadModuleModal({ open, onClose, onUploaded, resumeAdv
 
         <div className="modal-actions">
           {done || error ? (
-            <button className="btn-primary" onClick={handleClose}>Done</button>
+            <Button onClick={handleClose}>Done</Button>
           ) : paused ? (
             <>
-              <button className="btn-secondary" onClick={() => void handleUpload()}>Resume</button>
-              <button className="btn-primary" onClick={handleClose}>Save as Draft</button>
+              <Button variant="outline" color="secondary" onClick={() => void handleUpload()}>Resume</Button>
+              <Button onClick={handleClose}>Save as Draft</Button>
             </>
           ) : uploading ? (
-            <button className="btn-primary" onClick={() => void handlePause()} disabled={pausing}>
+            <Button onClick={() => void handlePause()} disabled={pausing}>
               {pausing ? 'Pausing…' : 'Pause'}
-            </button>
+            </Button>
           ) : (
             <>
-              <button className="btn-secondary" onClick={handleClose}>Cancel</button>
-              <button
-                className="btn-primary"
+              <Button variant="outline" color="secondary" onClick={handleClose}>Cancel</Button>
+              <Button
                 onClick={() => void handleUpload()}
                 disabled={!resumeAdventure && (!file || !name)}
               >
                 {resumeAdventure ? 'Resume' : 'Upload'}
-              </button>
+              </Button>
             </>
           )}
         </div>

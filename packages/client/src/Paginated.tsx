@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { Button } from './components/Button/Button.tsx';
 
 export interface PageResult<T> {
   items: T[];
@@ -53,9 +54,9 @@ export default function Paginated<T>({ fetchPage, pageSize, reloadKey, children 
       {children(items)}
       {totalPages > 1 && (
         <div className="pager">
-          <button className="btn-secondary" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1 || loading}>← Prev</button>
+          <Button variant="outline" color="secondary" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1 || loading}>← Prev</Button>
           <span className="pager-info">Page {page} of {totalPages}</span>
-          <button className="btn-secondary" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages || loading}>Next →</button>
+          <Button variant="outline" color="secondary" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages || loading}>Next →</Button>
         </div>
       )}
     </>

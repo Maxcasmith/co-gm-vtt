@@ -1,4 +1,5 @@
 import type { Character, Dungeon, Quest } from 'shared';
+import { Button } from './components/Button/Button.tsx';
 import './app.css';
 
 interface Props {
@@ -55,7 +56,7 @@ export default function CongratsScreen({ dungeon, quests, roster, onFinish }: Pr
           </ul>
         </div>
 
-        <button className="congrats-finish" onClick={onFinish}>Finish</button>
+        <Button variant="ghost" className="congrats-finish" onClick={onFinish}>Finish</Button>
       </div>
     </div>
   );

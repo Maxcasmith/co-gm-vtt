@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { WorldMeta } from 'shared';
 import { CharacterProvider, useCharacter } from './character-creation/CharacterContext.tsx';
+import { Button } from './components/Button/Button.tsx';
 import PlayerInfoTab from './character-creation/PlayerInfoTab.tsx';
 import BackstoryTab from './character-creation/BackstoryTab.tsx';
 import SpellsTab from './character-creation/SpellsTab.tsx';
@@ -183,15 +184,15 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
         </div>
 
         <footer className="create-page-footer">
-          <button className="create-page-exit" onClick={handleExit}>Cancel</button>
+          <Button variant="outline" color="danger" onClick={handleExit}>Cancel</Button>
           <div className="create-page-footer-actions">
-            <button className="btn-secondary" onClick={goBack} disabled={stepIndex === 0}>Back</button>
+            <Button variant="outline" color="secondary" onClick={goBack} disabled={stepIndex === 0}>Back</Button>
             {c.activeTab === 'finished' ? (
-              <button className="btn-primary" onClick={handleCreate} disabled={!canCreate || saving}>
+              <Button onClick={handleCreate} disabled={!canCreate || saving}>
                 {saving ? 'Creating…' : 'Create Character'}
-              </button>
+              </Button>
             ) : (
-              <button className="btn-primary" onClick={goNext}>Next</button>
+              <Button onClick={goNext}>Next</Button>
             )}
           </div>
         </footer>
@@ -202,8 +203,8 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
         <h2 className="modal-title">Discard character?</h2>
         <p className="modal-body-text">Your progress will be lost.</p>
         <div className="modal-actions">
-          <button className="btn-secondary" onClick={() => backDialogRef.current?.close()}>Keep editing</button>
-          <button className="btn-primary" onClick={() => { window.location.href = `/${campaignId}/lobby`; }}>Discard</button>
+          <Button variant="outline" color="secondary" onClick={() => backDialogRef.current?.close()}>Keep editing</Button>
+          <Button navigate={`/${campaignId}/lobby`}>Discard</Button>
         </div>
       </dialog>
 
@@ -213,12 +214,12 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
         <p className="modal-body-text">Save your password — you will need it to join as this character.</p>
         <div className="password-reveal">
           <code className="password-code">{createdPassword}</code>
-          <button className="btn-copy" onClick={copyPassword}>
+          <Button variant="ghost" className="btn-copy" onClick={copyPassword}>
             {copied ? '✓ Copied' : 'Copy'}
-          </button>
+          </Button>
         </div>
         <div className="modal-actions">
-          <button className="btn-primary" onClick={() => { window.location.href = `/${campaignId}/lobby`; }}>Done</button>
+          <Button navigate={`/${campaignId}/lobby`}>Done</Button>
         </div>
       </dialog>
     </div>

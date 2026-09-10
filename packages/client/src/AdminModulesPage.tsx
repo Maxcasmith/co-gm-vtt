@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CompendiumMeta } from 'shared';
+import { Button } from './components/Button/Button.tsx';
 import AdminPageShell from './AdminPageShell.tsx';
 import UploadModuleModal from './UploadModuleModal.tsx';
 import Paginated, { PageSizeSelect } from './Paginated.tsx';
@@ -45,7 +46,7 @@ export default function AdminModulesPage({ onHome }: Props) {
         <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">📜</span>Adventure Modules</h2>
         <div className="admin-modules-header-actions">
           <PageSizeSelect value={pageSize} onChange={setPageSize} />
-          <button className="btn-primary" onClick={() => setUploadOpen(true)}>+ Upload Module</button>
+          <Button onClick={() => setUploadOpen(true)}>+ Upload Module</Button>
         </div>
       </div>
       <Paginated key={adventures.length} fetchPage={fetchAdventuresPage} pageSize={pageSize}>
@@ -76,11 +77,11 @@ export default function AdminModulesPage({ onHome }: Props) {
                         ].filter(Boolean).join(' · ')}
                       </span>
                       {adv.status === 'draft' && (
-                        <button className="btn-secondary" onClick={() => { setResumeAdventure(adv); setUploadOpen(true); }}>Resume Upload</button>
+                        <Button variant="outline" color="secondary" onClick={() => { setResumeAdventure(adv); setUploadOpen(true); }}>Resume Upload</Button>
                       )}
                     </td>
                     <td>
-                      <button className="btn-danger" onClick={() => void deleteAdventure(adv.slug, adv.name)}>Delete</button>
+                      <Button variant="outline" color="danger" onClick={() => void deleteAdventure(adv.slug, adv.name)}>Delete</Button>
                       {feedback[`module:${adv.slug}`] && <span className="admin-feedback">{feedback[`module:${adv.slug}`]}</span>}
                     </td>
                   </tr>

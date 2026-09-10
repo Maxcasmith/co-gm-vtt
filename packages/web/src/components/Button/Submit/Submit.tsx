@@ -2,7 +2,7 @@ import { Button } from "../Button";
 import { useFormContext } from "../../Form/Form";
 import type { HTMLAttributes, ReactNode } from "react";
 
-interface SubmitButtonProps extends HTMLAttributes<HTMLButtonElement> {
+interface SubmitButtonProps extends Omit<HTMLAttributes<HTMLButtonElement>, "color"> {
   children: ReactNode;
   className?: string;
 }

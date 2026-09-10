@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import type { Spell } from 'shared';
+import { Button } from '../components/Button/Button.tsx';
 import { useCharacter } from './CharacterContext.tsx';
 import { CLASS_FEATURES, CLASS_SPELL_ALLOWANCE, FEAT_SPELL_GRANTS, BACKGROUND_FEAT } from './srd.ts';
 import CharacterSheet from './CharacterSheet.tsx';
@@ -13,7 +14,8 @@ const LEVEL_LABELS: Record<number, string> = {
 
 function SpellCard({ spell, onClick, selected }: { spell: Spell; onClick: () => void; selected: boolean }) {
   return (
-    <button
+    <Button
+      variant="ghost"
       className={`spell-card ${selected ? 'spell-card--selected' : ''}`}
       onClick={onClick}
     >
@@ -25,7 +27,7 @@ function SpellCard({ spell, onClick, selected }: { spell: Spell; onClick: () => 
         <span className="spell-card-school">{spell.school}{spell.isRitual ? ' · Ritual' : ''}</span>
         <span className="spell-card-cast">{spell.castingTime}</span>
       </div>
-    </button>
+    </Button>
   );
 }
 
@@ -194,10 +196,10 @@ export default function SpellsTab() {
                 if (!spell) return null;
                 return (
                   <div key={name} className="spells-learned-chip">
-                    <button className="spells-learned-name" onClick={() => setSelected(spell)}>{name}</button>
+                    <Button variant="ghost" className="spells-learned-name" onClick={() => setSelected(spell)}>{name}</Button>
                     {source !== c.characterClass && <span className="spells-tag spells-tag--ritual">{source}</span>}
                     <span className="spells-learned-level">{spell.levelLabel}</span>
-                    <button className="spells-learned-remove" onClick={() => toggleLearn(spell)} title="Forget">×</button>
+                    <Button variant="ghost" className="spells-learned-remove" onClick={() => toggleLearn(spell)} title="Forget">×</Button>
                   </div>
                 );
               })}
@@ -245,7 +247,7 @@ export default function SpellsTab() {
                 const source = c.learnedSpells[spell.name] ?? featOnlySource(spell) ?? null;
                 return (
                   <div key={spell.name} className={`spells-browser-row ${selected?.name === spell.name ? 'spells-browser-row--selected' : ''}`}>
-                    <button className="spells-browser-info" onClick={() => setSelected(selected?.name === spell.name ? null : spell)}>
+                    <Button variant="ghost" className="spells-browser-info" onClick={() => setSelected(selected?.name === spell.name ? null : spell)}>
                       <span className="spells-browser-name">{spell.name}</span>
                       <span className="spells-browser-tags">
                         <span className="spells-tag">{spell.levelLabel}</span>
@@ -254,15 +256,16 @@ export default function SpellsTab() {
                         {spell.isRitual && <span className="spells-tag spells-tag--ritual">Ritual</span>}
                         <span className="spells-tag spells-tag--cast">{spell.castingTime}</span>
                       </span>
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      variant="ghost"
                       className={`spells-learn-btn ${learned ? 'spells-learn-btn--learned' : ''}`}
                       onClick={() => toggleLearn(spell)}
                       disabled={!learned && atLimit}
                       title={learned ? 'Forget' : atLimit ? 'Limit reached' : 'Learn'}
                     >
                       {learned ? 'Forget' : 'Learn'}
-                    </button>
+                    </Button>
                   </div>
                 );
               })}

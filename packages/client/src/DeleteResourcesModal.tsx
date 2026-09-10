@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from './components/Button/Button.tsx';
 
 interface Props {
   open: boolean;
@@ -97,13 +98,13 @@ export default function DeleteResourcesModal({ open, name, deleteUrl, password, 
 
         <div className="modal-actions">
           {messages ? (
-            <button className="btn-primary" onClick={handleClose}>Done</button>
+            <Button onClick={handleClose}>Done</Button>
           ) : (
             <>
-              <button className="btn-secondary" onClick={handleClose} disabled={deleting}>Cancel</button>
-              <button className="btn-danger" onClick={() => void handleDelete()} disabled={deleting}>
+              <Button variant="outline" color="secondary" onClick={handleClose} disabled={deleting}>Cancel</Button>
+              <Button variant="outline" color="danger" onClick={() => void handleDelete()} disabled={deleting}>
                 {deleting ? 'Deleting…' : 'Delete'}
-              </button>
+              </Button>
             </>
           )}
         </div>

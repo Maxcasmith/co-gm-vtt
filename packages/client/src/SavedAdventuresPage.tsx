@@ -4,6 +4,8 @@ import Badge from './create-campaign/Badge.tsx';
 import TypeBadge from './create-campaign/TypeBadge.tsx';
 import { truncate } from './create-campaign/textUtils.ts';
 import DeleteResourcesModal from './DeleteResourcesModal.tsx';
+import { Button } from './components/Button/Button.tsx';
+import HomePageShell from './HomePageShell.tsx';
 import './app.css';
 import './styles/create-campaign.css';
 
@@ -23,23 +25,12 @@ export default function SavedAdventuresPage() {
   useEffect(() => { fetchAdventures(); }, []);
 
   return (
-    <div className="home">
-      <div className="home-atmosphere" aria-hidden="true" />
-      <header className="home-header">
-        <div className="home-header-titles">
-          <span className="home-eyebrow">The Chronicle Awaits</span>
-          <h1 className="home-title">
-            <span className="home-title-flourish" aria-hidden="true" />
-            My Saved Adventures
-            <span className="home-title-flourish" aria-hidden="true" />
-          </h1>
-          <p className="home-tagline">Reusable templates saved from past campaigns.</p>
-        </div>
-        <div className="home-header-actions">
-          <a className="btn-secondary" href="/">← Back to Game List</a>
-        </div>
-      </header>
-
+    <HomePageShell
+      eyebrow="The Chronicle Awaits"
+      title="My Saved Adventures"
+      tagline="Reusable templates saved from past campaigns."
+      actions={<Button variant="outline" color="secondary" navigate="/">← Back to Game List</Button>}
+    >
       {adventures === null && (
         <ul className="create-source-list saved-adventures-list">
           {[0, 1].map(i => (
@@ -75,7 +66,7 @@ export default function SavedAdventuresPage() {
                   <p className="create-source-list-synopsis">{truncate(a.scenarioSynopsis, 300)}</p>
                 )}
               </div>
-              <button className="btn-danger" onClick={() => setDeleteTarget(a)}>Delete</button>
+              <Button variant="outline" color="danger" onClick={() => setDeleteTarget(a)}>Delete</Button>
             </li>
           ))}
         </ul>
@@ -91,6 +82,6 @@ export default function SavedAdventuresPage() {
           setAdventures(prev => prev?.filter(x => x.slug !== deleteTarget.slug) ?? null);
         }}
       />
-    </div>
+    </HomePageShell>
   );
 }

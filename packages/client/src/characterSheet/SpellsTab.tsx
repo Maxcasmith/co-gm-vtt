@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Character, Spell } from "shared";
 import { isWeapon, actionCostFromCastingTime, parseRangeFeet, FEAT_SPELL_GRANTS } from "shared";
+import { Button } from "../components/Button/Button.tsx";
 import { dispatch } from "../events.ts";
 import { API, ActionCostDot } from "./helpers.tsx";
 import { BACKGROUND_FEAT } from "../character-creation/srd.ts";
@@ -261,12 +262,13 @@ export function SpellsTab({
                 {selected.isRitual ? " · Ritual" : ""}
               </span>
             </div>
-            <button
+            <Button
+              variant="ghost"
               className="sheet-spell-detail-close"
               onClick={() => setSelected(null)}
             >
               ×
-            </button>
+            </Button>
           </div>
           <dl className="sheet-spell-detail-stats">
             <dt>Casting Time</dt>
@@ -287,26 +289,28 @@ export function SpellsTab({
           {damageTypeOptionsFor(selected) && (
             <div className="sheet-spell-damage-types">
               {damageTypeOptionsFor(selected)!.map((type) => (
-                <button
+                <Button
                   key={type}
+                  variant="ghost"
                   className={`sheet-damage-type-btn sheet-damage-type-btn--${type.toLowerCase()}${damageType === type ? " sheet-damage-type-btn--active" : ""}`}
                   onClick={() => setDamageType(type)}
                 >
                   {type}
-                </button>
+                </Button>
               ))}
             </div>
           )}
           {commandOptionsFor(selected) && (
             <div className="sheet-spell-damage-types">
               {commandOptionsFor(selected)!.map((word) => (
-                <button
+                <Button
                   key={word}
+                  variant="ghost"
                   className={`sheet-damage-type-btn${!customCommand && command === word ? " sheet-damage-type-btn--active" : ""}`}
                   onClick={() => { setCommand(word); setCustomCommand(""); }}
                 >
                   {word}
-                </button>
+                </Button>
               ))}
               <input
                 className="sheet-command-custom-input"
@@ -320,13 +324,14 @@ export function SpellsTab({
           {skillOptionsFor(selected) && (
             <div className="sheet-spell-damage-types">
               {skillOptionsFor(selected)!.map((s) => (
-                <button
+                <Button
                   key={s}
+                  variant="ghost"
                   className={`sheet-damage-type-btn${skill === s ? " sheet-damage-type-btn--active" : ""}`}
                   onClick={() => setSkill(s)}
                 >
                   {s}
-                </button>
+                </Button>
               ))}
             </div>
           )}
@@ -338,7 +343,8 @@ export function SpellsTab({
               noSlotFor(selected) ||
               (isBundledSmite(selected) && (!mainHandWeapon || !actionAvailable));
             return (
-              <button
+              <Button
+                variant="ghost"
                 className={`sheet-spell-cast-btn${disabled ? " sheet-spell-cast-btn--disabled" : ""}`}
                 disabled={disabled}
                 onClick={() => handleCast(selected)}
@@ -352,7 +358,7 @@ export function SpellsTab({
                   <ActionCostDot cost={cost} />
                 )}
                 Cast
-              </button>
+              </Button>
             );
           })()}
         </div>

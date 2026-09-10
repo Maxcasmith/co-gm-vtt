@@ -1,44 +1,96 @@
-.login--page--wrapper {
-  display: grid;
-  width: 100%;
-  height: 100%;
-  justify-content: center;
+.login--hero {
+  display: flex;
   align-items: center;
+  justify-content: center;
+  min-height: 80vh;
+  padding: 48px 24px;
 }
 
-.login--page--content {
+.login--panel {
+  width: min(420px, 100%);
+  background: rgba(241, 223, 190, 0.6);
+  border: 1px solid var(--parchment-line);
+  border-radius: 10px;
+  padding: 40px;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.login--panel--title {
+  font-family: 'Playfair Display', serif;
+  font-size: 28px;
+  margin: 0 0 8px;
+}
+
+.login--panel--subtitle {
+  font-family: 'Crimson Pro', Georgia, serif;
+  color: var(--ink-muted);
+  margin: 0 0 28px;
+}
+
+.login--panel--fields {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin: auto;
+  gap: 16px;
+  margin-bottom: 20px;
 }
 
-.login--page--create--user--card--title {
-  padding: 0;
-  margin: 0;
-  font-size: 6rem;
-  font-weight: 900;
-  color: #ffffff;
-  letter-spacing: -0.02em;
+.login--panel--fields .input--wrapper label {
+  text-align: left;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  color: var(--ink-muted);
 }
 
-.login--page--subline {
+.login--panel--input {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(255, 251, 240, 0.6);
+  border: 1px solid var(--parchment-line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-top: 5px;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 15px;
+  color: var(--ink);
+  outline: none;
+}
+
+.login--panel--input:focus {
+  border-color: var(--maroon);
+}
+
+.login--panel--submit {
+  width: 100%;
+}
+
+.login--panel--divider {
   display: flex;
-  gap: 1.2rem;
-  padding: 0;
-  margin: 0;
-  font-size: 1.3rem;
-  font-weight: 400;
-  color: #e6c170;
-  letter-spacing: 0.05em;
-  margin-bottom: 1rem;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 0;
 }
 
-.login--page--logo {
-  position: absolute;
-  top: 0;
-  left: 0;
-  padding: 30px;
-  font-weight: 900;
-  font-size: 1.8rem;
+.login--panel--divider hr {
+  flex: 1;
+  border: none;
+  border-top: 1px solid var(--parchment-line);
+  margin: 0;
 }
+
+.login--panel--divider span {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.login--panel--google .btn {
+  width: 100%;
+}
+
+/* ── skeleton ── */
+.login--skeleton--title { width: 200px; height: 28px; margin: 0 auto 12px; }
+.login--skeleton--subtitle { width: 260px; height: 15px; margin: 0 auto 28px; }
+.login--skeleton--field { width: 100%; height: 46px; margin-bottom: 16px; }
+.login--skeleton--submit { width: 100%; height: 40px; margin-bottom: 8px; }
+.login--skeleton--divider { width: 100%; height: 1px; margin: 20px 0; }

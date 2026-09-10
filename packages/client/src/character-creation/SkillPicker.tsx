@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Button } from '../components/Button/Button.tsx';
 import { useCharacter } from './CharacterContext.tsx';
 import { SKILLS, CLASS_SKILLS, BACKGROUND_FEAT, BACKGROUND_SKILLS, CLASS_FEATURES } from './srd.ts';
 
@@ -82,18 +83,18 @@ export default function SkillPicker() {
           {sources.map(src => {
             const used = usedBySource(c.skillProficiencies, src.label);
             return (
-              <button key={src.key} className={`skill-tab ${validKey === src.key ? 'skill-tab--active' : ''}`} onClick={() => setActiveKey(src.key)}>
+              <Button key={src.key} variant="ghost" className={`skill-tab ${validKey === src.key ? 'skill-tab--active' : ''}`} onClick={() => setActiveKey(src.key)}>
                 {src.label}
                 <span className={`skill-tab-count ${used === src.count ? 'skill-tab-count--full' : ''}`}>{used}/{src.count}</span>
-              </button>
+              </Button>
             );
           })}
-          <button className={`skill-tab ${validKey === 'expertise' ? 'skill-tab--active' : ''}`} onClick={() => setActiveKey('expertise')}>
+          <Button variant="ghost" className={`skill-tab ${validKey === 'expertise' ? 'skill-tab--active' : ''}`} onClick={() => setActiveKey('expertise')}>
             Expertise
             <span className={`skill-tab-count ${expertiseSlots.length === EXPERTISE_COUNT ? 'skill-tab-count--full' : ''}`}>
               {expertiseSlots.length}/{EXPERTISE_COUNT}
             </span>
-          </button>
+          </Button>
         </div>
 
         <div className="skill-list">
@@ -103,8 +104,9 @@ export default function SkillPicker() {
             const canToggle = isProficient && (isExpert || slotsLeft > 0);
 
             return (
-              <button
+              <Button
                 key={skill.name}
+                variant="ghost"
                 className={['skill-item', isExpert ? 'skill-item--active skill-item--expertise' : '', !isProficient ? 'skill-item--disabled' : ''].filter(Boolean).join(' ')}
                 onClick={() => { if (canToggle) toggleExpertise(skill.name); }}
                 disabled={!isProficient}
@@ -113,7 +115,7 @@ export default function SkillPicker() {
                 <span className="skill-name">{skill.name}</span>
                 {isExpert && <span className="skill-source skill-source--expertise">Expertise</span>}
                 {!isProficient && <span className="skill-source skill-source--faded">not proficient</span>}
-              </button>
+              </Button>
             );
           })}
         </div>
@@ -157,19 +159,19 @@ export default function SkillPicker() {
         {sources.map(src => {
           const used = usedBySource(profs, src.label);
           return (
-            <button key={src.key} className={`skill-tab ${validKey === src.key ? 'skill-tab--active' : ''}`} onClick={() => setActiveKey(src.key)}>
+            <Button key={src.key} variant="ghost" className={`skill-tab ${validKey === src.key ? 'skill-tab--active' : ''}`} onClick={() => setActiveKey(src.key)}>
               {src.label}
               <span className={`skill-tab-count ${used === src.count ? 'skill-tab-count--full' : ''}`}>{used}/{src.count}</span>
-            </button>
+            </Button>
           );
         })}
         {hasExpertise && (
-          <button className={`skill-tab ${validKey === 'expertise' ? 'skill-tab--active' : ''}`} onClick={() => setActiveKey('expertise')}>
+          <Button variant="ghost" className={`skill-tab ${validKey === 'expertise' ? 'skill-tab--active' : ''}`} onClick={() => setActiveKey('expertise')}>
             Expertise
             <span className={`skill-tab-count ${c.expertiseSkills.length === EXPERTISE_COUNT ? 'skill-tab-count--full' : ''}`}>
               {c.expertiseSkills.length}/{EXPERTISE_COUNT}
             </span>
-          </button>
+          </Button>
         )}
       </div>
 
@@ -184,8 +186,9 @@ export default function SkillPicker() {
           const isDisabled = fromBg || isTakenByOther || (!isMine && !allowed);
 
           return (
-            <button
+            <Button
               key={skill.name}
+              variant="ghost"
               className={[
                 'skill-item',
                 fromBg          ? 'skill-item--bg'       : '',
@@ -207,7 +210,7 @@ export default function SkillPicker() {
                   </span>
                 )
               }
-            </button>
+            </Button>
           );
         })}
       </div>

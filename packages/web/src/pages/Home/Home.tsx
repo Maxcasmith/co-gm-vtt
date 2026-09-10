@@ -1,103 +1,152 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '../../components/Button/Button';
-import { Card } from '../../components/Card';
+import { CompassIcon, DropIcon, FlameIcon, GemIcon, SparkleIcon, StarIcon } from '../../components/icons/Icons';
+import { ParchmentLayout } from '../../components/ParchmentLayout/ParchmentLayout';
+import { PageHeader } from '../../components/PageHeader/PageHeader';
 import './Home.css';
 
-const FEATURES = [
-  {
-    title: 'AI-Designed Worlds',
-    body: 'Unique lore, factions, and plots built from your prompt.',
-  },
-  {
-    title: 'Complete & Playable',
-    body: 'Maps, NPCs, items, and encounters — session-ready.',
-  },
-  {
-    title: 'Built For Play',
-    body: "Runs straight into your table's virtual tabletop.",
-  },
-  {
-    title: 'Yours To Customize',
-    body: 'Edit anything. Make it your own world.',
-  },
+const VIBES = [
+  { label: 'Fantasy', icon: FlameIcon },
+  { label: 'Horror', icon: DropIcon },
+  { label: 'Heist', icon: GemIcon },
+  { label: 'Exploration', icon: CompassIcon },
+  { label: 'Any Setting', icon: StarIcon },
 ];
 
 export function Home() {
   const navigate = useNavigate();
-  const [prompt, setPrompt] = useState('');
-  const [tone, setTone] = useState('');
+  const [tags, setTags] = useState<string[]>([]);
+  const [draft, setDraft] = useState('');
+
+  function addTag(tag: string) {
+    const clean = tag.trim();
+    if (!clean || tags.includes(clean)) return;
+    setTags(ts => [...ts, clean]);
+  }
+
+  function removeTag(i: number) {
+    setTags(ts => ts.filter((_, ti) => ti !== i));
+  }
 
   function handleGenerate() {
-    navigate('/signup', { state: { prompt, tone } });
+    navigate('/signup', { state: { prompt: tags.join(', ') } });
   }
 
   return (
-    <div className="home--page">
-      <header className="home--nav">
-        <span className="home--nav--wordmark">Untitled AI VTT</span>
-        <nav className="home--nav--actions">
-          <Link className="home--nav--login" to="/login">Log in</Link>
-          <Button className="home--nav--signup" onClick={() => navigate('/signup')}>Sign Up Free</Button>
-        </nav>
-      </header>
-
-      <section className="home--hero">
-        <div className="home--hero--copy">
-          <span className="home--hero--eyebrow">AI-Powered Tabletop Adventures</span>
-          <h1 className="home--hero--title">
-            Build your world.<br />We&apos;ll draft the campaign.
-          </h1>
-          <p className="home--hero--subtitle">
-            Describe your idea and our AI drafts the story, NPCs, maps, and encounters. You bring the players — we&apos;ll handle the rest.
-          </p>
-
-          <div className="home--hero--prompt-card">
-            <label className="home--hero--prompt-label">
-              Describe the adventure you want to create
-              <textarea
-                className="home--hero--prompt-input"
-                value={prompt}
-                onChange={e => setPrompt(e.target.value)}
-                placeholder="A haunted coastal town cursed by an ancient sea god"
-                rows={2}
-              />
-            </label>
-            <label className="home--hero--prompt-label home--hero--prompt-label--optional">
-              Tone (optional)
-              <input
-                className="home--hero--tone-input"
-                value={tone}
-                onChange={e => setTone(e.target.value)}
-                placeholder="Dark and mysterious, with political intrigue"
-              />
-            </label>
-            <Button className="home--hero--generate" onClick={handleGenerate}>
-              Generate My Campaign
-            </Button>
-            <span className="home--hero--prompt-hint">Free to start — takes less than a minute</span>
-          </div>
-        </div>
-
-        <div className="home--hero--art">
-          <img
-            className="home--hero--art-img"
-            src="https://picsum.photos/seed/untitled-ai-vtt/1200/900"
-            alt=""
-          />
-        </div>
-      </section>
-
-      <section className="home--features">
-        {FEATURES.map(f => (
-          <Card key={f.title}>
-            <div className="home--feature--tile">
-              <span className="home--feature--title">{f.title}</span>
-              <span className="home--feature--body">{f.body}</span>
+    <ParchmentLayout
+      autoReady={false}
+      header={
+        <PageHeader
+          actions={
+            <>
+              <Link className="btn btn--outline btn--primary btn--md" to="/login">Log In</Link>
+              <Button onClick={() => navigate('/signup')}>Get Started</Button>
+            </>
+          }
+        />
+      }
+      skeleton={
+        <section className="home--hero">
+          <div className="home--hero--prompt-card torn-parchment">
+            <span className="skeleton home--skeleton--label" />
+            <div className="home--hero--prompt-row">
+              <span className="skeleton home--skeleton--input" />
+              <span className="skeleton home--skeleton--button" />
             </div>
-          </Card>
-        ))}
-      </section>
-    </div>
+            <div className="home--hero--chips">
+              {[0, 1, 2, 3, 4].map(i => (
+                <span className="skeleton home--skeleton--chip" key={i} />
+              ))}
+            </div>
+          </div>
+        </section>
+      }
+    >
+      {setReady => (
+        <>
+          <section className="home--hero">
+            <video
+              className="home--hero--video"
+              src="/hero-bg.mp4"
+              autoPlay
+              muted
+              loop
+              playsInline
+              onCanPlayThrough={() => setReady(true)}
+              onError={() => setReady(true)}
+            />
+
+            <div className="home--hero--prompt-card torn-parchment">
+              <label className="home--hero--prompt-label" htmlFor="prompt-input">
+                Describe the adventure you want to create…
+              </label>
+
+              {tags.length > 0 && (
+                <div className="home--hero--tags">
+                  {tags.map((t, i) => (
+                    <span className="home--hero--tag" key={`${t}_${i}`}>
+                      {t}
+                      <button
+                        type="button"
+                        className="home--hero--tag-remove"
+                        aria-label={`Remove ${t}`}
+                        onClick={() => removeTag(i)}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className="home--hero--prompt-row">
+                <input
+                  id="prompt-input"
+                  className="home--hero--prompt-input"
+                  value={draft}
+                  onChange={e => {
+                    const char = e.nativeEvent instanceof InputEvent ? e.nativeEvent.data : null;
+                    const val = e.target.value.replaceAll(',', '');
+                    if (char === ',' && val.trim() !== '') {
+                      addTag(val);
+                      setDraft('');
+                    } else {
+                      setDraft(val);
+                    }
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addTag(draft);
+                      setDraft('');
+                    }
+                  }}
+                  placeholder="e.g. cursed coastal town, political intrigue, sea monsters…"
+                />
+                <Button className="home--hero--generate" onClick={handleGenerate}>
+                  <SparkleIcon className="home--hero--generate-icon" />
+                  Create My Campaign
+                </Button>
+              </div>
+              <div className="home--hero--chips">
+                {VIBES.map(v => (
+                  <button
+                    key={v.label}
+                    type="button"
+                    className={`home--hero--chip${tags.includes(v.label) ? ' home--hero--chip--active' : ''}`}
+                    onClick={() => addTag(v.label)}
+                  >
+                    <v.icon className="home--hero--chip-icon" />
+                    {v.label}
+                  </button>
+                ))}
+              </div>
+              <p className="home--hero--quote">From a spark of an idea… to a living world.</p>
+            </div>
+          </section>
+        </>
+      )}
+    </ParchmentLayout>
   );
 }

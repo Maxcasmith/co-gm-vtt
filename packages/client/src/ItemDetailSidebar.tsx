@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { iconSlug } from 'shared';
+import { Button } from './components/Button/Button.tsx';
 import ItemIcon from './ItemIcon.tsx';
 
 export interface DetailSubject {
@@ -73,7 +74,7 @@ export default function ItemDetailSidebar({ subject, password, onClose, onIconCh
         {subject && (
           <>
             <div className="item-detail-sidebar-header">
-              <button className="sheet-close item-detail-sidebar-close" onClick={onClose} aria-label="Close">×</button>
+              <Button variant="outline" color="secondary" className="item-detail-sidebar-close" onClick={onClose} aria-label="Close">×</Button>
               <ItemIcon className="item-detail-sidebar-icon" name={subject.name} iconPath={subject.iconPath} />
               <h2 className="settings-title">{subject.name}</h2>
             </div>
@@ -86,12 +87,12 @@ export default function ItemDetailSidebar({ subject, password, onClose, onIconCh
                   <p className="admin-empty">Bundled icon — fixed in code, can't be changed here.</p>
                 ) : (
                   <>
-                    <button className="btn-secondary" onClick={() => void generateIcon()} disabled={busy}>
+                    <Button variant="outline" color="secondary" onClick={() => void generateIcon()} disabled={busy}>
                       {busy ? 'Working…' : 'Generate / Regenerate Icon'}
-                    </button>
-                    <button className="btn-secondary" onClick={() => void removeIcon()} disabled={busy}>
+                    </Button>
+                    <Button variant="outline" color="secondary" onClick={() => void removeIcon()} disabled={busy}>
                       Remove Icon
-                    </button>
+                    </Button>
                   </>
                 )}
               </div>

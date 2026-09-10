@@ -96,22 +96,6 @@
   padding: 18px 48px;
 }
 
-.create-page-exit {
-  font: inherit;
-  font-size: 13px;
-  color: var(--text-muted);
-  text-decoration: none;
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  transition: color 0.2s;
-}
-
-.create-page-exit:hover {
-  color: var(--gold);
-}
-
 .create-page-footer-actions {
   display: flex;
   gap: 10px;

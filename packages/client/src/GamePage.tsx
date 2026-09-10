@@ -3,6 +3,7 @@ import { io } from 'socket.io-client';
 import type { Character, Player, EnemyStatBlock, TokenPosition, Dungeon, Quest, TurnOrderEntry, StoryboardQueuePayload, HouseRules } from 'shared';
 import { DEFAULT_HOUSE_RULES } from 'shared';
 import { HIT_DICE } from './character-creation/srd.ts';
+import { Button } from './components/Button/Button.tsx';
 import Canvas from './Canvas.tsx';
 import EncounterLoadingOverlay from './EncounterLoadingOverlay.tsx';
 import DungeonLoadingOverlay from './DungeonLoadingOverlay.tsx';
@@ -792,13 +793,13 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
             <h2 className="modal-title">Adventure still ongoing</h2>
             <p className="modal-hint">Your adventure is still ongoing, would you like to end the session and leave?</p>
             <div className="modal-actions">
-              <button className="btn-secondary" onClick={() => setShowLeaveConfirm(false)}>Cancel</button>
-              <button className="btn-primary" onClick={() => {
+              <Button variant="outline" color="secondary" onClick={() => setShowLeaveConfirm(false)}>Cancel</Button>
+              <Button onClick={() => {
                 socketRef.current?.emit('session:end', { campaignId: character.campaignId });
                 setTimeout(() => { socketRef.current?.disconnect(); window.location.href = '/'; }, 400);
               }}>
                 End Session &amp; Leave
-              </button>
+              </Button>
             </div>
           </dialog>
         </div>
@@ -881,12 +882,12 @@ export default function GamePage({ campaignId }: { campaignId: string }) {
         </label>
         {error && <p className="modal-error">{error}</p>}
         <div className="auth-gate-actions">
-          <a className="btn-create-player-link" href={`/${campaignId}/player/create`}>
+          <Button variant="ghost" className="btn-create-player-link" navigate={`/${campaignId}/player/create`}>
             New here? Create a character
-          </a>
-          <button className="btn-primary" onClick={() => void handleJoin()} disabled={!password || loading}>
+          </Button>
+          <Button onClick={() => void handleJoin()} disabled={!password || loading}>
             {loading ? 'Joining…' : 'Join'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

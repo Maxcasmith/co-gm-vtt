@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback } from 'react';
+import { Button } from '../components/Button/Button.tsx';
 import { useCharacter } from './CharacterContext.tsx';
 import {
   SPECIES, BACKGROUNDS, CLASSES, STAT_NAMES, CLASS_SAVING_THROWS,
@@ -177,9 +178,9 @@ export default function PlayerInfoTab({ campaignId }: { campaignId: string }) {
         <div className="stat-block">
           <div className="stat-block-header">
             <span className="settings-section-title">Ability Scores</span>
-            <button className="btn-roll" onClick={handleRoll} disabled={c.rerollUsed}>
+            <Button variant="ghost" className="btn-roll" onClick={handleRoll} disabled={c.rerollUsed}>
               {!c.rolled ? 'Roll Stats' : c.rerollUsed ? 'Reroll used' : 'Reroll (1 left)'}
-            </button>
+            </Button>
           </div>
           {c.rolled && (
             <div
@@ -286,9 +287,9 @@ export default function PlayerInfoTab({ campaignId }: { campaignId: string }) {
                     <div key={stat} className="asi-stat">
                       <span className="asi-stat-name">{stat}</span>
                       <div className="asi-controls">
-                        <button className="asi-btn" onClick={() => adjustAsi(stat, -1)} disabled={val === 0}>−</button>
+                        <Button variant="ghost" className="asi-btn" onClick={() => adjustAsi(stat, -1)} disabled={val === 0}>−</Button>
                         <span className="asi-value">{val > 0 ? `+${val}` : '0'}</span>
-                        <button className="asi-btn" onClick={() => adjustAsi(stat, 1)} disabled={val >= ASI_MAX_PER_STAT || asiRemaining === 0}>+</button>
+                        <Button variant="ghost" className="asi-btn" onClick={() => adjustAsi(stat, 1)} disabled={val >= ASI_MAX_PER_STAT || asiRemaining === 0}>+</Button>
                       </div>
                     </div>
                   );
@@ -296,10 +297,10 @@ export default function PlayerInfoTab({ campaignId }: { campaignId: string }) {
               </div>
               {feat && (
                 <div className="feat-block">
-                  <button className={`feature-toggle feat-toggle ${featOpen ? 'feature-toggle--open' : ''}`} onClick={() => setFeatOpen(o => !o)}>
+                  <Button variant="ghost" className={`feature-toggle feat-toggle ${featOpen ? 'feature-toggle--open' : ''}`} onClick={() => setFeatOpen(o => !o)}>
                     <span className="feature-name">Origin Feat: {feat.name}</span>
                     <span className="feature-arrow">{featOpen ? '▲' : '▼'}</span>
-                  </button>
+                  </Button>
                   {featOpen && <p className="feature-desc feat-desc">{feat.description}</p>}
                 </div>
               )}

@@ -88,7 +88,7 @@
   border-top: 1px solid var(--border);
 }
 
-.feature-toggle {
+button.feature-toggle {
   width: 100%;
   background: transparent;
   border: none;
@@ -323,7 +323,7 @@
   padding: 3px 6px;
 }
 
-.spells-learned-name {
+button.spells-learned-name {
   background: none;
   border: none;
   color: var(--text);
@@ -339,7 +339,7 @@
   color: var(--muted);
 }
 
-.spells-learned-remove {
+button.spells-learned-remove {
   background: none;
   border: none;
   color: var(--muted);
@@ -404,7 +404,7 @@
   background: var(--surface-raised, #2a2a2e);
 }
 
-.spells-browser-info {
+button.spells-browser-info {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -755,7 +755,7 @@
   overflow-x: auto;
 }
 
-.skill-tab {
+button.skill-tab {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -910,7 +910,7 @@
   background: var(--bg);
 }
 
-.choice-item {
+button.choice-item {
   display: flex;
   align-items: center;
   gap: 10px;

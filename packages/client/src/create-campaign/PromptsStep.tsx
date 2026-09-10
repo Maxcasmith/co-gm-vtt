@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from '../components/Button/Button.tsx';
 import InfoTooltip from './InfoTooltip.tsx';
 
 interface Props {
@@ -68,7 +69,7 @@ export default function PromptsStep({
           {tags.map(tag => (
             <span key={tag} className="tag-chip">
               {tag}
-              <button className="tag-chip-remove" onClick={() => removeTag(tag)}>×</button>
+              <Button variant="ghost" className="tag-chip-remove" onClick={() => removeTag(tag)}>×</Button>
             </span>
           ))}
           <input
@@ -82,9 +83,9 @@ export default function PromptsStep({
         </div>
         <p className="tag-hint">Press Enter, comma, or click Add to add a tag</p>
         {tagInput.trim() && (
-          <button className="btn-add-tag" onClick={() => { addTag(tagInput); setTagInput(''); }}>
+          <Button variant="ghost" className="btn-add-tag" onClick={() => { addTag(tagInput); setTagInput(''); }}>
             + Add
-          </button>
+          </Button>
         )}
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from '../components/Button/Button.tsx';
 
 export interface ChoiceOption { name: string; description: string }
 
@@ -35,14 +36,15 @@ export default function ChoicePicker({ title, options, selected, max, onToggle }
           const isMine = selected.includes(opt.name);
           const isFull = max !== undefined && !isMine && selected.length >= max;
           return (
-            <button
+            <Button
               key={opt.name}
+              variant="ghost"
               className={`choice-item${isMine ? ' choice-item--active' : ''}${opt.name === active?.name ? ' choice-item--preview' : ''}${isFull ? ' choice-item--full' : ''}`}
               onClick={() => handleClick(opt.name)}
             >
               <span className="choice-check">{isMine ? '✓' : ''}</span>
               <span className="choice-name">{opt.name}</span>
-            </button>
+            </Button>
           );
         })}
       </div>

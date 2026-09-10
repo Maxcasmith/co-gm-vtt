@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import type { ReactionOffer } from 'shared';
 import { on } from './events';
+import { Button } from './components/Button/Button.tsx';
 import './styles/reaction-prompt.css';
 
 interface Props {
@@ -110,16 +111,16 @@ export default function ReactionPrompt({ onRespond, showDetailsByDefault }: Prop
                 {option.boostedAc !== undefined && (<><dt>Boosted AC</dt><dd>{option.boostedAc}</dd></>)}
               </dl>
             )}
-            <button className="reaction-accept" onClick={() => respond(option.spellName)}>
+            <Button variant="ghost" className="reaction-accept" onClick={() => respond(option.spellName)}>
               {option.kind === 'opportunity' ? 'Attack' : option.kind === 'protect' ? 'Protect' : option.kind === 'luck' || option.kind === 'luckReroll' ? 'Spend Luck Point' : option.kind === 'swap' ? 'Swap' : `Cast ${option.spellName}`}
-            </button>
+            </Button>
           </div>
         ))}
       </div>
 
-      <button className="reaction-decline" onClick={() => respond(null)}>
+      <Button variant="ghost" className="reaction-decline" onClick={() => respond(null)}>
         {offer.options[0]?.kind === 'luckReroll' ? 'Accept the miss' : 'Take the hit'}
-      </button>
+      </Button>
     </div>
   );
 }

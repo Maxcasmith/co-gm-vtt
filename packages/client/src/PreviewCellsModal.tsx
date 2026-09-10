@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Button } from './components/Button/Button.tsx';
 
 interface Props {
   file: string | null;
@@ -33,7 +34,7 @@ export default function PreviewCellsModal({ file, password, onClose }: Props) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <dialog className="modal super-modal" open onClick={e => e.stopPropagation()}>
-        <button className="sheet-close campaign-modal-close" onClick={onClose} aria-label="Close">×</button>
+        <Button variant="outline" color="secondary" className="sheet-close campaign-modal-close" onClick={onClose} aria-label="Close">×</Button>
         <h2 className="modal-title">Cell Preview</h2>
 
         <div className="super-modal-body">
@@ -57,7 +58,7 @@ export default function PreviewCellsModal({ file, password, onClose }: Props) {
         </div>
 
         <div className="modal-actions">
-          <button className="btn-primary" onClick={onClose}>Close</button>
+          <Button onClick={onClose}>Close</Button>
         </div>
       </dialog>
     </div>

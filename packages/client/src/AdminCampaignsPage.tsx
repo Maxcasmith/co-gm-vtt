@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Campaign } from 'shared';
+import { Button } from './components/Button/Button.tsx';
 import AdminPageShell from './AdminPageShell.tsx';
 import SaveAdventureModal from './SaveAdventureModal.tsx';
 import DeleteResourcesModal from './DeleteResourcesModal.tsx';
@@ -94,18 +95,18 @@ export default function AdminCampaignsPage({ password, onHome }: Props) {
                   <tr key={c.id}>
                     <td className="admin-campaign-name">{c.name}<span className="admin-campaign-id">{c.id}</span></td>
                     <td>
-                      <button className="btn-danger" onClick={() => erase(c.id, 'chat')}>Erase</button>
+                      <Button variant="outline" color="danger" onClick={() => erase(c.id, 'chat')}>Erase</Button>
                       {feedback[`${c.id}:chat`] && <span className="admin-feedback">{feedback[`${c.id}:chat`]}</span>}
                     </td>
                     <td>
-                      <button className="btn-danger" onClick={() => erase(c.id, 'sessions')}>Erase</button>
+                      <Button variant="outline" color="danger" onClick={() => erase(c.id, 'sessions')}>Erase</Button>
                       {feedback[`${c.id}:sessions`] && <span className="admin-feedback">{feedback[`${c.id}:sessions`]}</span>}
                     </td>
                     <td>
-                      <button className="btn-secondary" onClick={() => setSaveAdventureCampaign(c)}>Save</button>
+                      <Button variant="outline" color="secondary" onClick={() => setSaveAdventureCampaign(c)}>Save</Button>
                     </td>
                     <td>
-                      <button className="btn-danger" onClick={() => setDeleteCampaignTarget(c)}>Delete</button>
+                      <Button variant="outline" color="danger" onClick={() => setDeleteCampaignTarget(c)}>Delete</Button>
                     </td>
                   </tr>
                 ))}

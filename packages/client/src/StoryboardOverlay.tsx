@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { StoryboardQueuePayload } from 'shared';
+import { Button } from './components/Button/Button.tsx';
 
 interface Props {
   queue: StoryboardQueuePayload;
@@ -92,7 +93,7 @@ export default function StoryboardOverlay({ queue, onDone, skippable = true }: P
       <img key={`${charIndex}-${slideIndex}`} src={`${API}${slide.url}`} alt="" className="storyboard-slide" />
       <p key={`caption-${charIndex}-${slideIndex}`} className="storyboard-caption">{slide.caption}</p>
       <div className={`storyboard-curtain${phase === 'visible' && !done ? ' storyboard-curtain--lifted' : ''}`} />
-      {skippable && <button type="button" className="storyboard-skip" onClick={handleSkip}>Skip</button>}
+      {skippable && <Button variant="ghost" className="storyboard-skip" onClick={handleSkip}>Skip</Button>}
     </div>
   );
 }

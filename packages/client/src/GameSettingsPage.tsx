@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { HouseRules } from 'shared';
 import { DEFAULT_HOUSE_RULES } from 'shared';
+import { Button } from './components/Button/Button.tsx';
 import './app.css';
 
 interface Props { campaignId: string }
@@ -43,7 +44,7 @@ export default function GameSettingsPage({ campaignId }: Props) {
       <div className="home-atmosphere" aria-hidden="true" />
       <div className="game-settings-page">
         <div className="settings-sidebar-header">
-          <a className="btn-secondary" href={`/${campaignId}/lobby`}>&larr; Back</a>
+          <Button variant="outline" color="secondary" navigate={`/${campaignId}/lobby`}>&larr; Back</Button>
           <h2 className="settings-title">Game Settings</h2>
         </div>
 
@@ -72,13 +73,14 @@ export default function GameSettingsPage({ campaignId }: Props) {
                     : 'Off — a critical hit rolls the damage dice a second time, as normal.'}
                 </span>
               </div>
-              <button
+              <Button
+                variant="ghost"
                 className={`settings-toggle ${rules.perkinsCrit ? 'settings-toggle--on' : ''}`}
                 onClick={() => setRules(r => ({ ...r, perkinsCrit: !r.perkinsCrit }))}
                 aria-pressed={rules.perkinsCrit}
               >
                 <span className="settings-toggle-thumb" />
-              </button>
+              </Button>
             </div>
             <div className="settings-toggle-row">
               <div className="settings-toggle-text">
@@ -89,13 +91,14 @@ export default function GameSettingsPage({ campaignId }: Props) {
                     : 'Off — leaving a hostile creature’s reach provokes an Opportunity Attack, as normal.'}
                 </span>
               </div>
-              <button
+              <Button
+                variant="ghost"
                 className={`settings-toggle ${rules.noAttacksOfOpportunity ? 'settings-toggle--on' : ''}`}
                 onClick={() => setRules(r => ({ ...r, noAttacksOfOpportunity: !r.noAttacksOfOpportunity }))}
                 aria-pressed={rules.noAttacksOfOpportunity}
               >
                 <span className="settings-toggle-thumb" />
-              </button>
+              </Button>
             </div>
             <div className="settings-toggle-row">
               <div className="settings-toggle-text">
@@ -143,20 +146,21 @@ export default function GameSettingsPage({ campaignId }: Props) {
                   Shows each reaction's roll/AC math (e.g. what an enemy rolled) by default, instead of just the prompt.
                 </span>
               </div>
-              <button
+              <Button
+                variant="ghost"
                 className={`settings-toggle ${rules.reactionShowDetailsByDefault ? 'settings-toggle--on' : ''}`}
                 onClick={() => setRules(r => ({ ...r, reactionShowDetailsByDefault: !r.reactionShowDetailsByDefault }))}
                 aria-pressed={rules.reactionShowDetailsByDefault}
               >
                 <span className="settings-toggle-thumb" />
-              </button>
+              </Button>
             </div>
           </section>
         </div>
 
         <div className="settings-footer">
-          <a className="btn-secondary" href={`/${campaignId}/lobby`}>Cancel</a>
-          <button className="btn-primary" onClick={() => void handleApply()}>Apply</button>
+          <Button variant="outline" color="secondary" navigate={`/${campaignId}/lobby`}>Cancel</Button>
+          <Button onClick={() => void handleApply()}>Apply</Button>
         </div>
       </div>
     </div>

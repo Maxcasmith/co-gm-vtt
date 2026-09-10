@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { StoryboardTestRecord } from 'shared';
+import { Button } from './components/Button/Button.tsx';
 
 interface Props {
   open: boolean;
@@ -109,7 +110,7 @@ export default function StoryboardTestModal({ open, password, record, onClose, o
     <div className="modal-overlay" onClick={dismissable ? onClose : undefined}>
       <dialog className="modal campaign-modal" open onClick={e => e.stopPropagation()}>
         {dismissable && (
-          <button className="sheet-close campaign-modal-close" onClick={onClose} aria-label="Close">×</button>
+          <Button variant="outline" color="secondary" className="sheet-close campaign-modal-close" onClick={onClose} aria-label="Close">×</Button>
         )}
 
         {step === 'form' && (
@@ -139,10 +140,10 @@ export default function StoryboardTestModal({ open, password, record, onClose, o
             </label>
 
             <div className="modal-actions">
-              <button className="btn-secondary" onClick={onClose}>Cancel</button>
-              <button className="btn-primary" onClick={() => void generate()} disabled={!name.trim() || !backstory.trim() || !portraitPreview}>
+              <Button variant="outline" color="secondary" onClick={onClose}>Cancel</Button>
+              <Button onClick={() => void generate()} disabled={!name.trim() || !backstory.trim() || !portraitPreview}>
                 Generate
-              </button>
+              </Button>
             </div>
           </>
         )}
@@ -159,9 +160,9 @@ export default function StoryboardTestModal({ open, password, record, onClose, o
             {error && <p className="modal-error">{error}</p>}
             {done && <p className="modal-success">Storyboard is ready to play.</p>}
             <div className="modal-actions">
-              <button className="btn-primary" onClick={onClose} disabled={!done && !error}>
+              <Button onClick={onClose} disabled={!done && !error}>
                 {done ? 'Done' : error ? 'Close' : 'Generating…'}
-              </button>
+              </Button>
             </div>
           </>
         )}

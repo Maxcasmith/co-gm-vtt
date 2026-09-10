@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { DungeonMaterialSpec } from 'shared';
+import { Button } from './components/Button/Button.tsx';
 
 interface Props {
   open: boolean;
@@ -114,7 +115,7 @@ export default function GenerateTilesetModal({ open, password, onClose, onGenera
     <div className="modal-overlay" onClick={dismissable ? handleClose : undefined}>
       <dialog className="modal campaign-modal" open onClick={e => e.stopPropagation()}>
         {dismissable && (
-          <button className="sheet-close campaign-modal-close" onClick={handleClose} aria-label="Close">×</button>
+          <Button variant="outline" color="secondary" className="sheet-close campaign-modal-close" onClick={handleClose} aria-label="Close">×</Button>
         )}
 
         {step === 'form' && (
@@ -158,16 +159,16 @@ export default function GenerateTilesetModal({ open, password, onClose, onGenera
                   onChange={e => updateMaterial(i, 'description', e.target.value)}
                   placeholder="texture description, e.g. weathered oak planks, dark stain"
                 />
-                <button className="btn-secondary material-row-remove" onClick={() => removeMaterial(i)} disabled={materials.length <= 1} aria-label="Remove material">×</button>
+                <Button variant="outline" color="secondary" className="material-row-remove" onClick={() => removeMaterial(i)} disabled={materials.length <= 1} aria-label="Remove material">×</Button>
               </div>
             ))}
-            <button className="btn-secondary" onClick={addMaterial} disabled={materials.length >= MAX_MATERIALS}>+ Add material</button>
+            <Button variant="outline" color="secondary" onClick={addMaterial} disabled={materials.length >= MAX_MATERIALS}>+ Add material</Button>
 
             <div className="modal-actions">
-              <button className="btn-secondary" onClick={handleClose}>Cancel</button>
-              <button className="btn-primary" onClick={() => void generate()} disabled={!title.trim() || !theme.trim() || !validMaterials.length}>
+              <Button variant="outline" color="secondary" onClick={handleClose}>Cancel</Button>
+              <Button onClick={() => void generate()} disabled={!title.trim() || !theme.trim() || !validMaterials.length}>
                 Generate
-              </button>
+              </Button>
             </div>
           </>
         )}
@@ -184,9 +185,9 @@ export default function GenerateTilesetModal({ open, password, onClose, onGenera
             {error && <p className="modal-error">{error}</p>}
             {done && <p className="modal-success">Tileset is ready to use.</p>}
             <div className="modal-actions">
-              <button className="btn-primary" onClick={handleClose} disabled={!done && !error}>
+              <Button onClick={handleClose} disabled={!done && !error}>
                 {done ? 'Done' : error ? 'Close' : 'Generating…'}
-              </button>
+              </Button>
             </div>
           </>
         )}

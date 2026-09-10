@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Character, Item, Weapon, Armor, Consumable } from "shared";
 import { isWeapon, isArmor, isConsumable, isAmmunition } from "shared";
+import { Button } from "../components/Button/Button.tsx";
 import { dispatch } from "../events.ts";
 import ItemIcon from "../ItemIcon.tsx";
 import { ActionCostDot } from "./helpers.tsx";
@@ -365,12 +366,13 @@ export function InventoryTab({
                     )}
                   </div>
                 </div>
-                <button
+                <Button
+                  variant="ghost"
                   className="sheet-spell-detail-close"
                   onClick={() => setSelected(null)}
                 >
                   ×
-                </button>
+                </Button>
               </div>
               {selected.description && (
                 <p className="sheet-spell-detail-text">
@@ -378,7 +380,8 @@ export function InventoryTab({
                 </p>
               )}
               {(weapon || armor) && (
-                <button
+                <Button
+                  variant="ghost"
                   className={`sheet-spell-cast-btn${!sessionActive ? " sheet-spell-cast-btn--disabled" : ""}`}
                   disabled={!sessionActive}
                   onClick={() =>
@@ -386,16 +389,17 @@ export function InventoryTab({
                   }
                 >
                   {equipped ? "Unequip" : "Equip"}
-                </button>
+                </Button>
               )}
               {consumable && (
-                <button
+                <Button
+                  variant="ghost"
                   className={`sheet-spell-cast-btn${!sessionActive ? " sheet-spell-cast-btn--disabled" : ""}`}
                   disabled={!sessionActive}
                   onClick={() => handleConsumableClick(consumable)}
                 >
                   Use
-                </button>
+                </Button>
               )}
             </div>
           );

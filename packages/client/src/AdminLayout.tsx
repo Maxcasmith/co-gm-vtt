@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from './components/Button/Button.tsx';
 import SettingsSidebar from './SettingsSidebar.tsx';
 import AdminHomePage from './AdminHomePage.tsx';
 import AdminCampaignsPage from './AdminCampaignsPage.tsx';
@@ -63,7 +64,7 @@ export default function AdminLayout({ initialTab }: { initialTab: AdminTab }) {
             onKeyDown={e => e.key === 'Enter' && handleAuth()}
             autoFocus
           />
-          <button className="btn-primary" onClick={handleAuth}>Enter</button>
+          <Button onClick={handleAuth}>Enter</Button>
           <a className="admin-gate-back" href="/">← Back home</a>
         </div>
       </div>

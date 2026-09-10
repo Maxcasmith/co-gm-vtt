@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Quest } from 'shared';
+import { Button } from './components/Button/Button.tsx';
 
 interface Props {
   open: boolean;
@@ -48,7 +49,7 @@ export default function QuestLog({ open, onClose, quests, act }: Props) {
           <h2 className="journal-title">Quest Log</h2>
           <div className="quest-header-right">
             <span className="quest-act-badge">Act {act}</span>
-            <button className="sheet-close" onClick={onClose} aria-label="Close">×</button>
+            <Button variant="outline" color="secondary" className="sheet-close" onClick={onClose} aria-label="Close">×</Button>
           </div>
         </div>
 
@@ -60,11 +61,11 @@ export default function QuestLog({ open, onClose, quests, act }: Props) {
           ) : (
             visible.map(quest => (
               <div key={quest.id} className={`quest-item quest-item--${quest.status}`}>
-                <button className="quest-header-btn" onClick={() => toggle(quest.id)}>
+                <Button variant="ghost" className="quest-header-btn" onClick={() => toggle(quest.id)}>
                   <span className={`quest-dot quest-dot--${quest.status}`} />
                   <span className="quest-name">{quest.name}</span>
                   <span className="quest-chevron">{expanded.has(quest.id) ? '▲' : '▼'}</span>
-                </button>
+                </Button>
                 {expanded.has(quest.id) && (
                   <div className="quest-detail">
                     {(() => {

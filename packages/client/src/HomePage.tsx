@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { Campaign, Character } from 'shared';
 import { useAppMeta } from './AppMetaContext.tsx';
+import { Button } from './components/Button/Button.tsx';
+import HomePageShell from './HomePageShell.tsx';
 import './app.css';
 
 interface Game {
@@ -40,26 +42,15 @@ export default function HomePage() {
   useEffect(() => { fetchCampaigns(); }, []);
 
   return (
-      <div className="home">
-        <div className="home-atmosphere" aria-hidden="true" />
-        <header className="home-header">
-          <div className="home-header-titles">
-            <span className="home-eyebrow">The Chronicle Awaits</span>
-            <h1 className="home-title">
-              <span className="home-title-flourish" aria-hidden="true" />
-              Campaigns
-              <span className="home-title-flourish" aria-hidden="true" />
-            </h1>
-            <p className="home-tagline">Choose your table and step back into the story.</p>
-          </div>
-          <div className="home-header-actions">
-            {platform === 'desktop' && <a className="btn-secondary" href="/admin">Admin</a>}
-          </div>
-        </header>
-
+      <HomePageShell
+        eyebrow="The Chronicle Awaits"
+        title="Campaigns"
+        tagline="Choose your table and step back into the story."
+        actions={platform === 'desktop' && <Button variant="outline" color="secondary" navigate="/admin">Admin</Button>}
+      >
         <div className="home-create-cta">
-          <a className="btn-primary" href="/create">+ Create New Game</a>
-          <a className="btn-secondary" href="/saved-adventures">My Saved Adventures</a>
+          <Button navigate="/create">+ Create New Game</Button>
+          <Button variant="outline" color="secondary" navigate="/saved-adventures">My Saved Adventures</Button>
         </div>
 
         {games === null && (
@@ -129,6 +120,6 @@ export default function HomePage() {
             </div>
           </section>
         )}
-      </div>
+      </HomePageShell>
   );
 }

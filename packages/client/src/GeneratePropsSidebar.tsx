@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Button } from './components/Button/Button.tsx';
 
 interface PropRow {
   slug: string;
@@ -170,12 +171,12 @@ export default function GeneratePropsSidebar({ open, password, onClose, onGenera
                     onChange={e => updateRow(i, 'description', e.target.value)}
                     placeholder="visual description, e.g. a long wooden table, water-stained, benches on either side"
                   />
-                  <button className="btn-danger prop-row-remove" onClick={() => removeRow(i)} disabled={rows.length <= 1}>
+                  <Button variant="outline" color="danger" className="prop-row-remove" onClick={() => removeRow(i)} disabled={rows.length <= 1}>
                     Remove
-                  </button>
+                  </Button>
                 </div>
               ))}
-              <button className="btn-secondary" onClick={addRow} disabled={rows.length >= MAX_PROPS}>+ Add prop</button>
+              <Button variant="outline" color="secondary" onClick={addRow} disabled={rows.length >= MAX_PROPS}>+ Add prop</Button>
             </>
           )}
 
@@ -194,16 +195,16 @@ export default function GeneratePropsSidebar({ open, password, onClose, onGenera
         <div className="props-sidebar-footer">
           {step === 'form' && (
             <>
-              <button className="btn-secondary" onClick={handleClose}>Cancel</button>
-              <button className="btn-primary" onClick={() => void generate()} disabled={!validRows.length}>
+              <Button variant="outline" color="secondary" onClick={handleClose}>Cancel</Button>
+              <Button onClick={() => void generate()} disabled={!validRows.length}>
                 Generate
-              </button>
+              </Button>
             </>
           )}
           {step === 'generating' && (
-            <button className="btn-primary" onClick={handleClose} disabled={!done && !error}>
+            <Button onClick={handleClose} disabled={!done && !error}>
               {done ? 'Done' : error ? 'Close' : 'Generating…'}
-            </button>
+            </Button>
           )}
         </div>
       </aside>

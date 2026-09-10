@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Button } from '../components/Button/Button.tsx';
 
 interface Props {
   file: File | null;
@@ -134,8 +135,8 @@ export default function ImageCropModal({ file, onCancel, onConfirm }: Props) {
         />
 
         <div className="modal-actions">
-          <button className="btn-secondary" onClick={onCancel}>Cancel</button>
-          <button className="btn-primary" onClick={handleConfirm} disabled={!ready}>Use Photo</button>
+          <Button variant="outline" color="secondary" onClick={onCancel}>Cancel</Button>
+          <Button onClick={handleConfirm} disabled={!ready}>Use Photo</Button>
         </div>
       </dialog>
     </div>

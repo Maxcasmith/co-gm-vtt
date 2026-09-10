@@ -1,3 +1,5 @@
+import { Button } from './components/Button/Button.tsx';
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -19,7 +21,7 @@ export default function ShortcutsOverlay({ open, onClose }: Props) {
       <div className="shortcuts-panel" onClick={e => e.stopPropagation()}>
         <div className="shortcuts-header">
           <span className="shortcuts-title">Keyboard Shortcuts</span>
-          <button className="sheet-close" onClick={onClose} aria-label="Close">×</button>
+          <Button variant="outline" color="secondary" className="sheet-close" onClick={onClose} aria-label="Close">×</Button>
         </div>
         <ul className="shortcuts-list">
           {SHORTCUTS.map(s => (

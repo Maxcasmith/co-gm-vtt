@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Button } from './components/Button/Button.tsx';
 import CreatureDetailModal from './CreatureDetailModal.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
@@ -94,24 +95,24 @@ export default function BestiaryTab({ password }: BestiaryTabProps) {
         return (
           <div key={letter} className="tiles-accordion-item">
             <div className="tiles-accordion-header">
-              <button className="tiles-accordion-toggle" onClick={() => toggle(letter)} aria-expanded={isOpen}>
+              <Button variant="ghost" className="tiles-accordion-toggle" onClick={() => toggle(letter)} aria-expanded={isOpen}>
                 <span className="tiles-accordion-caret">{isOpen ? '▾' : '▸'}</span>
                 <span className="tiles-accordion-name">{letter}</span>
                 <span className="admin-module-counts">{group.length} creature{group.length === 1 ? '' : 's'}</span>
-              </button>
+              </Button>
             </div>
             {isOpen && (
               <div className="tiles-accordion-body">
                 <div className="tile-grid">
                   {group.map(c => (
-                    <button key={c.slug} className="tile-card tile-card-button" onClick={() => selectCreature(c)}>
+                    <Button key={c.slug} variant="ghost" className="tile-card tile-card-button" onClick={() => selectCreature(c)}>
                       {c.portraitSrc ? (
                         <img src={`${API}${c.portraitSrc}`} alt={c.name} title={c.name} className="tile-img" />
                       ) : (
                         <div className="tile-img tile-img--placeholder" title={c.name} aria-label={c.name}>{c.name[0]}</div>
                       )}
                       <span className="tile-label">{c.name}</span>
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>

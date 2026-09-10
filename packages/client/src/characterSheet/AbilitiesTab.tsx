@@ -1,6 +1,7 @@
 import type { Character, SenseKind } from "shared";
 import { effectiveWeaponProfs, effectiveArmorTraining, getSenses } from "shared";
 import { useState } from "react";
+import { Button } from "../components/Button/Button.tsx";
 import { dispatch } from "../events.ts";
 import { STAT_NAMES, CLASS_SAVING_THROWS, BACKGROUND_SKILLS, SKILLS } from "../character-creation/srd.ts";
 import { mod, modNum, profBonusForLevel } from "./helpers.tsx";
@@ -114,7 +115,8 @@ export function AbilitiesTab({ character }: { character: Character }) {
             );
           })}
 
-          <button
+          <Button
+            variant="ghost"
             className="sheet-save-row sheet-save-row--clickable"
             onClick={rollDeathSave}
             title="Roll death saving throw"
@@ -122,7 +124,7 @@ export function AbilitiesTab({ character }: { character: Character }) {
             <span className="sheet-save-dot" />
             <span className="sheet-save-label">DEATH</span>
             <span className="sheet-save-val">d20</span>
-          </button>
+          </Button>
 
           <div className="sheet-death-saves">
             <progress

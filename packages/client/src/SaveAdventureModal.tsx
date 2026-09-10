@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Campaign } from 'shared';
+import { Button } from './components/Button/Button.tsx';
 
 interface Props {
   open: boolean;
@@ -83,13 +84,13 @@ export default function SaveAdventureModal({ open, campaign, onClose, onSaved }:
 
         <div className="modal-actions">
           {done || error ? (
-            <button className="btn-primary" onClick={handleClose}>Done</button>
+            <Button onClick={handleClose}>Done</Button>
           ) : (
             <>
-              <button className="btn-secondary" onClick={handleClose} disabled={saving}>Cancel</button>
-              <button className="btn-primary" onClick={() => void handleSave()} disabled={saving}>
+              <Button variant="outline" color="secondary" onClick={handleClose} disabled={saving}>Cancel</Button>
+              <Button onClick={() => void handleSave()} disabled={saving}>
                 {saving ? 'Saving…' : 'Save Adventure'}
-              </button>
+              </Button>
             </>
           )}
         </div>

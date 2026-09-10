@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Character, CharacterClassLevel, HouseRules } from "shared";
 import { hasOriginFeat, hpBonusPerLevel, spellSlotsForCharacter } from "shared";
 import { CLASSES, CLASS_FEATURES, HIT_DICE, meetsMulticlassPrereq } from "../character-creation/srd.ts";
+import { Button } from "../components/Button/Button.tsx";
 
 interface Props {
   character: Character;
@@ -92,9 +93,9 @@ export function LevelUpScreen({
               {character.name} · {classes.map(c => `${c.class} ${c.level}`).join(" / ")} · Level {fromLevel} → {toLevel}
             </p>
           </div>
-          <button className="sheet-close" onClick={onClose} aria-label="Close">
+          <Button variant="outline" color="secondary" className="sheet-close" onClick={onClose} aria-label="Close">
             ×
-          </button>
+          </Button>
         </div>
 
         <div className="sheet-content level-up-content">
@@ -180,15 +181,16 @@ export function LevelUpScreen({
         </div>
 
         <div className="level-up-actions">
-          <button className="sheet-rest-btn" onClick={onClose}>
+          <Button variant="ghost" className="sheet-rest-btn" onClick={onClose}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
             className="sheet-levelup-btn sheet-levelup-btn--ready"
             onClick={() => onConfirm(selectedClass, hpGain)}
           >
             Confirm
-          </button>
+          </Button>
         </div>
       </div>
     </div>

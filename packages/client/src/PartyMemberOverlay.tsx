@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Character, CharacterStoryboard, StoryboardQueuePayload } from 'shared';
 import { API, mod } from './characterSheet/helpers.tsx';
+import { Button } from './components/Button/Button.tsx';
 import { STAT_NAMES } from './character-creation/srd.ts';
 import StoryboardOverlay from './StoryboardOverlay.tsx';
 
@@ -61,9 +62,9 @@ export default function PartyMemberOverlay({ characterId, campaignId, onClose }:
             </p>
           </div>
           {storyboard && (
-            <button className="btn-play" onClick={() => setPlaying(true)}>▶ Play Backstory</button>
+            <Button variant="outline" onClick={() => setPlaying(true)}>▶ Play Backstory</Button>
           )}
-          <button className="sheet-close" onClick={onClose} aria-label="Close">×</button>
+          <Button variant="outline" color="secondary" className="sheet-close" onClick={onClose} aria-label="Close">×</Button>
         </div>
 
         <div className="sheet-content">

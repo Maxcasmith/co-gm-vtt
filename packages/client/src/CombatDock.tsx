@@ -3,6 +3,7 @@ import type { Character, Spell, Weapon } from 'shared';
 import { actionCostFromCastingTime, isWeapon, hasOriginFeat, ABILITY_DEFS, RESOURCE_DEFS, resourceCurrent, resourceMax } from 'shared';
 import { dispatch, on } from './events.ts';
 import type { TargetingStartPayload } from './events.ts';
+import { Button } from './components/Button/Button.tsx';
 import ItemIcon from './ItemIcon.tsx';
 import './app.css';
 
@@ -367,75 +368,80 @@ export default function CombatDock({ character, combatActive, movementRemaining,
         allyPicker ? (
           <div className="combat-dock-alert-picker">
             {alertAllies.map(name => (
-              <button key={name} className="combat-dock-luck-toggle" onClick={() => handleAlertSwap(name)}>
+              <Button key={name} variant="ghost" className="combat-dock-luck-toggle" onClick={() => handleAlertSwap(name)}>
                 Swap with {name}
-              </button>
+              </Button>
             ))}
-            <button className="combat-dock-luck-toggle" onClick={() => setAllyPicker(false)}>Cancel</button>
+            <Button variant="ghost" className="combat-dock-luck-toggle" onClick={() => setAllyPicker(false)}>Cancel</Button>
           </div>
         ) : (
-          <button
+          <Button
+            variant="ghost"
             className="combat-dock-luck-toggle"
             title="Swap your rolled Initiative with a willing ally's — once per combat"
             onClick={() => setAllyPicker(true)}
           >
             Swap Initiative
-          </button>
+          </Button>
         )
       )}
       {canUseHealerKit && (
         healerPicker ? (
           <div className="combat-dock-alert-picker">
             {healerTargets.map(t => (
-              <button key={t.id} className="combat-dock-luck-toggle" onClick={() => handleHealerKit(t.id)}>
+              <Button key={t.id} variant="ghost" className="combat-dock-luck-toggle" onClick={() => handleHealerKit(t.id)}>
                 Tend {t.name === character.name ? 'self' : t.name}
-              </button>
+              </Button>
             ))}
-            <button className="combat-dock-luck-toggle" onClick={() => setHealerPicker(false)}>Cancel</button>
+            <Button variant="ghost" className="combat-dock-luck-toggle" onClick={() => setHealerPicker(false)}>Cancel</Button>
           </div>
         ) : (
-          <button
+          <Button
+            variant="ghost"
             data-action-cost="action"
             className="combat-dock-weapon-btn"
             title={`Healer's Kit (${healersKit?.quantity}) — expend a use to tend a creature within 5ft`}
             onClick={() => setHealerPicker(true)}
           >
             <ItemIcon className="combat-dock-weapon-icon" name="Healer's Kit" />
-          </button>
+          </Button>
         )
       )}
       {character.heroicInspiration && (
-        <button
+        <Button
+          variant="ghost"
           className={`combat-dock-luck-toggle${inspirationArmed ? ' combat-dock-luck-toggle--active' : ''}`}
           title="Spend Heroic Inspiration on your next attack roll for Advantage"
           onClick={() => setInspirationArmed(prev => !prev)}
         >
           Inspiration{inspirationArmed ? ' — armed' : ''}
-        </button>
+        </Button>
       )}
       {(equippedWeapons.length > 0 || offhandWeapon || availableAbilities.length > 0 || huntersMark) && (
         <div className="combat-dock-weapons">
           {equippedWeapons.map(weapon => (
-            <button
+            <Button
               key={weapon.id}
+              variant="ghost"
               data-action-cost="action"
               className={`combat-dock-weapon-btn${!weaponsUsable ? ' combat-dock-weapon-btn--spent' : ''}${targeting?.kind === 'weapon' && targeting.weapon.id === weapon.id ? ' combat-dock-weapon-btn--active' : ''}`}
               title={weapon.name}
               onClick={() => handleWeaponClick(weapon)}
             >
               <ItemIcon className="combat-dock-weapon-icon" name={weapon.name} iconPath={weapon.iconPath} />
-            </button>
+            </Button>
           ))}
           {offhandWeapon && (
-            <button
+            <Button
               key={`offhand:${offhandWeapon.id}`}
+              variant="ghost"
               data-action-cost="bonusAction"
               className={`combat-dock-weapon-btn${(actionsDisabled || !resources.bonusAction) ? ' combat-dock-weapon-btn--spent' : ''}${targeting?.kind === 'weapon' && targeting.isOffhand ? ' combat-dock-weapon-btn--active' : ''}`}
               title={`${offhandWeapon.name} (off-hand)`}
               onClick={() => handleOffhandClick(offhandWeapon)}
             >
               <ItemIcon className="combat-dock-weapon-icon" name={offhandWeapon.name} iconPath={offhandWeapon.iconPath} />
-            </button>
+            </Button>
           )}
           {availableAbilities.map(([key, ability]) => (
             <div className="combat-dock-ability-group" key={key}>
@@ -458,27 +464,29 @@ export default function CombatDock({ character, combatActive, movementRemaining,
                   onChange={e => setChosenAmounts(prev => ({ ...prev, [key]: Math.max(1, Math.min(Number(e.target.value) || 1, resourceCurrent(character, ability.resourceKey))) }))}
                 />
               )}
-              <button
+              <Button
+                variant="ghost"
                 data-action-cost={ability.actionCost}
                 className={`combat-dock-ability-btn${(actionsDisabled || !resources[ability.actionCost] || resourceCurrent(character, ability.resourceKey) <= 0) ? ' combat-dock-ability-btn--spent' : ''}${targeting?.kind === 'ability' && targeting.abilityKey === key ? ' combat-dock-ability-btn--active' : ''}`}
                 title={ability.label}
                 onClick={() => handleAbilityClick(key, ability)}
               >
                 <ItemIcon className="combat-dock-weapon-icon" name={ability.label} alt={ability.label} />
-              </button>
+              </Button>
               <span className="combat-dock-ability-uses">{resourceCurrent(character, ability.resourceKey)}/{resourceMax(character, ability.resourceKey)}</span>
             </div>
           ))}
           {huntersMark && (
             <div className="combat-dock-ability-group">
-              <button
+              <Button
+                variant="ghost"
                 data-action-cost={huntersMarkCost}
                 className={`combat-dock-ability-btn${(actionsDisabled || !resources[huntersMarkCost!]) ? ' combat-dock-ability-btn--spent' : ''}${targeting?.kind === 'spell' && targeting.spell.name === huntersMark.name ? ' combat-dock-ability-btn--active' : ''}`}
                 title={huntersMarkActive ? 'More Favored Enemy' : "Hunter's Mark (Favored Enemy)"}
                 onClick={handleCastHuntersMark}
               >
                 <ItemIcon className="combat-dock-weapon-icon" name="Hunter's Mark" alt="Hunter's Mark" />
-              </button>
+              </Button>
               <span className="combat-dock-ability-uses">{resourceCurrent(character, 'favoredEnemy')}/{resourceMax(character, 'favoredEnemy')}</span>
             </div>
           )}
@@ -498,9 +506,9 @@ export default function CombatDock({ character, combatActive, movementRemaining,
         <span className="combat-dock-speed">{movementRemaining}ft</span>
         {elevationFt > 0 && (
           <span className="combat-dock-elevation" title="Height off the ground">
-            {isFlying && <button type="button" onClick={() => handleElevationChange(-10)} disabled={elevationFt <= 0}>-</button>}
+            {isFlying && <Button variant="ghost" onClick={() => handleElevationChange(-10)} disabled={elevationFt <= 0}>-</Button>}
             {elevationFt}ft ↑
-            {isFlying && <button type="button" onClick={() => handleElevationChange(10)}>+</button>}
+            {isFlying && <Button variant="ghost" onClick={() => handleElevationChange(10)}>+</Button>}
           </span>
         )}
       </div>
@@ -533,36 +541,39 @@ export default function CombatDock({ character, combatActive, movementRemaining,
 
       <div className={`combat-dock-actions${actionsDisabled ? ' combat-dock-actions--disabled' : ''}`}>
         {STANDARD_ACTIONS.map(action => (
-          <button
+          <Button
             key={action.key}
+            variant="ghost"
             className={`combat-action-btn combat-action-btn--standard${(actionsDisabled || !resources.action) ? ' combat-action-btn--spent' : ''}`}
             onClick={() => handleStandardAction(action)}
           >
             {action.label}
             <span className="combat-action-btn-cost" />
-          </button>
+          </Button>
         ))}
         {isRestrained && (
-          <button
+          <Button
+            variant="ghost"
             className={`combat-action-btn combat-action-btn--standard${(actionsDisabled || !resources.action) ? ' combat-action-btn--spent' : ''}`}
             onClick={handleEscapeAttempt}
           >
             Escape
             <span className="combat-action-btn-cost" />
-          </button>
+          </Button>
         )}
         {activeBuffs.filter((kind): kind is keyof typeof ACTION_UNLOCKS => kind in ACTION_UNLOCKS).map(kind => {
           const unlock = ACTION_UNLOCKS[kind];
           const disabled = actionsDisabled || (unlock.cost === 'bonusAction' ? !resources.bonusAction : movementRemaining < 10);
           return (
-            <button
+            <Button
               key={kind}
+              variant="ghost"
               className={`combat-action-btn combat-action-btn--standard${disabled ? ' combat-action-btn--spent' : ''}`}
               onClick={() => handleActionUnlock(kind)}
             >
               {unlock.label}
               <span className="combat-action-btn-cost" />
-            </button>
+            </Button>
           );
         })}
       </div>
@@ -577,13 +588,14 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     </div>
     </div>
 
-    <button
+    <Button
+      variant="ghost"
       className={`combat-end-turn-btn${!isMyTurn ? ' combat-end-turn-btn--waiting' : ''}`}
       onKeyDown={e => e.code === 'Space' && e.preventDefault()}
       onClick={() => isMyTurn && dispatch('vtt:combat:turn:end', {})}
     >
       {isMyTurn ? 'End Turn' : 'Waiting…'}
-    </button>
+    </Button>
   </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CombatLogPayload } from './events.ts';
 import { on } from './events.ts';
+import { Button } from './components/Button/Button.tsx';
 
 interface Props {
   open: boolean;
@@ -107,7 +108,7 @@ export default function CombatLogOverlay({ open, onClose }: Props) {
       <div className="journal-panel combat-log-panel">
         <div className="journal-header">
           <h2 className="journal-title">Combat Log</h2>
-          <button className="sheet-close" onClick={onClose} aria-label="Close">×</button>
+          <Button variant="outline" color="secondary" className="sheet-close" onClick={onClose} aria-label="Close">×</Button>
         </div>
 
         <div className="journal-messages combat-log-messages" ref={scrollRef}>

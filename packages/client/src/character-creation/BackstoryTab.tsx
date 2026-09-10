@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from '../components/Button/Button.tsx';
 import { useCharacter } from './CharacterContext.tsx';
 import CharacterSheet from './CharacterSheet.tsx';
 
@@ -81,12 +82,12 @@ export default function BackstoryTab({ campaignId }: { campaignId: string }) {
             rows={10}
           />
           <div className="finished-create-row">
-            <button className="btn-secondary" onClick={generateBackstory} disabled={generating}>
+            <Button variant="outline" color="secondary" onClick={generateBackstory} disabled={generating}>
               {generating ? 'Generating…' : 'Generate Backstory From World'}
-            </button>
-            <button className="btn-secondary" onClick={checkConcept} disabled={checking || !c.backstory.trim()}>
+            </Button>
+            <Button variant="outline" color="secondary" onClick={checkConcept} disabled={checking || !c.backstory.trim()}>
               {checking ? 'Checking…' : 'Check Concept Against World Lore'}
-            </button>
+            </Button>
           </div>
           {generateError && <p className="modal-error">{generateError}</p>}
           {checkError && <p className="modal-error">{checkError}</p>}

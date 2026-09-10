@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { AiFeature, AiWorkflow, ModelTier, StoryProvider, ReasoningEffort } from 'shared';
+import { Button } from './components/Button/Button.tsx';
 import { STORY_PROVIDERS } from './SettingsSidebar.tsx';
 
 interface Props {
@@ -293,7 +294,7 @@ export default function ConfigureAiWorkflowsModal({ open, workflows, onCancel, o
             onChange={e => updateSelected(w => ({ ...w, name: e.target.value }))}
             placeholder="Workflow name"
           />
-          <button type="button" className="btn-secondary" onClick={handleNewWorkflow}>New Workflow</button>
+          <Button variant="outline" color="secondary" onClick={handleNewWorkflow}>New Workflow</Button>
         </div>
 
         {selected && (
@@ -301,12 +302,12 @@ export default function ConfigureAiWorkflowsModal({ open, workflows, onCancel, o
             <div className="workflow-status-row">
               <span className={`workflow-pip ${selected.enabled ? 'workflow-pip--active' : 'workflow-pip--disabled'}`} />
               <span className="workflow-status-label">{selected.enabled ? 'Active' : 'Disabled'}</span>
-              <button type="button" className="btn-secondary" onClick={toggleEnabled}>
+              <Button variant="outline" color="secondary" onClick={toggleEnabled}>
                 {selected.enabled ? 'Disable' : 'Enable'}
-              </button>
-              <button type="button" className="btn-secondary btn-delete-workflow" onClick={handleDeleteWorkflow}>
+              </Button>
+              <Button variant="outline" color="secondary" className="btn-delete-workflow" onClick={handleDeleteWorkflow}>
                 Delete
-              </button>
+              </Button>
             </div>
 
             <div className="chain-row">
@@ -315,7 +316,7 @@ export default function ConfigureAiWorkflowsModal({ open, workflows, onCancel, o
                 return (
                   <div className="chain-node-wrap" key={i}>
                     <div className={`chain-node chain-node--${statuses[i] ?? 'neutral'}`}>
-                      <button type="button" className="chain-node-remove" onClick={() => removeNode(i)}>×</button>
+                      <Button variant="ghost" className="chain-node-remove" onClick={() => removeNode(i)}>×</Button>
                       <select
                         className="modal-select chain-node-select"
                         value={node.provider}
@@ -354,16 +355,16 @@ export default function ConfigureAiWorkflowsModal({ open, workflows, onCancel, o
                 );
               })}
 
-              <button type="button" className="chain-node chain-node--empty" onClick={addNode}>
+              <Button variant="ghost" className="chain-node chain-node--empty" onClick={addNode}>
                 <span className="chain-node-plus">+</span>
                 <span>Add Model</span>
-              </button>
+              </Button>
             </div>
 
             <div className="chain-test-row">
-              <button className="btn-test" onClick={() => void handleTest()} disabled={testing || !selected.models.length}>
+              <Button variant="ghost" className="btn-test" onClick={() => void handleTest()} disabled={testing || !selected.models.length}>
                 {testing ? 'Testing…' : 'Test Connections'}
-              </button>
+              </Button>
               {summary && <span className="chain-summary">{summary}</span>}
             </div>
 
@@ -395,7 +396,7 @@ export default function ConfigureAiWorkflowsModal({ open, workflows, onCancel, o
         </div>
 
         <div className="modal-actions">
-          <button className="btn-primary" onClick={() => onSave(draft)}>Save</button>
+          <Button onClick={() => onSave(draft)}>Save</Button>
         </div>
       </dialog>
     </div>

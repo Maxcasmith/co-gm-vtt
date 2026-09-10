@@ -1,0 +1,218 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300&family=Cinzel:wght@400;600&display=swap');
+
+.parchment-shell {
+  --parchment: #f1dfbe;
+  --parchment-deep: #e6ce9e;
+  --parchment-line: #d0b382;
+  --ink: #2c2013;
+  --ink-muted: #6c5a3d;
+  --maroon: #7a2020;
+  --maroon-dark: #591515;
+
+  min-height: 100vh;
+  color: var(--ink);
+}
+
+.parchment-shell,
+.parchment-loader {
+  background-image:
+    radial-gradient(ellipse at center, transparent 55%, rgba(120, 72, 30, 0.4) 100%),
+    url("/textures/paper-noise.jpg"),
+    radial-gradient(ellipse 1100px 500px at 50% -8%, rgba(122, 32, 32, 0.06), transparent 60%);
+  background-color: var(--parchment);
+  background-repeat: no-repeat, repeat, no-repeat;
+  background-size: 100% 100%, 420px 594px, auto;
+  background-blend-mode: multiply, multiply, normal;
+}
+
+.parchment-content {
+  position: relative;
+}
+
+.parchment-loader {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  opacity: 1;
+  background-attachment: fixed;
+  transition: opacity 0.6s ease;
+}
+
+.parchment-loader--done {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── torn-parchment card treatment ──
+   clip-path also clips box-shadow, so the drop shadow lives on a separate, unclipped ::before
+   sitting behind the clipped, textured ::after. Apply to any position:relative box (the host
+   keeps its own layout/padding/color) that should read as a torn sheet of parchment. */
+.torn-parchment::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  z-index: -2;
+  border-radius: 4px;
+  box-shadow: 0 16px 26px -10px rgba(0, 0, 0, 0.4);
+}
+
+.torn-parchment::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(ellipse at center, transparent 50%, rgba(120, 72, 30, 0.3) 100%),
+    url("/textures/paper-noise.jpg") center / 420px 594px repeat,
+    rgba(241, 223, 190, 0.92);
+  background-blend-mode: multiply, multiply, normal;
+  box-shadow:
+    inset 0 0 8px rgba(120, 72, 30, 0.4),
+    inset 0 0 26px rgba(120, 72, 30, 0.18);
+  clip-path: polygon(
+    0% 1.3%,
+    1.3% 0%,
+    7.6% 0%, 8% 0.35%, 8.4% 0%, 16.7% 0%, 17% 0.6%, 17.3% 0%, 25.5% 0%, 26% 0.25%, 26.5% 0%,
+    35.6% .25%, 36% 1%, 36.4% .25%, 46.4% .25%, 47% .65%, 47.6% .25%, 56.7% .25%, 57% .8%, 57.3% .25%,
+    66.5% .25%, 67% .55%, 67.5% .25%, 78.6% .25%, 79% .9%, 79.4% .25%, 89.65% .25%, 90% .7%, 90.35% .25%,
+    98.7% .25%,
+    100% 1.3%,
+    100% 11.6%, 99.5% 12%, 100% 12.4%, 100% 27.5%, 99.7% 28%, 100% 28.5%,
+    99.8% 44.65%, 99.15% 45%, 99.8% 45.35%, 99.8% 62.5%, 99.4% 63%, 99.8% 63.5%,
+    99.8% 79.6%, 99.25% 80%, 99.8% 80.4%,
+    99.8% 98.7%,
+    98.7% 100%,
+    92.4% 100%, 92% 99.25%, 91.6% 100%, 84.5% 100%, 84% 99.55%, 83.5% 100%, 73.3% 100%, 73% 99%, 72.7% 100%,
+    63.6% 100%, 63% 99.4%, 62.4% 100%, 52.35% 99.55%, 52% 98.7%, 51.65% 99.55%, 41.5% 99.55%, 41% 99.15%, 40.5% 99.55%,
+    30.4% 99.55%, 30% 98.75%, 29.6% 99.55%, 20.3% 99.55%, 20% 98.55%, 19.7% 99.55%, 10.45% 99.55%, 10% 99.05%, 9.55% 99.55%,
+    1.3% 99.55%,
+    0% 98.7%,
+    0% 85.45%, 0.4% 85%, 0% 84.55%, 0% 68.35%, 0.6% 68%, 0% 67.65%,
+    0.2% 50.55%, 0.5% 50%, 0.2% 49.45%, 0.2% 33.4%, 0.9% 33%, 0.2% 32.6%,
+    0.2% 15.5%, 0.65% 15%, 0.2% 14.5%
+  );
+}
+
+/* ── skeleton shimmer ── */
+@keyframes parchment-skeleton-shimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position: 600px 0; }
+}
+
+.skeleton {
+  display: block;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--parchment-deep) 25%, var(--parchment-line) 50%, var(--parchment-deep) 75%);
+  background-size: 1200px 100%;
+  animation: parchment-skeleton-shimmer 1.6s infinite linear;
+}
+
+.parchment-container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 56px;
+  box-sizing: border-box;
+}
+
+/* ── shared top nav chrome ── */
+.parchment-nav {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding-top: 22px;
+  padding-bottom: 22px;
+}
+
+.parchment-nav--brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.parchment-nav--brand-icon {
+  width: 26px;
+  height: 26px;
+  color: var(--maroon);
+  flex-shrink: 0;
+}
+
+.parchment-nav--wordmark-group {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.parchment-nav--wordmark {
+  font-family: 'Cinzel', serif;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+
+.parchment-nav--tagline {
+  font-family: 'Cinzel', serif;
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.parchment-nav--links {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.parchment-nav--links a {
+  position: relative;
+  z-index: 0;
+  color: var(--ink);
+  text-decoration: none;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 15px;
+  padding: 2px 1px;
+  transition: color 0.2s;
+}
+
+.parchment-nav--links a:hover { color: var(--maroon); }
+
+.parchment-nav--links a.is-active {
+  color: #3a1414;
+  font-weight: 600;
+}
+
+.parchment-nav--links a.is-active::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: -10px;
+  right: -9px;
+  top: 42%;
+  height: 0.95em;
+  transform-origin: left center;
+  background: rgba(178, 59, 59, 0.45);
+  clip-path: polygon(1% 22%, 22% 2%, 52% 12%, 78% 0%, 99% 16%, 100% 52%, 97% 82%, 90% 100%, 62% 90%, 34% 100%, 12% 86%, 0% 58%);
+  mix-blend-mode: multiply;
+  animation: nav-highlight-sweep 0.32s ease-out forwards;
+}
+
+@keyframes nav-highlight-sweep {
+  from { transform: translateY(-50%) rotate(-3deg) scaleX(0); }
+  to   { transform: translateY(-50%) rotate(-3deg) scaleX(1); }
+}
+
+.parchment-nav--actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+@media (max-width: 560px) {
+  .parchment-container { padding: 0 24px; }
+  .parchment-nav--links { display: none; }
+}

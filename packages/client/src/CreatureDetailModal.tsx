@@ -1,3 +1,5 @@
+import { Button } from './components/Button/Button.tsx';
+
 interface EnemyAttack {
   name: string;
   bonus: number;
@@ -46,7 +48,7 @@ export default function CreatureDetailModal({ creature, onClose, onDelete, delet
   return (
     <div className="modal-overlay" onClick={onClose}>
       <dialog className="modal super-modal" open onClick={e => e.stopPropagation()}>
-        <button className="sheet-close campaign-modal-close" onClick={onClose} aria-label="Close">×</button>
+        <Button variant="outline" color="secondary" className="sheet-close campaign-modal-close" onClick={onClose} aria-label="Close">×</Button>
         <h2 className="modal-title">{creature.name}</h2>
 
         <div className="super-modal-body creature-detail-body">
@@ -111,8 +113,8 @@ export default function CreatureDetailModal({ creature, onClose, onDelete, delet
         {deleteError && <p className="modal-error">{deleteError}</p>}
 
         <div className="modal-actions">
-          <button className="btn-danger" onClick={onDelete}>Delete</button>
-          <button className="btn-primary" onClick={onClose}>Close</button>
+          <Button variant="outline" color="danger" onClick={onDelete}>Delete</Button>
+          <Button onClick={onClose}>Close</Button>
         </div>
       </dialog>
     </div>

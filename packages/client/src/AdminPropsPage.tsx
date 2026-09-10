@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from './components/Button/Button.tsx';
 import AdminPageShell from './AdminPageShell.tsx';
 import GeneratePropsSidebar from './GeneratePropsSidebar.tsx';
 import PreviewCellsModal from './PreviewCellsModal.tsx';
@@ -37,25 +38,28 @@ export default function AdminPropsPage({ password, onHome }: Props) {
         <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">🗝️</span>Dungeon Props</h2>
         <div className="admin-modules-header-actions">
           <PageSizeSelect value={propsPageSize} onChange={setPropsPageSize} />
-          <button className="btn-primary" onClick={() => setGeneratePropsOpen(true)}>+ Generate Test Batch</button>
+          <Button onClick={() => setGeneratePropsOpen(true)}>+ Generate Test Batch</Button>
         </div>
       </div>
 
       {propsSources.length > 0 && (
-        <div className="tile-grid">
-          {propsSources.map(url => (
-            <div key={url} className="tile-source">
-              <img
-                src={`${API}${url}`}
-                alt="Prop source atlas"
-                title="Click to preview how each cell would be cropped"
-                className="tile-source-img tile-source-clickable"
-                onClick={() => setPreviewFile(url.split('/').pop() ?? null)}
-              />
-              <span className="tile-label">Source Atlas (click to preview cells)</span>
-            </div>
-          ))}
-        </div>
+        <details className="admin-collapsible">
+          <summary className="admin-collapsible-summary">Source Atlas</summary>
+          <div className="tile-grid">
+            {propsSources.map(url => (
+              <div key={url} className="tile-source">
+                <img
+                  src={`${API}${url}`}
+                  alt="Prop source atlas"
+                  title="Click to preview how each cell would be cropped"
+                  className="tile-source-img tile-source-clickable"
+                  onClick={() => setPreviewFile(url.split('/').pop() ?? null)}
+                />
+                <span className="tile-label">Source Atlas (click to preview cells)</span>
+              </div>
+            ))}
+          </div>
+        </details>
       )}
 
       <Paginated key={`props-${propsReloadKey}`} fetchPage={fetchPropsPage} pageSize={propsPageSize}>

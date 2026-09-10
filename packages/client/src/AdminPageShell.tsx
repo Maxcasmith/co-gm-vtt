@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Button } from './components/Button/Button.tsx';
 
 interface Props {
   title: string;
@@ -15,7 +16,7 @@ export default function AdminPageShell({ title, onHome, homeLabel = '← Admin H
     <div className="admin-panel">
       <div className="admin-atmosphere" aria-hidden="true" />
       <div className="admin-header">
-        <button className="btn-secondary admin-header-link admin-header-link--left" onClick={onHome}>{homeLabel}</button>
+        <Button variant="outline" color="secondary" className="admin-header-link admin-header-link--left" onClick={onHome}>{homeLabel}</Button>
         <div className="admin-header-titles">
           <span className="home-eyebrow">Dungeon Master&apos;s Study</span>
           <h1 className="admin-title">

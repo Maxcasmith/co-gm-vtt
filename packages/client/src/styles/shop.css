@@ -35,7 +35,7 @@
 .shop-item-cost { font-size: 11px; color: var(--gold); }
 .shop-item-cost-original { text-decoration: line-through; opacity: 0.5; margin-right: 4px; }
 
-.shop-buy-btn, .shop-sell-btn {
+button.shop-buy-btn, button.shop-sell-btn {
   padding: 4px 10px;
   font-size: 10px;
   font-family: 'Cinzel', serif;
@@ -48,5 +48,5 @@
 }
 .shop-buy-btn:hover:not(:disabled), .shop-sell-btn:hover { border-color: var(--gold); color: var(--gold); }
 .shop-buy-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.shop-sell-btn { color: var(--text-muted); }
+button.shop-sell-btn { color: var(--text-muted); }
 

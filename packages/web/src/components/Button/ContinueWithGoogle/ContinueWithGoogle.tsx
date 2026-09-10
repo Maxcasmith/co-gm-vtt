@@ -6,13 +6,15 @@ import api from "../../../api/client";
 
 interface ContinueWithGoogleButtonProps extends Omit<
   HTMLAttributes<HTMLButtonElement>,
-  "onClick"
+  "onClick" | "color"
 > {
-  className?: "string";
+  className?: string;
+  /** Called with the OAuth code instead of the default sign-in-and-redirect-to-dashboard behavior. */
+  onAuthenticated?: (code: string) => void;
 }
 
 export function ContinueWithGoogleButton(props: ContinueWithGoogleButtonProps) {
-  const { ...rest } = props;
+  const { onAuthenticated, ...rest } = props;
   const navigate = useNavigate();
 
   const googleLogin = useGoogleLogin({
@@ -23,6 +25,11 @@ export function ContinueWithGoogleButton(props: ContinueWithGoogleButtonProps) {
       try {
         if (!codeResponse.code) {
           throw Error("Failed to sign in with google");
+        }
+
+        if (onAuthenticated) {
+          onAuthenticated(codeResponse.code);
+          return;
         }
 
         await api.auth.ssoGoogle({

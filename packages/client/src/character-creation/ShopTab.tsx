@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { InventoryItem } from 'shared';
 import { hasOriginFeat } from 'shared';
+import { Button } from '../components/Button/Button.tsx';
 import ItemIcon from '../ItemIcon.tsx';
 import { useCharacter } from './CharacterContext.tsx';
 import { SHOP_ITEMS, type ShopItem } from './srd.ts';
@@ -74,7 +75,7 @@ export default function ShopTab() {
               <div key={item.id} className="shop-inv-item">
                 <span className="shop-inv-item-name">{item.name}</span>
                 {item.quantity > 1 && <span className="shop-inv-item-qty">×{item.quantity}</span>}
-                <button className="shop-sell-btn" onClick={() => sell(item.id)}>Sell</button>
+                <Button variant="ghost" className="shop-sell-btn" onClick={() => sell(item.id)}>Sell</Button>
               </div>
             ))
           }
@@ -113,11 +114,12 @@ export default function ShopTab() {
                       )}
                       {priceFor(item.cost)} gp
                     </span>
-                    <button
+                    <Button
+                      variant="ghost"
                       className="shop-buy-btn"
                       disabled={c.gold < priceFor(item.cost)}
                       onClick={() => buy(item.id)}
-                    >Buy</button>
+                    >Buy</Button>
                   </div>
                 </div>
               ))}

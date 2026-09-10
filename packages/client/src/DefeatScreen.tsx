@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { Button } from './components/Button/Button.tsx';
 import './app.css';
 
 interface Props { onDismiss: () => void }
@@ -15,7 +16,7 @@ export default function DefeatScreen({ onDismiss }: Props) {
         <h1 className="defeat-title">Defeated</h1>
         <p className="defeat-subtitle">The party has fallen.</p>
         <p className="defeat-flavour">Your wounds overwhelm you. Darkness takes hold.</p>
-        <button className="defeat-dismiss" onClick={onDismiss}>Continue</button>
+        <Button variant="ghost" className="defeat-dismiss" onClick={onDismiss}>Continue</Button>
       </div>
     </div>
   );

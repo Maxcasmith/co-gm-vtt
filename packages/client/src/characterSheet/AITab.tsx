@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ActionResource, Character, Directive, DirectiveKind, Group, Manoeuvre, Spell, TacticCondition, TargetRef, TargetStrategy } from "shared";
 import { CONDITIONS, actionCostFromCastingTime, isConsumable } from "shared";
+import { Button } from "../components/Button/Button.tsx";
 import { dispatch } from "../events.ts";
 import { API } from "./helpers.tsx";
 
@@ -192,13 +193,13 @@ export function AITab({ character }: { character: Character }) {
         </div>
       )}
 
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         className="sheet-tactic-add-btn"
         onClick={() => persist([...tactics, newManoeuvre()], aiControlled)}
       >
         + Add manoeuvre
-      </button>
+      </Button>
     </div>
   );
 }
@@ -232,7 +233,7 @@ function ManoeuvreCard({
           value={manoeuvre.name}
           onChange={e => onChange({ name: e.target.value })}
         />
-        <button type="button" onClick={onRemove}>✕</button>
+        <Button variant="ghost" onClick={onRemove}>✕</Button>
       </div>
 
       <div className="sheet-tactic-row sheet-tactic-row--fixed">
@@ -277,20 +278,20 @@ function GroupBlock({
     <div className="sheet-group-block">
       <div className="sheet-group-header">
         <span className="sheet-group-logic-label">{isFirst ? "When" : "Or When"}</span>
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           className={`sheet-group-not-btn${group.negate ? " sheet-group-not-btn--active" : ""}`}
           onClick={() => cb.updateGroup(group.id, { negate: !group.negate })}
           title="Invert this condition"
         >
           Not
-        </button>
+        </Button>
         <ConditionEditor condition={group.condition} onChange={c => cb.updateGroup(group.id, { condition: c })} />
         {!isRoot && (
           <div className="sheet-tactic-controls">
-            <button type="button" onClick={() => cb.move(group.id, -1)} disabled={!canMoveUp}>↑</button>
-            <button type="button" onClick={() => cb.move(group.id, 1)} disabled={!canMoveDown}>↓</button>
-            <button type="button" onClick={() => cb.remove(group.id)}>✕</button>
+            <Button variant="ghost" onClick={() => cb.move(group.id, -1)} disabled={!canMoveUp}>↑</Button>
+            <Button variant="ghost" onClick={() => cb.move(group.id, 1)} disabled={!canMoveDown}>↓</Button>
+            <Button variant="ghost" onClick={() => cb.remove(group.id)}>✕</Button>
           </div>
         )}
       </div>
@@ -323,8 +324,8 @@ function GroupBlock({
       </div>
 
       <div className="sheet-group-add-buttons">
-        <button type="button" onClick={() => cb.addGroup(group.id)}>+ Add Group</button>
-        <button type="button" onClick={() => cb.addDirective(group.id)}>+ Add Directive</button>
+        <Button variant="ghost" onClick={() => cb.addGroup(group.id)}>+ Add Group</Button>
+        <Button variant="ghost" onClick={() => cb.addDirective(group.id)}>+ Add Directive</Button>
       </div>
     </div>
   );
@@ -402,9 +403,9 @@ function DirectiveBlock({
         )}
       </div>
       <div className="sheet-tactic-controls">
-        <button type="button" onClick={() => cb.move(directive.id, -1)} disabled={!canMoveUp}>↑</button>
-        <button type="button" onClick={() => cb.move(directive.id, 1)} disabled={!canMoveDown}>↓</button>
-        <button type="button" onClick={() => cb.remove(directive.id)}>✕</button>
+        <Button variant="ghost" onClick={() => cb.move(directive.id, -1)} disabled={!canMoveUp}>↑</Button>
+        <Button variant="ghost" onClick={() => cb.move(directive.id, 1)} disabled={!canMoveDown}>↓</Button>
+        <Button variant="ghost" onClick={() => cb.remove(directive.id)}>✕</Button>
       </div>
     </div>
   );

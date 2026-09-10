@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Character, CharacterStoryboard } from "shared";
+import { Button } from "../components/Button/Button.tsx";
 import { API } from "./helpers.tsx";
 
 interface Props {
@@ -22,9 +23,9 @@ export function InfoTab({ character, onPlay }: Props) {
       <div className="sheet-info-header">
         <p className="sheet-feature-group-title">Backstory</p>
         {storyboard && (
-          <button className="btn-play" onClick={() => onPlay(storyboard)}>
+          <Button variant="outline" onClick={() => onPlay(storyboard)}>
             ▶ Play Backstory
-          </button>
+          </Button>
         )}
       </div>
       <p className="sheet-backstory-text">

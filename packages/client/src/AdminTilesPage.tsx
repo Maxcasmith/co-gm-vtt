@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Button } from './components/Button/Button.tsx';
 import AdminPageShell from './AdminPageShell.tsx';
 import GenerateTilesetModal from './GenerateTilesetModal.tsx';
 import { titleCase } from './adminUtils.ts';
@@ -60,7 +61,7 @@ export default function AdminTilesPage({ password, onHome }: Props) {
     <AdminPageShell title="Tiles" onHome={onHome}>
       <div className="admin-modules-header">
         <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">🧱</span>Dungeon Tilesets</h2>
-        <button className="btn-primary" onClick={() => setGenerateOpen(true)}>+ Generate Tileset</button>
+        <Button onClick={() => setGenerateOpen(true)}>+ Generate Tileset</Button>
       </div>
 
       {themes.length === 0 && (
@@ -75,12 +76,12 @@ export default function AdminTilesPage({ password, onHome }: Props) {
           return (
             <div key={theme} className="tiles-accordion-item">
               <div className="tiles-accordion-header">
-                <button className="tiles-accordion-toggle" onClick={() => toggle(theme)} aria-expanded={isOpen}>
+                <Button variant="ghost" className="tiles-accordion-toggle" onClick={() => toggle(theme)} aria-expanded={isOpen}>
                   <span className="tiles-accordion-caret">{isOpen ? '▾' : '▸'}</span>
                   <span className="tiles-accordion-name">{titleCase(theme)}</span>
                   <span className="admin-module-counts">{tileCount} tiles</span>
-                </button>
-                <button className="btn-danger tiles-accordion-delete" onClick={() => setDeleteTarget(theme)}>Delete</button>
+                </Button>
+                <Button variant="outline" color="danger" className="tiles-accordion-delete" onClick={() => setDeleteTarget(theme)}>Delete</Button>
               </div>
               {isOpen && (
                 <div className="tiles-accordion-body">
@@ -144,10 +145,10 @@ export default function AdminTilesPage({ password, onHome }: Props) {
             </p>
           </div>
           <div className="modal-actions">
-            <button className="btn-secondary" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</button>
-            <button className="btn-danger" onClick={() => void confirmDelete()} disabled={deleting}>
+            <Button variant="outline" color="secondary" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+            <Button variant="outline" color="danger" onClick={() => void confirmDelete()} disabled={deleting}>
               {deleting ? 'Deleting…' : 'Delete'}
-            </button>
+            </Button>
           </div>
         </dialog>
       </div>

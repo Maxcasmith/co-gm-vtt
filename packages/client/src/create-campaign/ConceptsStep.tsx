@@ -1,4 +1,5 @@
 import type { WorldConcept } from 'shared';
+import { Button } from '../components/Button/Button.tsx';
 
 interface Props {
   title: string;
@@ -17,20 +18,21 @@ export default function ConceptsStep({ title, concepts, selectedConcept, onSelec
           <h1 className="modal-title">{title}</h1>
           <p className="modal-hint">Select the concept that speaks to you.</p>
         </div>
-        <button className="btn-refresh" onClick={onRefresh} disabled={loading} title="Regenerate concepts">
+        <Button variant="ghost" className="btn-refresh" onClick={onRefresh} disabled={loading} title="Regenerate concepts">
           {loading ? '…' : '↻'}
-        </button>
+        </Button>
       </div>
       <div className="concept-tiles">
         {concepts.map(concept => (
-          <button
+          <Button
             key={concept.name}
+            variant="ghost"
             className={`concept-tile ${selectedConcept?.name === concept.name ? 'concept-tile--selected' : ''}`}
             onClick={() => onSelect(concept)}
           >
             <span className="concept-tile-name">{concept.name}</span>
             <span className="concept-tile-desc">{concept.description}</span>
-          </button>
+          </Button>
         ))}
       </div>
     </div>

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ABILITY_DEFS } from 'shared';
+import { Button } from './components/Button/Button.tsx';
 import AdminPageShell from './AdminPageShell.tsx';
 import { iconSrcFor } from './ItemIcon.tsx';
 import emptyFrameIcon from './assets/icons/Icon-Frame-Blue.jpg';
@@ -51,7 +52,7 @@ export default function AdminItemsPage({ password, onHome }: Props) {
     <AdminPageShell title="Items" onHome={onHome}>
       <div className="admin-modules-header">
         <h2 className="admin-section-title"><span className="admin-section-sigil" aria-hidden="true">🎒</span>Items</h2>
-        <button className="btn-primary" onClick={() => setCreateIconsOpen(true)}>Create Icons</button>
+        <Button onClick={() => setCreateIconsOpen(true)}>Create Icons</Button>
       </div>
 
       <div className="item-grid" key={`items-${iconsRefreshKey}`}>

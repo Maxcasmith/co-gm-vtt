@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import type { CombatVictory } from 'shared';
+import { Button } from './components/Button/Button.tsx';
 import './app.css';
 
 export type VictoryData = CombatVictory;
@@ -28,7 +29,7 @@ export default function VictoryScreen({ data, onDismiss }: Props) {
           <span className="victory-xp-label">per adventurer</span>
           <span className="victory-xp-total">({data.totalXp} total)</span>
         </div>
-        <button className="victory-dismiss" onClick={onDismiss}>Continue</button>
+        <Button variant="ghost" className="victory-dismiss" onClick={onDismiss}>Continue</Button>
       </div>
     </div>
   );

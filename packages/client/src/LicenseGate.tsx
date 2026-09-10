@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Button } from './components/Button/Button.tsx';
 import './app.css';
 
 const API = `http://${window.location.hostname}:3001`;
@@ -63,7 +64,7 @@ export default function LicenseGate({ children }: { children: React.ReactNode })
           onKeyDown={e => e.key === 'Enter' && handleRedeem()}
           autoFocus
         />
-        <button className="btn-primary" onClick={handleRedeem}>Unlock</button>
+        <Button onClick={handleRedeem}>Unlock</Button>
       </div>
     </div>
   );

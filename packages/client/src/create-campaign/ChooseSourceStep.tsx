@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CompendiumMeta, SavedAdventureMeta } from 'shared';
+import { Button } from '../components/Button/Button.tsx';
 import Badge from './Badge.tsx';
 import InfoTooltip from './InfoTooltip.tsx';
 import TypeBadge from './TypeBadge.tsx';
@@ -42,20 +43,22 @@ export default function ChooseSourceStep({ title, selected, onChoose }: Props) {
           <InfoTooltip text="Generate a brand new world from scratch with AI, based on your own prompts." />
         </h2>
         <div className="create-source-types">
-          <button
+          <Button
+            variant="ghost"
             className={`create-source-type-card ${selected?.kind === 'type' && selected.type === 'campaign' ? 'create-source-type-card--selected' : ''}`}
             onClick={() => onChoose({ kind: 'type', type: 'campaign' })}
           >
             <span className="create-source-type-title">New Campaign</span>
             <span className="create-source-type-body">A full world generated from your prompt — grows session to session.</span>
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
             className={`create-source-type-card ${selected?.kind === 'type' && selected.type === 'dungeon-crawl' ? 'create-source-type-card--selected' : ''}`}
             onClick={() => onChoose({ kind: 'type', type: 'dungeon-crawl' })}
           >
             <span className="create-source-type-title">New Dungeon Crawl</span>
             <span className="create-source-type-body">A self-contained dungeon built around your party size.</span>
-          </button>
+          </Button>
         </div>
       </section>
 

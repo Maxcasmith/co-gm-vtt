@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Character, CharacterClassLevel, CharacterStoryboard, HouseRules, StoryboardQueuePayload, WorldMeta } from "shared";
 import { calcACBreakdown, characterClasses, DEFAULT_HOUSE_RULES, spellSlotsForCharacter } from "shared";
 import { on, dispatch } from "./events.ts";
+import { Button } from "./components/Button/Button.tsx";
 import { HIT_DICE } from "./character-creation/srd.ts";
 import { API, modNum, profBonusForLevel } from "./characterSheet/helpers.tsx";
 import { AbilitiesTab } from "./characterSheet/AbilitiesTab.tsx";
@@ -282,7 +283,8 @@ export default function CharacterSheetOverlay({
               · {character.species} · {character.background}
             </p>
           </div>
-          <button
+          <Button
+            variant="ghost"
             className={`sheet-rest-btn${combatActive ? " sheet-rest-btn--disabled" : ""}`}
             disabled={combatActive}
             onClick={
@@ -295,14 +297,16 @@ export default function CharacterSheetOverlay({
             }
           >
             Rest
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="outline"
+            color="secondary"
             className="sheet-close"
             onClick={() => dispatch("vtt:sheet:closed", {})}
             aria-label="Close"
           >
             ×
-          </button>
+          </Button>
         </div>
 
         <div className="sheet-hp-strip">
@@ -368,13 +372,14 @@ export default function CharacterSheetOverlay({
                   XP
                 </span>
                 {currentLevel < 20 && (
-                  <button
+                  <Button
+                    variant="ghost"
                     className={`sheet-levelup-btn${canLevel ? " sheet-levelup-btn--ready" : ""}`}
                     disabled={!canLevel}
                     onClick={() => setLevelingUp(true)}
                   >
                     LEVEL UP
-                  </button>
+                  </Button>
                 )}
               </div>
             );
@@ -383,13 +388,14 @@ export default function CharacterSheetOverlay({
 
         <div className="sheet-tabs">
           {TABS.map((t) => (
-            <button
+            <Button
               key={t.id}
+              variant="ghost"
               className={`sheet-tab${tab === t.id ? " sheet-tab--active" : ""}`}
               onClick={() => setTab(t.id)}
             >
               {t.label}
-            </button>
+            </Button>
           ))}
         </div>
 

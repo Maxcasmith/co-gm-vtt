@@ -4,6 +4,7 @@ import { hasOriginFeat, resourceCurrent } from 'shared';
 import type { ChatMessageReceivedPayload } from './events.ts';
 import { on, dispatch } from './events.ts';
 import { SKILLS } from './character-creation/srd.ts';
+import { Button } from './components/Button/Button.tsx';
 
 const SAVE_STAT: Record<string, string> = {
   strength: 'STR', str: 'STR',
@@ -120,7 +121,7 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
       <div className="journal-panel">
         <div className="journal-header">
           <h2 className="journal-title">Journal</h2>
-          <button className="sheet-close" onClick={onClose} aria-label="Close">×</button>
+          <Button variant="outline" color="secondary" className="sheet-close" onClick={onClose} aria-label="Close">×</Button>
         </div>
 
         <div className="journal-messages" ref={scrollRef}>
@@ -151,15 +152,17 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
                         const luckArmed = luckKeys.has(key);
                         return (
                           <span key={key} className="journal-roll-request">
-                            <button
+                            <Button
+                              variant="ghost"
                               className="journal-roll-btn"
                               disabled={rolling}
                               onClick={() => rollRequest(msg.timestamp, req)}
                             >
                               {rolling ? 'Rolling…' : `Roll ${req.skill} ${req.type === 'save' ? 'Save' : 'Check'}`}
-                            </button>
+                            </Button>
                             {luckPoints > 0 && !rolling && (
-                              <button
+                              <Button
+                                variant="ghost"
                                 className={`journal-luck-toggle${luckArmed ? ' journal-luck-toggle--active' : ''}`}
                                 title="Spend a Luck Point on this roll for Advantage"
                                 onClick={() => setLuckKeys(prev => {
@@ -169,10 +172,11 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
                                 })}
                               >
                                 Luck ({luckPoints})
-                              </button>
+                              </Button>
                             )}
                             {character.heroicInspiration && !rolling && (
-                              <button
+                              <Button
+                                variant="ghost"
                                 className={`journal-luck-toggle${inspirationKeys.has(key) ? ' journal-luck-toggle--active' : ''}`}
                                 title="Spend Heroic Inspiration on this roll for Advantage"
                                 onClick={() => setInspirationKeys(prev => {
@@ -182,7 +186,7 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
                                 })}
                               >
                                 Inspiration
-                              </button>
+                              </Button>
                             )}
                           </span>
                         );
@@ -216,7 +220,7 @@ export default function JournalOverlay({ open, onClose, character, sessionActive
             placeholder={sessionActive ? 'Say something…' : 'Session hasn\'t started yet'}
             disabled={!sessionActive}
           />
-          <button className="btn-primary" onClick={send} disabled={!sessionActive || !input.trim()}>Send</button>
+          <Button onClick={send} disabled={!sessionActive || !input.trim()}>Send</Button>
         </div>
       </div>
     </div>

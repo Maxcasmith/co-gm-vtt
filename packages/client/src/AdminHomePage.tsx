@@ -1,3 +1,5 @@
+import { Button } from './components/Button/Button.tsx';
+import { TileButton } from './components/TileButton/TileButton.tsx';
 import AdminPageShell from './AdminPageShell.tsx';
 import type { AdminTab } from './AdminLayout.tsx';
 
@@ -26,15 +28,17 @@ export default function AdminHomePage({ onNavigate, onOpenSettings }: Props) {
       title="Admin"
       homeLabel="← Site Home"
       onHome={() => { window.location.href = '/'; }}
-      actions={<button className="btn-secondary" onClick={onOpenSettings}>Settings</button>}
+      actions={<Button variant="outline" color="secondary" onClick={onOpenSettings}>Settings</Button>}
     >
       <div className="admin-tile-grid">
         {TILES.map(t => (
-          <button key={t.tab} className="admin-tile" onClick={() => onNavigate(t.tab)}>
-            <span className="admin-tile-sigil" aria-hidden="true">{t.sigil}</span>
-            <span className="admin-tile-label">{t.label}</span>
-            <span className="admin-tile-description">{t.description}</span>
-          </button>
+          <TileButton
+            key={t.tab}
+            sigil={t.sigil}
+            label={t.label}
+            description={t.description}
+            onClick={() => onNavigate(t.tab)}
+          />
         ))}
       </div>
     </AdminPageShell>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { Button } from './components/Button/Button.tsx';
 
 export interface PaletteItem {
   label: string;
@@ -38,15 +39,16 @@ export default function CommandPalette({ open, onClose, items, header }: Props) 
       <div className="palette" onClick={e => e.stopPropagation()}>
         {header && <div className="palette-header">{header}</div>}
         {items.map((item, i) => (
-          <button
+          <Button
             key={item.label}
+            variant="ghost"
             className={`palette-item${i === active ? ' palette-item--active' : ''}`}
             onMouseEnter={() => setActive(i)}
             onClick={() => { item.onSelect(); onClose(); }}
           >
             <span className="palette-item-label">{item.label}</span>
             {item.description && <span className="palette-item-desc">{item.description}</span>}
-          </button>
+          </Button>
         ))}
       </div>
     </div>

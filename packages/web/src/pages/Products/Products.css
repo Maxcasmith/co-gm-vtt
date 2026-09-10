@@ -1,0 +1,108 @@
+.products--intro {
+  padding: 64px 56px 8px;
+  text-align: center;
+}
+
+.products--intro--title {
+  font-family: 'Playfair Display', serif;
+  font-size: 40px;
+  margin: 0 0 12px;
+}
+
+.products--intro--subtitle {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 17px;
+  color: var(--ink-muted);
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.products--grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px;
+  padding: 48px 56px 96px;
+}
+
+.products--card {
+  background: rgba(241, 223, 190, 0.6);
+  border: 1px solid var(--parchment-line);
+  border-radius: 10px;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.products--card--icon {
+  width: 32px;
+  height: 32px;
+  color: var(--maroon);
+  margin-bottom: 8px;
+}
+
+.products--card--title {
+  font-family: 'Playfair Display', serif;
+  font-size: 24px;
+  margin: 0;
+}
+
+.products--card--tagline {
+  font-family: 'Crimson Pro', Georgia, serif;
+  color: var(--ink-muted);
+  margin: 0 0 16px;
+}
+
+.products--card--price {
+  font-family: 'Playfair Display', serif;
+  font-size: 36px;
+  color: var(--maroon);
+  margin: 0 0 20px;
+}
+
+.products--card--price span {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 15px;
+  color: var(--ink-muted);
+}
+
+.products--card--features {
+  list-style: none;
+  margin: 0 0 28px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.products--card--features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 15px;
+}
+
+.products--card--check {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--maroon);
+}
+
+@media (max-width: 760px) {
+  .products--grid { grid-template-columns: 1fr; }
+}
+
+/* ── skeleton ── */
+.products--skeleton--title { width: 300px; height: 40px; margin: 0 auto 12px; }
+.products--skeleton--subtitle { width: 460px; max-width: 100%; height: 17px; margin: 0 auto; }
+.products--skeleton--icon { width: 32px; height: 32px; border-radius: 50%; margin-bottom: 8px; }
+.products--skeleton--card-title { width: 140px; height: 24px; margin-bottom: 6px; }
+.products--skeleton--tagline { width: 180px; height: 15px; margin-bottom: 16px; }
+.products--skeleton--price { width: 90px; height: 36px; margin-bottom: 20px; }
+.products--skeleton--feature { width: 100%; height: 15px; }
+.products--skeleton--button { width: 160px; height: 40px; margin-top: 6px; }

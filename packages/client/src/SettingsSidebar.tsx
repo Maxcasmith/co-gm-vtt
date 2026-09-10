@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AppConfig, StoryProvider, ImageModel, NarrationModel } from 'shared';
 import { previewVoice } from './narration.ts';
 import ConfigureAiWorkflowsModal from './ConfigureAiWorkflowsModal.tsx';
+import { Button } from './components/Button/Button.tsx';
 
 interface Props {
   open: boolean;
@@ -260,7 +261,7 @@ export default function SettingsSidebar({ open, password, onClose, onPasswordCha
           <section className="settings-section">
             <h3 className="settings-section-title">AI Workflows</h3>
             <p className="settings-section-note">Configure named workflows, each with its own model chain, and assign which AI features each one handles.</p>
-            <button className="btn-secondary" onClick={() => setWorkflowsModalOpen(true)}>Configure AI Workflows</button>
+            <Button variant="outline" color="secondary" onClick={() => setWorkflowsModalOpen(true)}>Configure AI Workflows</Button>
           </section>
 
           <div className="settings-divider" />
@@ -276,13 +277,14 @@ export default function SettingsSidebar({ open, password, onClose, onPasswordCha
                     : 'No world map will be generated. The canvas will be blank outside of combat.'}
                 </span>
               </div>
-              <button
+              <Button
+                variant="ghost"
                 className={`settings-toggle ${config.image.generateWorldMap ? 'settings-toggle--on' : ''}`}
                 onClick={() => setConfig(c => ({ ...c, image: { ...c.image, generateWorldMap: !c.image.generateWorldMap } }))}
                 aria-pressed={config.image.generateWorldMap}
               >
                 <span className="settings-toggle-thumb" />
-              </button>
+              </Button>
             </div>
             <div className="settings-toggle-row">
               <div className="settings-toggle-text">
@@ -293,13 +295,14 @@ export default function SettingsSidebar({ open, password, onClose, onPasswordCha
                     : 'Dungeons with no matching tileset fall back to the default look instead of generating one.'}
                 </span>
               </div>
-              <button
+              <Button
+                variant="ghost"
                 className={`settings-toggle ${config.image.generateTilesets ? 'settings-toggle--on' : ''}`}
                 onClick={() => setConfig(c => ({ ...c, image: { ...c.image, generateTilesets: !c.image.generateTilesets } }))}
                 aria-pressed={config.image.generateTilesets}
               >
                 <span className="settings-toggle-thumb" />
-              </button>
+              </Button>
             </div>
             <div className="settings-toggle-row">
               <div className="settings-toggle-text">
@@ -310,13 +313,14 @@ export default function SettingsSidebar({ open, password, onClose, onPasswordCha
                     : 'No opening storyboards will be generated for new characters or scenarios.'}
                 </span>
               </div>
-              <button
+              <Button
+                variant="ghost"
                 className={`settings-toggle ${config.image.generateStoryboard ? 'settings-toggle--on' : ''}`}
                 onClick={() => setConfig(c => ({ ...c, image: { ...c.image, generateStoryboard: !c.image.generateStoryboard } }))}
                 aria-pressed={config.image.generateStoryboard}
               >
                 <span className="settings-toggle-thumb" />
-              </button>
+              </Button>
             </div>
             <div className="settings-toggle-row">
               <div className="settings-toggle-text">
@@ -327,13 +331,14 @@ export default function SettingsSidebar({ open, password, onClose, onPasswordCha
                     : 'Creatures show no generated portrait until one already exists in storage.'}
                 </span>
               </div>
-              <button
+              <Button
+                variant="ghost"
                 className={`settings-toggle ${config.image.generateBestiaryPortraits ? 'settings-toggle--on' : ''}`}
                 onClick={() => setConfig(c => ({ ...c, image: { ...c.image, generateBestiaryPortraits: !c.image.generateBestiaryPortraits } }))}
                 aria-pressed={config.image.generateBestiaryPortraits}
               >
                 <span className="settings-toggle-thumb" />
-              </button>
+              </Button>
             </div>
             <div className="settings-toggle-row">
               <div className="settings-toggle-text">
@@ -344,13 +349,14 @@ export default function SettingsSidebar({ open, password, onClose, onPasswordCha
                     : 'Props show no generated sprite until one already exists in storage.'}
                 </span>
               </div>
-              <button
+              <Button
+                variant="ghost"
                 className={`settings-toggle ${config.image.generatePropImages ? 'settings-toggle--on' : ''}`}
                 onClick={() => setConfig(c => ({ ...c, image: { ...c.image, generatePropImages: !c.image.generatePropImages } }))}
                 aria-pressed={config.image.generatePropImages}
               >
                 <span className="settings-toggle-thumb" />
-              </button>
+              </Button>
             </div>
             <label className="modal-label">
               Model
@@ -363,9 +369,9 @@ export default function SettingsSidebar({ open, password, onClose, onPasswordCha
               </select>
             </label>
             <div className="settings-test-row">
-              <button className="btn-test" onClick={() => void testImageConnection()} disabled={imageStatus === 'testing'}>
+              <Button variant="ghost" className="btn-test" onClick={() => void testImageConnection()} disabled={imageStatus === 'testing'}>
                 {imageStatus === 'testing' ? 'Testing…' : 'Test Connection'}
-              </button>
+              </Button>
               {imageStatus !== 'idle' && imageStatus !== 'testing' && (
                 <span className={`status-badge status-badge--${imageStatus}`}>
                   {imageStatus === 'ok' ? '● Connected' : '● Failed'}
@@ -400,13 +406,14 @@ export default function SettingsSidebar({ open, password, onClose, onPasswordCha
                     >
                       {OPENAI_VOICES.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
                     </select>
-                    <button
+                    <Button
+                      variant="ghost"
                       className="btn-test"
                       onClick={() => void handleNarrationPreview()}
                       disabled={narrationPreviewing || !config.apiKeys.openai}
                     >
                       {narrationPreviewing ? '▶ Playing…' : '▶ Preview'}
-                    </button>
+                    </Button>
                   </div>
                 </label>
               </>
@@ -417,8 +424,8 @@ export default function SettingsSidebar({ open, password, onClose, onPasswordCha
         <div className={`settings-footer${applyError ? ' modal-actions--split' : ''}`}>
           {applyError && <p className="admin-error">{applyError}</p>}
           <div className="modal-action-btns">
-            <button className="btn-secondary" onClick={handleCancel}>Cancel</button>
-            <button className="btn-primary" onClick={() => void handleApply()}>Apply</button>
+            <Button variant="outline" color="secondary" onClick={handleCancel}>Cancel</Button>
+            <Button onClick={() => void handleApply()}>Apply</Button>
           </div>
         </div>
       </aside>
@@ -427,8 +434,8 @@ export default function SettingsSidebar({ open, password, onClose, onPasswordCha
         <h2 className="modal-title">Discard changes?</h2>
         <p className="modal-body-text">You have unsaved changes. Discard them?</p>
         <div className="modal-actions">
-          <button className="btn-secondary" onClick={() => discardRef.current?.close()}>Keep editing</button>
-          <button className="btn-primary" onClick={handleDiscard}>Discard</button>
+          <Button variant="outline" color="secondary" onClick={() => discardRef.current?.close()}>Keep editing</Button>
+          <Button onClick={handleDiscard}>Discard</Button>
         </div>
       </dialog>
 

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { setLightingEnabled, isLightingEnabled, setDarkvisionEnabled, isDarkvisionEnabled } from './canvas/lighting.ts';
 import { togglePerfOverlay, isPerfOverlayEnabled } from './canvas/drawScene.ts';
 import { dispatch } from './events.ts';
+import { Button } from './components/Button/Button.tsx';
 
 interface Props {
   open: boolean;
@@ -40,7 +41,7 @@ export default function DevModal({ open, onClose }: Props) {
       <div className="journal-panel" onClick={e => e.stopPropagation()}>
         <div className="journal-header">
           <h2 className="journal-title">Dev Tools</h2>
-          <button className="sheet-close" onClick={onClose} aria-label="Close">×</button>
+          <Button variant="outline" color="secondary" className="sheet-close" onClick={onClose} aria-label="Close">×</Button>
         </div>
         <div className="settings-toggle-row">
           <div className="settings-toggle-text">
@@ -51,13 +52,14 @@ export default function DevModal({ open, onClose }: Props) {
                 : 'Map renders full-bright — illumination-based dimming/desaturation is bypassed.'}
             </span>
           </div>
-          <button
+          <Button
+            variant="ghost"
             className={`settings-toggle ${lighting ? 'settings-toggle--on' : ''}`}
             onClick={toggleLighting}
             aria-pressed={lighting}
           >
             <span className="settings-toggle-thumb" />
-          </button>
+          </Button>
         </div>
         <div className="settings-toggle-row">
           <div className="settings-toggle-text">
@@ -68,13 +70,14 @@ export default function DevModal({ open, onClose }: Props) {
                 : 'Sense tiers never activate — the character sees only what dungeon illumination allows.'}
             </span>
           </div>
-          <button
+          <Button
+            variant="ghost"
             className={`settings-toggle ${darkvision ? 'settings-toggle--on' : ''}`}
             onClick={toggleDarkvision}
             aria-pressed={darkvision}
           >
             <span className="settings-toggle-thumb" />
-          </button>
+          </Button>
         </div>
         <div className="settings-toggle-row">
           <div className="settings-toggle-text">
@@ -85,13 +88,14 @@ export default function DevModal({ open, onClose }: Props) {
                 : 'Perf overlay hidden.'}
             </span>
           </div>
-          <button
+          <Button
+            variant="ghost"
             className={`settings-toggle ${perfOverlay ? 'settings-toggle--on' : ''}`}
             onClick={toggleDrawData}
             aria-pressed={perfOverlay}
           >
             <span className="settings-toggle-thumb" />
-          </button>
+          </Button>
         </div>
       </div>
     </div>

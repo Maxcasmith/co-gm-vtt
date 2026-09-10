@@ -1,10 +1,469 @@
-.signup--page--create--user--wrapper {
+/* ── journey shell — rail + content, mirrors the client app's character-creation wizard ── */
+.journey--page {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── left rail ── */
+.journey--rail {
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  gap: 40px;
+  background: rgba(241, 223, 190, 0.5);
+  border-right: 1px solid var(--parchment-line);
+  padding: 28px 24px;
+  overflow-y: auto;
 }
-.signup--page--create--user--card--title {
-  padding: 0;
+
+.journey--rail--wordmark {
+  font-family: 'Cinzel', serif;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+
+.journey--rail--steps {
+  list-style: none;
   margin: 0;
-  font-size: 2.5rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.journey--rail--step {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  color: var(--ink-muted);
+  padding-left: 16px;
+  border-left: 2px solid var(--parchment-line);
+}
+
+.journey--rail--step--done {
+  color: var(--ink);
+  border-left-color: var(--maroon);
+}
+
+.journey--rail--step--current {
+  color: var(--maroon);
+  border-left-color: var(--maroon);
+  font-weight: 600;
+}
+
+/* ── main column ── */
+.journey--main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.journey--atmosphere {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(ellipse 900px 500px at 0% -10%, rgba(122, 32, 32, 0.06), transparent 60%);
+}
+
+.journey--body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  max-width: 640px;
+  padding: 56px 48px 32px;
+  overflow-y: auto;
+}
+
+.journey--body--wide {
+  max-width: 920px;
+}
+
+.journey--title {
+  font-family: 'Playfair Display', serif;
+  font-size: 30px;
+  margin: 0 0 28px;
+}
+
+.journey--footer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 48px;
+}
+
+.journey--footer--actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* ── shared field styling (step 2 / step 3) ── */
+.journey--fields {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.journey--fields--row {
+  display: flex;
+  gap: 18px;
+}
+
+.journey--fields--row > * {
+  flex: 1;
+}
+
+.journey--fields .input--wrapper label {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  color: var(--ink-muted);
+}
+
+.journey--input {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(255, 251, 240, 0.6);
+  border: 1px solid var(--parchment-line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-top: 5px;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 15px;
+  color: var(--ink);
+  outline: none;
+}
+
+.journey--input:focus {
+  border-color: var(--maroon);
+}
+
+.journey--input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.journey--google-linked {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--maroon);
+  margin: -6px 0 0;
+}
+
+.journey--divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0;
+}
+
+.journey--divider hr {
+  flex: 1;
+  border: none;
+  border-top: 1px solid var(--parchment-line);
+  margin: 0;
+}
+
+.journey--divider span {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.journey--google .btn {
+  width: 100%;
+}
+
+/* ── express payment buttons (step 3) ── */
+.journey--pay-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.journey--pay-btn {
+  width: 100%;
+  justify-content: flex-start;
+  padding-left: 18px;
+}
+
+.journey--pay-btn--icon {
+  width: 18px;
+  height: 18px;
+}
+
+.journey--pay-btn--paypal { --btn-color: #0070ba; --btn-color-strong: #003087; --btn-color-contrast: #ffffff; }
+.journey--pay-btn--apple { --btn-color: #000000; --btn-color-strong: #262626; --btn-color-contrast: #ffffff; }
+.journey--pay-btn--google { --btn-color: #4285f4; --btn-color-strong: #3367d6; --btn-color-contrast: #ffffff; }
+.journey--pay-btn--amazon { --btn-color: #ff9900; --btn-color-strong: #e88a00; --btn-color-contrast: #111111; }
+
+.journey--powered-by {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 12px;
+  color: var(--ink-muted);
+  text-align: center;
+  margin: 4px 0 0;
+}
+
+/* ── step 1: product selection ── */
+.journey--product-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+.journey--products {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.journey--product-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  text-align: left;
+  background: rgba(241, 223, 190, 0.6);
+  border: 1px solid var(--parchment-line);
+  border-radius: 10px;
+  padding: 22px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink);
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+
+.journey--product-card:hover {
+  border-color: var(--maroon);
+  transform: translateY(-2px);
+}
+
+.journey--product-card--selected {
+  border-color: var(--maroon);
+  box-shadow: 0 0 0 1px var(--maroon);
+}
+
+.journey--product-card--check {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 18px;
+  height: 18px;
+  color: var(--maroon);
+}
+
+.journey--product-card--icon {
+  width: 28px;
+  height: 28px;
+  color: var(--maroon);
+  margin-bottom: 4px;
+}
+
+.journey--product-card--title {
+  font-family: 'Playfair Display', serif;
+  font-size: 18px;
+  margin: 0;
+}
+
+.journey--product-card--tagline {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--ink-muted);
+  margin: 0;
+}
+
+.journey--product-card--price {
+  font-family: 'Playfair Display', serif;
+  font-size: 22px;
+  color: var(--maroon);
+  margin: 6px 0 0;
+}
+
+.journey--product-card--price span {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+/* ── step 1: selection info aside ── */
+.journey--product-info {
+  width: 260px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  background: var(--parchment-deep);
+  border: 1px solid var(--maroon);
+  border-top: 3px solid var(--maroon);
+  border-radius: 10px;
+  padding: 22px;
+  box-shadow: 0 14px 28px -16px rgba(44, 32, 19, 0.55);
+  animation: journey-info-in 0.2s ease backwards;
+}
+
+.journey--product-info--eyebrow {
+  display: block;
+  font-family: 'Cinzel', serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--maroon);
+  margin-bottom: 14px;
+}
+
+@keyframes journey-info-in {
+  from { opacity: 0; transform: translateX(6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.journey--product-info--icon {
+  width: 24px;
+  height: 24px;
+  color: var(--maroon);
+  margin-bottom: 8px;
+}
+
+.journey--product-info--title {
+  font-family: 'Playfair Display', serif;
+  font-size: 18px;
+  margin: 0 0 4px;
+}
+
+.journey--product-info--tagline {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--ink-muted);
+  margin: 0 0 12px;
+}
+
+.journey--product-info--price {
+  font-family: 'Playfair Display', serif;
+  font-size: 24px;
+  color: var(--maroon);
+  margin: 0 0 16px;
+}
+
+.journey--product-info--price span {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.journey--product-info--features {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.journey--product-info--features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+}
+
+.journey--product-info--check {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--maroon);
+}
+
+/* ── cancel confirmation ── */
+/* ── cancel confirmation ── torn-parchment edges/shadow via the shared .torn-parchment class */
+.journey--cancel-modal {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 28px;
+  color: var(--ink);
+  text-align: center;
+}
+
+.journey--cancel-modal--title {
+  font-family: 'Playfair Display', serif;
+  font-size: 22px;
+  margin: 0 0 10px;
+}
+
+.journey--cancel-modal--body {
+  font-family: 'Crimson Pro', Georgia, serif;
+  color: var(--ink-muted);
+  margin: 0 0 24px;
+}
+
+.journey--cancel-modal--actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+/* ── step 4: terms of service ── */
+.journey--terms {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.journey--terms--box {
+  position: relative;
+  z-index: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 18px 20px;
+}
+
+.journey--terms--box p {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-muted);
+  margin: 0 0 14px;
+}
+
+.journey--terms--box p:last-child {
+  margin-bottom: 0;
+}
+
+.journey--terms--checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 14px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.journey--terms--checkbox input {
+  width: 16px;
+  height: 16px;
+  margin: 3px 0 0;
+  padding: 0;
+  background: none;
+  border-radius: 3px;
+  accent-color: var(--maroon);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .journey--page { grid-template-columns: 1fr; height: auto; overflow: visible; }
+  .journey--rail { flex-direction: row; flex-wrap: wrap; overflow: visible; }
+  .journey--product-layout { flex-direction: column; }
+  .journey--products { grid-template-columns: 1fr; }
+  .journey--product-info { width: 100%; }
+  .journey--fields--row { flex-direction: column; }
 }

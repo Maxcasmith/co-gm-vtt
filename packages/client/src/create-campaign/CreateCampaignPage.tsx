@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { CompendiumMeta, SavedAdventureMeta, WorldConcept } from 'shared';
+import { Button } from '../components/Button/Button.tsx';
 import ChooseSourceStep, { type Choice } from './ChooseSourceStep.tsx';
 import PromptsStep from './PromptsStep.tsx';
 import ConceptsStep from './ConceptsStep.tsx';
@@ -417,23 +418,23 @@ export default function CreateCampaignPage() {
         </div>
 
         <footer className="create-page-footer">
-          <a className="create-page-exit" href="/">Cancel</a>
+          <Button variant="outline" color="danger" navigate="/">Cancel</Button>
           <div className="create-page-footer-actions">
             {step !== 'generating' && (
-              <button className="btn-secondary" onClick={handleBack} disabled={step === 'choose'}>Back</button>
+              <Button variant="outline" color="secondary" onClick={handleBack} disabled={step === 'choose'}>Back</Button>
             )}
             {step === 'generating' ? (
               done ? (
-                <a className="btn-primary" href={`/${campaignId}/lobby`}>Enter the Lobby</a>
+                <Button navigate={`/${campaignId}/lobby`}>Enter the Lobby</Button>
               ) : error ? (
-                <a className="btn-primary" href="/create">Back to Create</a>
+                <Button navigate="/create">Back to Create</Button>
               ) : (
-                <button className="btn-primary" disabled>Generating…</button>
+                <Button disabled>Generating…</Button>
               )
             ) : (
-              <button className="btn-primary" onClick={() => void handleNext()} disabled={nextDisabled}>
+              <Button onClick={() => void handleNext()} disabled={nextDisabled}>
                 {loadingConcepts ? 'Generating…' : 'Next'}
-              </button>
+              </Button>
             )}
           </div>
         </footer>

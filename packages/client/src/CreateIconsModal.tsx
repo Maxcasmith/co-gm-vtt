@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { iconSlug } from 'shared';
+import { Button } from './components/Button/Button.tsx';
 
 export interface IconCandidate {
   name: string;
@@ -139,7 +140,7 @@ export default function CreateIconsModal({ open, password, candidates, onClose, 
     <div className="modal-overlay" onClick={dismissable ? handleClose : undefined}>
       <dialog className="modal super-modal" open onClick={e => e.stopPropagation()}>
         {dismissable && (
-          <button className="sheet-close campaign-modal-close" onClick={handleClose} aria-label="Close">×</button>
+          <Button variant="outline" color="secondary" className="sheet-close campaign-modal-close" onClick={handleClose} aria-label="Close">×</Button>
         )}
 
         {step === 'select' && (
@@ -156,8 +157,8 @@ export default function CreateIconsModal({ open, password, candidates, onClose, 
               {candidates.length === 0 && <p className="admin-empty">Nothing needs an icon.</p>}
 
               <div className="icon-candidate-actions">
-                <button className="btn-secondary" onClick={() => setChecked(new Set(candidates.map(c => c.name)))}>Select All</button>
-                <button className="btn-secondary" onClick={() => setChecked(new Set())}>Select None</button>
+                <Button variant="outline" color="secondary" onClick={() => setChecked(new Set(candidates.map(c => c.name)))}>Select All</Button>
+                <Button variant="outline" color="secondary" onClick={() => setChecked(new Set())}>Select None</Button>
               </div>
 
               <div className="icon-candidate-list">
@@ -171,10 +172,10 @@ export default function CreateIconsModal({ open, password, candidates, onClose, 
             </div>
 
             <div className="modal-actions">
-              <button className="btn-secondary" onClick={handleClose}>Cancel</button>
-              <button className="btn-primary" onClick={() => void generate()} disabled={!selected.length}>
+              <Button variant="outline" color="secondary" onClick={handleClose}>Cancel</Button>
+              <Button onClick={() => void generate()} disabled={!selected.length}>
                 Confirm ({selected.length})
-              </button>
+              </Button>
             </div>
           </>
         )}
@@ -194,9 +195,9 @@ export default function CreateIconsModal({ open, password, candidates, onClose, 
             </div>
 
             <div className="modal-actions">
-              <button className="btn-primary" onClick={handleClose} disabled={!error}>
+              <Button onClick={handleClose} disabled={!error}>
                 {error ? 'Close' : 'Generating…'}
-              </button>
+              </Button>
             </div>
           </>
         )}
@@ -210,8 +211,8 @@ export default function CreateIconsModal({ open, password, candidates, onClose, 
 
             <div className="super-modal-body">
               <div className="icon-candidate-actions">
-                <button className="btn-secondary" onClick={() => setKeep(new Set(generated.map(c => c.name)))}>Select All</button>
-                <button className="btn-secondary" onClick={() => setKeep(new Set())}>Select None</button>
+                <Button variant="outline" color="secondary" onClick={() => setKeep(new Set(generated.map(c => c.name)))}>Select All</Button>
+                <Button variant="outline" color="secondary" onClick={() => setKeep(new Set())}>Select None</Button>
               </div>
 
               <div className="tile-grid">
@@ -228,12 +229,12 @@ export default function CreateIconsModal({ open, password, candidates, onClose, 
             </div>
 
             <div className="modal-actions">
-              <button className="btn-secondary" onClick={() => void commitKept()} disabled={committing}>
+              <Button variant="outline" color="secondary" onClick={() => void commitKept()} disabled={committing}>
                 {keep.size === 0 ? 'Discard All' : `Discard ${generated.length - keep.size} Unchecked`}
-              </button>
-              <button className="btn-primary" onClick={() => void commitKept()} disabled={committing}>
+              </Button>
+              <Button onClick={() => void commitKept()} disabled={committing}>
                 {committing ? 'Saving…' : `Keep Selected (${keep.size})`}
-              </button>
+              </Button>
             </div>
           </>
         )}

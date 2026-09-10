@@ -1,0 +1,82 @@
+:where(.btn) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font: inherit;
+  font-family: 'Cinzel', serif;
+  letter-spacing: 0.05em;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+  white-space: nowrap;
+}
+
+:where(.btn:disabled) {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+:where(.btn--sm) { padding: 5px 12px; font-size: 10px; }
+:where(.btn--md) { padding: 9px 20px; font-size: 11px; }
+:where(.btn--lg) { padding: 12px 28px; font-size: 13px; }
+
+:where(.btn--icon-only.btn--sm) { width: 28px; height: 28px; padding: 0; }
+:where(.btn--icon-only.btn--md) { width: 36px; height: 36px; padding: 0; }
+:where(.btn--icon-only.btn--lg) { width: 44px; height: 44px; padding: 0; }
+
+:where(.btn--primary) {
+  --btn-color: var(--gold, #c9a84c);
+  --btn-color-strong: var(--gold, #c9a84c);
+  --btn-color-contrast: #0e0c10;
+}
+
+:where(.btn--secondary) {
+  --btn-color: var(--text-muted, #9a9a9a);
+  --btn-color-strong: var(--gold, #c9a84c);
+  --btn-color-contrast: #0e0c10;
+}
+
+:where(.btn--danger) {
+  --btn-color: #e55353;
+  --btn-color-strong: #8b2020;
+  --btn-color-contrast: #fff;
+}
+
+:where(.btn--fill) {
+  background: var(--btn-color);
+  border: 1px solid var(--btn-color);
+  color: var(--btn-color-contrast);
+}
+:where(.btn--fill:hover):not(:disabled) { opacity: 0.85; }
+
+:where(.btn--outline) {
+  background: transparent;
+  border: 1px solid var(--btn-color);
+  color: var(--btn-color);
+}
+:where(.btn--outline:hover):not(:disabled) {
+  background: var(--btn-color-strong);
+  border-color: var(--btn-color-strong);
+  color: var(--btn-color-contrast);
+}
+
+:where(.btn--outline.btn--secondary:hover):not(:disabled) {
+  background: transparent;
+  border-color: var(--gold, #c9a84c);
+  color: var(--gold, #c9a84c);
+}
+
+:where(.btn--ghost) {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--btn-color);
+  padding: 0;
+}
+:where(.btn--ghost:hover):not(:disabled) { color: var(--btn-color-strong); }
+
+:where(.btn__icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { hasOriginFeat } from 'shared';
+import { Button } from '../components/Button/Button.tsx';
 import { useCharacter } from './CharacterContext.tsx';
 import { HIT_DICE, CLASS_FEATURES, SPECIES_FEATURES, BACKGROUND_FEAT, ORIGIN_FEAT_DETAILS, STAT_NAMES } from './srd.ts';
 
@@ -26,10 +27,10 @@ function AccordionSection({ title, items, openSet, toggle, namespace = '' }: Acc
         const isOpen = openSet.has(key);
         return (
           <div key={key} className="feature-item">
-            <button className={`feature-toggle ${isOpen ? 'feature-toggle--open' : ''}`} onClick={() => toggle(key)}>
+            <Button variant="ghost" className={`feature-toggle ${isOpen ? 'feature-toggle--open' : ''}`} onClick={() => toggle(key)}>
               <span className="feature-name">{f.name}</span>
               <span className="feature-arrow">{isOpen ? '▲' : '▼'}</span>
-            </button>
+            </Button>
             {isOpen && <p className="feature-desc">{f.description}</p>}
           </div>
         );
