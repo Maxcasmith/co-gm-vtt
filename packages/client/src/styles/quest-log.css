@@ -223,12 +223,13 @@
 
 /* ── concept tiles ── */
 .concept-tiles {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
   margin-bottom: 24px;
   flex: 1;
   overflow-y: auto;
+  align-content: start;
 }
 
 .concept-tile {
@@ -242,6 +243,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  white-space: normal;
+  height: auto;
 }
 
 .concept-tile:hover { border-color: var(--gold); background: var(--surface-hover); }

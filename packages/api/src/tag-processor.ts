@@ -2,6 +2,7 @@ import type { Item, Weapon, Consumable, Ammunition, EnemyStatBlock, CheckRequest
 import { randomUUID } from 'crypto';
 import type { StoryProviderAdapter } from './providers/index.ts';
 import { logError } from './logger.ts';
+import { toSlug } from './combat/dice.ts';
 
 export type AcquiredItem = Item | Weapon | Consumable | Ammunition;
 
@@ -15,7 +16,7 @@ export type TagEffect =
   | { type: 'dungeon_exit' }
   | { type: 'door_unlock'; characterName: string }
   | { type: 'item_used'; characterName: string; itemName: string }
-  | { type: 'quest_add'; id: string; name: string; description: string }
+  | { type: 'quest_add'; id: string; name: string; description: string; relatedNpc?: string }
   | { type: 'quest_update'; id: string; entry: string }
   | { type: 'quest_resolve'; id: string }
   | { type: 'clock'; secs: number }
@@ -209,7 +210,10 @@ export async function processVdmResponse(
     const description = match[3]?.trim();
     if (id && name && description) {
       console.log(`[tag] QUEST_ADD: ${id}`);
-      effects.push({ type: 'quest_add', id, name, description });
+      // If the DM tagged who it's speaking as this turn, that's a free, deterministic link to the
+      // NPC who's actually giving this hook right now — no need to make the model name it twice.
+      const relatedNpc = speakingAs ? toSlug(speakingAs) : undefined;
+      effects.push({ type: 'quest_add', id, name, description, ...(relatedNpc ? { relatedNpc } : {}) });
     }
   }
 

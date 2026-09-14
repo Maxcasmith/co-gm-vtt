@@ -53,10 +53,10 @@ export interface CombatStatePayload { active: boolean }
 export type TargetingStartPayload =
   | { kind: 'weapon'; weapon: Weapon; actionType: 'action' | 'bonusAction' | 'reaction'; bonusSpell?: Spell; isOffhand?: boolean; useInspiration?: boolean }
   | { kind: 'spell'; spell: Spell; casterId: string; actionType: 'action' | 'bonusAction' | 'reaction'; slotLevel?: number; chosenDamageType?: string; chosenCommand?: string; chosenSkill?: string; casterLevel?: number }
-  | { kind: 'ability'; abilityKey: string; label: string; casterId: string; actionCost: 'action' | 'bonusAction' | 'reaction'; chosenAmount?: number };
+  | { kind: 'ability'; abilityKey: string; label: string; casterId: string; actionCost: 'action' | 'bonusAction' | 'reaction'; chosenAmount?: number; cureCondition?: boolean };
 export type TargetingCancelPayload = Record<string, never>;
 export interface CombatAttackPayload { attackerName: string; attackerId: string; targetId: string; targetName: string; weapon: Weapon; bonusSpell?: Spell; isOffhand?: boolean; useInspiration?: boolean }
-export interface CombatAbilityUsePayload { casterId: string; casterName: string; abilityKey: string; targetId?: string; chosenItem?: string; chosenAmount?: number }
+export interface CombatAbilityUsePayload { casterId: string; casterName: string; abilityKey: string; targetId?: string; chosenItem?: string; chosenAmount?: number; cureCondition?: boolean }
 export interface CombatAttackResultPayload extends AttackResult {}
 export interface CombatSpellAttackPayload { casterName: string; casterId: string; targetIds: string[]; spell: Spell; slotLevel: number; chosenDamageType?: string }
 export interface CombatSpellAttackResultPayload extends SpellAttackResult {}

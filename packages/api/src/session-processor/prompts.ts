@@ -3,6 +3,9 @@ import type { Quest } from 'shared';
 
 export type EntityType = 'npc' | 'faction' | 'location' | 'character' | 'nemesis';
 
+/** slug + a short content summary, enough for the triage prompt to recognize the same entity under a different name — a bare slug list gives it nothing to match against. */
+export interface ExistingEntitySummary { slug: string; summary: string }
+
 function buildRelationshipsYaml(characters: string[]): string {
   const entries = characters.length > 0
     ? characters.map(c => `  - character: ${c}\n    score: 50\n    note: Neutral — no significant interaction yet`).join('\n')
@@ -502,7 +505,7 @@ When all enemies are defeated, flee, or the fight resolves without one: include 
 ## Item acquisition tags
 [[TAG_TYPE:PlayerName:item1,item2]] where TAG_TYPE is PICKED_UP_WEAPON, PICKED_UP_HEALING, PICKED_UP_AMMO, or PICKED_UP_ITEM. Only on definitive pickup, never on merely seeing or describing an item — but the instant your narration says a player has something in hand, this tag is MANDATORY in that same response. It is the only thing that actually puts the item in their inventory; without it, "you take the potion" is a lie the player has no way to catch until they open their inventory and it isn't there. Never narrate a pickup and skip the tag.
 A discovered "loot" entity in the floor plan above that lists "contains: ..." — that list is the ONLY source of truth for what's inside it. When a player opens it, narrate and tag exactly those items, never invent different or additional ones. A loot entity with no "contains:" listed is empty — say so plainly, don't invent contents to fill it.
-Coins are NEVER an item tag — use the currency tags below instead, even for a single "a few silver coins" find.
+Coins are NEVER an item tag — use the currency tags below instead, even for a single "a few silver coins" find. This still holds when the coins themselves are narratively unusual (cursed, warm, humming, tied to a plot thread) — unusual-feeling coins are still coinage and still go through CURRENCY_ADD; reach for an item tag only when what's handed over isn't fungible coinage at all (a signet ring, a specific named artifact).
 
 ## Currency tags
 [[CURRENCY_ADD:PlayerName:amount:denomination]] on a definitive coin/currency pickup, [[CURRENCY_REMOVE:PlayerName:amount:denomination]] on a definitive spend/loss. denomination MUST be exactly one of: platinum, gold, electrum, silver, bronze — these are the only five buckets the system tracks, no others are recognized and the tag is silently dropped if you use anything else. Example: the party finds a few silver coins in a chest → [[CURRENCY_ADD:Hades:3:silver]] alongside your narration.
@@ -584,6 +587,7 @@ Rules:
 
 export function buildSessionQuestsPrompt(opts: {
   campaignName: string;
+  entitySummaries: string;
   currentAct: number;
   actConditions: string[];
   existingIds: string[];
@@ -592,7 +596,7 @@ export function buildSessionQuestsPrompt(opts: {
   currentLocation: string | null;
   needed: number;
 }): string {
-  const { campaignName, currentAct, actConditions, existingIds, openQuestNames, resolvedQuestNames, currentLocation, needed } = opts;
+  const { campaignName, entitySummaries, currentAct, actConditions, existingIds, openQuestNames, resolvedQuestNames, currentLocation, needed } = opts;
   const conditionsList = actConditions.length ? actConditions.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No specific conditions defined.';
   const openList = openQuestNames.length ? openQuestNames.join(', ') : 'none';
   const resolvedList = resolvedQuestNames.length ? resolvedQuestNames.join(', ') : 'none';
@@ -608,15 +612,22 @@ Currently open quests (player is already tracking these): ${openList}
 Already resolved quests: ${resolvedList}
 Current location: ${currentLocation ?? 'unknown'}
 
+World state:
+${entitySummaries || '(no entity notes yet — this is early in the campaign)'}
+
 Generate exactly ${needed} new undiscovered quest(s) — story hooks the Virtual DM can steer the player toward this session. These should:
 - Relate to the act conditions or naturally arise from the current world state
 - Not duplicate any already open or resolved quests
 - Be player-facing (describe what the party encounters or is asked to do, not DM secrets)
 - Each use a unique kebab-case ID not in this list: ${existingIdList}
 
+For each quest, name the specific NPC who gives or embodies this hook (a "the old lamplighter" role must become a concrete named person, not a description the DM has to invent later) and the location it's tied to. Reuse an existing NPC/location from World state above if one genuinely fits; otherwise invent one — it gets created as a real entity from the moment this quest is seeded, so later play has something concrete to stay consistent with. A quest whose origin is a written document rather than a person (a found letter, a posted notice) may omit relatedNpc.
+
 Return ONLY valid JSON — no markdown fences, no explanation:
 [
-  { "id": "kebab-slug", "name": "Quest Name", "description": "1-2 sentences — what the party encounters or is asked to do" }
+  { "id": "kebab-slug", "name": "Quest Name", "description": "1-2 sentences — what the party encounters or is asked to do",
+    "relatedNpc": { "name": "NPC Name", "description": "1 sentence" } | null,
+    "relatedLocation": { "name": "Location Name", "description": "1 sentence" } | null }
 ]`;
 }
 
@@ -798,10 +809,10 @@ ${task}`;
 
 export function buildTriagePrompt(
   chatLog: string,
-  existingEntities: Record<EntityType, string[]>,
+  existingEntities: Record<EntityType, ExistingEntitySummary[]>,
 ): string {
-  const entityList = (Object.entries(existingEntities) as [EntityType, string[]][])
-    .flatMap(([type, slugs]) => slugs.map(s => `  - ${s} (${type})`))
+  const entityList = (Object.entries(existingEntities) as [EntityType, ExistingEntitySummary[]][])
+    .flatMap(([type, entities]) => entities.map(e => `  - ${e.slug} (${type})${e.summary ? ` — ${e.summary}` : ''}`))
     .join('\n') || '  (none yet)';
 
   return `You are a session analyst for a tabletop RPG campaign.

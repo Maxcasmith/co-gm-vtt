@@ -1813,7 +1813,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
   // RESOURCE_DEFS pool instead of a spell slot. Reuses the same dice/apply helpers the spell
   // pipeline above uses (rollApplicableHeal, applyHealingToPlayer, ...) against onUse's
   // EffectSpec list, rather than a parallel resolution path.
-  socket.on('combat:ability:use', ({ casterId, casterName, abilityKey, targetId, chosenItem, chosenAmount }: { casterId: string; casterName: string; abilityKey: string; targetId?: string; chosenItem?: string; chosenAmount?: number }) => {
+  socket.on('combat:ability:use', ({ casterId, casterName, abilityKey, targetId, chosenItem, chosenAmount, cureCondition }: { casterId: string; casterName: string; abilityKey: string; targetId?: string; chosenItem?: string; chosenAmount?: number; cureCondition?: boolean }) => {
     void (async () => {
       const cid = campaignId;
       if (!combatState.get(cid)) return;
@@ -1844,9 +1844,13 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       if (!trySpendAction(cid, casterId, ability.actionCost)) return;
 
       // Lay on Hands spends a chosen amount out of an HP pool rather than one fixed "use" —
-      // trySpendResourceAmount is the variable-amount counterpart to trySpendResource.
+      // trySpendResourceAmount is the variable-amount counterpart to trySpendResource. The cure
+      // option spends a flat cureCost instead of an arbitrary heal amount (see AbilityDef.cureCost).
+      const isCure = !!cureCondition && ability.cureCost !== undefined;
       const pool = ability.amountChoice ? resourceCurrent(char, ability.resourceKey) : 0;
-      const spentAmount = ability.amountChoice ? Math.max(1, Math.min(chosenAmount ?? pool, pool)) : 1;
+      const spentAmount = ability.amountChoice
+        ? (cureCondition && ability.cureCost !== undefined ? ability.cureCost : Math.max(1, Math.min(chosenAmount ?? pool, pool)))
+        : 1;
       const nextResourceUses = ability.amountChoice
         ? (pool > 0 ? trySpendResourceAmount(char, ability.resourceKey, spentAmount) : undefined)
         : trySpendResource(char, ability.resourceKey);
@@ -1868,8 +1872,11 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       }
 
       // Lay on Hands: heal the chosen amount straight out of the pool — no dice, no scaling.
+      // The cure option spends cureCost instead of healing, clearing Poisoned off the target.
       if (ability.amountChoice) {
-        if (effectParticipant.isPlayer) applyHealingToPlayer(cid, effectParticipant, effectId, spentAmount, ability.label);
+        if (isCure) {
+          await clearCondition(cid, effectId, 'Poisoned');
+        } else if (effectParticipant.isPlayer) applyHealingToPlayer(cid, effectParticipant, effectId, spentAmount, ability.label);
         else if (effectParticipant.creature) applyHealingToCreature(cid, effectId, spentAmount);
       }
 
@@ -1905,7 +1912,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         craftedItem = chosenItem;
       }
 
-      const msg = { text: `${casterName} uses ${ability.label}${craftedItem ? ` to craft a ${craftedItem}` : ability.amountChoice ? ` on ${effectParticipant.name}, restoring ${spentAmount} HP` : ability.target === 'ally' ? ` on ${effectParticipant.name}` : ''}.`, senderName: 'System', timestamp: Date.now() };
+      const msg = { text: `${casterName} uses ${ability.label}${craftedItem ? ` to craft a ${craftedItem}` : ability.amountChoice ? (isCure ? ` on ${effectParticipant.name}, curing Poisoned` : ` on ${effectParticipant.name}, restoring ${spentAmount} HP`) : ability.target === 'ally' ? ` on ${effectParticipant.name}` : ''}.`, senderName: 'System', timestamp: Date.now() };
       void appendChatLog(cid, msg);
       io.to(ROOM).emit('chat:message', msg);
     })();

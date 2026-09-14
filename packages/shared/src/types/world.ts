@@ -68,6 +68,10 @@ export interface Quest {
   addedAt: string;
   /** Set when this quest was seeded by a dungeon's own goals (buildDungeonQuests) — scopes it to that dungeon's closed-world narration instead of the full campaign quest list. */
   sourceDungeonId?: string;
+  /** npc entity slug this quest's hook originates from, when it has one (a missive/document-origin quest may have none). Lets the DM prompt point at a concrete NPC instead of leaving the match to inference — see session-processor/index.ts's undiscovered-quests block. */
+  relatedNpc?: string;
+  /** location entity slug this quest's hook is tied to, when known. */
+  relatedLocation?: string;
 }
 
 export interface SessionManifest {

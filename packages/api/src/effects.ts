@@ -209,10 +209,21 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
 
       if (effect.type === 'quest_add') {
         const existing = quests.find(q => q.id === effect.id);
+        // Fill in relatedNpc/relatedLocation from this turn's live context (who's speaking, where
+        // the party is) only when the quest doesn't already carry one from generation-time seeding
+        // — a live guess should never clobber a better-grounded pre-seeded value.
+        const manifest = await readManifest(cid);
+        const relatedNpc = existing?.relatedNpc ?? effect.relatedNpc;
+        const relatedLocation = existing?.relatedLocation ?? manifest?.currentLocation ?? undefined;
         if (existing) {
           existing.status = 'open';
+          if (relatedNpc) existing.relatedNpc = relatedNpc;
+          if (relatedLocation) existing.relatedLocation = relatedLocation;
         } else {
-          quests.push({ id: effect.id, name: effect.name, description: effect.description, status: 'open', log: [], addedAt: today });
+          quests.push({
+            id: effect.id, name: effect.name, description: effect.description, status: 'open', log: [], addedAt: today,
+            ...(relatedNpc ? { relatedNpc } : {}), ...(relatedLocation ? { relatedLocation } : {}),
+          });
         }
       } else if (effect.type === 'quest_update') {
         const q = quests.find(q => q.id === effect.id);

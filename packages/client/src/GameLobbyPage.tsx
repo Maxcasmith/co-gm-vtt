@@ -14,8 +14,9 @@ const API = `http://${window.location.hostname}:3001`;
 export default function GameLobbyPage({ campaignId }: Props) {
   const { platform } = useAppMeta();
   const [campaignName, setCampaignName] = useState('');
-  // Dungeon-crawl worlds only — the rich scenario synopsis written before the dungeon itself (see
-  // routes/campaigns.ts's dungeon-crawl branch). Absent for every other world type.
+  // Dungeon-crawl worlds get the rich scenario synopsis written before the dungeon itself (see
+  // routes/campaigns.ts's dungeon-crawl branch); every other type falls back to its concept
+  // description, the same text GameListings already shows on the grid card.
   const [synopsis, setSynopsis] = useState('');
   // Also dungeon-crawl only, and only present once generation finished (see generateScenarioStoryboard) —
   // its mere presence is the "was this generated" check, same as PartyMemberOverlay does for a character's own.
@@ -78,9 +79,9 @@ export default function GameLobbyPage({ campaignId }: Props) {
   useEffect(() => {
     fetch(`${API}/api/campaigns/${campaignId}`)
       .then(r => r.json())
-      .then((c: { name?: string; scenarioSynopsis?: string }) => {
+      .then((c: { name?: string; scenarioSynopsis?: string; concept?: { name: string; description: string } }) => {
         setCampaignName(c.name ?? campaignId);
-        setSynopsis(c.scenarioSynopsis ?? '');
+        setSynopsis(c.scenarioSynopsis ?? c.concept?.description ?? '');
       })
       .catch(() => setCampaignName(campaignId));
     fetch(`${API}/api/campaigns/${campaignId}/party`)

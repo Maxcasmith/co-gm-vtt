@@ -1,4 +1,5 @@
 import path from 'path';
+import { SKILL_ABILITY, type ChatPayload, type CheckRequest } from 'shared';
 import { CAMPAIGNS_DIR, listEntitySlugs, readEntity, getWorldMeta, getConfig, saveDungeon, loadDungeon, readManifest, writeManifest, emptyManifest, readQuests, appendChatLog, readChatLog, appendNote } from './storage.ts';
 import { getTextStore } from './storage/index.ts';
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
@@ -179,6 +180,28 @@ export function stripRepeatedSentences(newText: string, recentDmText: string): s
   return result.length ? result : newText;
 }
 
+const CHECK_ASK_RE = /\b(check|roll)\b/i;
+
+// A player who names a skill and asks to check/roll it should always get a [[REQUEST_CHECK]]
+// button — but that's a prompt instruction, not a guarantee, and it's been observed skipped
+// (a player asked to "insight check" someone and got narrated tells with no roll offered).
+// Backstop: if the DM's own tags produced no check/save request for this player this turn,
+// and their triggering message names a skill alongside check/roll wording, synthesize the
+// request directly. No second LLM pass needed — a CheckRequest is just {player, skill, type},
+// nothing here requires anything an LLM would need to invent.
+export function detectMissedSkillCheck(recentLog: ChatPayload[], existing: CheckRequest[]): CheckRequest | undefined {
+  const last = [...recentLog].reverse().find(m =>
+    m.senderName !== 'System' && m.senderName !== 'Combat' && m.senderName !== 'Virtual DM' && !m.senderName.endsWith('(Virtual DM)')
+  );
+  if (!last || !CHECK_ASK_RE.test(last.text)) return undefined;
+
+  const lower = last.text.toLowerCase();
+  const skill = Object.keys(SKILL_ABILITY).find(s => new RegExp(`\\b${s.toLowerCase().replace(/ /g, '\\s+')}\\b`, 'i').test(lower));
+  if (!skill || existing.some(c => c.player === last.senderName && c.skill === skill)) return undefined;
+
+  return { player: last.senderName, skill, type: 'check' };
+}
+
 export function dispatchDMResponse(cid: string, combatEndedNear?: { gx: number; gy: number }[]): void {
   if (!sessionState.get(cid)) return;
   io.to(ROOM).emit('dm:thinking', true);
@@ -240,9 +263,13 @@ export function dispatchDMResponse(cid: string, combatEndedNear?: { gx: number; 
         }
       }
 
+      const missedCheck = detectMissedSkillCheck(recentLog, checkRequests);
+      const finalCheckRequests = missedCheck ? [...checkRequests, missedCheck] : checkRequests;
+      if (missedCheck) console.warn(`[dm] cid=${cid} ${missedCheck.player} asked for a ${missedCheck.skill} check but no REQUEST_CHECK tag was emitted — synthesizing one`);
+
       const senderName = speakingAs ? `${speakingAs} (Virtual DM)` : 'Virtual DM';
       await appendChatLog(cid, { text: cleanResponse, senderName, timestamp: Date.now() });
-      io.to(ROOM).emit('session:recap', { text: cleanResponse, senderName, checkRequests });
+      io.to(ROOM).emit('session:recap', { text: cleanResponse, senderName, checkRequests: finalCheckRequests });
     } catch (err) {
       logError('index:dmResponse', err);
       io.to(ROOM).emit('chat:message', { text: `[DM error: ${(err as Error).message}]`, senderName: 'System', timestamp: Date.now() });

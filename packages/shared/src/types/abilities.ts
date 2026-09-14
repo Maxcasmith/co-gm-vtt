@@ -26,6 +26,8 @@ export interface AbilityDef {
   itemChoices?: string[];
   /** Present only for a "spend any amount up to what's left" ability (Lay on Hands) — the socket payload's chosenAmount is clamped to the pool and healed directly, bypassing onUse's dice-scaling path entirely. */
   amountChoice?: true;
+  /** Present only when this ability also offers a flat-cost alternative to healing (Lay on Hands 2024: spend 5 points to cure Poisoned instead of restoring HP). Requires amountChoice. */
+  cureCost?: number;
 }
 
 /** Populated per-feature as each is wired up (see build audit) — empty is a valid, fully-functional state. */
@@ -131,5 +133,6 @@ export const ABILITY_DEFS: Record<string, AbilityDef> = {
     target: "ally",
     onUse: [],
     amountChoice: true,
+    cureCost: 5,
   },
 };

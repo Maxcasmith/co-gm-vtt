@@ -536,8 +536,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   useEffect(() => on('vtt:combat:attack', ({ attackerId, attackerName, targetId, weapon, bonusSpell, isOffhand, useInspiration }) => {
     socketRef.current?.emit('combat:attack', { attackerId, attackerName, targetId, weapon, ...(bonusSpell ? { bonusSpell } : {}), ...(isOffhand ? { isOffhand } : {}), ...(useInspiration ? { useInspiration } : {}) });
   }), []);
-  useEffect(() => on('vtt:combat:ability:use', ({ casterId, casterName, abilityKey, targetId, chosenItem, chosenAmount }) => {
-    socketRef.current?.emit('combat:ability:use', { casterId, casterName, abilityKey, targetId, chosenItem, chosenAmount });
+  useEffect(() => on('vtt:combat:ability:use', ({ casterId, casterName, abilityKey, targetId, chosenItem, chosenAmount, cureCondition }) => {
+    socketRef.current?.emit('combat:ability:use', { casterId, casterName, abilityKey, targetId, chosenItem, chosenAmount, cureCondition });
   }), []);
   useEffect(() => on('vtt:combat:spell:attack', ({ casterId, casterName, targetIds, spell, slotLevel, chosenDamageType }) => {
     socketRef.current?.emit('combat:spell:attack', { casterId, casterName, targetIds, spell, slotLevel, chosenDamageType });

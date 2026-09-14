@@ -4,7 +4,9 @@ import { actionCostFromCastingTime, isWeapon, hasOriginFeat, ABILITY_DEFS, RESOU
 import { dispatch, on } from './events.ts';
 import type { TargetingStartPayload } from './events.ts';
 import { Button } from './components/Button/Button.tsx';
+import { PipCounter } from './components/PipCounter/PipCounter.tsx';
 import ItemIcon from './ItemIcon.tsx';
+import InfoTooltip from './create-campaign/InfoTooltip.tsx';
 import './app.css';
 
 const API = `http://${window.location.hostname}:3001`;
@@ -83,8 +85,8 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   const [isMyTurn, setIsMyTurn] = useState(false);
   // Selected item name for a "pick a name" ability (Tinker's Magic) — keyed by ability key.
   const [chosenItems, setChosenItems] = useState<Record<string, string>>({});
-  // Selected HP amount for a "spend up to what's left" ability (Lay on Hands) — keyed by ability key.
-  const [chosenAmounts, setChosenAmounts] = useState<Record<string, number>>({});
+  // Params modal for a "spend up to what's left" ability (Lay on Hands) — open when set.
+  const [amountModal, setAmountModal] = useState<{ key: string; amount: number; cure: boolean } | null>(null);
   const [inspirationArmed, setInspirationArmed] = useState(false);
   // Origin feat Alert's swap clause — once per combat; the server is the real gate (Participant.alertSwapUsed),
   // this is just an optimistic lockout so the picker doesn't stay offered after a request is sent.
@@ -243,15 +245,35 @@ export default function CombatDock({ character, combatActive, movementRemaining,
 
   function handleAbilityClick(key: string, ability: (typeof ABILITY_DEFS)[string]) {
     if (actionsDisabled || !resources[ability.actionCost]) return;
-    if (resourceCurrent(character, ability.resourceKey) <= 0) return;
-    dispatch('vtt:sheet:closed', {});
     const pool = resourceCurrent(character, ability.resourceKey);
-    const chosenAmount = ability.amountChoice ? (chosenAmounts[key] ?? pool) : undefined;
+    if (pool <= 0) return;
+    if (ability.amountChoice) {
+      setAmountModal({ key, amount: pool, cure: false });
+      return;
+    }
+    dispatch('vtt:sheet:closed', {});
     if (ability.target === 'self') {
       const chosenItem = ability.itemChoices?.length ? (chosenItems[key] ?? ability.itemChoices[0]) : undefined;
-      dispatch('vtt:combat:ability:use', { casterId: character.id, casterName: character.name, abilityKey: key, targetId: character.id, ...(chosenItem ? { chosenItem } : {}), ...(chosenAmount !== undefined ? { chosenAmount } : {}) });
+      dispatch('vtt:combat:ability:use', { casterId: character.id, casterName: character.name, abilityKey: key, targetId: character.id, ...(chosenItem ? { chosenItem } : {}) });
     } else {
-      dispatch('vtt:targeting:start', { kind: 'ability', abilityKey: key, label: ability.label, casterId: character.id, actionCost: ability.actionCost, ...(chosenAmount !== undefined ? { chosenAmount } : {}) });
+      dispatch('vtt:targeting:start', { kind: 'ability', abilityKey: key, label: ability.label, casterId: character.id, actionCost: ability.actionCost });
+    }
+  }
+
+  // Accept in the amount-params modal (Lay on Hands): heal for the chosen HP, or spend the
+  // ability's flat cureCost to cure a condition instead — same targeting/self dispatch
+  // handleAbilityClick uses for every other ability, just fed by the modal's state.
+  function confirmAmountModal() {
+    if (!amountModal) return;
+    const { key, amount, cure } = amountModal;
+    const ability = ABILITY_DEFS[key];
+    setAmountModal(null);
+    dispatch('vtt:sheet:closed', {});
+    const chosenAmount = cure ? ability.cureCost : amount;
+    if (ability.target === 'self') {
+      dispatch('vtt:combat:ability:use', { casterId: character.id, casterName: character.name, abilityKey: key, targetId: character.id, chosenAmount, ...(cure ? { cureCondition: true } : {}) });
+    } else {
+      dispatch('vtt:targeting:start', { kind: 'ability', abilityKey: key, label: ability.label, casterId: character.id, actionCost: ability.actionCost, chosenAmount, ...(cure ? { cureCondition: true } : {}) });
     }
   }
 
@@ -351,6 +373,12 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   }
 
   const weaponsUsable = !actionsDisabled && resources.action;
+
+  const amountModalAbility = amountModal ? ABILITY_DEFS[amountModal.key] : undefined;
+  const amountModalPool = amountModalAbility ? resourceCurrent(character, amountModalAbility.resourceKey) : 0;
+  const amountModalCureCost = amountModalAbility?.cureCost;
+  const amountModalCanCure = amountModalCureCost !== undefined && amountModalPool >= amountModalCureCost;
+  const amountModalCanAccept = amountModal ? (amountModal.cure ? amountModalCanCure : amountModal.amount >= 1) : false;
 
   const alertAllies = connectedAllies.filter(name => name !== character.name && allyCharacterIds[name]);
   const canOfferAlertSwap = hasOriginFeat(character, 'Alert') && !alertSwapRequested && alertAllies.length > 0;
@@ -454,16 +482,6 @@ export default function CombatDock({ character, combatActive, movementRemaining,
                   {ability.itemChoices.map(name => <option key={name} value={name}>{name}</option>)}
                 </select>
               )}
-              {ability.amountChoice && (
-                <input
-                  type="number"
-                  className="combat-dock-ability-select"
-                  min={1}
-                  max={Math.max(1, resourceCurrent(character, ability.resourceKey))}
-                  value={chosenAmounts[key] ?? resourceCurrent(character, ability.resourceKey)}
-                  onChange={e => setChosenAmounts(prev => ({ ...prev, [key]: Math.max(1, Math.min(Number(e.target.value) || 1, resourceCurrent(character, ability.resourceKey))) }))}
-                />
-              )}
               <Button
                 variant="ghost"
                 data-action-cost={ability.actionCost}
@@ -495,11 +513,13 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     <div className="combat-dock">
       <div className="combat-dock-pips">
         {PIPS.map(pip => (
-          <div
+          <PipCounter
             key={pip.key}
-            data-resource={pip.key}
-            data-active={targeting !== null && pip.key === (targeting.kind === 'ability' ? targeting.actionCost : targeting.actionType) ? 'true' : undefined}
-            className={`combat-pip${!resources[pip.key] ? ' combat-pip--spent' : ''}`}
+            color={pip.key}
+            shape="circle"
+            max={1}
+            current={resources[pip.key] ? 1 : 0}
+            active={targeting !== null && pip.key === (targeting.kind === 'ability' ? targeting.actionCost : targeting.actionType)}
             title={pip.title}
           />
         ))}
@@ -515,27 +535,17 @@ export default function CombatDock({ character, combatActive, movementRemaining,
 
       {ownedResources.length > 0 && (
         <div className="combat-dock-resource-pips">
-          {ownedResources.map(def => {
-            const max = resourceMax(character, def.key);
-            const current = resourceCurrent(character, def.key);
-            return (
-              <div
-                className="combat-resource-group"
-                data-pip-color={def.key}
-                data-active={def.key === activeResourceKey ? 'true' : undefined}
-                key={def.key}
-                title={def.label}
-              >
-                {Array.from({ length: max }, (_, n) => (
-                  <div
-                    key={n}
-                    data-pip-color={def.key}
-                    className={`combat-resource-pip${n >= current ? ' combat-resource-pip--spent' : ''}`}
-                  />
-                ))}
-              </div>
-            );
-          })}
+          {ownedResources.map(def => (
+            <PipCounter
+              key={def.key}
+              color={def.key}
+              shape="square"
+              max={resourceMax(character, def.key)}
+              current={resourceCurrent(character, def.key)}
+              active={def.key === activeResourceKey}
+              title={def.label}
+            />
+          ))}
         </div>
       )}
 
@@ -596,6 +606,54 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     >
       {isMyTurn ? 'End Turn' : 'Waiting…'}
     </Button>
+
+    {amountModal && amountModalAbility && (
+      <div className="modal-overlay" onClick={() => setAmountModal(null)}>
+        <dialog className="modal campaign-modal" open onClick={e => e.stopPropagation()}>
+          <div className="modal-header">
+            <h2 className="modal-title">{amountModalAbility.label}</h2>
+          </div>
+          <div className="modal-form">
+            <label className="modal-label">
+              <span className="create-label-row">
+                Heal Amount (HP)
+                <InfoTooltip text={`Restore this many hit points to the target from your ${amountModalAbility.label} pool (${amountModalPool} remaining).`} />
+              </span>
+              <input
+                className="modal-input"
+                type="number"
+                min={1}
+                max={Math.max(1, amountModalPool)}
+                disabled={amountModal.cure}
+                value={amountModal.amount}
+                onChange={e => {
+                  const amount = Math.max(1, Math.min(Number(e.target.value) || 1, amountModalPool));
+                  setAmountModal(prev => prev && { ...prev, amount });
+                }}
+              />
+            </label>
+            {amountModalCureCost !== undefined && (
+              <label className="feature-checkbox">
+                <input
+                  type="checkbox"
+                  checked={amountModal.cure}
+                  disabled={!amountModalCanCure}
+                  onChange={() => setAmountModal(prev => prev && { ...prev, cure: !prev.cure })}
+                />
+                <span className="create-label-row">
+                  Cure Poisoned ({amountModalCureCost} points)
+                  <InfoTooltip text={`Instead of healing, spend ${amountModalCureCost} points from your ${amountModalAbility.label} pool to remove the Poisoned condition from the target. Requires at least ${amountModalCureCost} points remaining.`} />
+                </span>
+              </label>
+            )}
+          </div>
+          <div className="modal-actions">
+            <Button variant="outline" color="secondary" onClick={() => setAmountModal(null)}>Cancel</Button>
+            <Button onClick={confirmAmountModal} disabled={!amountModalCanAccept}>Accept</Button>
+          </div>
+        </dialog>
+      </div>
+    )}
   </div>
   );
 }

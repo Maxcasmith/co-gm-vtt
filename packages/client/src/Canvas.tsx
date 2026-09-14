@@ -474,7 +474,7 @@ export default function Canvas({ player, characterId, character, connected, show
               const py = ppos.gy * hdCellSz + hdCellSz / 2;
               if (Math.hypot(mx - px, my - py) <= TOKEN_R) {
                 if (targetingNow.kind === 'ability') {
-                  dispatch('vtt:combat:ability:use', { casterId: targetingNow.casterId, casterName: player, abilityKey: targetingNow.abilityKey, targetId: name, ...(targetingNow.chosenAmount !== undefined ? { chosenAmount: targetingNow.chosenAmount } : {}) });
+                  dispatch('vtt:combat:ability:use', { casterId: targetingNow.casterId, casterName: player, abilityKey: targetingNow.abilityKey, targetId: name, ...(targetingNow.chosenAmount !== undefined ? { chosenAmount: targetingNow.chosenAmount } : {}), ...(targetingNow.cureCondition ? { cureCondition: true } : {}) });
                 } else {
                   tryCastOnTarget(name);
                 }

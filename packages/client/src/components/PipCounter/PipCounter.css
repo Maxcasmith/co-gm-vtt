@@ -1,0 +1,133 @@
+.pip-counter {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.pip-counter[data-pip-shape="square"] {
+  padding: 4px 7px;
+  margin: 2px 0;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.pip-counter-dot {
+  border: 1.5px solid transparent;
+  transition: opacity 0.2s, box-shadow 0.15s;
+}
+
+.pip-counter-dot[data-pip-shape="circle"] { width: 12px; height: 12px; border-radius: 50%; }
+.pip-counter-dot[data-pip-shape="square"] { width: 10px; height: 10px; border-radius: 3px; }
+
+.pip-counter-dot--spent {
+  background: #2a2535 !important;
+  border-color: #3d3650 !important;
+  opacity: 0.4;
+}
+
+.pip-counter-count {
+  font-size: 10px;
+  font-weight: 600;
+  color: #e5e0f0;
+  line-height: 10px;
+}
+
+.pip-counter[data-active="true"] {
+  animation: pip-counter-pulse 1s ease-in-out infinite;
+}
+
+@keyframes pip-counter-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
+/* Action economy (circle, no pill). */
+.pip-counter-dot[data-pip-color="action"]      { background: #16a34a; border-color: #22c55e; }
+.pip-counter-dot[data-pip-color="bonusAction"] { background: #c2410c; border-color: #f97316; }
+.pip-counter-dot[data-pip-color="reaction"]    { background: #be185d; border-color: #ec4899; }
+
+.pip-counter[data-active="true"][data-pip-color="action"]      { box-shadow: 0 0 0 3px #22c55e, 0 0 14px 3px #22c55e88; }
+.pip-counter[data-active="true"][data-pip-color="bonusAction"] { box-shadow: 0 0 0 3px #f97316, 0 0 14px 3px #f9731688; }
+.pip-counter[data-active="true"][data-pip-color="reaction"]    { box-shadow: 0 0 0 3px #ec4899, 0 0 14px 3px #ec489988; }
+
+/* One hue per RESOURCE_DEFS key (square, pill). Dot uses the full colour; the pill uses the
+   same hue darker and translucent. Deliberately clear of the spell-slot blue (#60a5fa) and the
+   action-economy colours above so nothing reads as the wrong pool. */
+.pip-counter-dot[data-pip-color="secondWind"]                { background: #dc2626; border-color: #f87171; }
+.pip-counter[data-pip-color="secondWind"]               { background: rgba(220, 38, 38, 0.16); border-color: rgba(220, 38, 38, 0.4); }
+
+.pip-counter-dot[data-pip-color="rage"]                       { background: #d97706; border-color: #fbbf24; }
+.pip-counter[data-pip-color="rage"]                     { background: rgba(217, 119, 6, 0.16); border-color: rgba(217, 119, 6, 0.4); }
+
+.pip-counter-dot[data-pip-color="innateSorcery"]              { background: #7c3aed; border-color: #a78bfa; }
+.pip-counter[data-pip-color="innateSorcery"]            { background: rgba(124, 58, 237, 0.16); border-color: rgba(124, 58, 237, 0.4); }
+
+.pip-counter-dot[data-pip-color="favoredEnemy"]               { background: #65a30d; border-color: #a3e635; }
+.pip-counter[data-pip-color="favoredEnemy"]             { background: rgba(101, 163, 13, 0.16); border-color: rgba(101, 163, 13, 0.4); }
+
+.pip-counter-dot[data-pip-color="bardicInspiration"]          { background: #ca8a04; border-color: #fde047; }
+.pip-counter[data-pip-color="bardicInspiration"]        { background: rgba(202, 138, 4, 0.16); border-color: rgba(202, 138, 4, 0.4); }
+
+.pip-counter-dot[data-pip-color="tinkersMagic"]               { background: #0d9488; border-color: #5eead4; }
+.pip-counter[data-pip-color="tinkersMagic"]             { background: rgba(13, 148, 136, 0.16); border-color: rgba(13, 148, 136, 0.4); }
+
+.pip-counter-dot[data-pip-color="layOnHands"]                 { background: #c026d3; border-color: #e879f9; }
+.pip-counter[data-pip-color="layOnHands"]               { background: rgba(192, 38, 211, 0.16); border-color: rgba(192, 38, 211, 0.4); }
+
+.pip-counter-dot[data-pip-color="arcaneRecovery"]             { background: #4338ca; border-color: #818cf8; }
+.pip-counter[data-pip-color="arcaneRecovery"]           { background: rgba(67, 56, 202, 0.16); border-color: rgba(67, 56, 202, 0.4); }
+
+.pip-counter-dot[data-pip-color="luckPoints"]                 { background: #059669; border-color: #6ee7b7; }
+.pip-counter[data-pip-color="luckPoints"]               { background: rgba(5, 150, 105, 0.16); border-color: rgba(5, 150, 105, 0.4); }
+
+.pip-counter-dot[data-pip-color="magicInitiateClericSpell"]   { background: #0e7490; border-color: #67e8f9; }
+.pip-counter[data-pip-color="magicInitiateClericSpell"] { background: rgba(14, 116, 144, 0.16); border-color: rgba(14, 116, 144, 0.4); }
+
+.pip-counter-dot[data-pip-color="magicInitiateDruidSpell"]    { background: #9333ea; border-color: #d8b4fe; }
+.pip-counter[data-pip-color="magicInitiateDruidSpell"]  { background: rgba(147, 51, 234, 0.16); border-color: rgba(147, 51, 234, 0.4); }
+
+.pip-counter-dot[data-pip-color="magicInitiateWizardSpell"]   { background: #e11d48; border-color: #fb7185; }
+.pip-counter[data-pip-color="magicInitiateWizardSpell"] { background: rgba(225, 29, 72, 0.16); border-color: rgba(225, 29, 72, 0.4); }
+
+.pip-counter-dot[data-pip-color="fastCrafting"]               { background: #78716c; border-color: #d6d3d1; }
+.pip-counter[data-pip-color="fastCrafting"]             { background: rgba(120, 113, 108, 0.16); border-color: rgba(120, 113, 108, 0.4); }
+
+.pip-counter-dot[data-pip-color="musicianPerformance"]        { background: #475569; border-color: #94a3b8; }
+.pip-counter[data-pip-color="musicianPerformance"]      { background: rgba(71, 85, 105, 0.16); border-color: rgba(71, 85, 105, 0.4); }
+
+/* Same "about to spend this" ping the action pip does (data-active + pip-pulse below), one
+   variant per resource hue so whichever pool a targeted ability/spell will spend lights up. */
+.pip-counter[data-active="true"] {
+  animation: resource-pip-pulse 1s ease-in-out infinite;
+}
+
+.pip-counter[data-pip-color="secondWind"][data-active="true"]              { box-shadow: 0 0 0 2px #dc2626, 0 0 12px 3px rgba(220, 38, 38, 0.5); }
+.pip-counter[data-pip-color="rage"][data-active="true"]                    { box-shadow: 0 0 0 2px #d97706, 0 0 12px 3px rgba(217, 119, 6, 0.5); }
+.pip-counter[data-pip-color="innateSorcery"][data-active="true"]           { box-shadow: 0 0 0 2px #7c3aed, 0 0 12px 3px rgba(124, 58, 237, 0.5); }
+.pip-counter[data-pip-color="favoredEnemy"][data-active="true"]            { box-shadow: 0 0 0 2px #65a30d, 0 0 12px 3px rgba(101, 163, 13, 0.5); }
+.pip-counter[data-pip-color="bardicInspiration"][data-active="true"]       { box-shadow: 0 0 0 2px #ca8a04, 0 0 12px 3px rgba(202, 138, 4, 0.5); }
+.pip-counter[data-pip-color="tinkersMagic"][data-active="true"]            { box-shadow: 0 0 0 2px #0d9488, 0 0 12px 3px rgba(13, 148, 136, 0.5); }
+.pip-counter[data-pip-color="layOnHands"][data-active="true"]              { box-shadow: 0 0 0 2px #c026d3, 0 0 12px 3px rgba(192, 38, 211, 0.5); }
+.pip-counter[data-pip-color="arcaneRecovery"][data-active="true"]          { box-shadow: 0 0 0 2px #4338ca, 0 0 12px 3px rgba(67, 56, 202, 0.5); }
+.pip-counter[data-pip-color="luckPoints"][data-active="true"]              { box-shadow: 0 0 0 2px #059669, 0 0 12px 3px rgba(5, 150, 105, 0.5); }
+.pip-counter[data-pip-color="magicInitiateClericSpell"][data-active="true"] { box-shadow: 0 0 0 2px #0e7490, 0 0 12px 3px rgba(14, 116, 144, 0.5); }
+.pip-counter[data-pip-color="magicInitiateDruidSpell"][data-active="true"]  { box-shadow: 0 0 0 2px #9333ea, 0 0 12px 3px rgba(147, 51, 234, 0.5); }
+.pip-counter[data-pip-color="magicInitiateWizardSpell"][data-active="true"] { box-shadow: 0 0 0 2px #e11d48, 0 0 12px 3px rgba(225, 29, 72, 0.5); }
+.pip-counter[data-pip-color="fastCrafting"][data-active="true"]            { box-shadow: 0 0 0 2px #78716c, 0 0 12px 3px rgba(120, 113, 108, 0.5); }
+.pip-counter[data-pip-color="musicianPerformance"][data-active="true"]     { box-shadow: 0 0 0 2px #475569, 0 0 12px 3px rgba(71, 85, 105, 0.5); }
+
+/* Same "about to spend this" ping the action pip does, one variant per resource hue. */
+.pip-counter[data-pip-color="secondWind"][data-active="true"]              { box-shadow: 0 0 0 2px #dc2626, 0 0 12px 3px rgba(220, 38, 38, 0.5); }
+.pip-counter[data-pip-color="rage"][data-active="true"]                    { box-shadow: 0 0 0 2px #d97706, 0 0 12px 3px rgba(217, 119, 6, 0.5); }
+.pip-counter[data-pip-color="innateSorcery"][data-active="true"]           { box-shadow: 0 0 0 2px #7c3aed, 0 0 12px 3px rgba(124, 58, 237, 0.5); }
+.pip-counter[data-pip-color="favoredEnemy"][data-active="true"]            { box-shadow: 0 0 0 2px #65a30d, 0 0 12px 3px rgba(101, 163, 13, 0.5); }
+.pip-counter[data-pip-color="bardicInspiration"][data-active="true"]       { box-shadow: 0 0 0 2px #ca8a04, 0 0 12px 3px rgba(202, 138, 4, 0.5); }
+.pip-counter[data-pip-color="tinkersMagic"][data-active="true"]            { box-shadow: 0 0 0 2px #0d9488, 0 0 12px 3px rgba(13, 148, 136, 0.5); }
+.pip-counter[data-pip-color="layOnHands"][data-active="true"]              { box-shadow: 0 0 0 2px #c026d3, 0 0 12px 3px rgba(192, 38, 211, 0.5); }
+.pip-counter[data-pip-color="arcaneRecovery"][data-active="true"]          { box-shadow: 0 0 0 2px #4338ca, 0 0 12px 3px rgba(67, 56, 202, 0.5); }
+.pip-counter[data-pip-color="luckPoints"][data-active="true"]              { box-shadow: 0 0 0 2px #059669, 0 0 12px 3px rgba(5, 150, 105, 0.5); }
+.pip-counter[data-pip-color="magicInitiateClericSpell"][data-active="true"] { box-shadow: 0 0 0 2px #0e7490, 0 0 12px 3px rgba(14, 116, 144, 0.5); }
+.pip-counter[data-pip-color="magicInitiateDruidSpell"][data-active="true"]  { box-shadow: 0 0 0 2px #9333ea, 0 0 12px 3px rgba(147, 51, 234, 0.5); }
+.pip-counter[data-pip-color="magicInitiateWizardSpell"][data-active="true"] { box-shadow: 0 0 0 2px #e11d48, 0 0 12px 3px rgba(225, 29, 72, 0.5); }
+.pip-counter[data-pip-color="fastCrafting"][data-active="true"]            { box-shadow: 0 0 0 2px #78716c, 0 0 12px 3px rgba(120, 113, 108, 0.5); }
+.pip-counter[data-pip-color="musicianPerformance"][data-active="true"]     { box-shadow: 0 0 0 2px #475569, 0 0 12px 3px rgba(71, 85, 105, 0.5); }

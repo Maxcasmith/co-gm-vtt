@@ -8,7 +8,8 @@ import {
 import { getTextStore } from '../storage/index.ts';
 import { getConfig } from '../storage.ts';
 import { getFeatureProvider, type ChatMessage } from '../providers/index.ts';
-import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDungeonNarrationPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, buildPlotHookCandidatePrompt, buildDungeonQuestPrompt, buildStoryTagsPrompt, buildSessionNotesPrompt, type EntityType } from './prompts.ts';
+import { toSlug } from '../combat/dice.ts';
+import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDungeonNarrationPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, buildPlotHookCandidatePrompt, buildDungeonQuestPrompt, buildStoryTagsPrompt, buildSessionNotesPrompt, type EntityType, type ExistingEntitySummary } from './prompts.ts';
 import { PLOT_HOOK_TAGS } from 'shared';
 import type { AppConfig, ChatPayload, Character, CurrencyDenomination, Dungeon, Quest, PlotHook, ActivePlotArc, PlotHookTag } from 'shared';
 import { logError } from '../logger.ts';
@@ -104,6 +105,18 @@ async function getCharacterSummaries(campaignSlug: string): Promise<string> {
   return chars.length ? chars.map(formatCharacterSummary).join('\n') : '(no party members yet)';
 }
 
+// Gives the triage prompt enough to recognize "Widdershins Lane" as the same place as an
+// existing entities/location/the-lane-behind-the-sooted-swan.md stub filed under a generic
+// name — a bare slug list has no content for the "match by description" rule to work from.
+function summarizeEntity(content: string): string {
+  const frontmatterName = content.match(/^name:\s*(.+)$/m)?.[1]?.trim();
+  const body = content.replace(/^---[\s\S]*?---\n?/, '');
+  const lines = body.split('\n').map(l => l.trim()).filter(Boolean);
+  const heading = lines.find(l => l.startsWith('#'))?.replace(/^#+\s*/, '');
+  const firstDetail = lines.find(l => !l.startsWith('#'));
+  return [frontmatterName ?? heading, firstDetail].filter(Boolean).join(' — ').slice(0, 150);
+}
+
 function excerpts(log: ChatPayload[], entitySlug: string): string {
   const term = entitySlug.replace(/-/g, ' ').toLowerCase();
   const relevant = log.filter(m =>
@@ -166,12 +179,21 @@ async function buildEntitySummaries(campaignSlug: string): Promise<string> {
     if (content) lines.push(`### character/${slug}\n${content.slice(0, 500)}`);
   }
 
+  const manifest = await readManifest(campaignSlug);
+
   // Quests — pending shown as story beats to trigger, active shown as ongoing goals
   const quests = await readQuests(campaignSlug);
   const pendingQuests = quests.filter(q => q.status === 'undiscovered').slice(0, 3);
   const activeQuests = quests.filter(q => q.status === 'open');
   if (pendingQuests.length) {
-    const section = pendingQuests.map(q => `- ${q.id}: ${q.name} — ${q.description}`).join('\n');
+    const section = pendingQuests.map(q => {
+      // A quest's relatedNpc is a concrete cross-reference to an entity file — spell it out when
+      // that NPC is actually in the current scene instead of leaving the match to inference (the
+      // gap that let "an old lamplighter" and NPC Obed Marsh sit unlinked in the same session).
+      const inScene = q.relatedNpc && manifest?.npcs.includes(q.relatedNpc);
+      const flag = inScene ? ` [${q.relatedNpc} is in the current scene — this is their hook]` : '';
+      return `- ${q.id}: ${q.name} — ${q.description}${flag}`;
+    }).join('\n');
     lines.push(`### Undiscovered quests (steer the player toward these — do not wait for them to ask)\n${section}`);
   }
   if (activeQuests.length) {
@@ -182,7 +204,6 @@ async function buildEntitySummaries(campaignSlug: string): Promise<string> {
     lines.push(`### Open quests (player is tracking these — push toward resolution)\n${section}`);
   }
 
-  const manifest = await readManifest(campaignSlug);
   if (!manifest) return lines.join('\n\n') || '(no entity notes yet)';
 
   const totalSecs = manifest.worldTimeSecs ?? 43200;
@@ -259,22 +280,25 @@ export async function generateDmBrief(
 
 // ── Session quest generation ──────────────────────────────────────────────────
 
-// Grounds a winning plot arc's invented cast as real entity files from the moment it starts,
-// instead of leaving them as names that only exist inside quest description text — mirrors
+// Grounds a quest's invented cast as real entity files from the moment it's seeded, instead of
+// leaving them as names that only exist inside quest description text — mirrors
 // routes/campaigns.ts's syncCharacterToWorldLore (same "skip anything that collides with an
 // existing slug" rule: a same-named entity is almost certainly the established one, and this
-// pass must never clobber hand-authored lore).
-async function seedPlotArcEntities(
-  campaignSlug: string, arcTitle: string, entities: Array<{ name: string; type: 'npc' | 'faction' | 'location'; description: string }>,
-): Promise<void> {
-  const toEntitySlug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  await Promise.all(entities.filter(e => e.name?.trim()).map(async e => {
-    const slug = toEntitySlug(e.name);
+// pass must never clobber hand-authored lore). Returns the resolved slug for every entity passed
+// in (whether newly created here or already on disk) so the caller can link a Quest record to it
+// — see relatedNpc/relatedLocation on Quest.
+async function seedNamedEntities(
+  campaignSlug: string, originLabel: string, entities: Array<{ name: string; type: 'npc' | 'faction' | 'location'; description: string }>,
+): Promise<Array<{ name: string; type: 'npc' | 'faction' | 'location'; slug: string }>> {
+  return Promise.all(entities.filter(e => e.name?.trim()).map(async e => {
+    const slug = toSlug(e.name);
     const existingSlugs = await listEntitySlugs(campaignSlug, e.type);
-    if (existingSlugs.includes(slug)) return;
-    const heading = e.type === 'location' ? '## Scene Notes' : '## Observed';
-    const content = `# ${e.name}\n\n${e.description}\n\n${heading}\n- Introduced by the "${arcTitle}" storyline.\n`;
-    await writeEntity(campaignSlug, e.type, slug, content);
+    if (!existingSlugs.includes(slug)) {
+      const heading = e.type === 'location' ? '## Scene Notes' : '## Observed';
+      const content = `# ${e.name}\n\n${e.description}\n\n${heading}\n- Introduced by "${originLabel}".\n`;
+      await writeEntity(campaignSlug, e.type, slug, content);
+    }
+    return { name: e.name, type: e.type, slug };
   }));
 }
 
@@ -331,10 +355,10 @@ export async function ensureSessionQuests(campaignSlug: string): Promise<void> {
     let remainingNeeded = UNDISCOVERED_THRESHOLD - undiscovered.length;
     const newQuests: Quest[] = [];
 
+    const entitySummaries = await buildEntitySummaries(campaignSlug);
     const pool = await readPlotHooks();
     const chosenHook = pickEligiblePlotHook(pool, campaignSlug, meta?.storyTags ?? []);
     if (chosenHook) {
-      const entitySummaries = await buildEntitySummaries(campaignSlug);
       const candidatePrompt = buildPlotHookCandidatePrompt({
         campaignName: meta?.name ?? campaignSlug,
         entitySummaries,
@@ -367,12 +391,18 @@ export async function ensureSessionQuests(campaignSlug: string): Promise<void> {
           .slice().sort((a, b) => a.order - b.order)
           .map(b => ({ order: b.order, questId: b.id, name: b.name, description: b.description }));
         const first = arcBeats[0]!;
-        newQuests.push({ id: first.questId, name: first.name, description: first.description, status: 'undiscovered', log: [], addedAt: today });
+
+        const seeded = await seedNamedEntities(campaignSlug, chosenHook.title, parsed.poolCandidate.entities ?? []);
+        const relatedNpc = seeded.find(e => e.type === 'npc')?.slug;
+        const relatedLocation = seeded.find(e => e.type === 'location')?.slug;
+        newQuests.push({
+          id: first.questId, name: first.name, description: first.description, status: 'undiscovered', log: [], addedAt: today,
+          ...(relatedNpc ? { relatedNpc } : {}), ...(relatedLocation ? { relatedLocation } : {}),
+        });
 
         const arc: ActivePlotArc = { plotHookId: chosenHook.id, beats: arcBeats, currentBeatIndex: 0, startedAt: new Date().toISOString() };
         await writePlotArcs(campaignSlug, [...await readPlotArcs(campaignSlug), arc]);
         await markPlotHookUsed(chosenHook.id, campaignSlug);
-        await seedPlotArcEntities(campaignSlug, chosenHook.title, parsed.poolCandidate.entities ?? []);
         console.log(`[session-quests] plot hook "${chosenHook.title}" selected (score ${parsed.poolCandidate.score} vs invented ${parsed.inventedCandidate.score}) — started arc with ${arcBeats.length} beat(s)`);
       } else {
         const c = parsed.inventedCandidate;
@@ -384,6 +414,7 @@ export async function ensureSessionQuests(campaignSlug: string): Promise<void> {
     if (remainingNeeded > 0) {
       const prompt = buildSessionQuestsPrompt({
         campaignName: meta?.name ?? campaignSlug,
+        entitySummaries,
         currentAct,
         actConditions,
         existingIds: [...existingIds, ...newQuests.map(q => q.id)],
@@ -396,13 +427,27 @@ export async function ensureSessionQuests(campaignSlug: string): Promise<void> {
       const raw = await provider.complete(prompt);
       console.log('[session-quests] raw response:\n', raw);
       const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```\s*$/, '');
-      const generated = JSON.parse(cleaned) as Array<{ id: string; name: string; description: string }>;
+      const generated = JSON.parse(cleaned) as Array<{
+        id: string; name: string; description: string;
+        relatedNpc?: { name: string; description: string } | null;
+        relatedLocation?: { name: string; description: string } | null;
+      }>;
       const knownIds = new Set([...existingIds, ...newQuests.map(q => q.id)]);
       for (const q of generated) {
-        if (q.id && q.name && !knownIds.has(q.id)) {
-          newQuests.push({ id: q.id, name: q.name, description: q.description, status: 'undiscovered', log: [], addedAt: today });
-          knownIds.add(q.id);
-        }
+        if (!q.id || !q.name || knownIds.has(q.id)) continue;
+        knownIds.add(q.id);
+
+        const toSeed: Array<{ name: string; type: 'npc' | 'location'; description: string }> = [];
+        if (q.relatedNpc?.name) toSeed.push({ ...q.relatedNpc, type: 'npc' });
+        if (q.relatedLocation?.name) toSeed.push({ ...q.relatedLocation, type: 'location' });
+        const seeded = toSeed.length ? await seedNamedEntities(campaignSlug, q.name, toSeed) : [];
+        const relatedNpc = seeded.find(e => e.type === 'npc')?.slug;
+        const relatedLocation = seeded.find(e => e.type === 'location')?.slug;
+
+        newQuests.push({
+          id: q.id, name: q.name, description: q.description, status: 'undiscovered', log: [], addedAt: today,
+          ...(relatedNpc ? { relatedNpc } : {}), ...(relatedLocation ? { relatedLocation } : {}),
+        });
       }
     }
 
@@ -554,9 +599,13 @@ export async function processSession(campaignSlug: string): Promise<ProcessResul
   const characters = await getCharacterNames(campaignSlug);
 
   // Build existing entity map for triage
-  const existingEntities: Record<EntityType, string[]> = { npc: [], faction: [], location: [], character: [], nemesis: [] };
+  const existingEntities: Record<EntityType, ExistingEntitySummary[]> = { npc: [], faction: [], location: [], character: [], nemesis: [] };
   for (const type of ENTITY_TYPES) {
-    existingEntities[type] = await listEntitySlugs(campaignSlug, type);
+    const slugs = await listEntitySlugs(campaignSlug, type);
+    existingEntities[type] = await Promise.all(slugs.map(async slug => ({
+      slug,
+      summary: summarizeEntity((await readEntity(campaignSlug, type, slug)) ?? ''),
+    })));
   }
 
   // Pass 1 — triage
@@ -565,7 +614,7 @@ export async function processSession(campaignSlug: string): Promise<ProcessResul
   const triage = parseTriageYaml(triageRaw);
 
   const existingSlugs = new Set(
-    ENTITY_TYPES.flatMap(t => existingEntities[t].map(s => `${t}:${s}`)),
+    ENTITY_TYPES.flatMap(t => existingEntities[t].map(e => `${t}:${e.slug}`)),
   );
   const updated: string[] = [];
   const created: string[] = [];
