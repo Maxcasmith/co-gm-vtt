@@ -1,7 +1,7 @@
 import type { TurnContext, RoundContext, CombatContext, Condition } from 'shared';
 import { Hook, type HookProps } from '../Hook.ts';
 import type { StateEngine } from '../StateEngine.ts';
-import { clearCondition } from '../../runtime.ts';
+import { clearCondition } from '../../runtime/statusEffects.ts';
 
 /** Who to clear a bare condition marker (or markers — Tasha's Hideous Laughter's Prone+Incapacitated) off of when an expiry fires — see ConditionClear in registerSpellHooks.ts. */
 export interface ConditionClear {

@@ -3,7 +3,7 @@ import { readChatLog, readNotes, readQuests, readManifest, listCharacters, loadD
 import { toClientDungeon } from '../dungeon/index.ts';
 import { io, ROOM, connected, playerSocketIds, campaignPlayers, sessionState, combatState, dungeons, tokenPositions, microDungeons, encounters, enemiesReady, withLivePositions } from '../state.ts';
 import { maybeResolveRest, broadcastRestProgress } from './rest.ts';
-import { conditionsHolder } from '../combat/runtime.ts';
+import { conditionsHolder } from '../combat/runtime/statusEffects.ts';
 import type { JoinContext } from './context.ts';
 
 export function registerJoin(ctx: JoinContext): void {

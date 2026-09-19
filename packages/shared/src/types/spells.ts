@@ -151,7 +151,7 @@ export interface HookSpec {
   dieSize?: number;
   /** rollModifier only — 1 to add (Bless), -1 to subtract (Bane, Blade Ward). */
   sign?: 1 | -1;
-  /** rollModifier only — false/omitted (Bless/Bane) modifies the owner's OWN attack rolls and saves. true (Blade Ward) flips it: modifies the roll of whoever ATTACKS the owner instead — registers under kind 'rollModifierVsAttacker' so it's queried at the attacker's roll (see bladeWardPenalty, combat/runtime.ts) rather than getHooksOwnedBy(attackerId, 'rollModifier'). */
+  /** rollModifier only — false/omitted (Bless/Bane) modifies the owner's OWN attack rolls and saves. true (Blade Ward) flips it: modifies the roll of whoever ATTACKS the owner instead — registers under kind 'rollModifierVsAttacker' so it's queried at the attacker's roll (see bladeWardPenalty, combat/runtime/damage.ts) rather than getHooksOwnedBy(attackerId, 'rollModifier'). */
   appliesToAttacker?: boolean;
   /** rollModifier only — scopes the modifier to ability checks using one chosen skill (Guidance) instead of attack rolls/saves. Registers under kind 'rollModifierCheck', with the hook's `skill` set from SpellHookContext.chosenSkill (the caster's cast-time pick, see SpellCombatMeta.skillOptions) — queried by roll:check (socketHandlers/rolls.ts), not the attack/save sites. */
   scopedToChosenSkill?: boolean;
@@ -165,7 +165,7 @@ export interface HookSpec {
   thresholdFt?: number;
   /** reactionLock only — narrows the block to Opportunity Attacks specifically (Shocking Grasp) instead of every reaction (Arms of Hadar's full block). */
   opportunityOnly?: boolean;
-  /** illuminationSource only — ambient light level (0-1) this owner is emitting while the hook is registered (Light's bright light ~1, Starry Wisp's Dim Light ~0.5). Global illumination has no per-cell radius; the dungeon's live `illumination` becomes max(baseIllumination, every active source's level) — see recomputeIllumination in combat/runtime.ts. */
+  /** illuminationSource only — ambient light level (0-1) this owner is emitting while the hook is registered (Light's bright light ~1, Starry Wisp's Dim Light ~0.5). Global illumination has no per-cell radius; the dungeon's live `illumination` becomes max(baseIllumination, every active source's level) — see recomputeIllumination in combat/runtime/environment.ts. */
   illuminationLevel?: number;
   /**
    * Same meaning and shape as EffectSpec.appliesIf — gates the whole spec (hook AND any
@@ -319,7 +319,7 @@ export interface SpellCombatMeta {
    * every matching effect together instead of picking one).
    */
   onHitIfTargetMissingHp?: EffectSpec[];
-  /** Spare the Dying — sets the target's death saves to Stable directly instead of dealing damage or granting a hook. Player-only; a no-op against a creature target (see stabilizeParticipant, combat/runtime.ts). */
+  /** Spare the Dying — sets the target's death saves to Stable directly instead of dealing damage or granting a hook. Player-only; a no-op against a creature target (see stabilizeParticipant, combat/runtime/deathSaves.ts). */
   stabilizesTarget?: boolean;
 }
 

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import type { CompendiumMeta, SavedAdventureMeta, WorldConcept } from 'shared';
+import type { CompendiumMeta, SavedAdventureMeta, WorldConcept, CampaignGenre } from 'shared';
 import { Button } from '../components/Button/Button.tsx';
 import ChooseSourceStep, { type Choice } from './ChooseSourceStep.tsx';
 import PromptsStep from './PromptsStep.tsx';
@@ -48,6 +48,7 @@ export default function CreateCampaignPage() {
   const [campaignType, setCampaignType] = useState<'campaign' | 'dungeon-crawl'>('campaign');
   const [partySize, setPartySize] = useState(4);
   const [tags, setTags] = useState<string[]>(initialTags);
+  const [genre, setGenre] = useState<CampaignGenre | null>(null);
   const [loadingConcepts, setLoadingConcepts] = useState(false);
   const [concepts, setConcepts] = useState<WorldConcept[]>([]);
   const [selectedConcept, setSelectedConcept] = useState<WorldConcept | null>(null);
@@ -125,7 +126,7 @@ export default function CreateCampaignPage() {
       const res = await fetch(`${API}/api/campaigns/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tags, concept, name: campaignName, type: campaignType, partySize }),
+        body: JSON.stringify({ tags, concept, name: campaignName, type: campaignType, partySize, genre }),
       });
 
       const reader = res.body!.getReader();
@@ -288,7 +289,7 @@ export default function CreateCampaignPage() {
 
   const nextDisabled = {
     choose: choice === null,
-    prompts: tags.length === 0 || loadingConcepts,
+    prompts: tags.length === 0 || genre === null || loadingConcepts,
     concepts: selectedConcept === null || loadingConcepts,
     title: campaignName.trim() === '' || passwordsMismatch(password, confirmPassword),
     name: campaignName.trim() === '' || passwordsMismatch(password, confirmPassword),
@@ -352,6 +353,8 @@ export default function CreateCampaignPage() {
             onTagsChange={setTags}
             partySize={partySize}
             onPartySizeChange={setPartySize}
+            genre={genre}
+            onGenreChange={setGenre}
           />
         )}
 

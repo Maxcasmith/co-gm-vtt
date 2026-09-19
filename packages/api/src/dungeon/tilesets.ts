@@ -1,9 +1,9 @@
 import { createHash } from 'crypto';
 import path from 'path';
 import sharp from 'sharp';
-import type { AppConfig, DungeonMaterialSpec } from 'shared';
+import type { AppConfig, DungeonMaterialSpec, CampaignGenre, MaterialCategory } from 'shared';
 import { DUNGEON_STYLE_PACKS, slugifyTheme } from 'shared';
-import { TILESETS_DIR } from '../storage.ts';
+import { TILESETS_DIR, readGenreTileMap, writeGenreTileMap } from '../storage.ts';
 import { getMediaStore } from '../storage/index.ts';
 import { generateTilesetAtlas } from '../providers/openai.ts';
 import { buildDynamicTilesetPrompt } from '../session-processor/imagePrompts.ts';
@@ -192,24 +192,48 @@ export async function generateExtendedTileset(title: string, theme: string, mate
   });
 }
 
+// Records each distinct material this tileset actually generated, under its category, keyed by
+// its own freeform key (e.g. horror.stone["cracked-stone"] = "tilesets/<slug>/cracked-stone") — so
+// a later dungeon of the same genre can be shown the SPECIFIC existing variants (see
+// dungeon/manifest.ts's genreBlock), not just which categories exist. Best-effort: called after
+// the tileset is already known good, never allowed to fail the caller.
+async function recordGenreTileset(genre: CampaignGenre, materials: DungeonMaterialSpec[], tilesetSlug: string): Promise<void> {
+  try {
+    const map = await readGenreTileMap();
+    const forGenre: Partial<Record<MaterialCategory, Record<string, string>>> = { ...(map[genre] ?? {}) };
+    for (const m of materials) {
+      forGenre[m.category] = { ...(forGenre[m.category] ?? {}), [m.key]: path.join(TILESETS_DIR, tilesetSlug, m.key) };
+    }
+    await writeGenreTileMap({ ...map, [genre]: forGenre });
+  } catch (err) {
+    logError('dungeon/tilesets:recordGenreTileset', err);
+  }
+}
+
 // Called from generateDungeon() once a manifest's theme and materials are known. Never throws —
 // a failed or skipped generation just means the dungeon renders with the client's existing
 // default-pack fallback (dungeonThemes.ts), same as today's behaviour for an unrecognised theme.
 // Returns the folder key the caller should stamp onto Dungeon.tilesetSlug — a bare theme slug for
 // curated packs or a skip/failure, or theme-slug--<materials-hash> once a matching (possibly
-// freshly generated) dynamic tileset exists on disk.
-export async function ensureTilesetSupport(theme: string, materials: DungeonMaterialSpec[], config: AppConfig): Promise<string> {
+// freshly generated) dynamic tileset exists on disk. `genre` is optional (undefined on campaigns
+// predating the field) — when present, every material this dungeon actually used gets recorded
+// against it in the app-wide genre tile map (see recordGenreTileset).
+export async function ensureTilesetSupport(theme: string, materials: DungeonMaterialSpec[], config: AppConfig, genre?: CampaignGenre): Promise<string> {
   const slug = slugifyTheme(theme);
   if (hasTilesetSupport(theme)) return slug;
   if (!materials.length) return slug;
 
   const tilesetSlug = `${slug}--${hashMaterials(materials)}`;
-  if ((await getMediaStore().list(path.join(TILESETS_DIR, tilesetSlug))).length > 0) return tilesetSlug;
+  if ((await getMediaStore().list(path.join(TILESETS_DIR, tilesetSlug))).length > 0) {
+    if (genre) await recordGenreTileset(genre, materials, tilesetSlug);
+    return tilesetSlug;
+  }
   if (!config.image.generateTilesets) return slug;
   const apiKey = config.apiKeys.openai;
   if (!apiKey) return slug;
   try {
     await generateExtendedTileset(tilesetSlug, theme, materials, apiKey, config.image.model);
+    if (genre) await recordGenreTileset(genre, materials, tilesetSlug);
     return tilesetSlug;
   } catch (err) {
     logError('dungeon/tilesets:ensureTilesetSupport', err);

@@ -4,7 +4,7 @@ import { Hook, type HookProps } from '../Hook.ts';
 import type { StateEngine } from '../StateEngine.ts';
 import { encounters } from '../../../state.ts';
 import { rollDice } from '../../dice.ts';
-import { applyDamageToCreature } from '../../runtime.ts';
+import { applyDamageToCreature } from '../../runtime/damage.ts';
 
 /**
  * Damages whoever just hit its owner — Armor of Agathys' cold damage back at a melee attacker.

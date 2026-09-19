@@ -1,7 +1,7 @@
 import type { CharacterStats } from 'shared';
 import { statMod } from 'shared';
 import { getCharacter, appendChatLog } from '../storage.ts';
-import { trySpendLuckForAdvantage, trySpendHeroicInspiration } from '../combat/runtime.ts';
+import { trySpendLuckForAdvantage, trySpendHeroicInspiration } from '../combat/runtime/resources.ts';
 import { io, ROOM, STAT_FULL, BG_SKILLS, SAVE_PROFS, getStateEngine, combatState } from '../state.ts';
 import { D20Roll } from '../combat/dice.ts';
 import { rollModeFor } from '../combat/conditions/rollModeFor.ts';

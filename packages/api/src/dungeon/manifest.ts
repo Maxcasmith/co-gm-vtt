@@ -1,6 +1,7 @@
-import type { EnemyStatBlock, DungeonMaterialSpec, PropSpec, DungeonStylePack, DungeonStructureType, CreatureType, DungeonQuestStage, DungeonQuestTrigger, DungeonQuestTriggerKind } from 'shared';
-import { CREATURE_TYPES, slugifyTheme } from 'shared';
+import type { EnemyStatBlock, DungeonMaterialSpec, PropSpec, DungeonStylePack, DungeonStructureType, CreatureType, DungeonQuestStage, DungeonQuestTrigger, DungeonQuestTriggerKind, MaterialCategory, CampaignGenre } from 'shared';
+import { CREATURE_TYPES, MATERIAL_CATEGORIES, slugifyTheme } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
+import { readGenreTileMap } from '../storage.ts';
 import { logError } from '../logger.ts';
 
 export interface ManifestHazard {
@@ -48,6 +49,7 @@ export interface ManifestRoom {
   key?: string; // single-char id for the organic grid prompt — assigned here, never left to the LLM
   material?: string; // floor material key for this room — free-text, slugified on parse
   materialDescription?: string; // visual description of this room's texture — server-only, feeds the tileset prompt, never forwarded to DungeonRoom
+  materialCategory?: MaterialCategory; // coarse fixed-enum bucket for this room's material — always set (defaulted on parse) whenever `material` is, feeds the genre tile map, never forwarded to DungeonRoom
   isHallway?: boolean; // building layouts only — a passage/circulation room, not a destination
   floor?: number; // building layouts only — omitted/0 = ground floor, negative = basement, positive = upper. Every room on the same floor is laid out together; a multi-floor building is generateBuildingLayout stitching one per-floor layout per distinct value used here.
   isStairwell?: boolean; // building layouts only — this room IS the vertical connection to another floor. Always exactly 2x2 (footprint() forces this regardless of "size"). Comes out of the same room-count budget as every other room, not on top of it.
@@ -82,12 +84,12 @@ export interface DungeonManifest {
 // cap is primarily enforced by the manifest prompt itself (rooms are told to reuse keys); this
 // slice is just a defensive backstop against a model that ignores the instruction.
 function collectDungeonMaterials(rooms: ManifestRoom[]): DungeonMaterialSpec[] {
-  const seen = new Map<string, string>();
+  const seen = new Map<string, { description: string; category: MaterialCategory }>();
   for (const room of rooms) {
     if (!room.material || seen.has(room.material)) continue;
-    seen.set(room.material, room.materialDescription?.trim() || room.material);
+    seen.set(room.material, { description: room.materialDescription?.trim() || room.material, category: room.materialCategory ?? 'stone' });
   }
-  return [...seen.entries()].slice(0, 16).map(([key, description]) => ({ key, description }));
+  return [...seen.entries()].slice(0, 16).map(([key, { description, category }]) => ({ key, description, category }));
 }
 
 // Same shape as collectDungeonMaterials — dedupes by normalized name (first-seen description
@@ -115,6 +117,13 @@ function isGeneric(name: string): boolean {
 
 function normalizeCreatureType(t: unknown): CreatureType {
   return CREATURE_TYPES.includes(t as CreatureType) ? (t as CreatureType) : 'Humanoid';
+}
+
+// 'stone' is a reasonable generic default for the rare case the model returns something outside
+// the enum (should be rare — the prompt lists the exact fixed set) rather than dropping the room's
+// material categorization entirely.
+function normalizeMaterialCategory(c: unknown): MaterialCategory {
+  return (MATERIAL_CATEGORIES as readonly string[]).includes(c as string) ? (c as MaterialCategory) : 'stone';
 }
 
 const PROP_SIZES = ['small', 'medium', 'large'] as const;
@@ -154,12 +163,12 @@ function normalizeHiddenDressing(roomIndex: number, hiddenDressing: unknown): { 
 const GENERIC_WOOD_DESC = 'Worn wooden floor planks, warm honey-brown tone, faint grain, scattered scuffs.';
 
 const GENERIC_ROOMS: ManifestRoom[] = [
-  { name: 'Entrance', size: 'medium', role: 'entrance', material: 'wood', materialDescription: GENERIC_WOOD_DESC },
-  { name: 'Guard Room', size: 'small', material: 'wood', materialDescription: GENERIC_WOOD_DESC, creatures: [{ id: 'guard-1', name: 'Guard', cr: 0.25, hp: 11, ac: 12, speed: 30, stats: { str: 13, dex: 12, con: 12, int: 10, wis: 10, cha: 10 }, attacks: [{ name: 'Spear', bonus: 3, damage: '1d6+1' }], creatureType: 'Humanoid', appearance: 'A weary human guard in scuffed leather armor, iron spear in hand, a plain steel cap pulled low.' }] },
-  { name: 'Storage Room', size: 'small', material: 'wood', materialDescription: GENERIC_WOOD_DESC, loot: [{ name: 'Supplies', hideDC: 8, contents: ['a coil of rope', 'a half-empty waterskin'] }] },
-  { name: 'Junction', size: 'small', material: 'wood', materialDescription: GENERIC_WOOD_DESC },
-  { name: 'Vault', size: 'medium', material: 'wood', materialDescription: GENERIC_WOOD_DESC, traps: [{ name: 'Trapped Chest', hideDC: 15, kind: 'damage', saveAbility: 'dex', dc: 13, damageFormula: '1d4', damageType: 'Piercing' }], loot: [{ name: 'Treasure Chest', hideDC: 12, contents: ['a small pouch of gold coins'] }] },
-  { name: 'Inner Chamber', size: 'large', material: 'wood', materialDescription: GENERIC_WOOD_DESC, creatures: [{ id: 'boss-1', name: 'Boss', cr: 1, hp: 27, ac: 14, speed: 30, stats: { str: 15, dex: 13, con: 14, int: 10, wis: 11, cha: 12 }, attacks: [{ name: 'Greatsword', bonus: 5, damage: '2d6+3' }], creatureType: 'Humanoid', isBoss: true, appearance: 'A towering armored warlord, a notched greatsword resting on one shoulder, a battle-scarred face set in a cold glare.' }], role: 'exit' },
+  { name: 'Entrance', size: 'medium', role: 'entrance', material: 'wood', materialDescription: GENERIC_WOOD_DESC, materialCategory: 'wood' },
+  { name: 'Guard Room', size: 'small', material: 'wood', materialDescription: GENERIC_WOOD_DESC, materialCategory: 'wood', creatures: [{ id: 'guard-1', name: 'Guard', cr: 0.25, hp: 11, ac: 12, speed: 30, stats: { str: 13, dex: 12, con: 12, int: 10, wis: 10, cha: 10 }, attacks: [{ name: 'Spear', bonus: 3, damage: '1d6+1' }], creatureType: 'Humanoid', appearance: 'A weary human guard in scuffed leather armor, iron spear in hand, a plain steel cap pulled low.' }] },
+  { name: 'Storage Room', size: 'small', material: 'wood', materialDescription: GENERIC_WOOD_DESC, materialCategory: 'wood', loot: [{ name: 'Supplies', hideDC: 8, contents: ['a coil of rope', 'a half-empty waterskin'] }] },
+  { name: 'Junction', size: 'small', material: 'wood', materialDescription: GENERIC_WOOD_DESC, materialCategory: 'wood' },
+  { name: 'Vault', size: 'medium', material: 'wood', materialDescription: GENERIC_WOOD_DESC, materialCategory: 'wood', traps: [{ name: 'Trapped Chest', hideDC: 15, kind: 'damage', saveAbility: 'dex', dc: 13, damageFormula: '1d4', damageType: 'Piercing' }], loot: [{ name: 'Treasure Chest', hideDC: 12, contents: ['a small pouch of gold coins'] }] },
+  { name: 'Inner Chamber', size: 'large', material: 'wood', materialDescription: GENERIC_WOOD_DESC, materialCategory: 'wood', creatures: [{ id: 'boss-1', name: 'Boss', cr: 1, hp: 27, ac: 14, speed: 30, stats: { str: 15, dex: 13, con: 14, int: 10, wis: 11, cha: 12 }, attacks: [{ name: 'Greatsword', bonus: 5, damage: '2d6+3' }], creatureType: 'Humanoid', isBoss: true, appearance: 'A towering armored warlord, a notched greatsword resting on one shoulder, a battle-scarred face set in a cold glare.' }], role: 'exit' },
 ];
 
 // A-Z, deterministic — up to 26 rooms, well past the largest room range we ask for (20).
@@ -183,6 +192,14 @@ export async function fetchManifest(
   // rest of the chain (stages 1+) in the same response, so it's described in the prompt so the
   // floor plan is actually designed to serve it (a rescue stage needs a captive placed somewhere).
   predefinedChain: { id: string; name: string; description: string }[] = [],
+  // The campaign's persisted, fixed-set genre (see WorldMeta.genre) — undefined for campaigns
+  // predating the field, in which case this call behaves exactly as it did before the field
+  // existed (no genre block, "high_fantasy" theme fallback unchanged). Used two ways below: (1)
+  // narrows the room-material instructions to categories the genre tile map already has art for,
+  // so the model reuses them instead of always inventing something new; (2) replaces the vague
+  // "if nothing fits, use high_fantasy" theme fallback with a genre-aware one — this is the actual
+  // fix for themes drifting to high_fantasy regardless of a campaign's real tone.
+  genre?: CampaignGenre,
 ): Promise<DungeonManifest> {
   if (isGeneric(name)) {
     // Test/debug dungeons never reach a real LLM call, so there's no way to author a trigger that
@@ -198,6 +215,11 @@ export async function fetchManifest(
   const questsBlock = predefinedChain.length
     ? `\nThis dungeon's opening quest stage is already decided — do not invent a different one, and design rooms, creatures, and loot to actually serve it (a "rescue" stage needs a captive placed somewhere; a "retrieve X" stage needs X seeded as loot). Its id/name/description are fixed; YOU decide its "trigger" (below) plus every stage that follows it:\n${predefinedChain.map(q => `- ${q.id} — ${q.name}: ${q.description}`).join('\n')}\n`
     : '';
+  const genreEntries = genre ? Object.entries((await readGenreTileMap())[genre] ?? {}) : [];
+  const genreBlock = genreEntries.length
+    ? `\nThis campaign's genre is "${genre}". These specific materials already have generated tile art available for it, grouped by category — whenever a room's material is a close enough real-world match to one of these, reuse it EXACTLY: set "material" to that exact key (verbatim, same spelling/hyphenation) and "materialCategory" to its category, so the existing art gets reused instead of a brand new tileset being generated:\n${genreEntries.map(([cat, keys]) => `- ${cat}: ${Object.keys(keys ?? {}).join(', ')}`).join('\n')}\nOnly invent a new "material" key when none of the above are actually close enough for the room in question — don't force a bad match just to reuse art.\n`
+    : '';
+  const themeFallback = genre ? `a theme fitting the "${genre}" genre` : 'high_fantasy';
 
   const [minRooms, maxRooms] = roomRange;
   const prompt = `You are a location architect. First decide whether "${name}" is a BUILDING (a man-made structure with an intentional floor plan — house, school, church, office, ship, station, mansion, prison, police precinct, etc.) or ORGANIC (a natural or crudely-dug space with no designed floor plan — cave, natural crypt, tomb carved into rock, sewer, ruins). This decision changes how you produce rooms below.
@@ -205,7 +227,7 @@ export async function fetchManifest(
 Return ONLY valid JSON, no markdown fences, no explanation:
 {
   "structureType": "building|organic",
-  "theme": "string — a short lowercase keyword for this location's overall art style/setting, e.g. high_fantasy. Pick whatever actually fits the genre; if nothing fits, use high_fantasy.",
+  "theme": "string — a short lowercase keyword for this location's overall art style/setting, e.g. high_fantasy. Pick whatever actually fits the genre; if nothing fits, use ${themeFallback}.",
   "illumination": "number 0-1 — this location's ambient light level, on a continuous scale, not a pick between a few fixed labels. 1.0 = full daylight or lamps/torches everywhere, 0.9 = bright interior with a few shadowed corners, 0.7 = overcast daylight or a well-lit room with some unlit spots, 0.55 = dusk or scattered torchlight, 0.4 = single flickering light source in an otherwise dark room, 0.2 = deep dusk or moonlight only, 0.05 = almost no light, a sliver under a door, 0.0 = pitch black, no ambient light source at all. Weigh the location's actual light sources (windows, torches, time of day, depth underground) and land on the specific number those imply — don't default to the midpoint.",
   "rooms": [
     {
@@ -220,6 +242,7 @@ Return ONLY valid JSON, no markdown fences, no explanation:
       "doors": [{ "toRoom": "string — BUILDING ONLY, one of this room's connectsTo names. Only declare an entry for an edge that ISN'T a plain open doorway — omit connectsTo edges you want left as ordinary unlocked doors entirely.", "state": "closed|locked — 'closed' is an ordinary shut-but-unlocked door (this is already the default for every connectsTo edge, so only write 'closed' here if you want to say so explicitly). 'locked' REQUIRES keyName.", "keyName": "string — 'locked' only. Must be the EXACT \"name\" of a loot entry placed somewhere in THIS response, ideally in a different room than either side of this door. That loot entry is the key — it is always trivially found (no hard search) once discovered.", "lockpickDC": "number 10-20 — 'locked' only. The DC to bypass this specific lock with Thieves' Tools instead of the key, scaled to how sturdy/important it is. Never hinted at anywhere in room text, same discipline as a trap's hidden DC." }],
       "material": "string — short lowercase key (1-2 words, e.g. wood, cracked-stone, wet-sand) naming this room's floor material, fitting its actual purpose (grass for an outdoor/dirt-floored space, wood for an indoor wood-floored room, stone for an indoor stone-floored room like a dungeon or crypt).",
       "materialDescription": "string — vivid visual description of this exact floor texture's appearance (color, wear, pattern) for an image generator. Reuse the EXACT SAME material key AND description verbatim across every room that should share the same texture (e.g. two plain-stone rooms both use key 'stone' with identical wording) rather than inventing near-duplicate keys for the same material — this dungeon may use AT MOST 16 distinct material keys in total across all rooms.",
+      "materialCategory": "one of: ${MATERIAL_CATEGORIES.join('|')} — the coarse real-world material family this room's floor belongs to. Pick whichever actually matches; this is separate from \"material\" above (that's a specific short label, this is always one of this fixed list).",
       "description": "string — 1-2 sentence read-aloud description for the moment a party first steps into this room. Evocative, sensory, scene-setting. Never mention who is present or what they do — this text is shown verbatim regardless of which characters enter or when.",
       "creatures": [{
         "id": "string, unique per creature",
@@ -292,7 +315,7 @@ At most ONE creature in the entire dungeon may have "isBoss": true — only set 
 "questChain" (0+ stages, ordered — this is the sequence a party actually plays through, not a flat wishlist): a mutating quest, each stage replacing the last as it resolves. Design the ROOMS/CREATURES/LOOT above and this CHAIN together, as one coherent plan — a stage's trigger must reference something you actually placed (a real room name, or a real creature/loot/trap/prop name), never something invented only in the quest text. "defeat_boss" is only valid if you actually set a creature "isBoss": true above. Keep stages concrete and distinct from each other — never generic filler like "explore the dungeon" or "find the exit" as their own stage (a real "escape" stage should mean something specific happened first: supplies gathered, a threat that wasn't there before). An empty array is correct for a dungeon with no specific narrative hook beyond exploring it — do not force a chain onto a location the story context gives no reason to want one for.
 
 "doors" (BUILDING ONLY) is where you gate a connectsTo edge instead of leaving it a plain doorway — use it deliberately, tied to the chain above, not scattered at random (a good use: an early "enter_room" stage's target room is "locked" so the party needs the earlier stage's key first; most edges should stay plain doorways with no "doors" entry at all). Whenever you write a "locked" entry, its keyName's loot item must actually be reachable — place it somewhere the party can get to WITHOUT needing to go through this same locked door, and never behind a second lock whose own key sits behind this one (no circular locks). A key is always trivially found once its loot is discovered, so don't hesitate to place it plainly — the difficulty is in finding the room, not in the search roll once there.
-${questsBlock}${contextBlock}
+${questsBlock}${contextBlock}${genreBlock}
 Location: ${name}
 Genre: ${dungeonType}`;
 
@@ -305,9 +328,9 @@ Genre: ${dungeonType}`;
     const theme: DungeonStylePack = rawTheme || 'high_fantasy';
     let bossSeen = false;
     const rooms: ManifestRoom[] = (parsed.rooms?.length ? parsed.rooms : GENERIC_ROOMS).map((r, i) => {
-      const { material, materialDescription, creatures, props, dressing, hiddenDressing, ...rest } = r;
+      const { material, materialDescription, materialCategory, creatures, props, dressing, hiddenDressing, ...rest } = r;
       const materialed = typeof material === 'string' && material.trim()
-        ? { ...rest, material: slugifyTheme(material), ...(typeof materialDescription === 'string' && materialDescription.trim() ? { materialDescription: materialDescription.trim() } : {}) }
+        ? { ...rest, material: slugifyTheme(material), materialCategory: normalizeMaterialCategory(materialCategory), ...(typeof materialDescription === 'string' && materialDescription.trim() ? { materialDescription: materialDescription.trim() } : {}) }
         : rest;
       const normalizedProps = normalizeProps(props);
       const propped = normalizedProps ? { ...materialed, props: normalizedProps } : materialed;

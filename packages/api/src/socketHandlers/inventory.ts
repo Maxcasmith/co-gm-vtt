@@ -3,7 +3,7 @@ import type { Manoeuvre } from 'shared';
 import { getCharacter, updateCharacter } from '../storage.ts';
 import { io, ROOM, playerSocketIds, encounters } from '../state.ts';
 import { rollDice, calcMaxHp } from '../combat/dice.ts';
-import { setLightSourceFor } from '../combat/runtime.ts';
+import { setLightSourceFor } from '../combat/runtime/environment.ts';
 import { resolveLockpickAttempt, resolveTrapDisarmAttempt } from '../dungeon/runtime.ts';
 import type { JoinContext } from './context.ts';
 

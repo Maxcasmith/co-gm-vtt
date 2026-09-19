@@ -1,4 +1,5 @@
 import type { Item, Weapon, Armor, Consumable, Ammunition } from "./items.ts";
+import { isWeapon, isArmor, isMonkWeapon } from "./items.ts";
 import type { ActiveCondition } from "./conditions.ts";
 import type { Manoeuvre } from "./tactics.ts";
 
@@ -133,6 +134,36 @@ export function hasClassLevel(character: Pick<Character, "class" | "level" | "cl
   return characterClasses(character).some(c => c.class === className);
 }
 
+/** Character's level in the Monk class specifically, or 0 if they have none. */
+export function monkLevel(character: Pick<Character, "class" | "level" | "classes">): number {
+  return characterClasses(character).find(c => c.class === "Monk")?.level ?? 0;
+}
+
+/**
+ * 2024 PHB Martial Arts: all three benefits (Dex-if-higher, scaling damage die, bonus-action
+ * Unarmed Strike) require the Monk be unarmed or wielding only Monk weapons, and wearing no
+ * armor or Shield — not just "this one attack happens to be unarmed/a Monk weapon".
+ */
+export function monkMartialArtsActive(character: Pick<Character, "class" | "level" | "classes" | "equipment" | "inventory">): boolean {
+  if (monkLevel(character) <= 0) return false;
+  const inv = character.inventory ?? [];
+  const bodyArmor = inv.find(i => i.id === character.equipment?.body && isArmor(i) && !i.isShield);
+  const shield = inv.find(i => i.id === character.equipment?.offHand && isArmor(i) && i.isShield);
+  if (bodyArmor || shield) return false;
+  const equippedWeapons = [character.equipment?.mainHand, character.equipment?.offHand]
+    .map(id => inv.find(i => i.id === id))
+    .filter((i): i is Weapon => !!i && isWeapon(i));
+  return equippedWeapons.every(isMonkWeapon);
+}
+
+/** Martial Arts die by Monk level (2024 PHB Monk Features table). */
+export function martialArtsDie(monkLvl: number): string {
+  if (monkLvl >= 17) return "1d12";
+  if (monkLvl >= 11) return "1d10";
+  if (monkLvl >= 5) return "1d8";
+  return "1d6";
+}
+
 // Multiclass Spell Slots table (2014/2024 PHB), 1st-level-slot column only — this app tracks no
 // slot beyond 1st level for anyone, single- or multiclass, so the rest of the table's columns
 // (2nd-9th level slots) are irrelevant here. A single full caster's own level-1 slot count
@@ -226,6 +257,20 @@ export const BACKGROUND_FEAT: Record<string, string> = {
 export function hasOriginFeat(char: Pick<Character, 'background' | 'species' | 'speciesOriginFeat'>, featName: string): boolean {
   return BACKGROUND_FEAT[char.background] === featName ||
     (char.species === 'Human' && char.speciesOriginFeat === featName);
+}
+
+// Unarmed Strike — everyone can throw a punch (2024 PHB base: 1 + Strength damage, d20 +
+// Strength to hit). Tavern Brawler bumps the damage die to 1d4 (push/reroll riders are applied
+// separately, gated on the feat, where each attack is resolved). Monk's Martial Arts die
+// replaces this at the attack-resolution call sites, not here — see monkMartialArtsActive.
+// 'simple' tags it so the server's proficiency check (every class has 'simple' in
+// CLASS_WEAPON_PROFS) grants proficiency bonus on it.
+export function unarmedStrikeFor(character: Pick<Character, 'background' | 'species' | 'speciesOriginFeat'>): Weapon {
+  return {
+    id: 'unarmed-strike', name: 'Unarmed Strike', description: 'A bare-handed strike.', quantity: 1,
+    type: 'weapon', damage: hasOriginFeat(character, 'Tavern Brawler') ? '1d4' : '1',
+    damageType: 'bludgeoning', attackBonus: 0, range: 5, properties: ['simple'], isFinesse: false,
+  };
 }
 
 /**

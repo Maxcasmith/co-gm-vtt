@@ -984,3 +984,149 @@ button.choice-item {
   opacity: 0.5;
 }
 
+.sheet-goals-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.sheet-goal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid #9c7ae044;
+  border-radius: 6px;
+}
+
+.sheet-goal-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sheet-goal-tier-select {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface-hover);
+  border: 1px solid #9c7ae044;
+  border-radius: 4px;
+  padding: 3px 6px;
+}
+
+.sheet-goal-tier-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.sheet-goal-card--locked {
+  opacity: 0.85;
+}
+
+.sheet-goal-locked-hint {
+  margin-left: auto;
+  font-size: 12px;
+  cursor: help;
+}
+
+.sheet-goal-description-locked {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--text);
+  margin: 0;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.sheet-goal-lock-notice {
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.7;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.sheet-goal-status {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.sheet-goal-status--succeeded { color: #4ade80; }
+.sheet-goal-status--failed { color: #f87171; }
+
+.sheet-goal-delete {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sheet-goal-textarea {
+  width: 100%;
+  min-height: 44px;
+  resize: vertical;
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface-hover);
+  border: 1px solid #9c7ae044;
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.sheet-goal-feedback {
+  font-size: 11px;
+  color: #f87171;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.sheet-goal-consequence {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.sheet-goal-milestones {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sheet-goal-milestone--done {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.sheet-goal-new-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.sheet-goal-save {
+  align-self: flex-end;
+  font-size: 12px;
+  font-weight: 600;
+  color: #9c7ae0;
+}
+
+.sheet-goal-add {
+  width: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  color: #9c7ae0;
+  border: 1px dashed #9c7ae044;
+  border-radius: 6px;
+  padding: 10px;
+}
+

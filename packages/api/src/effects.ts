@@ -1,7 +1,7 @@
 import type { Character, EnemyStatBlock } from 'shared';
 import { statMod, addCurrency, removeCurrency } from 'shared';
 import { randomUUID } from 'crypto';
-import { updateCharacter, listCharacters, readEntity, writeEntity, readManifest, writeManifest, emptyManifest, parseEntityLinks, clearDungeon, getConfig, readChatLog, saveDungeon, saveDungeonAscii, readQuests, writeQuests, loadPartyAllies, savePartyAllies, appendChatLog, readNemeses, writeNemeses } from './storage.ts';
+import { updateCharacter, listCharacters, readEntity, writeEntity, readManifest, writeManifest, emptyManifest, parseEntityLinks, clearDungeon, getConfig, readChatLog, saveDungeon, saveDungeonAscii, readQuests, writeQuests, loadPartyAllies, savePartyAllies, appendChatLog, readNemeses, writeNemeses, getWorldMeta } from './storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
 import { generateDungeon, toClientDungeon } from './dungeon/index.ts';
 import { generateDungeonQuests } from './session-processor/index.ts';
@@ -14,7 +14,9 @@ import {
   NEMESIS_COOLDOWN_SESSIONS, NEMESIS_CAP_PER_TARGET, NEMESIS_MAX_DEATHS, ALLY_XP_PER_LEVEL, withLivePositions,
 } from './state.ts';
 import { D20Roll, toSlug, escalateCr } from './combat/dice.ts';
-import { rollPlayerInitiatives, addToTurnOrder, sweepGameTimeExpiries, trySpendSpellSlot } from './combat/runtime.ts';
+import { rollPlayerInitiatives, addToTurnOrder } from './combat/runtime/lifecycle.ts';
+import { sweepGameTimeExpiries } from './combat/runtime/environment.ts';
+import { trySpendSpellSlot } from './combat/runtime/resources.ts';
 import { generateAndBroadcastEnemies, unlockDoorNear, resolveLockpickAttempt, resolveTrapDisarmAttempt } from './dungeon/runtime.ts';
 import { checkQuestChainTriggers } from './dungeon/questChain.ts';
 import { advancePlotArc } from './plotArcs.ts';
@@ -35,8 +37,21 @@ function findCharByName(chars: Character[], name: string): Character | undefined
 const LOCKPICK_NAME = /lockpick/i;
 const TRAP_DISARM_KIT_NAME = /trap disarm kit/i;
 
+type QuestEffect = Extract<TagEffect, { type: 'quest_add' | 'quest_update' | 'quest_resolve' }>;
+const isQuestEffect = (e: TagEffect): e is QuestEffect =>
+  e.type === 'quest_add' || e.type === 'quest_update' || e.type === 'quest_resolve';
+
 export async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
-  await Promise.all(consolidateEffects(effects).map(async effect => {
+  const consolidated = consolidateEffects(effects);
+  const questEffects = consolidated.filter(isQuestEffect);
+  const otherEffects = consolidated.filter(e => !isQuestEffect(e));
+
+  // Quest effects all read-modify-write the same quests.json — run them as one sequential
+  // batch (single read, single write) instead of racing inside the Promise.all below, where
+  // two quest tags from the same DM turn could otherwise clobber each other's write.
+  if (questEffects.length) await applyQuestEffects(cid, questEffects);
+
+  await Promise.all(otherEffects.map(async effect => {
     if (effect.type === 'combat_init' && !combatState.get(cid)) {
       // Hard guard, not just a prompt instruction: while a real dungeon is loaded, combat must
       // only ever start through the dungeon's own aggro system (checkDungeonProximity /
@@ -136,7 +151,8 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
       }
       const predefinedChain = predefinedQuests.map(q => ({ id: q.id, name: q.name, description: q.description }));
 
-      const dungeon = await generateDungeon(effect.name, effect.dungeonType, getFeatureProvider(config, 'dungeonGeneration'), storyContext, { partySize, partyLevel, id: dungeonId, predefinedChain }, undefined, config);
+      const worldMeta = await getWorldMeta(cid);
+      const dungeon = await generateDungeon(effect.name, effect.dungeonType, getFeatureProvider(config, 'dungeonGeneration'), storyContext, { partySize, partyLevel, id: dungeonId, predefinedChain, genre: worldMeta?.genre }, undefined, config);
       dungeons.set(cid, dungeon);
       await saveDungeon(cid, dungeon);
       await saveDungeonAscii(cid, dungeon);
@@ -203,42 +219,6 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
         io.to(ROOM).emit('chat:message', joinMsg);
         void appendChatLog(cid, joinMsg);
       }
-    } else if (effect.type === 'quest_add' || effect.type === 'quest_update' || effect.type === 'quest_resolve') {
-      const quests = await readQuests(cid);
-      const today = new Date().toISOString().slice(0, 10);
-
-      if (effect.type === 'quest_add') {
-        const existing = quests.find(q => q.id === effect.id);
-        // Fill in relatedNpc/relatedLocation from this turn's live context (who's speaking, where
-        // the party is) only when the quest doesn't already carry one from generation-time seeding
-        // — a live guess should never clobber a better-grounded pre-seeded value.
-        const manifest = await readManifest(cid);
-        const relatedNpc = existing?.relatedNpc ?? effect.relatedNpc;
-        const relatedLocation = existing?.relatedLocation ?? manifest?.currentLocation ?? undefined;
-        if (existing) {
-          existing.status = 'open';
-          if (relatedNpc) existing.relatedNpc = relatedNpc;
-          if (relatedLocation) existing.relatedLocation = relatedLocation;
-        } else {
-          quests.push({
-            id: effect.id, name: effect.name, description: effect.description, status: 'open', log: [], addedAt: today,
-            ...(relatedNpc ? { relatedNpc } : {}), ...(relatedLocation ? { relatedLocation } : {}),
-          });
-        }
-      } else if (effect.type === 'quest_update') {
-        const q = quests.find(q => q.id === effect.id);
-        if (q) q.log.push({ date: today, text: effect.entry });
-      } else if (effect.type === 'quest_resolve') {
-        const q = quests.find(q => q.id === effect.id);
-        if (q) q.status = 'resolved';
-        // If this quest was the live beat of a plot arc, this pushes the next beat into `quests`
-        // (or drops the finished arc) — must run before the write below picks it up.
-        await advancePlotArc(cid, effect.id, quests);
-      }
-
-      await writeQuests(cid, quests);
-      const manifest = await readManifest(cid);
-      io.to(ROOM).emit('quest:update', { quests, act: manifest?.act ?? 1 });
     } else if (effect.type === 'clock') {
       const manifest = await readManifest(cid) ?? emptyManifest();
       manifest.worldTimeSecs = (manifest.worldTimeSecs ?? 43200) + effect.secs;
@@ -324,6 +304,44 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
       console.log(`[ally] ${ally.name} learned ${effect.attackName}`);
     }
   }));
+}
+
+async function applyQuestEffects(cid: string, effects: QuestEffect[]): Promise<void> {
+  const quests = await readQuests(cid);
+  const today = new Date().toISOString().slice(0, 10);
+  // Read once for the whole batch — a live guess should never clobber a better-grounded
+  // pre-seeded relatedLocation, and there's no need to re-read per effect for that.
+  const manifest = await readManifest(cid);
+
+  for (const effect of effects) {
+    if (effect.type === 'quest_add') {
+      const existing = quests.find(q => q.id === effect.id);
+      const relatedNpc = existing?.relatedNpc ?? effect.relatedNpc;
+      const relatedLocation = existing?.relatedLocation ?? manifest?.currentLocation ?? undefined;
+      if (existing) {
+        existing.status = 'open';
+        if (relatedNpc) existing.relatedNpc = relatedNpc;
+        if (relatedLocation) existing.relatedLocation = relatedLocation;
+      } else {
+        quests.push({
+          id: effect.id, name: effect.name, description: effect.description, status: 'open', log: [], addedAt: today,
+          ...(relatedNpc ? { relatedNpc } : {}), ...(relatedLocation ? { relatedLocation } : {}),
+        });
+      }
+    } else if (effect.type === 'quest_update') {
+      const q = quests.find(q => q.id === effect.id);
+      if (q) q.log.push({ date: today, text: effect.entry });
+    } else if (effect.type === 'quest_resolve') {
+      const q = quests.find(q => q.id === effect.id);
+      if (q) q.status = 'resolved';
+      // If this quest was the live beat of a plot arc, this pushes the next beat into `quests`
+      // (or drops the finished arc) — must run before the write below picks it up.
+      await advancePlotArc(cid, effect.id, quests);
+    }
+  }
+
+  await writeQuests(cid, quests);
+  io.to(ROOM).emit('quest:update', { quests, act: manifest?.act ?? 1 });
 }
 
 /**

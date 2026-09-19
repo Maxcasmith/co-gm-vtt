@@ -1,7 +1,9 @@
+import { randomUUID } from 'crypto';
 import { calcAC, CREATURE_TYPES, ENEMY_ROLES } from 'shared';
-import type { ChatPayload, Character, EnemyStatBlock, CreatureType, EnemyRole, AttackResult, SpellAttackResult, SpellSaveResult, WorldState, NemesisRecord, DungeonMaterialSpec, AbilityKey } from 'shared';
+import type { ChatPayload, Character, EnemyStatBlock, CreatureType, EnemyRole, AttackResult, SpellAttackResult, SpellSaveResult, WorldState, WorldActor, Goal, NemesisRecord, DungeonMaterialSpec, AbilityKey } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { logError } from '../logger.ts';
+import { writeGoals } from '../storage.ts';
 import { renderRoleTemplatesForPrompt } from '../combat/ai/roleTemplates.ts';
 
 function normalizeCreatureType(t: unknown): CreatureType {
@@ -225,8 +227,18 @@ If type is "use_item", only use an id that appears in Inventory above — never 
   ], adapter);
 }
 
-export async function generateWorldState(worldMd: string, factionsMd: string, adapter: StoryProviderAdapter): Promise<WorldState | null> {
-  return llmJson<WorldState>([
+// Raw LLM output shape — kept identical to the pre-Goal-framework format (a good schema for the
+// model to fill in) and split into a slim WorldActor + a Goal record right after generation.
+interface GeneratedWorldActor {
+  id: string; name: string; type: 'bbeg' | 'faction';
+  ultimateGoal: string; totalDays: number; daysElapsed: number;
+  milestones: Array<{ day: number; description: string; completed: boolean }>;
+  currentStatus: string; status: 'active' | 'defeated' | 'succeeded';
+}
+interface GeneratedWorldState { dayNumber: number; totalHoursElapsed: number; actors: GeneratedWorldActor[] }
+
+export async function generateWorldState(slug: string, worldMd: string, factionsMd: string, adapter: StoryProviderAdapter): Promise<WorldState | null> {
+  const raw = await llmJson<GeneratedWorldState>([
     {
       role: 'system',
       content: `You are creating a world state tracker for a D&D campaign. Based on the world lore and factions provided, generate a JSON object with this exact structure:
@@ -262,6 +274,28 @@ Rules:
     },
     { role: 'user', content: `World lore:\n${worldMd}\n\nFactions:\n${factionsMd}` },
   ], adapter);
+  if (!raw) return null;
+
+  const goals: Goal[] = [];
+  const actors: WorldActor[] = raw.actors.map(a => {
+    const goalId = randomUUID();
+    goals.push({
+      id: goalId,
+      ownerType: a.type,
+      ownerId: a.id,
+      tier: 'long',
+      description: a.ultimateGoal,
+      status: a.status === 'succeeded' ? 'succeeded' : 'active',
+      milestones: a.milestones.map(m => ({ id: randomUUID(), description: m.description, completed: m.completed, day: m.day })),
+      totalDays: a.totalDays,
+      daysElapsed: a.daysElapsed,
+      createdAt: new Date().toISOString(),
+    });
+    return { id: a.id, name: a.name, type: a.type, goalId, currentStatus: a.currentStatus, status: a.status };
+  });
+
+  await writeGoals(slug, goals);
+  return { dayNumber: raw.dayNumber, totalHoursElapsed: raw.totalHoursElapsed, actors };
 }
 
 export async function tickWorldNarrative(
@@ -270,12 +304,14 @@ export async function tickWorldNarrative(
   worldMd: string,
   newlyCompleted: string[],
   adapter: StoryProviderAdapter,
+  goals: Goal[],
 ): Promise<string | null> {
   const actorSummaries = state.actors
     .filter(a => a.status === 'active')
     .map(a => {
-      const nextMilestone = a.milestones.find(m => !m.completed);
-      return `${a.name} (${a.type}): Goal — ${a.ultimateGoal}. Currently: ${a.currentStatus}. Next milestone: ${nextMilestone?.description ?? 'none — approaching final goal'}`;
+      const goal = goals.find(g => g.id === a.goalId);
+      const nextMilestone = goal?.milestones.find(m => !m.completed);
+      return `${a.name} (${a.type}): Goal — ${goal?.description ?? 'unknown'}. Currently: ${a.currentStatus}. Next milestone: ${nextMilestone?.description ?? 'none — approaching final goal'}`;
     })
     .join('\n');
 

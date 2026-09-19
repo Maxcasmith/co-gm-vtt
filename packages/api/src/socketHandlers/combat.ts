@@ -1,5 +1,5 @@
 import type { TurnOrderEntry, Weapon, Spell, SpellAttackResult, SpellSaveOutcome, SpellSaveResult, CreatureType, Character, ActionResource, AttackContext, DungeonEntity, EffectSpec, AbilityKey, HookSpec } from 'shared';
-import { effectiveWeaponProfs, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, isAmmunition, isWeapon, statMod, parseRangeFeet, resolveForcedMovement, findPath, effectApplies, actionCostFromCastingTime, requiresConcentration, resolveSpellDamageDice, hasOriginFeat, hasClassLevel, crossesObscuredArea, ABILITY_DEFS, trySpendResource, trySpendResourceAmount, resourceCurrent, getSenses, hasLineOfSight, closedDoorCells } from 'shared';
+import { effectiveWeaponProfs, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, isAmmunition, isWeapon, isMonkWeapon, statMod, parseRangeFeet, resolveForcedMovement, findPath, effectApplies, actionCostFromCastingTime, requiresConcentration, resolveSpellDamageDice, hasOriginFeat, hasClassLevel, crossesObscuredArea, ABILITY_DEFS, trySpendResource, trySpendResourceAmount, resourceCurrent, getSenses, hasLineOfSight, closedDoorCells, monkMartialArtsActive, monkLevel, martialArtsDie } from 'shared';
 import { randomUUID } from 'crypto';
 import { getCharacter, updateCharacter, saveEncounter, listCharacters, getConfig, appendChatLog, saveDungeon, getHouseRules } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
@@ -16,7 +16,17 @@ import type { WeaponAttackOverrideHook } from '../combat/stateEngine/hooks/Weapo
 import { resolveReaction } from '../combat/stateEngine/reactionPrompt.ts';
 import { D20Roll, rollDice, rollDiceRerollLow, fmtMod, rollApplicableDamage, rollApplicableHeal, rollChainableDamage, resolveHit, maxDiceValue } from '../combat/dice.ts';
 import { rollModeFor, attackModeAgainstTarget } from '../combat/conditions/rollModeFor.ts';
-import { applyDamageToCreature, applyDamageToPlayer, applyHealingToPlayer, applyHealingToCreature, grantTempHpToPlayer, advanceTurn, trySpendSpellSlot, tryBeginCombat, emitResources, applyCondition, clearCondition, startConcentrating, isConcentratingOn, rollSavingThrow, checkTrapAt, canMove, breakSanctuaryOn, getWorldTimeSecs, applyElevationChange, investigateIllusion, checkMovementTriggers, bladeWardPenalty, stabilizeParticipant, offerLuckAttackReroll, trySpendHeroicInspiration, requestAlertSwap, breakConcentration } from '../combat/runtime.ts';
+import { applyDamageToCreature, applyDamageToPlayer, applyHealingToPlayer, applyHealingToCreature, grantTempHpToPlayer, bladeWardPenalty } from '../combat/runtime/damage.ts';
+import { advanceTurn, tryBeginCombat, requestAlertSwap } from '../combat/runtime/lifecycle.ts';
+import { trySpendSpellSlot, offerLuckAttackReroll, trySpendHeroicInspiration } from '../combat/runtime/resources.ts';
+import { emitResources } from '../combat/runtime/shared.ts';
+import { applyCondition, clearCondition, breakSanctuaryOn } from '../combat/runtime/statusEffects.ts';
+import { startConcentrating, isConcentratingOn, breakConcentration } from '../combat/runtime/concentration.ts';
+import { rollSavingThrow, investigateIllusion } from '../combat/runtime/rolls.ts';
+import { checkTrapAt } from '../combat/runtime/traps.ts';
+import { canMove, applyElevationChange, checkMovementTriggers } from '../combat/runtime/movement.ts';
+import { getWorldTimeSecs } from '../combat/runtime/environment.ts';
+import { stabilizeParticipant } from '../combat/runtime/deathSaves.ts';
 import { checkDungeonProximity, toggleDoor, useStairs } from '../dungeon/runtime.ts';
 import { applyEffects } from '../effects.ts';
 import type { JoinContext } from './context.ts';
@@ -429,8 +439,8 @@ function updateFollowingObjects(cid: string, tokenId: string, gx: number, gy: nu
 
 export async function resolvePlayerAttack(
   campaignId: string,
-  { attackerId, attackerName, targetId, weapon, bonusSpell, isOffhand, useInspiration }: {
-    attackerId: string; attackerName: string; targetId: string; weapon: Weapon; bonusSpell?: Spell; isOffhand?: boolean; useInspiration?: boolean;
+  { attackerId, attackerName, targetId, weapon, bonusSpell, isOffhand, actionType, useInspiration }: {
+    attackerId: string; attackerName: string; targetId: string; weapon: Weapon; bonusSpell?: Spell; isOffhand?: boolean; actionType?: 'action' | 'bonusAction'; useInspiration?: boolean;
   },
 ): Promise<{ hit: boolean } | undefined> {
       const cid = campaignId;
@@ -446,7 +456,11 @@ export async function resolvePlayerAttack(
       // Two-Weapon Fighting: the off-hand attack costs the bonus action instead of the action.
       // An ordinary attack costs the action; a bundled smite costs the bonus action on top.
       // Spent before ammunition is deducted so a blocked attack cannot silently eat an arrow.
-      if (!trySpendAction(cid, attackerId, isOffhand ? 'bonusAction' : 'action')) return;
+      // isOffhand alone used to double as "spend bonus action" — that broke once Monk's bonus
+      // punch needed a bonus-action cost WITHOUT the offhand ability-mod suppression below.
+      // actionType (already on the client's targeting payload) is the real cost signal now;
+      // isOffhand stays for offhandStatBonus only.
+      if (!trySpendAction(cid, attackerId, actionType === 'bonusAction' ? 'bonusAction' : 'action')) return;
       if (bonusSpell && !trySpendAction(cid, attackerId, 'bonusAction')) return;
 
       if (weapon.ammoSlug) {
@@ -475,7 +489,10 @@ export async function resolvePlayerAttack(
       const strMod = statMod(char.stats.str);
       const dexMod = statMod(char.stats.dex);
       const isMelee = weapon.range <= 10; // covers reach weapons (e.g. Whip, range 10) — next tier up is bows at 80+
-      const useDex = !isMelee || (weapon.isFinesse && dexMod > strMod);
+      // Martial Arts' Dexterous Attacks: Dex-if-higher on Unarmed Strikes/Monk weapons, same as
+      // Finesse — but gated on the full RAW condition (unarmored, shieldless, monk-weapons-only).
+      const monkActive = monkMartialArtsActive(char);
+      const useDex = !isMelee || ((weapon.isFinesse || (monkActive && isMonkWeapon(weapon))) && dexMod > strMod);
       // Dueling Fighting Style's "no other weapon" gate — a weapon (not shield/empty) in the
       // off-hand disqualifies it regardless of which hand is actually attacking.
       const offhandItem = char.inventory?.find(i => i.id === char.equipment?.offHand);
@@ -554,7 +571,11 @@ export async function resolvePlayerAttack(
       let damageStatBonus: number | undefined;
       let bonus: { spellName: string; damageType: string | undefined; total: number } | undefined;
       if (hit) {
-        const damageFormula = weaponOverride?.damageDie ?? weapon.damage;
+        // Martial Arts Die: rolled in place of the weapon's own damage on Unarmed Strikes/Monk
+        // weapons while active — takes priority over the weapon's own die, but a spell effect
+        // (Shillelagh via weaponOverride) still wins over both.
+        const damageFormula = weaponOverride?.damageDie
+          ?? (monkActive && isMonkWeapon(weapon) ? martialArtsDie(monkLevel(char)) : weapon.damage);
         // Great Weapon Fighting: reroll 1s and 2s once on two-handed/versatile melee weapons.
         const usesGwf = isMelee && char.fightingStyle === 'Great Weapon Fighting' &&
           (weapon.twoHanded || weapon.properties?.includes('versatile'));
@@ -1242,7 +1263,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
     void saveEncounter(cid, encounter);
   });
 
-  socket.on('combat:attack', (payload: { attackerId: string; attackerName: string; targetId: string; weapon: Weapon; bonusSpell?: Spell; isOffhand?: boolean; useInspiration?: boolean }) => {
+  socket.on('combat:attack', (payload: { attackerId: string; attackerName: string; targetId: string; weapon: Weapon; bonusSpell?: Spell; isOffhand?: boolean; actionType?: 'action' | 'bonusAction'; useInspiration?: boolean }) => {
     void resolvePlayerAttack(campaignId, payload);
   });
 

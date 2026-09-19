@@ -1,5 +1,5 @@
 import { PLOT_HOOK_TAGS } from 'shared';
-import type { Quest } from 'shared';
+import type { Quest, Goal } from 'shared';
 
 export type EntityType = 'npc' | 'faction' | 'location' | 'character' | 'nemesis';
 
@@ -213,7 +213,7 @@ These tokens are stripped before players see them — include them alongside you
 - Physical descriptions: concrete objects and facts ONLY. NO metaphors, NO emotional atmosphere, NO abstract qualities. "Three mismatched tables, a bar along the left wall, a jukebox by the door" — not "the air reeks of broken dreams." Atmosphere is shown through facts: ten empty mugs on one table tells you more than any adjective.
 - Never use phrases like "the weight of", "the air is thick with", "echoes of", "shadows of", or any variant. These are banned.
 - Write in second person present tense ("You see...", "The guard turns...")
-- Narrate only what the characters can directly perceive. Never use world knowledge to name an NPC, faction, or location before players have been introduced to it. Describe by appearance and action — "a woman in a feathered headdress" not "Taya Ahtu". Players earn names through interaction.
+- Narrate only what the characters can directly perceive. Never use world knowledge to name an NPC, faction, or location before players have been introduced to it. Describe by appearance and action — "a woman in a feathered headdress" not "Taya Ahtu". Players earn names through interaction. Exception: a location entity already marked [CURRENT] below is the party's already-established location, not undiscovered lore — use its exact given name for it, don't invent a different one.
 - Track what has been established. NPCs remember previous interactions. Consequences carry forward.
 - If players try something genuinely creative, reward the approach even on a modest roll.
 - Never end a response by asking the player what they want to do. This includes any phrasing of "What do you do next?", "What will you do?", "What would you like to do?", "What do you decide?", or equivalent. Your response ends on the world.
@@ -287,6 +287,7 @@ Only emit this for a narrative resolution happening in the current scene, not pr
 
 ## Scene building tags
 When you describe a named location's physical layout — either because asked directly or as part of scene-setting — emit a tag so the system can remember it for future prompts.
+If this is the location already marked [CURRENT] in "World entities" above, use that entity's exact name — never invent a different name for the same physical place, even for its first scene-setting description.
 
 Format: [[SCENE_BUILD:Location Name:physical details]]
 
@@ -913,4 +914,43 @@ Return ONLY a single valid JSON object — no markdown fences, no explanation:
   ]
 }
 If nothing this session clearly earns a theme from the list, return { "tags": [] }.`;
+}
+
+export function buildGoalReviewPrompt(goals: Goal[], chatLog: string): string {
+  const goalList = goals
+    .map(g => `  - id: ${g.id}\n    tier: ${g.tier}\n    description: "${g.description}"`)
+    .join('\n');
+
+  return `You are the Virtual DM reviewing a tabletop RPG session that just ended, checking on the party's personal goals (separate from the campaign's main plot).
+
+Each player-set goal below must be concrete and measurable enough to build a real quest from — "I want to break into the thieves' den to steal back my ancestral weapon" is usable, "I want to be stronger" is not. For each goal, decide exactly one of:
+- It's fine as written — do nothing.
+- It's too vague to act on — flag it with one sentence of concrete, actionable feedback the player can revise it with (do not invent a whole new goal for them).
+- Events in this session's log clearly made it impossible to ever accomplish (not just harder) — mark it failed. Be strict: only mark failed on unambiguous in-fiction proof (the target was destroyed, the person died, the window irreversibly closed), never because a session simply ended without progress. Goals are never retried once failed, so when you fail one, also decide its consequence: one sentence describing what concretely changes in the world now (a door closes, someone else claims the prize, a relationship sours) — this is on you as the VDM, the player never pre-declares it.
+
+Then, for goals that ARE concrete and still active, propose 0 or more new quest hooks the VDM can run next session that intersect a goal with a real NPC/faction conflict already active in this campaign (don't invent a hook to a goal already actively being pursued as an open quest). One quest may serve more than one player's goal if they naturally intersect. Ground every quest in specifics: who's involved, what they want, where it happens.
+
+Active player goals:
+${goalList || '  (none)'}
+
+Session log:
+${chatLog}
+
+Respond with ONLY a single valid JSON object — no markdown fences, no explanation:
+{
+  "goalUpdates": [
+    { "goalId": "<id from the list above>", "action": "vague", "feedback": "<one sentence, concrete>" },
+    { "goalId": "<id from the list above>", "action": "failed", "consequence": "<one sentence: what concretely changes in the world now>" }
+  ],
+  "quests": [
+    {
+      "goalIds": ["<one or more ids from the list above>"],
+      "name": "<short quest title>",
+      "description": "<what's going on and why it matters, 2-4 sentences>",
+      "relatedNpc": "<NPC name this hook comes from, if any>",
+      "relatedLocation": "<location name this unfolds at, if any>"
+    }
+  ]
+}
+Only include a goal in goalUpdates when it's vague or newly failed — omit goals that are fine or already resolved. If nothing needs flagging and no quest is warranted, return { "goalUpdates": [], "quests": [] }.`;
 }

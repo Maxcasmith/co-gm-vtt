@@ -12,7 +12,8 @@ import { Encounter, Team, Participant } from '../domain/encounter.ts';
 import { Creature } from '../domain/creature.ts';
 import { logError, logDebug } from '../logger.ts';
 import { io, ROOM, combatState, encounters, tokenPositions, dungeons, microDungeons, withLivePositions, PLAYER_SIGHT_RADIUS, ENEMY_AGGRO_RADIUS, enemiesReady, combatStartedAt } from '../state.ts';
-import { addToTurnOrder, rollPlayerInitiatives, rollEnemyInitiatives, checkTrapAt } from '../combat/runtime.ts';
+import { addToTurnOrder, rollPlayerInitiatives, rollEnemyInitiatives } from '../combat/runtime/lifecycle.ts';
+import { checkTrapAt } from '../combat/runtime/traps.ts';
 import { checkQuestChainTriggers } from './questChain.ts';
 
 // Live cell positions of every participant currently in the fight — players keyed by name,

@@ -1,17 +1,18 @@
 import path from 'path';
+import { randomUUID } from 'crypto';
 import {
   readChatLog, listEntitySlugs, readEntity, writeEntity, archiveChatLog,
   getCharacter, getWorldMeta, writeWorldMeta, CAMPAIGNS_DIR, readManifest, writeManifest,
-  readQuests, writeQuests, readCampaignFile,
+  readQuests, writeQuests, readCampaignFile, readGoals, writeGoals,
   readPlotHooks, readPlotArcs, writePlotArcs, markPlotHookUsed,
 } from '../storage.ts';
 import { getTextStore } from '../storage/index.ts';
 import { getConfig } from '../storage.ts';
-import { getFeatureProvider, type ChatMessage } from '../providers/index.ts';
+import { getFeatureProvider, type ChatMessage, type StoryProviderAdapter } from '../providers/index.ts';
 import { toSlug } from '../combat/dice.ts';
-import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDungeonNarrationPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, buildPlotHookCandidatePrompt, buildDungeonQuestPrompt, buildStoryTagsPrompt, buildSessionNotesPrompt, type EntityType, type ExistingEntitySummary } from './prompts.ts';
+import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDungeonNarrationPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, buildPlotHookCandidatePrompt, buildDungeonQuestPrompt, buildStoryTagsPrompt, buildSessionNotesPrompt, buildGoalReviewPrompt, type EntityType, type ExistingEntitySummary } from './prompts.ts';
 import { PLOT_HOOK_TAGS } from 'shared';
-import type { AppConfig, ChatPayload, Character, CurrencyDenomination, Dungeon, Quest, PlotHook, ActivePlotArc, PlotHookTag } from 'shared';
+import type { AppConfig, ChatPayload, Character, CurrencyDenomination, Dungeon, Quest, Goal, PlotHook, ActivePlotArc, PlotHookTag } from 'shared';
 import { logError } from '../logger.ts';
 
 const ENTITY_TYPES: EntityType[] = ['npc', 'faction', 'location', 'character', 'nemesis'];
@@ -231,14 +232,18 @@ async function buildEntitySummaries(campaignSlug: string): Promise<string> {
   const locContent = await readEntity(campaignSlug, 'location', manifest.currentLocation);
   if (locContent) lines.push(`### location/${manifest.currentLocation} [CURRENT]\n${locContent}`);
 
-  // NPCs and factions in current scene
+  // NPCs and factions in current scene — full content, not truncated. A blind character-count
+  // slice here used to silently drop whatever fell past the cutoff, including the DM Notes
+  // section (an NPC's actual secret/true identity) on any entity that had grown past ~800 chars
+  // after a single session. See ADD-IT-TO-THE-LATERBASE.md for the cost/latency tradeoff this
+  // reintroduces once an entity file grows large over a long campaign.
   for (const slug of manifest.npcs) {
     const content = await readEntity(campaignSlug, 'npc', slug);
-    if (content) lines.push(`### npc/${slug}\n${content.slice(0, 800)}`);
+    if (content) lines.push(`### npc/${slug}\n${content}`);
   }
   for (const slug of manifest.factions) {
     const content = await readEntity(campaignSlug, 'faction', slug);
-    if (content) lines.push(`### faction/${slug}\n${content.slice(0, 600)}`);
+    if (content) lines.push(`### faction/${slug}\n${content}`);
   }
 
   // Adjacent zones — names only so DM can narrate transitions
@@ -589,6 +594,82 @@ export interface ProcessResult {
   notes: string[];
 }
 
+export interface GoalReviewResult {
+  goalUpdates: Array<{ goalId: string; action: 'vague' | 'failed'; feedback?: string; consequence?: string }>;
+  quests: Array<{ goalIds: string[]; name: string; description: string; relatedNpc?: string; relatedLocation?: string }>;
+}
+
+/**
+ * Pure application of a parsed GoalReviewResult onto the campaign's goals — no I/O, no LLM call.
+ * Split out from reviewSessionGoals so this branching (vague vs. failed, which quests are
+ * well-formed enough to keep) is unit-testable without a network call — see
+ * session-processor.goalReview.selfcheck.ts. Mutates `goals` in place and returns it alongside
+ * any newly-generated Quest records.
+ */
+export function applyGoalReview(goals: Goal[], result: GoalReviewResult): { goals: Goal[]; newQuests: Quest[] } {
+  const now = new Date().toISOString();
+  for (const update of result.goalUpdates) {
+    const goal = goals.find(g => g.id === update.goalId && g.ownerType === 'player');
+    if (!goal) continue; // AI hallucinated an id, or it's not a player goal — ignore rather than throw
+    if (update.action === 'vague') {
+      goal.validationFeedback = update.feedback ?? 'This goal needs a clearer, more concrete outcome for the VDM to build on.';
+    } else if (update.action === 'failed' && goal.status === 'active') {
+      goal.status = 'failed';
+      goal.failedAt = now;
+      goal.failureConsequence = update.consequence ?? 'This goal has failed — what changed was left undetermined.';
+    }
+  }
+
+  // A quest naming zero valid player-goal ids is malformed output, not a real hook — drop it
+  // rather than write a Quest nothing can ever trace back to.
+  const newQuests: Quest[] = result.quests
+    .filter(q => q.goalIds.length > 0 && q.goalIds.every(id => goals.some(g => g.id === id && g.ownerType === 'player')))
+    .map(q => ({
+      id: randomUUID(), name: q.name, description: q.description, status: 'open', log: [], addedAt: now.slice(0, 10),
+      ...(q.relatedNpc ? { relatedNpc: q.relatedNpc } : {}),
+      ...(q.relatedLocation ? { relatedLocation: q.relatedLocation } : {}),
+      relatedGoalId: q.goalIds,
+    }));
+
+  // A goal a real quest now depends on is woven into the world — the player can no longer edit
+  // or remove it out from under that quest (see isGoalLocked).
+  for (const quest of newQuests) {
+    for (const goalId of quest.relatedGoalId ?? []) {
+      const goal = goals.find(g => g.id === goalId && g.ownerType === 'player');
+      if (goal) goal.builtIntoWorld = true;
+    }
+  }
+
+  return { goals, newQuests };
+}
+
+/**
+ * Session-end review of active player goals: flags vague ones with feedback, lets the VDM
+ * adjudicate failure, and spins up quest hooks from goals that are concrete and still open.
+ * Best-effort — a parse/LLM failure here should never block the rest of session-end processing.
+ * No-ops (no LLM call) when nobody has an active goal, same lazy-cost pattern as the story-tags pass above.
+ */
+async function reviewSessionGoals(campaignSlug: string, chatLogText: string, provider: StoryProviderAdapter): Promise<void> {
+  const goals = await readGoals(campaignSlug);
+  if (!goals.some(g => g.ownerType === 'player' && g.status === 'active')) return;
+
+  const activeGoals = goals.filter(g => g.ownerType === 'player' && g.status === 'active');
+  const raw = await provider.complete(buildGoalReviewPrompt(activeGoals, chatLogText));
+  console.log('[goal-review] raw response:\n', raw);
+  const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```\s*$/, '');
+  const result = JSON.parse(cleaned) as GoalReviewResult;
+
+  const { goals: updatedGoals, newQuests } = applyGoalReview(goals, result);
+  await writeGoals(campaignSlug, updatedGoals);
+  if (newQuests.length) {
+    await writeQuests(campaignSlug, [...(await readQuests(campaignSlug)), ...newQuests]);
+  }
+
+  const vagueCount = result.goalUpdates.filter(u => u.action === 'vague').length;
+  const failedCount = result.goalUpdates.filter(u => u.action === 'failed').length;
+  console.log(`[goal-review] ${campaignSlug}: ${vagueCount} flagged vague, ${failedCount} failed, ${newQuests.length} quest(s) created${newQuests.length ? ` (${newQuests.map(q => q.id).join(', ')})` : ''}`);
+}
+
 export async function processSession(campaignSlug: string): Promise<ProcessResult> {
   const log = await readChatLog(campaignSlug);
   if (log.length === 0) return { skipped: true, updated: [], created: [], cascaded: [], notes: [] };
@@ -707,6 +788,14 @@ export async function processSession(campaignSlug: string): Promise<ProcessResul
     notes = parseSessionNotesYaml(notesRaw);
   } catch (err) {
     logError('session-processor/index:sessionNotes', err);
+  }
+
+  // Player goal review — same feature/model as ensureSessionQuests/generateDungeonQuests below,
+  // since this is quest generation too, just seeded from player goals instead of plot hooks.
+  try {
+    await reviewSessionGoals(campaignSlug, chatLogText, getFeatureProvider(config, 'questGeneration'));
+  } catch (err) {
+    logError('session-processor/index:goalReview', err);
   }
 
   return { updated, created, cascaded, notes };

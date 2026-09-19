@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type { AppConfig, Dungeon, DungeonEntity, DungeonRoom, EnemyStatBlock } from 'shared';
+import type { AppConfig, Dungeon, DungeonEntity, DungeonRoom, EnemyStatBlock, CampaignGenre } from 'shared';
 import { slugifyTheme } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { fetchManifest } from './manifest.ts';
@@ -26,11 +26,15 @@ export async function generateDungeon(
      * decides its trigger plus every stage that follows, since only it knows the real room/entity
      * names to reference. */
     predefinedChain?: { id: string; name: string; description: string }[];
+    /** The campaign's persisted, fixed-set genre (see WorldMeta.genre) — undefined for campaigns
+     * predating the field. Threaded through to fetchManifest (narrows the room-material prompt to
+     * what's already reusable) and ensureTilesetSupport (records new materials against it). */
+    genre?: CampaignGenre;
   },
   onToken: (t: string) => void = () => {},
   config?: AppConfig,
 ): Promise<Dungeon> {
-  const manifest = await fetchManifest(name, dungeonType, adapter, storyContext, opts?.roomRange, opts?.partySize, opts?.partyLevel, onToken, opts?.predefinedChain);
+  const manifest = await fetchManifest(name, dungeonType, adapter, storyContext, opts?.roomRange, opts?.partySize, opts?.partyLevel, onToken, opts?.predefinedChain, opts?.genre);
   // Man-made structures get a deterministic floor-plan layout driven by the manifest's adjacency
   // graph; natural/carved spaces (cave, crypt, tomb) go straight to the procedural row-packer —
   // no LLM geometry call, and no attempt to force building-shaped rooms onto a cave.
@@ -72,7 +76,7 @@ export async function generateDungeon(
   // is paused behind these two. Fired together via Promise.all rather than sequentially, so their
   // atlas requests overlap instead of queueing one behind the other.
   const [tilesetSlug] = await Promise.all([
-    config ? ensureTilesetSupport(manifest.theme, manifest.materials, config) : Promise.resolve(slugifyTheme(manifest.theme)),
+    config ? ensureTilesetSupport(manifest.theme, manifest.materials, config, opts?.genre) : Promise.resolve(slugifyTheme(manifest.theme)),
     config ? generatePropSprites(manifest.props, config) : Promise.resolve(),
   ]);
 
@@ -216,7 +220,7 @@ export function resolveRoom(dungeon: Dungeon, gx: number, gy: number): { room?: 
 
 /**
  * Ground-truth line anchoring a post-combat aftermath to where the fight actually happened (the
- * defeated creatures' own positions — see combat/runtime.ts's victory handler), not wherever the
+ * defeated creatures' own positions — see combat/runtime/damage.ts's victory handler), not wherever the
  * player's token happens to be sitting. Dungeon-crawl combat triggers on aggro radius, so a
  * ranged fight can end with the player never having walked into the room the kill happened in —
  * without this, the aftermath narration falls back on whatever room the player's token resolves

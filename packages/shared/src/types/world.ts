@@ -6,6 +6,14 @@ export interface WorldConcept {
   description: string;
 }
 
+/** Fixed, pre-created set — chosen once at campaign creation, persisted, never fed into any
+ * LLM tone/flavor prompt. Purely a deterministic key for looking up reusable dungeon tile
+ * assets (see GenreTileMap in dungeon.ts) — unrelated to the freeform, LLM-invented `theme`
+ * a dungeon gets per-generation, and unrelated to WorldMeta.tags/storyTags (both freeform,
+ * both feed tone prompts). */
+export const CAMPAIGN_GENRES = ["fantasy", "horror", "sci-fi"] as const;
+export type CampaignGenre = (typeof CAMPAIGN_GENRES)[number];
+
 export interface Campaign {
   id: string;
   name: string;
@@ -35,6 +43,9 @@ export interface WorldMeta {
    * play has actually proven to be about, used to filter the plot hook pool. Empty/undefined means
    * "not yet known", not "nothing fits" — pool eligibility treats that as no tag filter at all. */
   storyTags?: PlotHookTag[];
+  /** Set once at creation, never changed. Deterministic tile-lookup key only — see CAMPAIGN_GENRES.
+   * Undefined on campaigns saved before this field existed; treated as "no genre map filtering". */
+  genre?: CampaignGenre;
 }
 
 /** Optional per-campaign rule toggles, off by default. */
@@ -72,6 +83,8 @@ export interface Quest {
   relatedNpc?: string;
   /** location entity slug this quest's hook is tied to, when known. */
   relatedLocation?: string;
+  /** Goal.id(s) this quest was generated to serve, when it came from the session-end goal review pass — a single quest can intersect more than one party member's goal. */
+  relatedGoalId?: string[];
 }
 
 export interface SessionManifest {
@@ -132,21 +145,12 @@ export interface CompendiumMeta {
   resumeFromChunk: number;
 }
 
-export interface WorldMilestone {
-  day: number;
-  description: string;
-  completed: boolean;
-  completedOnDay?: number;
-}
-
 export interface WorldActor {
   id: string;
   name: string;
   type: "bbeg" | "faction";
-  ultimateGoal: string;
-  totalDays: number;
-  daysElapsed: number;
-  milestones: WorldMilestone[];
+  /** The Goal (goals.json, ownerType "bbeg"|"faction", ownerId === this actor's id) this actor is pursuing. */
+  goalId: string;
   currentStatus: string;
   status: "active" | "defeated" | "succeeded";
 }

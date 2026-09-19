@@ -4,7 +4,7 @@
 // physically live. TextStore holds JSON/markdown/text content, MediaStore holds binary blobs
 // (images). Split in two because they're configured independently (STORAGE_TEXT_BACKEND /
 // STORAGE_MEDIA_BACKEND) — an Electron build keeps both local, a SaaS deploy can point media at
-// S3 and text at RDS without the two choices being coupled.
+// S3 independently of where text/JSON content lives.
 export interface TextStore {
   get(key: string): Promise<string | null>;
   put(key: string, content: string): Promise<void>;
@@ -28,4 +28,4 @@ export interface MediaStore {
   deletePrefix(prefix: string): Promise<void>;
 }
 
-export type StorageBackend = 'local' | 's3' | 'rds';
+export type StorageBackend = 'local' | 's3';

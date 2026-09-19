@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import type { Character, Spell, Weapon } from 'shared';
-import { actionCostFromCastingTime, isWeapon, hasOriginFeat, ABILITY_DEFS, RESOURCE_DEFS, resourceCurrent, resourceMax } from 'shared';
+import { actionCostFromCastingTime, isWeapon, hasOriginFeat, unarmedStrikeFor, monkMartialArtsActive, ABILITY_DEFS, RESOURCE_DEFS, resourceCurrent, resourceMax } from 'shared';
 import { dispatch, on } from './events.ts';
 import type { TargetingStartPayload } from './events.ts';
 import { Button } from './components/Button/Button.tsx';
@@ -49,18 +50,6 @@ const STANDARD_ACTIONS = [
   { key: 'disengage', label: 'Disengage', effect: 'Disengaging' },
   { key: 'hide',      label: 'Hide',      effect: 'Hiding'      },
 ] as const;
-
-// Unarmed Strike — everyone can throw a punch (2024 PHB base: 1 + Strength damage, d20 +
-// Strength to hit). Tavern Brawler bumps the damage die to 1d4 (server adds the Push separately,
-// gated on the feat). 'simple' tags it so the server's proficiency check (every class has
-// 'simple' in CLASS_WEAPON_PROFS) grants proficiency bonus on it.
-function unarmedStrikeFor(character: Character): Weapon {
-  return {
-    id: 'unarmed-strike', name: 'Unarmed Strike', description: 'A bare-handed strike.', quantity: 1,
-    type: 'weapon', damage: hasOriginFeat(character, 'Tavern Brawler') ? '1d4' : '1',
-    damageType: 'bludgeoning', attackBonus: 0, range: 5, properties: ['simple'], isFinesse: false,
-  };
-}
 
 function storageKey(id: string) { return `vtt-resources:${id}`; }
 
@@ -211,6 +200,10 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   const offhandWeapon = (mainHandItem && offHandItem && isWeapon(mainHandItem) && isWeapon(offHandItem)
     && !mainHandItem.twoHanded && !offHandItem.twoHanded) ? offHandItem : undefined;
 
+  // Martial Arts' Bonus Unarmed Strike — only while unarmored, shieldless, and wielding nothing
+  // but Monk weapons (or nothing); monkMartialArtsActive already carries that full RAW gate.
+  const monkBonusStrike = monkMartialArtsActive(character) ? unarmedStrikeFor(character) : undefined;
+
   // The off-hand weapon only ever gets its own bonus-action button (above) — never also listed
   // as an action-attack option, or it'd render twice (once as an action button, once as bonus).
   const equippedWeapons = [character.equipment?.mainHand, character.equipment?.offHand]
@@ -243,6 +236,14 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     dispatch('vtt:targeting:start', { kind: 'weapon', weapon, actionType: 'bonusAction', isOffhand: true, ...(inspirationArmed ? { useInspiration: true } : {}) });
   }
 
+  // Not isOffhand — the bonus punch still gets its ability-mod damage bonus, unlike a true
+  // off-hand weapon attack (see offhandStatBonus, combat.ts).
+  function handleMonkBonusClick(weapon: Weapon) {
+    if (actionsDisabled || !resources.bonusAction) return;
+    dispatch('vtt:sheet:closed', {});
+    dispatch('vtt:targeting:start', { kind: 'weapon', weapon, actionType: 'bonusAction', ...(inspirationArmed ? { useInspiration: true } : {}) });
+  }
+
   function handleAbilityClick(key: string, ability: (typeof ABILITY_DEFS)[string]) {
     if (actionsDisabled || !resources[ability.actionCost]) return;
     const pool = resourceCurrent(character, ability.resourceKey);
@@ -256,7 +257,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
       const chosenItem = ability.itemChoices?.length ? (chosenItems[key] ?? ability.itemChoices[0]) : undefined;
       dispatch('vtt:combat:ability:use', { casterId: character.id, casterName: character.name, abilityKey: key, targetId: character.id, ...(chosenItem ? { chosenItem } : {}) });
     } else {
-      dispatch('vtt:targeting:start', { kind: 'ability', abilityKey: key, label: ability.label, casterId: character.id, actionCost: ability.actionCost });
+      dispatch('vtt:targeting:start', { kind: 'ability', abilityKey: key, label: ability.label, casterId: character.id, actionCost: ability.actionCost, ...(ability.includeSelf ? { includeSelf: true } : {}) });
     }
   }
 
@@ -273,7 +274,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     if (ability.target === 'self') {
       dispatch('vtt:combat:ability:use', { casterId: character.id, casterName: character.name, abilityKey: key, targetId: character.id, chosenAmount, ...(cure ? { cureCondition: true } : {}) });
     } else {
-      dispatch('vtt:targeting:start', { kind: 'ability', abilityKey: key, label: ability.label, casterId: character.id, actionCost: ability.actionCost, chosenAmount, ...(cure ? { cureCondition: true } : {}) });
+      dispatch('vtt:targeting:start', { kind: 'ability', abilityKey: key, label: ability.label, casterId: character.id, actionCost: ability.actionCost, chosenAmount, ...(cure ? { cureCondition: true } : {}), ...(ability.includeSelf ? { includeSelf: true } : {}) });
     }
   }
 
@@ -390,6 +391,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   const canUseHealerKit = hasOriginFeat(character, 'Healer') && !!healersKit && weaponsUsable;
 
   return (
+  <>
   <div className="combat-dock-wrapper">
     <div className="combat-dock-column">
       {canOfferAlertSwap && (
@@ -469,6 +471,18 @@ export default function CombatDock({ character, combatActive, movementRemaining,
               onClick={() => handleOffhandClick(offhandWeapon)}
             >
               <ItemIcon className="combat-dock-weapon-icon" name={offhandWeapon.name} iconPath={offhandWeapon.iconPath} />
+            </Button>
+          )}
+          {monkBonusStrike && (
+            <Button
+              key="monk-bonus-strike"
+              variant="ghost"
+              data-action-cost="bonusAction"
+              className={`combat-dock-weapon-btn${(actionsDisabled || !resources.bonusAction) ? ' combat-dock-weapon-btn--spent' : ''}${targeting?.kind === 'weapon' && !targeting.isOffhand && targeting.actionType === 'bonusAction' && targeting.weapon.id === 'unarmed-strike' ? ' combat-dock-weapon-btn--active' : ''}`}
+              title={`${monkBonusStrike.name} (bonus action)`}
+              onClick={() => handleMonkBonusClick(monkBonusStrike)}
+            >
+              <ItemIcon className="combat-dock-weapon-icon" name={monkBonusStrike.name} iconPath={monkBonusStrike.iconPath} />
             </Button>
           )}
           {availableAbilities.map(([key, ability]) => (
@@ -607,53 +621,56 @@ export default function CombatDock({ character, combatActive, movementRemaining,
       {isMyTurn ? 'End Turn' : 'Waiting…'}
     </Button>
 
-    {amountModal && amountModalAbility && (
-      <div className="modal-overlay" onClick={() => setAmountModal(null)}>
-        <dialog className="modal campaign-modal" open onClick={e => e.stopPropagation()}>
-          <div className="modal-header">
-            <h2 className="modal-title">{amountModalAbility.label}</h2>
-          </div>
-          <div className="modal-form">
-            <label className="modal-label">
-              <span className="create-label-row">
-                Heal Amount (HP)
-                <InfoTooltip text={`Restore this many hit points to the target from your ${amountModalAbility.label} pool (${amountModalPool} remaining).`} />
-              </span>
-              <input
-                className="modal-input"
-                type="number"
-                min={1}
-                max={Math.max(1, amountModalPool)}
-                disabled={amountModal.cure}
-                value={amountModal.amount}
-                onChange={e => {
-                  const amount = Math.max(1, Math.min(Number(e.target.value) || 1, amountModalPool));
-                  setAmountModal(prev => prev && { ...prev, amount });
-                }}
-              />
-            </label>
-            {amountModalCureCost !== undefined && (
-              <label className="feature-checkbox">
-                <input
-                  type="checkbox"
-                  checked={amountModal.cure}
-                  disabled={!amountModalCanCure}
-                  onChange={() => setAmountModal(prev => prev && { ...prev, cure: !prev.cure })}
-                />
-                <span className="create-label-row">
-                  Cure Poisoned ({amountModalCureCost} points)
-                  <InfoTooltip text={`Instead of healing, spend ${amountModalCureCost} points from your ${amountModalAbility.label} pool to remove the Poisoned condition from the target. Requires at least ${amountModalCureCost} points remaining.`} />
-                </span>
-              </label>
-            )}
-          </div>
-          <div className="modal-actions">
-            <Button variant="outline" color="secondary" onClick={() => setAmountModal(null)}>Cancel</Button>
-            <Button onClick={confirmAmountModal} disabled={!amountModalCanAccept}>Accept</Button>
-          </div>
-        </dialog>
-      </div>
-    )}
   </div>
+
+  {amountModal && amountModalAbility && createPortal(
+    <div className="modal-overlay" onClick={() => setAmountModal(null)}>
+      <dialog className="modal campaign-modal" open onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">{amountModalAbility.label}</h2>
+        </div>
+        <div className="modal-form">
+          <label className="modal-label">
+            <span className="create-label-row">
+              Heal Amount (HP)
+              <InfoTooltip text={`Restore this many hit points to the target from your ${amountModalAbility.label} pool (${amountModalPool} remaining).`} />
+            </span>
+            <input
+              className="modal-input"
+              type="number"
+              min={1}
+              max={Math.max(1, amountModalPool)}
+              disabled={amountModal.cure}
+              value={amountModal.amount}
+              onChange={e => {
+                const amount = Math.max(1, Math.min(Number(e.target.value) || 1, amountModalPool));
+                setAmountModal(prev => prev && { ...prev, amount });
+              }}
+            />
+          </label>
+          {amountModalCureCost !== undefined && (
+            <label className="feature-checkbox">
+              <input
+                type="checkbox"
+                checked={amountModal.cure}
+                disabled={!amountModalCanCure}
+                onChange={() => setAmountModal(prev => prev && { ...prev, cure: !prev.cure })}
+              />
+              <span className="create-label-row">
+                Cure Poisoned ({amountModalCureCost} points)
+                <InfoTooltip text={`Instead of healing, spend ${amountModalCureCost} points from your ${amountModalAbility.label} pool to remove the Poisoned condition from the target. Requires at least ${amountModalCureCost} points remaining.`} />
+              </span>
+            </label>
+          )}
+        </div>
+        <div className="modal-actions">
+          <Button variant="outline" color="secondary" onClick={() => setAmountModal(null)}>Cancel</Button>
+          <Button onClick={confirmAmountModal} disabled={!amountModalCanAccept}>Accept</Button>
+        </div>
+      </dialog>
+    </div>,
+    document.body
+  )}
+  </>
   );
 }

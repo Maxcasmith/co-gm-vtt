@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Character, CharacterClassLevel, CharacterStoryboard, HouseRules, StoryboardQueuePayload, WorldMeta } from "shared";
+import type { Character, CharacterClassLevel, CharacterStoryboard, Goal, HouseRules, StoryboardQueuePayload, WorldMeta } from "shared";
 import { calcACBreakdown, characterClasses, DEFAULT_HOUSE_RULES, spellSlotsForCharacter } from "shared";
 import { on, dispatch } from "./events.ts";
 import { Button } from "./components/Button/Button.tsx";
@@ -12,10 +12,11 @@ import { SpellsTab } from "./characterSheet/SpellsTab.tsx";
 import { ScoresTab } from "./characterSheet/ScoresTab.tsx";
 import { AITab } from "./characterSheet/AITab.tsx";
 import { InfoTab } from "./characterSheet/InfoTab.tsx";
+import { GoalsTab } from "./characterSheet/GoalsTab.tsx";
 import StoryboardOverlay from "./StoryboardOverlay.tsx";
 import { LevelUpScreen, bumpClass } from "./characterSheet/LevelUpScreen.tsx";
 
-type SheetTab = "abilities" | "features" | "inventory" | "spells" | "ai" | "scores" | "info";
+type SheetTab = "abilities" | "features" | "inventory" | "spells" | "ai" | "scores" | "info" | "goals";
 
 interface Props {
   character: Character;
@@ -25,16 +26,19 @@ interface Props {
   currentSpellSlots1?: number;
   maxSpellSlots1?: number;
   sessionActive: boolean;
+  goals: Goal[];
 }
 
+// "ai" and "scores" must stay last, in this order — keep any future tab additions above them.
 const TAB_ORDER: { id: SheetTab; label: string }[] = [
   { id: "abilities", label: "Abilities" },
   { id: "inventory", label: "Inventory" },
   { id: "spells", label: "Spells" },
   { id: "features", label: "Features" },
+  { id: "goals", label: "Goals" },
+  { id: "info", label: "Info" },
   { id: "ai", label: "Combat AI" },
   { id: "scores", label: "Scores" },
-  { id: "info", label: "Info" },
 ];
 
 // XP required to reach each level (index = level, so index 1 = 300 XP to reach level 2)
@@ -51,6 +55,7 @@ export default function CharacterSheetOverlay({
   currentSpellSlots1,
   maxSpellSlots1,
   sessionActive,
+  goals,
 }: Props) {
   const [visible, setVisible] = useState(false);
   const [tab, setTab] = useState<SheetTab>("abilities");
@@ -405,6 +410,7 @@ export default function CharacterSheetOverlay({
           {tab === "inventory" && (
             <InventoryTab character={character} sessionActive={sessionActive} />
           )}
+          {tab === "goals" && <GoalsTab character={character} goals={goals} />}
           {tab === "ai" && <AITab character={character} />}
           {tab === "scores" && <ScoresTab character={character} />}
           {tab === "info" && (

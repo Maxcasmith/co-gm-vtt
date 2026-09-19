@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { hasOriginFeat, trySpendResource, FAST_CRAFTING_TABLE } from 'shared';
+import type { WorldActor, Goal } from 'shared';
 import { io, ROOM, playerSocketIds, pendingRests, type RestChoice } from '../state.ts';
-import { listCharacters, updateCharacter, getConfig, readWorldState, writeWorldState, readCampaignFile } from '../storage.ts';
+import { listCharacters, updateCharacter, getConfig, readWorldState, writeWorldState, readCampaignFile, readGoals, writeGoals } from '../storage.ts';
 import { getFeatureProvider } from '../providers/index.ts';
 import { generateWorldState, tickWorldNarrative } from '../session-processor/imagePrompts.ts';
 import { applyEffects } from '../effects.ts';
@@ -123,6 +124,40 @@ export async function maybeResolveRest(campaignId: string): Promise<void> {
   }
 }
 
+/**
+ * Pure milestone/day-threshold advancement, no I/O — mutates `actors`/`goals` in place and
+ * returns the newly-crossed-milestone/succeeded messages for narration. Split out from
+ * tickWorldForRest so this logic is unit-testable without an LLM call — see
+ * rest.advanceWorldActorGoals.selfcheck.ts.
+ */
+export function advanceWorldActorGoals(actors: WorldActor[], goals: Goal[], hours: number): string[] {
+  const newlyCompleted: string[] = [];
+  for (const actor of actors) {
+    if (actor.status !== 'active') continue;
+    const goal = goals.find(g => g.id === actor.goalId);
+    if (!goal) continue;
+
+    goal.daysElapsed = (goal.daysElapsed ?? 0) + hours / 24;
+    for (const ms of goal.milestones) {
+      if (!ms.completed && ms.day !== undefined && goal.daysElapsed >= ms.day) {
+        ms.completed = true;
+        ms.completedOnDay = Math.floor(goal.daysElapsed);
+        newlyCompleted.push(`${actor.name}: ${ms.description}`);
+      }
+    }
+    const next = goal.milestones.find(m => !m.completed);
+    if (next) {
+      actor.currentStatus = `Working toward: ${next.description}`;
+    } else if (goal.totalDays !== undefined && goal.daysElapsed >= goal.totalDays) {
+      actor.status = 'succeeded';
+      goal.status = 'succeeded';
+      actor.currentStatus = `Has achieved their ultimate goal: ${goal.description}`;
+      newlyCompleted.push(`⚠️ ${actor.name} HAS SUCCEEDED: ${goal.description}`);
+    }
+  }
+  return newlyCompleted;
+}
+
 /** Advances the background actor/world-narrative clock (ported from the old long-rest route) and returns the "while you slept" text, if any. */
 async function tickWorldForRest(campaignId: string, hours: number): Promise<string | undefined> {
   try {
@@ -135,36 +170,20 @@ async function tickWorldForRest(campaignId: string, hours: number): Promise<stri
         readCampaignFile(campaignId, 'world.md'),
         readCampaignFile(campaignId, 'factions.md'),
       ]);
-      state = await generateWorldState(worldMd ?? '', factionsMd ?? '', adapter);
+      state = await generateWorldState(campaignId, worldMd ?? '', factionsMd ?? '', adapter);
       if (state) { state.dayNumber = 1; state.totalHoursElapsed = 0; }
     }
     if (!state) return undefined;
 
     state.totalHoursElapsed += hours;
     state.dayNumber = Math.floor(state.totalHoursElapsed / 24) + 1;
-    const newlyCompleted: string[] = [];
 
-    for (const actor of state.actors) {
-      if (actor.status !== 'active') continue;
-      actor.daysElapsed += hours / 24;
-      for (const ms of actor.milestones) {
-        if (!ms.completed && actor.daysElapsed >= ms.day) {
-          ms.completed = true;
-          ms.completedOnDay = Math.floor(actor.daysElapsed);
-          newlyCompleted.push(`${actor.name}: ${ms.description}`);
-        }
-      }
-      const next = actor.milestones.find(m => !m.completed);
-      if (next) actor.currentStatus = `Working toward: ${next.description}`;
-      else if (actor.daysElapsed >= actor.totalDays) {
-        actor.status = 'succeeded';
-        actor.currentStatus = `Has achieved their ultimate goal: ${actor.ultimateGoal}`;
-        newlyCompleted.push(`⚠️ ${actor.name} HAS SUCCEEDED: ${actor.ultimateGoal}`);
-      }
-    }
+    const goals = await readGoals(campaignId);
+    const newlyCompleted = advanceWorldActorGoals(state.actors, goals, hours);
+    await writeGoals(campaignId, goals);
 
     const worldMd = await readCampaignFile(campaignId, 'world.md');
-    const worldEvents = await tickWorldNarrative(state, hours, worldMd ?? '', newlyCompleted, adapter);
+    const worldEvents = await tickWorldNarrative(state, hours, worldMd ?? '', newlyCompleted, adapter, goals);
     await writeWorldState(campaignId, state);
     return worldEvents ?? undefined;
   } catch (err) {

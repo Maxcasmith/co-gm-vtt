@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import type { WorldConcept, Character, Quest, HouseRules } from 'shared';
-import { spellSlotsForCharacter, DEFAULT_HOUSE_RULES } from 'shared';
+import type { WorldConcept, Character, Quest, HouseRules, CampaignGenre } from 'shared';
+import { spellSlotsForCharacter, DEFAULT_HOUSE_RULES, CAMPAIGN_GENRES } from 'shared';
 import {
   CAMPAIGNS_DIR,
   getConfig, writeCampaignFile, listCampaigns,
@@ -29,6 +29,7 @@ import path from 'path';
 import { parseLlmJson } from '../utils/llmJson.ts';
 import { logError } from '../logger.ts';
 import { licenseOrJwtMiddleware } from '../presentation/middleware/AuthMiddleware/AuthMiddleware.ts';
+import { clearCampaignRuntimeState } from '../state.ts';
 
 export const campaignsRouter = Router();
 
@@ -84,6 +85,7 @@ campaignsRouter.delete('/:id', async (req, res) => {
       if (dungeon) messages = await deleteUnusedResources(dungeon, resources, { excludeId: campaignId, excludeKind: 'campaign' });
     }
     await deleteCampaign(campaignId);
+    clearCampaignRuntimeState(campaignId);
     res.json({ ok: true, messages });
   } catch (err) {
     logError('routes/campaigns:deleteCampaign', err);
@@ -182,8 +184,9 @@ campaignsRouter.post('/concepts', licenseOrJwtMiddleware, async (req, res) => {
 // ── world generation (SSE) ────────────────────────────────────────────────────
 
 campaignsRouter.post('/generate', licenseOrJwtMiddleware, async (req, res) => {
-  const { tags, concept, name, type = 'campaign', partySize = 4 } = req.body as { tags: string[]; concept: WorldConcept; name: string; type?: 'campaign' | 'one-shot' | 'dungeon-crawl'; partySize?: number };
+  const { tags, concept, name, type = 'campaign', partySize = 4, genre } = req.body as { tags: string[]; concept: WorldConcept; name: string; type?: 'campaign' | 'one-shot' | 'dungeon-crawl'; partySize?: number; genre?: CampaignGenre };
   if (!concept || !tags?.length) { res.status(400).json({ error: 'tags and concept required' }); return; }
+  if (!genre || !(CAMPAIGN_GENRES as readonly string[]).includes(genre)) { res.status(400).json({ error: 'a valid genre is required' }); return; }
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -241,6 +244,7 @@ campaignsRouter.post('/generate', licenseOrJwtMiddleware, async (req, res) => {
         concept: { name: concept.name, description: concept.description },
         scenarioSynopsis: synopsis,
         partySize,
+        genre,
       });
 
       // Started here, awaited only right before `complete` below — runs the whole time the goal
@@ -266,7 +270,7 @@ campaignsRouter.post('/generate', licenseOrJwtMiddleware, async (req, res) => {
       const dungeonId = randomUUID();
       const dungeon = await generateDungeon(
         title, 'dungeon-crawl', getFeatureProvider(config, 'dungeonGeneration'), synopsis,
-        { width: 100, height: 100, roomRange: [14, 20], partySize, id: dungeonId, predefinedChain },
+        { width: 100, height: 100, roomRange: [14, 20], partySize, id: dungeonId, predefinedChain, genre },
         token => send({ type: 'token', text: token }),
         config,
       );
@@ -318,6 +322,7 @@ campaignsRouter.post('/generate', licenseOrJwtMiddleware, async (req, res) => {
       campaignDir: slug,
       type,
       concept: { name: concept.name, description: concept.description },
+      genre,
     });
 
     if (type === 'campaign' && config.image.generateWorldMap) {

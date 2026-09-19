@@ -28,7 +28,7 @@ DEPLOY_TARGET=saas
 # Admin panel password fallback — only used if no admin password is set in-app (Settings)
 ADMIN_PASSWORD=admin
 
-# Storage backend — 'local' (default), 's3', or 'rds', set independently per store
+# Storage backend — 'local' (default) or 's3', set independently per store
 STORAGE_TEXT_BACKEND=local
 STORAGE_MEDIA_BACKEND=local
 

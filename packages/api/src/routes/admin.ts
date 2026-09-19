@@ -20,6 +20,7 @@ import { buildPlotHookNormalizePrompt } from '../prompts.ts';
 import { parseLlmJson } from '../utils/llmJson.ts';
 import { parsePageParams } from '../utils/pagination.ts';
 import { logError } from '../logger.ts';
+import { clearCampaignRuntimeState } from '../state.ts';
 
 export const adminRouter = Router();
 
@@ -58,6 +59,7 @@ adminRouter.delete('/campaigns/:id', async (req, res) => {
       if (dungeon) messages = await deleteUnusedResources(dungeon, resources, { excludeId: campaignId, excludeKind: 'campaign' });
     }
     await deleteCampaign(campaignId);
+    clearCampaignRuntimeState(campaignId);
     res.json({ ok: true, messages });
   } catch (err) {
     logError('routes/admin:deleteCampaign', err);
@@ -132,10 +134,14 @@ adminRouter.delete('/campaigns/:id/sessions', async (req, res) => {
 // 16-tile 4x4 pipeline — the old 8-tile/2:1 mode-selection is retired, see tilesets.ts.
 adminRouter.post('/tilesets/generate', async (req, res) => {
   if (!(await requireAdmin(req, res))) return;
-  const { title, theme, materials: rawMaterials } = req.body as { title?: string; theme?: string; materials?: DungeonMaterialSpec[] };
+  const { title, theme, materials: rawMaterials } = req.body as { title?: string; theme?: string; materials?: Omit<DungeonMaterialSpec, 'category'>[] };
   const materials = (Array.isArray(rawMaterials) ? rawMaterials : [])
-    .filter((m): m is DungeonMaterialSpec => !!m?.key?.trim() && !!m?.description?.trim())
-    .slice(0, 16);
+    .filter((m): m is Omit<DungeonMaterialSpec, 'category'> => !!m?.key?.trim() && !!m?.description?.trim())
+    .slice(0, 16)
+    // This manual admin tool bypasses the genre system entirely (no genre passed to
+    // generateExtendedTileset below, category never read on this path) — filled in only to
+    // satisfy the shared type.
+    .map((m): DungeonMaterialSpec => ({ ...m, category: 'stone' }));
   if (!title?.trim() || !theme?.trim() || !materials.length) {
     res.status(400).json({ error: 'title, theme, and at least one material (key + description) are required' });
     return;

@@ -23,7 +23,8 @@ import { MovementDamageHook } from './hooks/MovementDamageHook.ts';
 import { IlluminationSourceHook } from './hooks/IlluminationSourceHook.ts';
 import { WeaponAttackOverrideHook } from './hooks/WeaponAttackOverrideHook.ts';
 import { DcModifierHook } from './hooks/DcModifierHook.ts';
-import { applyCondition, recomputeIllumination } from '../runtime.ts';
+import { applyCondition } from '../runtime/statusEffects.ts';
+import { recomputeIllumination } from '../runtime/environment.ts';
 
 export interface SpellHookContext {
   /** Who the hook attaches to — the caster for 'self' specs, an affected target otherwise. */

@@ -179,6 +179,23 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ── genre picker (prompts step) ── */
+.create-genre-options {
+  display: flex;
+  gap: 10px;
+}
+
+.create-genre-option {
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.create-genre-option--selected {
+  border-color: var(--gold);
+  color: var(--gold);
+  box-shadow: 0 0 0 1px rgba(201, 168, 76, 0.4);
+}
+
 /* ── choose-source step ── */
 .create-source-types {
   display: grid;

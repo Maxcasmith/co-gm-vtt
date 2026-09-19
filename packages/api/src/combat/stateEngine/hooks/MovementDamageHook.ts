@@ -4,7 +4,7 @@ import { Hook, type HookProps } from '../Hook.ts';
 import type { StateEngine } from '../StateEngine.ts';
 import { encounters } from '../../../state.ts';
 import { rollDice } from '../../dice.ts';
-import { applyDamageToCreature, applyDamageToPlayer } from '../../runtime.ts';
+import { applyDamageToCreature, applyDamageToPlayer } from '../../runtime/damage.ts';
 
 /**
  * Damages its owner the moment they move `thresholdFt` or more in one token:move leg — Booming

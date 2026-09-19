@@ -28,6 +28,8 @@ export interface AbilityDef {
   amountChoice?: true;
   /** Present only when this ability also offers a flat-cost alternative to healing (Lay on Hands 2024: spend 5 points to cure Poisoned instead of restoring HP). Requires amountChoice. */
   cureCost?: number;
+  /** 'ally'-target abilities that may also target the caster (Lay on Hands can heal yourself). Unset/false abilities (Bardic Inspiration — "another creature" only) can't be self-targeted. */
+  includeSelf?: boolean;
 }
 
 /** Populated per-feature as each is wired up (see build audit) — empty is a valid, fully-functional state. */
@@ -134,5 +136,6 @@ export const ABILITY_DEFS: Record<string, AbilityDef> = {
     onUse: [],
     amountChoice: true,
     cureCost: 5,
+    includeSelf: true,
   },
 };

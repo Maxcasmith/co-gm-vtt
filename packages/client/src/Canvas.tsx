@@ -177,6 +177,7 @@ export default function Canvas({ player, characterId, character, connected, show
       setMultiTargetCursor(null);
       setTargeting(null);
       setHoverHitChance(null);
+      setHoveredTokenKey(null);
       if (ref.current) ref.current.style.cursor = 'default';
     });
     const u3 = on('vtt:combat:attack', () => {
@@ -191,6 +192,15 @@ export default function Canvas({ player, characterId, character, connected, show
       setTargeting(null);
       setHoverHitChance(null);
     });
+    // Ability targeting (Lay on Hands, Bardic Inspiration, ...) resolves via
+    // vtt:combat:ability:use rather than an attack/spell event — same grid-highlight clear.
+    const u6 = on('vtt:combat:ability:use', () => {
+      targetingRef.current = null;
+      aoeMouseRef.current = null;
+      setTargeting(null);
+      setHoverHitChance(null);
+      setHoveredTokenKey(null);
+    });
     const u5 = on('vtt:combat:spell:cast', () => {
       targetingRef.current = null;
       aoeMouseRef.current = null;
@@ -200,7 +210,7 @@ export default function Canvas({ player, characterId, character, connected, show
       setTargeting(null);
       setHoverHitChance(null);
     });
-    return () => { u1(); u2(); u3(); u4(); u5(); };
+    return () => { u1(); u2(); u3(); u4(); u5(); u6(); };
   }, []);
 
   // One-off redraw outside the normal state-driven draw effect below — for dev toggles (perf
@@ -452,7 +462,7 @@ export default function Canvas({ player, characterId, character, connected, show
             const ey = epos.gy * hdCellSz + hdCellSz / 2;
             if (Math.hypot(mx - ex, my - ey) <= TOKEN_R) {
               if (targetingNow.kind === 'weapon') {
-                dispatch('vtt:combat:attack', { attackerName: player, attackerId: characterId, targetId: enemy.id, targetName: enemy.name, weapon: targetingNow.weapon, ...(targetingNow.bonusSpell ? { bonusSpell: targetingNow.bonusSpell } : {}), ...(targetingNow.isOffhand ? { isOffhand: true } : {}), ...(targetingNow.useInspiration ? { useInspiration: true } : {}) });
+                dispatch('vtt:combat:attack', { attackerName: player, attackerId: characterId, targetId: enemy.id, targetName: enemy.name, weapon: targetingNow.weapon, actionType: targetingNow.actionType === 'bonusAction' ? 'bonusAction' : 'action', ...(targetingNow.bonusSpell ? { bonusSpell: targetingNow.bonusSpell } : {}), ...(targetingNow.isOffhand ? { isOffhand: true } : {}), ...(targetingNow.useInspiration ? { useInspiration: true } : {}) });
               } else {
                 tryCastOnTarget(enemy.id);
               }
@@ -461,12 +471,15 @@ export default function Canvas({ player, characterId, character, connected, show
             }
           }
 
-          // Buff/utility spells (Bless, Aid, ...) and self-target abilities' ally pick (Bardic
-          // Inspiration) target party members, not enemies — including the caster's own token.
+          // Buff/utility spells (Bless, Aid, ...) target party members, not enemies — including
+          // the caster's own token. Ability targeting (Bardic Inspiration, Lay on Hands) does
+          // too, but only includes the caster's own token when the ability opts in via
+          // includeSelf (Lay on Hands can heal yourself; Bardic Inspiration can't self-target).
           // Weapon attacks and attack-roll spells skip this: there's no legitimate reason to
           // attack-roll a party member from a stray click.
           if (targetingNow.kind === 'ability' || (targetingNow.kind === 'spell' && targetingNow.spell.combat?.resolution !== 'attack')) {
             for (const name of connected) {
+              if (name === player && targetingNow.kind === 'ability' && !targetingNow.includeSelf) continue;
               const ppos = tokenPositions[name];
               if (!ppos) continue;
               if (Math.max(Math.abs(ppos.gx - playerPos.gx), Math.abs(ppos.gy - playerPos.gy)) > maxRangeCells) continue;
@@ -583,13 +596,33 @@ export default function Canvas({ player, characterId, character, connected, show
         return;
       }
 
+      if (targetingNow.kind === 'ability') {
+        if (playerPos) {
+          const maxRangeCells = Math.floor(60 / 5);
+          for (const name of connected) {
+            if (name === player && !targetingNow.includeSelf) continue;
+            const apos = tokenPositions[name];
+            if (!apos || Math.max(Math.abs(apos.gx - playerPos.gx), Math.abs(apos.gy - playerPos.gy)) > maxRangeCells) continue;
+            const ax = apos.gx * mmCellSz + mmCellSz / 2;
+            const ay = apos.gy * mmCellSz + mmCellSz / 2;
+            if (Math.hypot(mx - ax, my - ay) <= TOKEN_R) {
+              e.currentTarget.style.cursor = 'crosshair';
+              if (hoveredTokenKey !== name) setHoveredTokenKey(name);
+              return;
+            }
+          }
+        }
+        e.currentTarget.style.cursor = 'default';
+        if (hoveredTokenKey) setHoveredTokenKey(null);
+        return;
+      }
+
       if (playerPos) {
         const range = targetingNow.kind === 'weapon' ? targetingNow.weapon.range
-          : targetingNow.kind === 'ability' ? 60
           : parseRangeFeet(targetingNow.spell.range);
         const extendedRange = targetingNow.kind === 'weapon' ? targetingNow.weapon.extendedRange : undefined;
         const maxRangeCells = extendedRange ? Math.floor(extendedRange / 5) : Math.floor(range / 5);
-        for (const enemy of (targetingNow.kind === 'ability' ? [] : encounter ?? [])) {
+        for (const enemy of encounter ?? []) {
           const epos = tokenPositions[enemy.id];
           if (!epos || Math.max(Math.abs(epos.gx - playerPos.gx), Math.abs(epos.gy - playerPos.gy)) > maxRangeCells) continue;
           const ex = epos.gx * mmCellSz + mmCellSz / 2;

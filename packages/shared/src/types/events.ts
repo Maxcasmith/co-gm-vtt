@@ -6,6 +6,7 @@ import type { Spell } from "./spells.ts";
 import type { Condition, ActiveCondition } from "./conditions.ts";
 import type { Manoeuvre } from "./tactics.ts";
 import type { StoryboardQueuePayload } from "./storyboard.ts";
+import type { Goal, GoalTier } from "./goals.ts";
 
 export type Player = string;
 
@@ -273,6 +274,7 @@ export interface ServerToClientEvents {
   "rest:open": () => void;
   "rest:result": (payload: RestResultBroadcast) => void;
   "rest:progress": (payload: { allCommitted: boolean }) => void;
+  "goals:update": (data: { characterId: string; goals: Goal[] }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -412,4 +414,9 @@ export interface ClientToServerEvents {
     grantInspiration?: boolean;
   }) => void;
   "rest:cancel": (payload: { campaignId: string; characterId: string }) => void;
+  /** Explicit save, not live-as-you-type — nothing reaches goals.json until this fires. Omit `id` (or pass one this character doesn't already own) to create a new goal; a matching id updates it in place. */
+  "goal:save": (payload: { characterId: string; id?: string; tier: GoalTier; description: string }) => void;
+  "goal:delete": (payload: { characterId: string; id: string }) => void;
+  /** Requests this character's goals via `goals:update` — the character sheet's Goals tab fetches on open rather than caching from join, since goals can change (session-end review) while the sheet is closed. */
+  "goals:fetch": (payload: { characterId: string }) => void;
 }

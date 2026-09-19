@@ -187,20 +187,25 @@ export async function processVdmResponse(
   const SPEAKING_AS_RE = /\[\[SPEAKING_AS:([^\]]+)\]\]/;
   const speakingAsMatch = text.match(SPEAKING_AS_RE);
   const speakingAs = speakingAsMatch?.[1]?.trim();
+  if (speakingAs) console.log(`[tag] SPEAKING_AS: ${speakingAs}`);
 
   const CHECK_RE = /\[\[REQUEST_CHECK:([^|[\]]+)\|([^\]]+)\]\]/g;
   const SAVE_RE  = /\[\[REQUEST_SAVE:([^|[\]]+)\|([^\]]+)\]\]/g;
-  const checkRequests: CheckRequest[] = [
-    ...[...text.matchAll(CHECK_RE)].map(m => ({ player: m[1]!.trim(), skill: m[2]!.trim(), type: 'check' as const })),
-    ...[...text.matchAll(SAVE_RE)].map(m =>  ({ player: m[1]!.trim(), skill: m[2]!.trim(), type: 'save'  as const })),
-  ];
+  const checkMatches = [...text.matchAll(CHECK_RE)].map(m => ({ player: m[1]!.trim(), skill: m[2]!.trim(), type: 'check' as const }));
+  const saveMatches  = [...text.matchAll(SAVE_RE)].map(m =>  ({ player: m[1]!.trim(), skill: m[2]!.trim(), type: 'save'  as const }));
+  for (const c of checkMatches) console.log(`[tag] REQUEST_CHECK: ${c.player} — ${c.skill}`);
+  for (const s of saveMatches) console.log(`[tag] REQUEST_SAVE: ${s.player} — ${s.skill}`);
+  const checkRequests: CheckRequest[] = [...checkMatches, ...saveMatches];
 
   const DUNGEON_GEN_RE = /\[\[DUNGEON_GEN:([^:[\]]+):([^\]]+)\]\]/g;
   const dungeonGenMatches = [...text.matchAll(DUNGEON_GEN_RE)];
   for (const match of dungeonGenMatches) {
     const name = match[1]?.trim();
     const dungeonType = match[2]?.trim();
-    if (name && dungeonType) effects.push({ type: 'dungeon_gen', name, dungeonType });
+    if (name && dungeonType) {
+      console.log(`[tag] DUNGEON_GEN: ${name} (${dungeonType})`);
+      effects.push({ type: 'dungeon_gen', name, dungeonType });
+    }
   }
 
   const QUEST_ADD_RE = /\[\[QUEST_ADD:([^|[\]]+)\|([^|[\]]+)\|([^\]]+)\]\]/g;
@@ -209,10 +214,10 @@ export async function processVdmResponse(
     const name = match[2]?.trim();
     const description = match[3]?.trim();
     if (id && name && description) {
-      console.log(`[tag] QUEST_ADD: ${id}`);
       // If the DM tagged who it's speaking as this turn, that's a free, deterministic link to the
       // NPC who's actually giving this hook right now — no need to make the model name it twice.
       const relatedNpc = speakingAs ? toSlug(speakingAs) : undefined;
+      console.log(`[tag] QUEST_ADD: ${id} "${name}"${relatedNpc ? ` (npc: ${relatedNpc})` : ''}`);
       effects.push({ type: 'quest_add', id, name, description, ...(relatedNpc ? { relatedNpc } : {}) });
     }
   }
@@ -258,7 +263,10 @@ export async function processVdmResponse(
   const CLOCK_RE = /\[\[CLOCK:(\d+)\]\]/g;
   for (const match of [...text.matchAll(CLOCK_RE)]) {
     const secs = parseInt(match[1]!, 10);
-    if (!isNaN(secs) && secs > 0) effects.push({ type: 'clock', secs });
+    if (!isNaN(secs) && secs > 0) {
+      console.log(`[tag] CLOCK: +${secs}s`);
+      effects.push({ type: 'clock', secs });
+    }
   }
 
   const COMBAT_INIT_RE = /\[\[COMBAT_INIT(?::([^\]]*))?\]\]/g;
@@ -383,6 +391,13 @@ export async function processVdmResponse(
       effects.push({ type: 'npc_build', npcName, detail });
     }),
   ]);
+
+  // Full audit trail of exactly what the DM said, tags and all — logged once per turn here,
+  // before any tag gets stripped out of what the player actually sees below. Gated on there
+  // being anything to audit so a plain narration turn with zero tags doesn't spam this.
+  if (effects.length || checkRequests.length) {
+    console.log(`[tag-processor] full response before stripping (${effects.length} effect(s), ${checkRequests.length} check request(s)):\n${text}`);
+  }
 
   let strippedText = text.replace(TAG_RE, '').replace(PARTY_JOIN_RE, '').replace(SCENE_BUILD_RE, '').replace(NPC_BUILD_RE, '').replace(COMBAT_INIT_RE, '').replace(DUNGEON_EXIT_RE, '').replace(DOOR_UNLOCK_RE, '').replace(ITEM_USED_RE, '').replace(SPEAKING_AS_RE, '').replace(CHECK_RE, '').replace(SAVE_RE, '').replace(DUNGEON_GEN_RE, '').replace(QUEST_ADD_RE, '').replace(QUEST_UPDATE_RE, '').replace(QUEST_RESOLVE_RE, '').replace(CLOCK_RE, '').replace(NEMESIS_RETIRE_RE, '').replace(ALLY_XP_RE, '').replace(ALLY_LEARN_RE, '').replace(CURRENCY_ADD_RE, '').replace(CURRENCY_REMOVE_RE, '').replace(CAST_SPELL_RE, '').replace(/\s{2,}/g, ' ').trim();
   // A tag sitting at the end of a sentence (the common case — models emit it after the prose it

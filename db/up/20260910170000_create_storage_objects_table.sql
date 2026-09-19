@@ -1,6 +1,0 @@
-CREATE TABLE storage_objects (
-  store_key VARCHAR(767) PRIMARY KEY,
-  content_text LONGTEXT,
-  content_blob LONGBLOB,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -10,10 +10,10 @@ export type QuestChainEvent =
   | { kind: 'defeat_boss' }
   | { kind: 'exit_dungeon' };
 
-// Deliberately its own module, not part of dungeon/runtime.ts or combat/runtime.ts — both of
+// Deliberately its own module, not part of dungeon/runtime.ts or combat/runtime/ — both of
 // those need to call this (room-entry/discovery live in dungeon/runtime.ts, boss-defeat lives in
-// combat/runtime.ts, which dungeon/runtime.ts already imports from), so putting it in either would
-// create a circular import. This file only depends on storage.ts/state.ts.
+// combat/runtime/damage.ts, which dungeon/runtime.ts already imports from), so putting it in
+// either would create a circular import. This file only depends on storage.ts/state.ts.
 //
 // A linear chain has exactly one open, chain-sourced quest at a time (dungeon.questChain[n], where
 // n is the first stage whose Quest is 'open' rather than 'resolved' or not yet created). Resolving

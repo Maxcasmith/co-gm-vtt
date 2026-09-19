@@ -56,6 +56,26 @@ already parses `QUEST_ADD`/`QUEST_UPDATE`/`QUEST_RESOLVE` fine) — likely needs
 stronger prompt nudge or a repair pass similar to the existing missed-pickup repair
 (`session.ts` `repairMissedPickup`) for missed quest tags.
 
+### Antagonist goals live in goals.json now, not inline on WorldActor
+
+The old `world-state.json` shape embedded each antagonist/faction's goal and milestones directly
+on `WorldActor` (`ultimateGoal`, `totalDays`, `daysElapsed`, `milestones`). This was unified with
+the new player-goal framework (character sheet Goals tab) into one shared `Goal` type
+(`packages/shared/src/types/goals.ts`), stored in `goals.json` per campaign. `WorldActor` is now
+just `{id, name, type, goalId, currentStatus, status}` — a reference into `goals.json`, resolved
+via `ownerType`/`ownerId`. A campaign with an old-shape `world-state.json` auto-migrates on first
+`readWorldState` call (`storage.ts`'s `migrateLegacyWorldActors`) — this is expected, transparent,
+one-time behavior, not a bug if you see a slim `WorldActor` missing `ultimateGoal` in a live
+campaign's data. See `rest.advanceWorldActorGoals.selfcheck.ts` and
+`storage.worldStateMigration.selfcheck.ts` for the covered behavior.
+
+### The GM is virtual — there is no human GM
+
+The "VDM"/GM role in this app is entirely AI-driven. There is no human game master
+approving/adjudicating in the loop. Any feature that says "GM decides X" or "GM reviews Y"
+(e.g. goal-failure adjudication, session-end quest generation) means an AI/LLM pass decides
+it automatically — don't design a human-approval step into these flows unless Max asks for one.
+
 ### DM sometimes narrates a check's outcome instead of requesting the roll
 
 Player asked to make an Insight check; first DM reply gave flavor-text tells for free with

@@ -1,4 +1,4 @@
-import type { EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon, ReactionOffer, Condition, Manoeuvre } from 'shared';
+import type { EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon, ReactionOffer, Condition, Manoeuvre, GoalTier } from 'shared';
 
 // ── Payload types ─────────────────────────────────────────────────────────────
 //
@@ -53,9 +53,9 @@ export interface CombatStatePayload { active: boolean }
 export type TargetingStartPayload =
   | { kind: 'weapon'; weapon: Weapon; actionType: 'action' | 'bonusAction' | 'reaction'; bonusSpell?: Spell; isOffhand?: boolean; useInspiration?: boolean }
   | { kind: 'spell'; spell: Spell; casterId: string; actionType: 'action' | 'bonusAction' | 'reaction'; slotLevel?: number; chosenDamageType?: string; chosenCommand?: string; chosenSkill?: string; casterLevel?: number }
-  | { kind: 'ability'; abilityKey: string; label: string; casterId: string; actionCost: 'action' | 'bonusAction' | 'reaction'; chosenAmount?: number; cureCondition?: boolean };
+  | { kind: 'ability'; abilityKey: string; label: string; casterId: string; actionCost: 'action' | 'bonusAction' | 'reaction'; chosenAmount?: number; cureCondition?: boolean; includeSelf?: boolean };
 export type TargetingCancelPayload = Record<string, never>;
-export interface CombatAttackPayload { attackerName: string; attackerId: string; targetId: string; targetName: string; weapon: Weapon; bonusSpell?: Spell; isOffhand?: boolean; useInspiration?: boolean }
+export interface CombatAttackPayload { attackerName: string; attackerId: string; targetId: string; targetName: string; weapon: Weapon; bonusSpell?: Spell; isOffhand?: boolean; actionType?: 'action' | 'bonusAction'; useInspiration?: boolean }
 export interface CombatAbilityUsePayload { casterId: string; casterName: string; abilityKey: string; targetId?: string; chosenItem?: string; chosenAmount?: number; cureCondition?: boolean }
 export interface CombatAttackResultPayload extends AttackResult {}
 export interface CombatSpellAttackPayload { casterName: string; casterId: string; targetIds: string[]; spell: Spell; slotLevel: number; chosenDamageType?: string }
@@ -86,6 +86,9 @@ export interface ConsumableTrapDisarmPayload { characterId: string; characterNam
 export interface ConsumableHealResultPayload { characterId: string; characterName: string; healAmount: number; currentHp: number; maxHp: number }
 export interface EquipmentUpdatePayload { characterId: string; slot: 'head' | 'body' | 'gloves' | 'boots' | 'mainHand' | 'offHand'; itemId: string | null }
 export interface TacticsUpdatePayload { characterId: string; tactics: Manoeuvre[]; aiControlled: boolean }
+export interface GoalSavePayload { characterId: string; id?: string; tier: GoalTier; description: string }
+export interface GoalDeletePayload { characterId: string; id: string }
+export interface GoalsFetchPayload { characterId: string }
 export interface CombatTurnPayload { actorId: string; actorName: string; speedMultiplier?: number; speedBonusFt?: number; buffs?: string[] }
 export type CombatTurnEndPayload = Record<string, never>
 export interface ConditionEscapeAttemptPayload { targetId: string; name: Condition }
@@ -258,6 +261,9 @@ export interface VTTEventMap {
   'vtt:consumable:heal:result': ConsumableHealResultPayload;
   'vtt:equipment:update':       EquipmentUpdatePayload;
   'vtt:tactics:update':         TacticsUpdatePayload;
+  'vtt:goal:save':              GoalSavePayload;
+  'vtt:goal:delete':            GoalDeletePayload;
+  'vtt:goals:fetch':            GoalsFetchPayload;
   'vtt:combat:turn':            CombatTurnPayload;
   'vtt:combat:turn:end':        CombatTurnEndPayload;
   'vtt:condition:escape:attempt': ConditionEscapeAttemptPayload;

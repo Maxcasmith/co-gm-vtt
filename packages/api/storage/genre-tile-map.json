@@ -1,0 +1,75 @@
+{
+  "fantasy": {
+    "ash": { "ash": "tilesets/ancient-egypt-three/ash" },
+    "brick": { "brick": "tilesets/ancient-egypt-three/brick" },
+    "dirt": { "dirt": "tilesets/ancient-egypt-three/dirt" },
+    "grass": { "grass": "tilesets/ancient-egypt-three/grass" },
+    "rubble": { "gravel": "tilesets/ancient-egypt-three/gravel" },
+    "ice": { "ice": "tilesets/ancient-egypt-three/ice" },
+    "metal": { "iron": "tilesets/ancient-egypt-three/iron" },
+    "lava": { "lava": "tilesets/ancient-egypt-three/lava" },
+    "stone": {
+      "marble": "tilesets/ancient-egypt-three/marble",
+      "stone": "tilesets/ancient-egypt-three/stone"
+    },
+    "moss": { "moss": "tilesets/ancient-egypt-three/moss" },
+    "mud": { "mud": "tilesets/ancient-egypt-three/mud" },
+    "sand": { "sand": "tilesets/ancient-egypt-three/sand" },
+    "snow": { "snow": "tilesets/ancient-egypt-three/snow" },
+    "water": { "water": "tilesets/ancient-egypt-three/water" },
+    "wood": { "wood": "tilesets/ancient-egypt-three/wood" }
+  },
+  "horror": {
+    "stone": {
+      "algae-stone": "tilesets/cosmic-horror-2d20b8bc08/algae-stone",
+      "barnacled-stone": "tilesets/cosmic-horror-2d20b8bc08/barnacled-stone",
+      "wet-stone": "tilesets/cosmic-horror-2d20b8bc08/wet-stone",
+      "cracked-tile": "tilesets/cosmic-horror-89f12707c2/cracked-tile",
+      "stone": "tilesets/dark-academia-760c618ef9/stone",
+      "warded-stone": "tilesets/dark-academia-760c618ef9/warded-stone",
+      "marble": "tilesets/gothic-horror-d42fd63791/marble",
+      "tile": "tilesets/gothic-horror-d42fd63791/tile",
+      "cracked-stone": "tilesets/gothic-horror-f0fc6ae428/cracked-stone",
+      "mosaic": "tilesets/sunken-temple-3a03ccc96f/mosaic",
+      "checkerboard-tile": "tilesets/survival-horror-2c2e19dc95/checkerboard-tile",
+      "stained-tile": "tilesets/post-apocalyptic-americana-4d4d36e344/stained-tile"
+    },
+    "wood": {
+      "wood": "tilesets/gothic-horror-f0fc6ae428/wood",
+      "wet-wood": "tilesets/cosmic-horror-89f12707c2/wet-wood",
+      "rotted-wood": "tilesets/sunken-temple-3a03ccc96f/rotted-wood"
+    },
+    "metal": {
+      "rusted-steel": "tilesets/cosmic-horror-89f12707c2/rusted-steel",
+      "metal": "tilesets/dark-academia-760c618ef9/metal"
+    },
+    "fabric": {
+      "soaked-carpet": "tilesets/cosmic-horror-89f12707c2/soaked-carpet",
+      "carpet": "tilesets/survival-horror-2c2e19dc95/carpet",
+      "worn-carpet": "tilesets/post-apocalyptic-americana-4d4d36e344/worn-carpet"
+    },
+    "grass": {
+      "grass": "tilesets/gothic-horror-f0fc6ae428/grass"
+    },
+    "sand": {
+      "sand": "tilesets/cosmic-horror-2d20b8bc08/sand"
+    },
+    "mud": {
+      "silt": "tilesets/sunken-temple-3a03ccc96f/silt"
+    },
+    "dirt": {
+      "dirt": "tilesets/post-apocalyptic-rural-2f1247e1b1/dirt"
+    },
+    "rubble": {
+      "gravel": "tilesets/post-apocalyptic-rural-2f1247e1b1/gravel"
+    },
+    "concrete": {
+      "concrete": "tilesets/survival-horror-2c2e19dc95/concrete",
+      "linoleum": "tilesets/survival-horror-2c2e19dc95/linoleum",
+      "grease-concrete": "tilesets/post-apocalyptic-americana-4d4d36e344/grease-concrete",
+      "cracked-asphalt": "tilesets/post-apocalyptic-americana-4d4d36e344/cracked-asphalt",
+      "peeling-linoleum": "tilesets/post-apocalyptic-americana-4d4d36e344/peeling-linoleum"
+    }
+  },
+  "sci-fi": {}
+}

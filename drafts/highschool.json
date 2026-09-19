@@ -1,0 +1,382 @@
+{
+  "world": {
+    "name": "Briar Falls: Neon Pumpkin Autumn",
+    "overview": "Briar Falls is a lake-wrapped mill town in northern Michigan where every October feels louder than real life: Glimmerbell High's lockers purr with sticker-gloss enchantments, cafeteria pixie-fries sparkle under heat lamps, the Broomjackets drill above the football field, and students trade spell-laced mixtapes beneath pink-and-teal hallway rune-lights. Lake Mirrorglen reflects the town upside down after sunset, when porches glow with carved jack-o'-lanterns, the Moonspool Woods fill with candle trails, and Channel 13 reruns local monster movies with commercials that sometimes answer back.\n\nThis autumn is breaking. Pumpkins are ripening into impossible neon colors, homecoming decorations whisper students' names, and missing memories are turning up recorded on blank VHS tapes. Principal Cordelia Vale and the secret Bell Committee are preparing the One Last Fall, a ritual disguised as the Harvest Moon Pep Rally that will feed the town's brightest teenage memories to an ancient lake-fae called the Briar King in exchange for keeping Briar Falls forever prosperous, pretty, and safely 1996.\n\nOutsiders arrive at the best and worst possible moment: Glimmerbell is taking exchange students for Spirit Week, the Harvest Moon Carnival opens in six days, and every faction needs deniable help. The administration wants quiet hands, the fae want doors opened, the AV kids want proof, the Booster Coven wants scholarships saved, the Lantern Wardens want the lake sealed, and the students just want to survive homecoming without losing their first kiss, their favorite song, or their name.",
+    "history": "1973, The Bellweather Drowning: after the paper mill poisoned Lake Mirrorglen, senior Opal Bellweather vanished during a candlelit swim behind Glimmerbell Pier; her silver class bell was found ringing underwater for three nights, and the first fae crossings began in the school basement. 1981, The Pumpkin Concord: Mayor Hazel Voss, Principal Eunice Vale, and the lake-fae emissary Lord Calabash signed a pact in the old agriculture classroom, trading one autumn memory from every graduating class for record harvests, low crime, and the survival of Briar Falls after the mill closure. 1987, The Broomjackets Miracle Season: Coach Bram Bristle led the varsity broom team to an impossible state championship after accepting a charm from the Neon Pumpkin Court; three rival players forgot how to fly, and Glimmerbell's athletic trophy case became a ritual anchor. 1993, The Channel 13 Blackout: AV teacher Marisol Quill broadcast a forbidden tape of the Pumpkin Concord during a Halloween movie marathon, causing thirteen minutes of townwide static, six adult amnesia cases, and the creation of the student Tapehead Society. 1996, The Neon Pumpkin Autumn: seven carved anchor-pumpkins have begun glowing across campus and town, proving the Briar King is no longer satisfied with scraps of memory and intends to enter Briar Falls bodily during the Harvest Moon Pep Rally.",
+    "currentState": "Play begins on Monday morning as Locker 313 erupts in tangerine light between second-period bells, swallowing sophomore Jessa Pike's reflection while leaving her body wandering the hall smiling and speaking only in radio jingles. Principal Cordelia Vale orders a lockdown drill and tells staff it is a harmless glamour malfunction, while the Tapehead Society, Sheriff Lorna Pike, and Lord Calabash's crow-masked sprites all race to reach the locker before the first anchor-pumpkin fully blooms inside it. If no one acts, the Bell Committee will quietly move Jessa's stolen reflection to the auditorium trophy case before lunch.",
+    "hooks": [
+      "A Trapper Keeper covered in animated Lisa Frank dolphins slides from under Locker 313 and opens to a map of Glimmerbell High with seven pulsing pumpkin stickers, one already crossed out in black glitter.",
+      "At the Lakeside Video & Bait, owner Trina Moth offers free rentals to anyone willing to watch a returned VHS labeled Homecoming 96: Things We Promised Not To Remember, because the tape now shows scenes from tomorrow night.",
+      "During broom practice, star captain Marnie Glowhart collapses midair as the Broomjackets' trophy case begins chanting the names of students from rival cliques, faculty, and the Thornwood goblin punks alike."
+    ],
+    "countdown": "Within six in-game days, at 22:13 on Friday during the Harvest Moon Pep Rally, Principal Cordelia Vale and the Bell Committee will complete the One Last Fall. They already control five of seven anchor-pumpkins: the trophy case, the cafeteria fryer-oil cauldron, the auditorium bell rope, the PTA float in Nimue Orchard, and the old lifeguard chair at Lake Mirrorglen. If they secure Locker 313 and the Channel 13 broadcast tower, the Briar King will rise through the school gym floor, every Glimmerbell student will lose their most vivid autumn memory, and Briar Falls will become a sealed, smiling pocket-realm where no one can graduate, leave, or grow older without the King's permission."
+  },
+  "geography": {
+    "regions": [
+      {
+        "name": "Glimmerbell High Campus",
+        "description": "A sprawling brick-and-glass public high school built around an older stone bell tower, Glimmerbell High is the town's magical pressure cooker: pastel spell posters, trophy-polished ambition, gossip familiars, and old fae architecture hidden behind vending machines.",
+        "keyLocations": [
+          {
+            "name": "The Rune-Lit Main Hall",
+            "description": "A glossy corridor of teal lockers, glowing ceiling sigils, student-made spirit banners, and a pay phone that rings with calls from possible futures. Locker 313 currently sweats pumpkin sap and emits muffled cassette static."
+          },
+          {
+            "name": "Cafeteria of the Three Fryers",
+            "description": "Lunch Lady Nona Crumb's domain, famous for pixie-fries, ecto-slushies, and square pizza that can reveal crushes if folded correctly. One fryer has begun bubbling without heat and occasionally spits out tiny jack-o'-lantern teeth."
+          },
+          {
+            "name": "Broomjacket Field and Skybleachers",
+            "description": "A football field overlaid with broom-racing hoops and floating bleachers tethered by silver chains. The scoreboard sometimes lists scores for games that have not happened yet."
+          }
+        ]
+      },
+      {
+        "name": "Downtown Briar Falls",
+        "description": "A walkable strip of brick storefronts, maple trees, cassette shops, church steeples, and carved pumpkins on every sill. By day it is friendly and sugary; after dusk every window becomes a candlelit stage for secrets.",
+        "keyLocations": [
+          {
+            "name": "Lakeside Video & Bait",
+            "description": "Half VHS rental store, half fishing supply shop, with beaded curtains separating horror tapes from enchanted minnows. Its after-hours return slot accepts tapes from other timelines."
+          },
+          {
+            "name": "Candlewick Chapel",
+            "description": "A white clapboard church whose basement holds lanterns made from old lake glass. The Lantern Wardens meet here under the choir loft, mapping fae crossings with hymnals and Polaroids."
+          },
+          {
+            "name": "The Sugar Static Diner",
+            "description": "A chrome-and-pink diner beside the falls where jukebox songs answer questions for quarters. The pumpkin milkshakes now glow under blacklight and induce shared dreams."
+          }
+        ]
+      },
+      {
+        "name": "Lake Mirrorglen",
+        "description": "A cold, black-blue lake below the falls, too smooth on windless nights and too reflective under a crescent moon. The fae court beneath it throws inverted carnivals where laughter sounds like bells dropped in deep water.",
+        "keyLocations": [
+          {
+            "name": "Glimmerbell Pier",
+            "description": "A weathered wooden pier behind the school where students sneak out after dances. Opal Bellweather's memorial plaque is warm to the touch and rings softly when someone lies nearby."
+          },
+          {
+            "name": "The Old Lifeguard Chair",
+            "description": "A sun-bleached chair at the closed swimming beach, wrapped in caution tape and homecoming streamers. One of the anchor-pumpkins glows underneath it, pulsing with drowned applause."
+          },
+          {
+            "name": "The Upside Carnival",
+            "description": "A fae fair visible only in the lake's reflection: neon tents, pumpkin masks, candied apples full of teeth, and a ferris wheel turning beneath the waterline."
+          }
+        ]
+      },
+      {
+        "name": "Moonspool Woods and Nimue Orchard",
+        "description": "The woods north of town are dense with birch, thorn, and foxfire mushrooms, opening into an orchard owned by the PTA Booster Coven. Weekend bonfires, dares, and secret rituals overlap until no one agrees which path leads home.",
+        "keyLocations": [
+          {
+            "name": "Nimue Orchard",
+            "description": "Rows of apple and pumpkin fields strung with fairy lights for the Harvest Moon Carnival. The PTA float barn hides an anchor-pumpkin carved with every senior's initials."
+          },
+          {
+            "name": "The Thornwood Culvert",
+            "description": "A graffiti-covered storm drain where goblin punks, runaway familiars, and skateboard witches gather around a trash-can fire that burns green. It connects to tunnels under the high school."
+          },
+          {
+            "name": "The Mixtape Clearing",
+            "description": "A ring of black trees where students leave cassettes for crushes, rivals, or ghosts. Any tape played here under moonlight becomes a spell, but the woods keep a copy."
+          }
+        ]
+      }
+    ],
+    "startingLocation": {
+      "name": "The Rune-Lit Main Hall outside Locker 313",
+      "description": "It is second-period passing time at Glimmerbell High. The hall smells of grape lip gloss, ozone, cafeteria grease, and wet leaves tracked in from the courtyard. Teal lockers chatter and click as students slam them shut; a hand-painted Spirit Week banner flutters though there is no breeze; the pay phone beside the trophy alcove is ringing nonstop. Locker 313 glows neon orange through its vents, dripping pumpkin sap onto the linoleum while Jessa Pike stands nearby with a blank smile, humming the Channel 13 jingle in three voices."
+    }
+  },
+  "factions": [
+    {
+      "name": "The Bell Committee",
+      "description": "A secret circle of administrators, old alumni, and town officials who maintain the Pumpkin Concord from inside Glimmerbell High.",
+      "goals": "They are securing the last two anchor-pumpkins, suppressing evidence of memory theft, and preparing the Harvest Moon Pep Rally seating chart so every targeted student is inside the gym at 22:13 on Friday.",
+      "methods": "Lockdown drills, detention slips that function as geases, edited yearbooks, scholarship threats, charmed PA announcements, and quiet deals with scared parents."
+    },
+    {
+      "name": "The Neon Pumpkin Court",
+      "description": "Lake-fae nobles, sprites, and masked revelers from the Upside Carnival beneath Lake Mirrorglen, ruled in absentia by the Briar King and represented in town by Lord Calabash.",
+      "goals": "They are pushing the Concord beyond its old limits, tempting students into bargains, and trying to turn Glimmerbell's homecoming festivities into a public doorway for the Briar King.",
+      "methods": "Glamours, carnival prizes, midnight invitations, cursed candy apples, reflection theft, and promises to make any teenager beloved, beautiful, or unforgettable."
+    },
+    {
+      "name": "The Tapehead Society",
+      "description": "Glimmerbell's underground AV club, zine-makers, pirate radio kids, and conspiracy nerds who believe analog media can trap and expose fae magic.",
+      "goals": "They are gathering proof of the One Last Fall, hunting the missing 1993 broadcast master tape, and trying to seize the Channel 13 tower before the Bell Committee does.",
+      "methods": "Camcorders, bootleg mixtapes, photocopied zines, hacked school TVs, magnetic wards, sleepover surveillance parties, and reckless public reveals."
+    },
+    {
+      "name": "Briar Falls PTA Booster Coven",
+      "description": "A committee of ambitious parents and local business owners who fund school sports, carnival floats, bake sales, and several legally dubious protective enchantments.",
+      "goals": "They are split between protecting their children from the ritual and preserving the prosperity the Concord brought to their shops, farms, and mortgages.",
+      "methods": "Bake-sale hexes, phone trees, coupon-book bribes, casserole diplomacy, orchard rituals, and pressure on teachers, coaches, and the sheriff."
+    },
+    {
+      "name": "The Broomjackets Varsity Circle",
+      "description": "The elite broom-racing team and their hangers-on, treated like royalty by students and alumni after years of enchanted championships.",
+      "goals": "They are trying to win Friday's rally exhibition, keep their scholarships, and hide the fact that the trophy case has become a hungry ritual anchor.",
+      "methods": "Social leverage, athletic intimidation, sky patrols, charm-enhanced training drills, locker-room oaths, and favors from Coach Bram Bristle."
+    },
+    {
+      "name": "The Lantern Wardens of Candlewick",
+      "description": "A multigenerational town society based out of Candlewick Chapel that believes Lake Mirrorglen must be sealed even if Briar Falls loses its magic and prosperity.",
+      "goals": "They are searching for Opal Bellweather's original silver class bell, assembling lake-glass lanterns, and planning to disrupt the pep rally with a sealing hymn.",
+      "methods": "Old hymns, blessed lantern oil, genealogy records, boat patrols, confession-room intelligence, and exorcism rites disguised as youth group activities."
+    },
+    {
+      "name": "The Thornwood Runaways",
+      "description": "Goblin punks, dropout witches, runaway familiars, and town kids who live between the storm drains, woods, and abandoned mill foundations.",
+      "goals": "They are stealing ritual components from every faction, selling some, sabotaging others, and trying to keep the fae court from claiming the tunnels they call home.",
+      "methods": "Graffiti sigils, skateboard courier routes, culvert ambushes, stolen keys, bottle rockets, trash-fire divination, and black-market charm swaps."
+    },
+    {
+      "name": "Channel 13 WBRF",
+      "description": "Briar Falls' low-budget public access station, operating from a converted ranger tower with outdated cameras and a transmitter that accidentally broadcasts across the lake veil.",
+      "goals": "They are preparing the live Harvest Moon broadcast while employees argue over whether to obey Principal Vale, expose her, or sell the signal to the Neon Pumpkin Court.",
+      "methods": "Live call-in shows, weather crawlers with hidden sigils, commercial jingles, tape archives, antenna magic, and editorial blackmail."
+    }
+  ],
+  "npcs": [
+    {
+      "name": "Principal Cordelia Vale",
+      "role": "Architect of the One Last Fall",
+      "race": "Human witch",
+      "occupation": "Principal of Glimmerbell High",
+      "personality": "Immaculately calm, weaponizes disappointment, and remembers tiny personal details to make students feel seen before cornering them.",
+      "motivation": "She wants to complete the ritual because she believes Briar Falls will collapse into poverty, illness, and adult failure without the Concord her grandmother made.",
+      "secret": "Her private planner lists the true locations of all seven anchor-pumpkins and shows that Locker 313 was supposed to awaken last, not first; if revealed, Lord Calabash will realize someone else is accelerating the ritual behind both their backs.",
+      "factionAffiliation": "The Bell Committee",
+      "crossFactionTie": "She owes Pastor Eli Candlewick a life-debt from a 1989 lake rescue, which is why she has not moved against the Lantern Wardens directly."
+    },
+    {
+      "name": "Lord Calabash of the Upside Carnival",
+      "role": "Fae emissary and tempter",
+      "race": "Lake fae",
+      "occupation": "Master of Revels for the Neon Pumpkin Court",
+      "personality": "Flamboyant, courtly, delighted by teen slang, and visibly offended by bad manners.",
+      "motivation": "He wants the Briar King embodied in town so the Neon Pumpkin Court can stop living as reflections and enjoy Briar Falls in flesh, music, and sugar.",
+      "secret": "He does not know the Briar King plans to devour the Court's lesser fae along with mortal memories; if shown proof from the 1993 master tape, he will bargain against his own monarch.",
+      "factionAffiliation": "The Neon Pumpkin Court",
+      "crossFactionTie": "He has a sincere crush on Trina Moth at Lakeside Video & Bait and leaves her impossible VHS tapes as love letters."
+    },
+    {
+      "name": "Jessa Pike",
+      "role": "First visible victim",
+      "race": "Human",
+      "occupation": "Sophomore student and junior varsity broom spotter",
+      "personality": "Normally sharp, sarcastic, and quick to sketch monsters in notebook margins; currently vacant, cheerful, and speaking in ad slogans.",
+      "motivation": "She wants her reflection and real voice back, though her stolen reflection wants to escape town rather than return to her body.",
+      "secret": "Jessa's reflection saw a student, not a teacher or fae, carve the Locker 313 anchor early; if recovered, she can identify the saboteur by their silver nail polish and pumpkin-seed bracelet.",
+      "factionAffiliation": null,
+      "crossFactionTie": "She is Sheriff Lorna Pike's niece and Marnie Glowhart's secret girlfriend, a relationship both families have been trying not to discuss."
+    },
+    {
+      "name": "Dante Ruiz",
+      "role": "Analog occult investigator",
+      "race": "Human",
+      "occupation": "Junior student, AV club president, WBRF weekend intern",
+      "personality": "Fast-talking, sleep-deprived, loyal to receipts over rumors, and always carrying three labeled tapes.",
+      "motivation": "He wants to broadcast proof of the ritual because his older brother Mateo graduated in 1993 and came home unable to remember Dante's existence.",
+      "secret": "Dante has the missing audio track from the 1993 blackout hidden inside a mixtape labeled Sad Songs for Algebra; if played over the Channel 13 tower, it can make every anchor-pumpkin visible for one hour.",
+      "factionAffiliation": "The Tapehead Society",
+      "crossFactionTie": "He trades editing help to Marnie Glowhart for access to Broomjacket practices, and both pretend it is not friendship."
+    },
+    {
+      "name": "Marnie Glowhart",
+      "role": "Homecoming favorite under pressure",
+      "race": "Half-elf",
+      "occupation": "Senior student, Broomjackets captain, homecoming court nominee",
+      "personality": "Radiant, competitive, painfully controlled, and kind in private when no one is watching.",
+      "motivation": "She wants to secure a flight scholarship out of Briar Falls before her mother's PTA obligations and the Bell Committee trap her in town.",
+      "secret": "Marnie accepted a speed charm from Lord Calabash that is tied to the trophy-case anchor; if she refuses to fly at Friday's rally, the Broomjackets' ritual formation cannot lock properly.",
+      "factionAffiliation": "The Broomjackets Varsity Circle",
+      "crossFactionTie": "She is secretly dating Jessa Pike, which gives Sheriff Lorna Pike leverage over Coach Bristle if she learns it."
+    },
+    {
+      "name": "Coach Bram Bristle",
+      "role": "Keeper of the trophy anchor",
+      "race": "Dwarf",
+      "occupation": "Broom-racing coach and driver's education teacher",
+      "personality": "Booming, superstitious, sentimental about team traditions, and terrified of looking weak.",
+      "motivation": "He wants the Broomjackets to keep winning because the team's success is the only thing he believes he has given the town.",
+      "secret": "He has been feeding old rival-school medals to the trophy case for years, but last week it demanded student hair; if confronted with proof that Marnie is being targeted, he may betray the Bell Committee.",
+      "factionAffiliation": "The Broomjackets Varsity Circle",
+      "crossFactionTie": "He owes Lunch Lady Nona Crumb for hiding a cursed broom accident in 1987."
+    },
+    {
+      "name": "Lunch Lady Nona Crumb",
+      "role": "Cafeteria hearth guardian",
+      "race": "Brownie",
+      "occupation": "Head cafeteria cook",
+      "personality": "Warm, fussy, brutally observant, and prone to smacking supernatural threats with a ladle.",
+      "motivation": "She wants every student fed and safe because she has protected Glimmerbell children since the building's first cafeteria opened.",
+      "secret": "The cafeteria fryer anchor can be cooled by dumping in the original 1981 Pumpkin Concord menu, which Nona has hidden behind a framed health inspection; if the Bell Committee learns she kept it, they will replace her with a glamoured substitute.",
+      "factionAffiliation": null,
+      "crossFactionTie": "She and Principal Vale were once close, and Nona still keeps Cordelia's childhood lunchbox full of emergency anti-fae salt."
+    },
+    {
+      "name": "Sheriff Lorna Pike",
+      "role": "Town law caught between family and order",
+      "race": "Human",
+      "occupation": "Sheriff of Briar Falls",
+      "personality": "Blunt, exhausted, protective, and allergic to mystical excuses for criminal behavior.",
+      "motivation": "She wants Jessa restored and the town kept from panic, but she also fears exposing magic will get children hurt by adult overreaction.",
+      "secret": "Lorna has confiscated three fae masks from missing-person scenes and locked them in her cruiser trunk; wearing one lets a mortal see the Upside Carnival entrance at the pier.",
+      "factionAffiliation": null",
+      "crossFactionTie": "She dated Pastor Eli Candlewick in high school and still trusts him with evidence she will not log."
+    },
+    {
+      "name": "Pastor Eli Candlewick",
+      "role": "Leader of the Lantern Wardens",
+      "race": "Human",
+      "occupation": "Pastor of Candlewick Chapel",
+      "personality": "Gentle-voiced, stubborn, keeps his sleeves rolled up, and treats teenagers as capable people rather than problems.",
+      "motivation": "He wants to seal Lake Mirrorglen because his daughter Ruth lost seven years of emotional memory after the 1993 blackout.",
+      "secret": "The sealing hymn will also strip minor everyday magic from Briar Falls for a generation; if the PTA learns this, they will move from negotiation to open opposition.",
+      "factionAffiliation": "The Lantern Wardens of Candlewick",
+      "crossFactionTie": "Principal Vale saved his life as a teenager, and he hesitates whenever he has a clear chance to destroy her career."
+    },
+    {
+      "name": "Trina Moth",
+      "role": "Video-store oracle",
+      "race": "Mothfolk",
+      "occupation": "Owner of Lakeside Video & Bait",
+      "personality": "Dryly funny, nocturnal, impossible to surprise, and always dusted with silver VHS static.",
+      "motivation": "She wants to keep Briar Falls strange but not imprisoned, because the town's weirdness gave her a home when other places treated her as a monster.",
+      "secret": "Her after-hours return slot leads to a shelf in the Upside Carnival; she can smuggle one person or object through nightly, but Lord Calabash believes she cannot control it.",
+      "factionAffiliation": null",
+      "crossFactionTie": "Lord Calabash courts her, Dante Ruiz rents equipment from her, and the Bell Committee blackmails her over unlicensed portal use."
+    },
+    {
+      "name": "Marisol Quill",
+      "role": "Teacher with forbidden footage",
+      "race": "Human",
+      "occupation": "English teacher and former WBRF producer",
+      "personality": "Elegant, evasive, theatrical with chalk, and quick to redirect questions with poetry quotes.",
+      "motivation": "She wants to protect students from what she uncovered in 1993 without admitting she helped cause the blackout.",
+      "secret": "She edited the 1993 master tape into three pieces and gave one to Dante's brother, one to Channel 13, and one to Opal Bellweather's ghost; if reunited, the tape reveals the Briar King's true appetite.",
+      "factionAffiliation": "The Tapehead Society",
+      "crossFactionTie": "She is Principal Vale's ex-best friend, and Cordelia still cannot bring herself to erase Marisol's memory."
+    },
+    {
+      "name": "Roxy Ratchet",
+      "role": "Goblin punk courier",
+      "race": "Goblin",
+      "occupation": "Skateboard mechanic, charm thief, Thornwood courier",
+      "personality": "Mouthy, kinetic, loyal once paid or respected, and constantly chewing cinnamon gum.",
+      "motivation": "She wants the Thornwood tunnels free from both school authority and fae ownership because they are the only home her crew has.",
+      "secret": "Roxy stole the pumpkin-seed bracelet used to awaken Locker 313 and sold it to someone in the homecoming court; if pressured with protection for her crew, she can identify the buyer.",
+      "factionAffiliation": "The Thornwood Runaways",
+      "crossFactionTie": "She has a younger brother in the Broomjackets' freshman program and secretly sabotages dangerous brooms before meets."
+    },
+    {
+      "name": "Bev Glowhart",
+      "role": "PTA power broker",
+      "race": "Elf",
+      "occupation": "Realtor and PTA Booster Coven treasurer",
+      "personality": "Polished, smiling, merciless with spreadsheets, and terrified beneath the gloss.",
+      "motivation": "She wants Marnie accepted to Starfall Flight Academy while keeping property values and orchard profits from crashing.",
+      "secret": "Bev has already moved PTA funds into buying lakefront lots that will become fae embassy land if the ritual succeeds; if exposed, the Booster Coven will fracture instantly.",
+      "factionAffiliation": "Briar Falls PTA Booster Coven",
+      "crossFactionTie": "She bribes Coach Bristle for Marnie's flight time but secretly funds Pastor Candlewick's lantern oil."
+    },
+    {
+      "name": "Todd Wexler",
+      "role": "Ambitious broadcaster",
+      "race": "Human",
+      "occupation": "Channel 13 station manager and evening weather host",
+      "personality": "Greasy-charming, desperate to seem important, and always checking his reflection in dark screens.",
+      "motivation": "He wants a miraculous live broadcast that gets him hired in Detroit, no matter who has to be embarrassed or endangered.",
+      "secret": "Todd has promised Lord Calabash a five-minute open signal during the pep rally in exchange for a glamour that makes viewers adore him; if Dante or Marisol proves this, WBRF staff may mutiny.",
+      "factionAffiliation": "Channel 13 WBRF",
+      "crossFactionTie": "He is being paid by Principal Vale for censorship and by Lord Calabash for access, and neither side knows he is double-selling the same airtime."
+    },
+    {
+      "name": "Opal Bellweather",
+      "role": "Drowned witness",
+      "race": "Ghost",
+      "occupation": "Former Glimmerbell senior, unofficial hallway haunting",
+      "personality": "Flickering, melancholy, mischievous around freshmen, and intensely lucid when bells ring.",
+      "motivation": "She wants her silver class bell recovered from the lakebed so she can remember whether she died by accident, sacrifice, or murder.",
+      "secret": "Opal knows the original Concord required adult memories, not student memories; if the town learns Mayor Voss and Eunice Vale altered the pact, the moral authority of the Bell Committee collapses.",
+      "factionAffiliation": null,
+      "crossFactionTie": "She protects Dante Ruiz because Mateo Ruiz once tried to help her during the 1993 blackout."
+    }
+  ],
+  "acts": [
+    {
+      "act": 1,
+      "conditions": [
+        "The players have directly witnessed or proved that at least one anchor-pumpkin is stealing memories rather than merely causing harmless autumn glamours.",
+        "At least two factions have openly approached the players with incompatible requests concerning the same anchor, tape, or victim."
+      ]
+    },
+    {
+      "act": 2,
+      "conditions": [
+        "The location or nature of all seven anchor-pumpkins is known to at least one player-facing faction.",
+        "The One Last Fall can no longer be hidden from the student body, townsfolk, or fae court because a public incident occurs at a rally, broadcast, carnival event, or chapel gathering."
+      ]
+    },
+    {
+      "act": 3,
+      "conditions": [
+        "The Harvest Moon Pep Rally, lake sealing, fae crossing, or an equivalent confrontation over the Concord has been resolved in a way that determines whether Briar Falls remains bound to the Briar King.",
+        "The fate of stolen memories, including Jessa Pike's reflection and Opal Bellweather's testimony, has been decided or left in a clear new status quo."
+      ]
+    }
+  ],
+  "initialQuests": [
+    {
+      "id": "locker-313",
+      "name": "The Girl Who Forgot Her Reflection",
+      "description": "Jessa Pike is walking the halls with someone else's smile while Locker 313 glows like a carved pumpkin. Sheriff Lorna Pike wants discreet help before Principal Vale moves the evidence."
+    },
+    {
+      "id": "sad-songs-for-algebra",
+      "name": "Dante's Missing Mixtape",
+      "description": "Dante Ruiz swears a tape labeled Sad Songs for Algebra can reveal hidden ritual anchors, but it vanished from his backpack during gym. He suspects a Broomjacket, a goblin courier, or his own AV vice president."
+    },
+    {
+      "id": "pixie-fryer-boilover",
+      "name": "Lunch Period Is Screaming",
+      "description": "The cafeteria fryers start spitting tiny flaming pumpkin seeds into students' food. Lunch Lady Nona Crumb needs the kitchen cleared, the fryer cooled, and the health inspector kept from seeing the teeth."
+    },
+    {
+      "id": "broomjacket-blackout",
+      "name": "The Trophy Case Wants Hair",
+      "description": "During practice, the Broomjackets' trophies chant for offerings and one broom dives toward Lake Mirrorglen against its rider's will. Coach Bristle demands silence, while Marnie Glowhart wants someone to find out what he is hiding."
+    },
+    {
+      "id": "video-return-slot",
+      "name": "Be Kind, Rewind Tomorrow",
+      "description": "Trina Moth has received a VHS showing scenes from the next night, including someone in a jack-o'-lantern mask entering the Channel 13 tower. She will trade the tape for help retrieving a rental lost in the Upside Carnival."
+    },
+    {
+      "id": "candlewick-lanterns",
+      "name": "The Chapel Basement Map",
+      "description": "Pastor Eli Candlewick is assembling lake-glass lanterns and needs old student volunteers, fresh witnesses, or brave outsiders to confirm a fae crossing beneath Glimmerbell Pier before the Wardens act."
+    },
+    {
+      "id": "thornwood-bracelet",
+      "name": "Pumpkin Seeds and Spray Paint",
+      "description": "Roxy Ratchet is selling a rumor: the charm that woke Locker 313 came from the Thornwood Culvert and ended up with someone popular. The Runaways will talk if someone stops sprites from taking over their tunnels."
+    },
+    {
+      "id": "homecoming-float-barn",
+      "name": "The PTA Float That Breathes",
+      "description": "The Harvest Moon Carnival float in Nimue Orchard is supposed to be a harmless giant pumpkin, but its carved mouth fogs the windows and whispers senior names. Bev Glowhart wants it inspected quietly before the Booster Coven meeting."
+    },
+    {
+      "id": "channel-13-open-signal",
+      "name": "Five Minutes of Dead Air",
+      "description": "A WBRF intern reports that station manager Todd Wexler reserved an unexplained five-minute live signal during Friday's pep rally. Dante wants the tower hacked; Principal Vale wants the schedule left alone; Lord Calabash wants a front-row seat."
+    }
+  ],
+  "startingTime": "10:17"
+}

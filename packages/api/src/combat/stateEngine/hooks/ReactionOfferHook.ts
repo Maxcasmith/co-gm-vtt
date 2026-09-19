@@ -4,7 +4,8 @@ import type { StateEngine } from '../StateEngine.ts';
 import { encounters } from '../../../state.ts';
 import { getCharacter } from '../../../storage.ts';
 import { offerReaction } from '../reactionPrompt.ts';
-import { trySpendSpellSlot, emitResources } from '../../runtime.ts';
+import { trySpendSpellSlot } from '../../runtime/resources.ts';
+import { emitResources } from '../../runtime/shared.ts';
 import { registerSpellHooks } from '../registerSpellHooks.ts';
 import { findSpell } from '../../../routes/spells.ts';
 

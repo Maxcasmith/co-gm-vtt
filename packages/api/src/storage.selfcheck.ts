@@ -165,6 +165,6 @@ main()
   .then(() => console.log('storage selfcheck: OK — storage.ts, compendium/storage.ts, adventures/storage.ts round-trips all behave.'))
   .catch(err => { console.error(err); process.exitCode = 1; })
   .finally(cleanup)
-  // The rds backend's mysql2 pool keeps its sockets open (correct for a long-lived server), which
-  // would otherwise leave this one-off script hanging forever instead of exiting after the run.
+  // A live mysql2 pool keeps its sockets open (correct for a long-lived server), which would
+  // otherwise leave this one-off script hanging forever instead of exiting after the run.
   .finally(() => process.exit(process.exitCode ?? 0));

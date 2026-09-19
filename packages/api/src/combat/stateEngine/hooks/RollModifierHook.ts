@@ -15,7 +15,7 @@ import { rollDice } from '../../dice.ts';
  *
  * Blade Ward registers the identical class under kind 'rollModifierVsAttacker' instead (see
  * registerSpellHooks' rollModifier case) — same die-and-sign shape, but read the other direction:
- * bladeWardPenalty (combat/runtime.ts) looks it up on the DEFENDER and subtracts from whoever is
+ * bladeWardPenalty (combat/runtime/damage.ts) looks it up on the DEFENDER and subtracts from whoever is
  * attacking them, instead of getHooksOwnedBy(attackerId, 'rollModifier') reading the roller's own.
  *
  * Guidance registers it a third way, under kind 'rollModifierCheck' with `skill` set to the

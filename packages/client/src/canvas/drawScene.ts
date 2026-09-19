@@ -394,10 +394,13 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
             }
           }
 
-          // Normal range cells (brighter)
+          // Normal range cells (brighter) — the origin cell (dx=0,dy=0) is skipped by default
+          // since you can't target your own floor tile with a weapon/spell, but an ability that
+          // opts into self-targeting (Lay on Hands' includeSelf) needs it highlighted too.
+          const includesOriginCell = targeting.kind === 'ability' && targeting.includeSelf;
           for (let dx = -rangeCells; dx <= rangeCells; dx++) {
             for (let dy = -rangeCells; dy <= rangeCells; dy++) {
-              if (dx === 0 && dy === 0) continue;
+              if (dx === 0 && dy === 0 && !includesOriginCell) continue;
               const tx = playerPos.gx + dx;
               const ty = playerPos.gy + dy;
               if (tx < 0 || ty < 0) continue;
@@ -456,12 +459,18 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
             if (spellArea && aoeOrigin && inArea(spellArea, aoeOrigin.originGx, aoeOrigin.originGy, aoeOrigin.dirGx, aoeOrigin.dirGy, pos.gx + 0.5, pos.gy + 0.5, aoeOrigin.isSelf)) {
               drawTargetRing(ctx, x, y, tokenR);
             }
-            // Ally in range of a non-attack point-target spell (Bless, Aid, ...) or an ally-target
-            // ability (Bardic Inspiration) — same ring treatment as enemies get for weapon/attack-spell targeting.
-            if (!spellArea && playerPos && (targeting?.kind === 'ability' || (targeting?.kind === 'spell' && targeting.spell.combat?.resolution !== 'attack'))) {
-              const range = targeting.kind === 'ability' ? 60 : parseRangeFeet(targeting.spell.range);
+            // Ally in range of a non-attack point-target spell (Bless, Aid, ...) — every valid
+            // target in range rings at once, same treatment as enemies get for weapon/attack-spell
+            // targeting. An ally-target ability (Bardic Inspiration, Lay on Hands) only rings the
+            // one token currently under the cursor — one caster picks one target at a time, so
+            // ringing every eligible ally in range at once reads as "targeting everyone".
+            if (!spellArea && playerPos && targeting?.kind === 'spell' && targeting.spell.combat?.resolution !== 'attack') {
+              const range = parseRangeFeet(targeting.spell.range);
               const dist = Math.max(Math.abs(pos.gx - playerPos.gx), Math.abs(pos.gy - playerPos.gy));
               if (dist <= Math.floor(range / 5)) drawTargetRing(ctx, x, y, tokenR);
+            }
+            if (!spellArea && targeting?.kind === 'ability' && hoveredTokenKey === name) {
+              drawTargetRing(ctx, x, y, tokenR);
             }
             drawHitFlash(ctx, x, y, tokenR, flashEffectsRef.current.find(f => f.tokenKey === name));
             tokenEffectsRef.current.filter(e => e.tokenKey === name).forEach(e => drawTokenEffect(ctx, x, y, tokenR, e));
@@ -629,8 +638,10 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
               drawTargetRing(ctx, x, y, tokenR);
             }
             // Self as a valid target of a non-attack point-target spell (Bless, Aid, ...) — you're
-            // always in range of yourself, no distance check needed.
-            if (!spellArea && targeting?.kind === 'spell' && targeting.spell.combat?.resolution !== 'attack') {
+            // always in range of yourself, no distance check needed. An ability that opts into
+            // self-targeting (Lay on Hands) only rings while the cursor is actually over your own
+            // token, same one-token-at-a-time treatment the ally loop above gives other targets.
+            if (!spellArea && ((targeting?.kind === 'spell' && targeting.spell.combat?.resolution !== 'attack') || (targeting?.kind === 'ability' && targeting.includeSelf && hoveredTokenKey === player))) {
               drawTargetRing(ctx, x, y, tokenR);
             }
             drawHitFlash(ctx, x, y, tokenR, flashEffectsRef.current.find(f => f.tokenKey === player));

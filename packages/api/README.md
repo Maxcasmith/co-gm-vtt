@@ -24,7 +24,7 @@ Copy `env-example` to `.env` and fill in real values. Grouped below by what each
 
 | Var | What it does |
 |---|---|
-| `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE` | Connection for the relational data: users, auth, licenses/products, and (if `STORAGE_*_BACKEND=rds`) the storage abstraction's `storage_objects` table. Defaults: `localhost:3306`, `root`/no password, database `co_gm_vtt`. |
+| `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE` | Connection for the relational data only: users, auth, licenses/products — account/billing data with real legal/compliance requirements. Not used for campaign/gameplay data (see Storage backend below). Defaults: `localhost:3306`, `root`/no password, database `co_gm_vtt`. |
 
 Migrations live in `db/up` / `db/down` at the repo root — run with `pnpm migrate` (see root `package.json`), not automatically on boot.
 
@@ -36,12 +36,12 @@ Migrations live in `db/up` / `db/down` at the repo root — run with `pnpm migra
 
 ## Storage backend
 
-Two independent stores — one for text/JSON content (campaigns, characters, notes, quests), one for binary media (portraits, tilesets, maps). Each picks its backend separately, so e.g. a self-hosted desktop build can keep both `local` while a SaaS deploy runs media on `s3` and text on `rds`.
+Two independent stores — one for text/JSON content (campaigns, characters, notes, quests), one for binary media (portraits, tilesets, maps). Each picks its backend separately, so e.g. a self-hosted desktop build can keep both `local` while a SaaS deploy runs media on `s3`.
 
 | Var | What it does |
 |---|---|
-| `STORAGE_TEXT_BACKEND` | `local` (default), `s3`, or `rds`. Backs every JSON/markdown read-write in `storage.ts`, `compendium/storage.ts`, `adventures/storage.ts`. |
-| `STORAGE_MEDIA_BACKEND` | Same three options, for binary content (images, maps). |
+| `STORAGE_TEXT_BACKEND` | `local` (default) or `s3`. Backs every JSON/markdown read-write in `storage.ts`, `compendium/storage.ts`, `adventures/storage.ts`. Campaign/gameplay data is moving to a dedicated NoSQL store — this backend is transitional, not the target architecture. |
+| `STORAGE_MEDIA_BACKEND` | Same two options, for binary content (images, maps). |
 
 **If either is `local`:** no other vars needed — reads/writes the same on-disk `packages/api/storage/` directory the app has always used.
 
@@ -54,5 +54,3 @@ Two independent stores — one for text/JSON content (campaigns, characters, not
 | `S3_MEDIA_BUCKET` | Bucket for `STORAGE_MEDIA_BACKEND=s3`. Same throw-if-missing behavior. |
 
 Uses the AWS SDK's default credential chain (env vars, shared config file, instance role, etc.) — no explicit access-key env vars here.
-
-**If either is `rds`:** no separate vars — reuses the `MYSQL_*` connection above, storing objects in a `storage_objects` key-value table (migration: `db/up/20260910170000_create_storage_objects_table.sql`).

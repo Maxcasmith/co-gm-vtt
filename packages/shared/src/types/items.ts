@@ -143,6 +143,11 @@ export class Ammunition extends Item {
 export function isWeapon(item: Item): item is Weapon {
   return item.type === "weapon";
 }
+
+/** 2024 PHB Monk "Monk weapons": Simple Melee weapons, plus Martial Melee weapons with the Light property. Melee-only (range <= 10, same convention combat code already uses for reach weapons). */
+export function isMonkWeapon(weapon: Weapon): boolean {
+  return weapon.range <= 10 && (weapon.properties.includes("simple") || weapon.properties.includes("light"));
+}
 export function isArmor(item: Item): item is Armor {
   return item.type === "armor";
 }

@@ -20,7 +20,7 @@ export default function GenerateTilesetModal({ open, password, onClose, onGenera
   const [step, setStep] = useState<Step>('form');
   const [title, setTitle] = useState('');
   const [theme, setTheme] = useState('');
-  const [materials, setMaterials] = useState<DungeonMaterialSpec[]>([{ key: '', description: '' }]);
+  const [materials, setMaterials] = useState<Omit<DungeonMaterialSpec, 'category'>[]>([{ key: '', description: '' }]);
   const [progressLines, setProgressLines] = useState<string[]>([]);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
@@ -35,7 +35,7 @@ export default function GenerateTilesetModal({ open, password, onClose, onGenera
     setError('');
   }
 
-  function updateMaterial(i: number, field: keyof DungeonMaterialSpec, value: string) {
+  function updateMaterial(i: number, field: keyof Omit<DungeonMaterialSpec, 'category'>, value: string) {
     setMaterials(m => m.map((row, idx) => idx === i ? { ...row, [field]: value } : row));
   }
 

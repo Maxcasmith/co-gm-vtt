@@ -1,5 +1,6 @@
 import path from 'path';
-import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, NotePayload, BattleMap, WorldState, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord, CharacterStoryboard, ScenarioStoryboard, StoryboardTestRecord, HouseRules, PlotHook, ActivePlotArc } from 'shared';
+import { randomUUID } from 'crypto';
+import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, NotePayload, BattleMap, WorldState, WorldActor, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord, CharacterStoryboard, ScenarioStoryboard, StoryboardTestRecord, HouseRules, PlotHook, ActivePlotArc, Goal, GenreTileMap } from 'shared';
 import { DEFAULT_HOUSE_RULES } from 'shared';
 import { Encounter } from './domain/encounter.ts';
 import { renderDungeonAscii } from './dungeon/index.ts';
@@ -12,6 +13,7 @@ import { getTextStore, getMediaStore, STORAGE_ROOT } from './storage/index.ts';
 export const STORAGE_DIR = STORAGE_ROOT;
 const CONFIG_KEY = 'config.json';
 const PLOT_HOOKS_KEY = 'plot-hooks.json';
+const GENRE_TILE_MAP_KEY = 'genre-tile-map.json';
 
 // Key prefixes for the TextStore/MediaStore abstraction below — same relative shape the old
 // flat on-disk layout always used, now backend-agnostic (local disk, S3, or RDS depending on
@@ -89,6 +91,24 @@ export async function readPlotHooks(): Promise<PlotHook[]> {
 
 export async function writePlotHooks(hooks: PlotHook[]): Promise<void> {
   await getTextStore().put(PLOT_HOOKS_KEY, JSON.stringify(hooks, null, 2));
+}
+
+// App-wide (not per-campaign), same single-document shape as plot hooks above — genre -> material
+// category -> tilesetSlug of an already-generated tileset. See dungeon/tilesets.ts (write side,
+// on every successful generation) and dungeon/manifest.ts (read side, narrows what's offered to
+// the room-material LLM call to what's already available for this campaign's genre).
+export async function readGenreTileMap(): Promise<GenreTileMap> {
+  try {
+    const raw = await getTextStore().get(GENRE_TILE_MAP_KEY);
+    return raw === null ? {} : (JSON.parse(raw) as GenreTileMap);
+  } catch (err) {
+    logError('storage:readGenreTileMap', err);
+    return {};
+  }
+}
+
+export async function writeGenreTileMap(map: GenreTileMap): Promise<void> {
+  await getTextStore().put(GENRE_TILE_MAP_KEY, JSON.stringify(map, null, 2));
 }
 
 export async function writeCampaignFile(slug: string, filename: string, content: string): Promise<void> {
@@ -323,12 +343,67 @@ export async function clearEncounter(slug: string): Promise<void> {
 export async function readWorldState(slug: string): Promise<WorldState | null> {
   try {
     const raw = await getTextStore().get(path.join(campaignDir(slug), 'world-state.json'));
-    return raw === null ? null : (JSON.parse(raw) as WorldState);
+    if (raw === null) return null;
+    const state = JSON.parse(raw) as WorldState;
+    await migrateLegacyWorldActors(slug, state);
+    return state;
   } catch (err) { logError('storage:readWorldState', err); return null; }
 }
 
 export async function writeWorldState(slug: string, state: WorldState): Promise<void> {
   await writeCampaignFile(slug, 'world-state.json', JSON.stringify(state, null, 2));
+}
+
+// Old world-state.json shape embedded each antagonist's goal/milestones directly on WorldActor;
+// goal-tracking now lives in goals.json (shared with player goals — see types/goals.ts), so an
+// actor loaded with its legacy `ultimateGoal` field gets split into a Goal record + slim
+// WorldActor here, once, transparently. No separate migration script needed.
+async function migrateLegacyWorldActors(slug: string, state: WorldState): Promise<void> {
+  type LegacyActor = WorldActor & {
+    ultimateGoal?: string; totalDays?: number; daysElapsed?: number;
+    milestones?: Array<{ day: number; description: string; completed: boolean; completedOnDay?: number }>;
+  };
+  const legacy = (state.actors as LegacyActor[]).filter(a => a.ultimateGoal !== undefined);
+  if (!legacy.length) return;
+
+  const goals = await readGoals(slug);
+  const now = new Date().toISOString();
+  for (const actor of legacy) {
+    const goalId = randomUUID();
+    goals.push({
+      id: goalId,
+      ownerType: actor.type,
+      ownerId: actor.id,
+      tier: 'long',
+      description: actor.ultimateGoal!,
+      status: actor.status === 'succeeded' ? 'succeeded' : 'active',
+      milestones: (actor.milestones ?? []).map(m => ({
+        id: randomUUID(), description: m.description, completed: m.completed, day: m.day,
+        ...(m.completedOnDay !== undefined ? { completedOnDay: m.completedOnDay } : {}),
+      })),
+      createdAt: now,
+      ...(actor.totalDays !== undefined ? { totalDays: actor.totalDays } : {}),
+      ...(actor.daysElapsed !== undefined ? { daysElapsed: actor.daysElapsed } : {}),
+    });
+    actor.goalId = goalId;
+    delete actor.ultimateGoal;
+    delete actor.totalDays;
+    delete actor.daysElapsed;
+    delete actor.milestones;
+  }
+  await writeGoals(slug, goals);
+  await writeCampaignFile(slug, 'world-state.json', JSON.stringify(state, null, 2));
+}
+
+export async function readGoals(slug: string): Promise<Goal[]> {
+  try {
+    const raw = await getTextStore().get(path.join(campaignDir(slug), 'goals.json'));
+    return raw === null ? [] : (JSON.parse(raw) as Goal[]);
+  } catch (err) { logError('storage:readGoals', err); return []; }
+}
+
+export async function writeGoals(slug: string, goals: Goal[]): Promise<void> {
+  await writeCampaignFile(slug, 'goals.json', JSON.stringify(goals, null, 2));
 }
 
 export async function readCampaignFile(slug: string, filename: string): Promise<string | null> {

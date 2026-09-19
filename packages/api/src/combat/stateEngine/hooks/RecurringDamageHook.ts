@@ -4,7 +4,9 @@ import { Hook, type HookProps } from '../Hook.ts';
 import type { StateEngine } from '../StateEngine.ts';
 import { encounters } from '../../../state.ts';
 import { rollDice, fmtMod } from '../../dice.ts';
-import { applyDamageToCreature, applyDamageToPlayer, grantTempHpToPlayer, clearCondition, rollSavingThrow, rollSkillCheck } from '../../runtime.ts';
+import { applyDamageToCreature, applyDamageToPlayer, grantTempHpToPlayer } from '../../runtime/damage.ts';
+import { clearCondition } from '../../runtime/statusEffects.ts';
+import { rollSavingThrow, rollSkillCheck } from '../../runtime/rolls.ts';
 
 /**
  * Damages its owner at the start of each of their turns — Tasha's Caustic Brew's 2d4 acid while

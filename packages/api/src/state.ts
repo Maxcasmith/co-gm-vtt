@@ -92,6 +92,27 @@ export interface RestChoice {
 }
 export const pendingRests = new Map<string, Map<string, RestChoice>>(); // campaignId → charId → choice, cleared once every online charId has voted
 
+// A campaign delete only wipes the persisted store — call this alongside it so a slug reused
+// right after (same adventure recreated under the same name) doesn't resume from the erased
+// predecessor's cached dungeon/combat state still sitting in these Maps.
+export function clearCampaignRuntimeState(cid: string): void {
+  sessionState.delete(cid);
+  combatState.delete(cid);
+  encounters.delete(cid);
+  stateEngines.delete(cid);
+  tokenPositions.delete(cid);
+  dmQueue.delete(cid);
+  campaignPlayers.delete(cid);
+  enemiesReady.delete(cid);
+  combatStartedAt.delete(cid);
+  combatScores.delete(cid);
+  dungeons.delete(cid);
+  pendingWeaponBonuses.delete(cid);
+  microDungeons.delete(cid);
+  activeMarks.delete(cid);
+  pendingRests.delete(cid);
+}
+
 export const PLAYER_SIGHT_RADIUS = 20; // square (Chebyshev) radius, in cells
 export const ENEMY_AGGRO_RADIUS  = 12;
 

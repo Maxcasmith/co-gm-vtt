@@ -9,7 +9,7 @@ import { describeDungeonState, describeDungeonGroundTruth, describeCombatLocatio
 import { processVdmResponse, repairMissedPickup } from './tag-processor.ts';
 import { logError } from './logger.ts';
 import { io, ROOM, sessionState, combatState, dungeons, tokenPositions, connected, dmQueue } from './state.ts';
-import { endCombat } from './combat/runtime.ts';
+import { endCombat } from './combat/runtime/lifecycle.ts';
 import { applyEffects } from './effects.ts';
 
 export function queueDMResponse(campaignId: string, fn: () => Promise<void>): void {

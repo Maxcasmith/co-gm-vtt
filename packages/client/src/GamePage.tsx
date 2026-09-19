@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
-import type { Character, Player, EnemyStatBlock, TokenPosition, Dungeon, Quest, TurnOrderEntry, StoryboardQueuePayload, HouseRules } from 'shared';
+import type { Character, Player, EnemyStatBlock, TokenPosition, Dungeon, Quest, TurnOrderEntry, StoryboardQueuePayload, HouseRules, Goal } from 'shared';
 import { DEFAULT_HOUSE_RULES } from 'shared';
 import { HIT_DICE } from './character-creation/srd.ts';
 import { Button } from './components/Button/Button.tsx';
@@ -106,6 +106,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   // even though the edit already made it to disk.
   const [tactics, setTactics] = useState<Character['tactics']>(character.tactics);
   const [aiControlled, setAiControlled] = useState<Character['aiControlled']>(character.aiControlled);
+  const [goals, setGoals] = useState<Goal[]>([]);
   // Party allies (recruited NPCs, Find Familiar/Unseen Servant companions) — a subset of the
   // turn order, kept separately so Canvas can render their tokens and let an owner (ownerId
   // matching this character) drag theirs the same way they drag their own.
@@ -265,6 +266,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       if (characterId !== character.id) return;
       setTactics(tactics);
       setAiControlled(aiControlled);
+    });
+    socket.on('goals:update', ({ characterId, goals: g }) => {
+      if (characterId !== character.id) return;
+      setGoals(g);
     });
     socket.on('character:inventory:remove', ({ itemId, quantity }) => {
       setItemQtyOverrides(prev => ({ ...prev, [itemId]: quantity }));
@@ -533,8 +538,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     setCompanions(entries.filter(e => e.teamId === 'players' && (!e.isPlayer || !connected.includes(e.name))));
   }), [connected]);
   useEffect(() => on('vtt:combat:turn', ({ actorName }) => setIsMyTurn(actorName === character.name)), [character.name]);
-  useEffect(() => on('vtt:combat:attack', ({ attackerId, attackerName, targetId, weapon, bonusSpell, isOffhand, useInspiration }) => {
-    socketRef.current?.emit('combat:attack', { attackerId, attackerName, targetId, weapon, ...(bonusSpell ? { bonusSpell } : {}), ...(isOffhand ? { isOffhand } : {}), ...(useInspiration ? { useInspiration } : {}) });
+  useEffect(() => on('vtt:combat:attack', ({ attackerId, attackerName, targetId, weapon, bonusSpell, isOffhand, actionType, useInspiration }) => {
+    socketRef.current?.emit('combat:attack', { attackerId, attackerName, targetId, weapon, ...(bonusSpell ? { bonusSpell } : {}), ...(isOffhand ? { isOffhand } : {}), ...(actionType ? { actionType } : {}), ...(useInspiration ? { useInspiration } : {}) });
   }), []);
   useEffect(() => on('vtt:combat:ability:use', ({ casterId, casterName, abilityKey, targetId, chosenItem, chosenAmount, cureCondition }) => {
     socketRef.current?.emit('combat:ability:use', { casterId, casterName, abilityKey, targetId, chosenItem, chosenAmount, cureCondition });
@@ -551,6 +556,20 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   useEffect(() => on('vtt:tactics:update', payload => {
     socketRef.current?.emit('character:tactics:update', payload);
   }), []);
+  useEffect(() => on('vtt:goal:save', payload => {
+    socketRef.current?.emit('goal:save', payload);
+  }), []);
+  useEffect(() => on('vtt:goal:delete', payload => {
+    socketRef.current?.emit('goal:delete', payload);
+  }), []);
+  useEffect(() => on('vtt:goals:fetch', payload => {
+    socketRef.current?.emit('goals:fetch', payload);
+  }), []);
+  // The Goals tab has no data until fetched — request it once when the sheet is opened rather
+  // than on every join, since goals only matter once a player actually looks at their sheet.
+  useEffect(() => on('vtt:sheet:opened', () => {
+    socketRef.current?.emit('goals:fetch', { characterId: character.id });
+  }), [character.id]);
   // Movement resets to full only at the START of this player's turn, not on combat start
   useEffect(() => { if (!combatActive) setMovementRemaining(0); }, [combatActive]);
   useEffect(() => on('vtt:combat:turn', ({ actorName, speedMultiplier, speedBonusFt, buffs }) => {
@@ -778,6 +797,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         currentHp={playerHpState?.current} maxHp={playerHpState?.max} tempHp={playerHpState?.temp}
         currentSpellSlots1={playerSlotsState?.current} maxSpellSlots1={playerSlotsState?.max}
         sessionActive={sessionActive}
+        goals={goals}
       />
       <JournalOverlay open={journalOpen} variant={journalVariant} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} />
       <QuestLog open={questLogOpen} onClose={() => setQuestLogOpen(false)} quests={quests} act={act} />

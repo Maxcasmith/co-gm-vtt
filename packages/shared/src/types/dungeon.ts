@@ -1,13 +1,37 @@
 import type { EnemyStatBlock } from "./combat.ts";
 import type { EffectSpec } from "./spells.ts";
 import type { AbilityKey } from "./character.ts";
+import type { CampaignGenre } from "./world.ts";
+
+// A coarse, fixed bucket sitting above the freeform `key` below — every room's material must be
+// classified into one of these by the manifest LLM (same call, no extra request), so genre-scoped
+// tile reuse (GenreTileMap) has a small closed set to key off instead of an ever-growing pile of
+// freeform strings. Deliberately generous (cheaper to over-provide categories at tile-creation
+// time than to under-provide and force a full new tileset generation later).
+export const MATERIAL_CATEGORIES = [
+  "wood", "stone", "brick", "cobblestone", "concrete", "metal", "dirt", "mud", "sand", "grass",
+  "moss", "water", "ice", "snow", "glass", "fabric", "rope", "bone", "rubble", "lava", "ash",
+] as const;
+export type MaterialCategory = (typeof MATERIAL_CATEGORIES)[number];
+
+// genre -> material category -> (specific freeform material key -> storage-relative path to its
+// tile folder, e.g. "tilesets/gothic-horror-d42fd63791/cracked-stone"). App-wide (not per-campaign)
+// — see api/storage.ts's readGenreTileMap/writeGenreTileMap and api/dungeon/tilesets.ts's
+// ensureTilesetSupport, which writes into it on every successful generation (one entry per
+// material actually used). Consulted by api/dungeon/manifest.ts to show the room-material LLM
+// call the SPECIFIC existing variants for its genre (not just the coarse category), so it can pick
+// whichever already-generated key is the closest fit — same "checks the horror map, finds only
+// wood/iron, generates cobblestone; finds grey-stone too, reuses that" logic the feature is for.
+export type GenreTileMap = Partial<Record<CampaignGenre, Partial<Record<MaterialCategory, Record<string, string>>>>>;
 
 // A room's floor material is a free-text key + texture description the manifest LLM proposes per
 // room (see api/dungeon/manifest.ts's collectDungeonMaterials) — not a fixed enum. This is the
-// shared shape passed through the tileset-generation pipeline (api/dungeon/tilesets.ts).
+// shared shape passed through the tileset-generation pipeline (api/dungeon/tilesets.ts). `category`
+// is the coarse bucket above — always set by the manifest LLM alongside key/description.
 export interface DungeonMaterialSpec {
   key: string;
   description: string;
+  category: MaterialCategory;
 }
 
 // A dungeon-wide deduped prop (furniture/decor) type — up to 32 per dungeon, mirrors
@@ -226,7 +250,7 @@ export interface Dungeon {
    * Live ambient light level, 0-1. 1 (default when omitted) = fully lit, no darkness overlay.
    * 0 = pitch black. Independent of fog-of-war — dims cells the player can already see, doesn't
    * change which cells are visible. Recomputed server-side (recomputeIllumination in
-   * combat/runtime.ts) as max(baseIllumination, every active illuminationSource hook's level) —
+   * combat/runtime/environment.ts) as max(baseIllumination, every active illuminationSource hook's level) —
    * a light spell brightens the whole dungeon rather than a local radius around its bearer, since
    * there's no per-cell light-propagation model, only this one global knob.
    */
@@ -260,7 +284,7 @@ export interface Dungeon {
    * whoever's currently holding a lit item (a torch). Hard cutoff at rangeFt, walls block it (see
    * Canvas.tsx's litCells), combined with `illumination` via max() and capped at 1 — no partial
    * falloff, no per-source brightness level. Recomputed on equip/unequip (setLightSourceFor,
-   * combat/runtime.ts) and on dungeon (re)load (socketHandlers/connection.ts). Position isn't
+   * combat/runtime/environment.ts) and on dungeon (re)load (socketHandlers/connection.ts). Position isn't
    * stored here — resolved client-side from the live token position, same as everything else that
    * tracks a token.
    */

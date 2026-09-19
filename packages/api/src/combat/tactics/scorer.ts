@@ -1,6 +1,6 @@
 import { CLASS_SPELLCASTING_ABILITY, resolveSpellDamageDice, statMod } from 'shared';
 import type { Character, Directive } from 'shared';
-import { weaponFor } from '../runtime.ts';
+import { weaponFor } from '../runtime/ai.ts';
 import { findSpell } from '../../routes/spells.ts';
 import { averageDamage } from '../ai/planEvaluator.ts';
 import { selfHpPct } from './conditionEvaluator.ts';
