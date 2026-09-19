@@ -8,6 +8,7 @@ import { registerCombatHandlers } from './combat.ts';
 import { registerInventoryHandlers } from './inventory.ts';
 import { registerRestHandlers } from './rest.ts';
 import { registerGoalHandlers } from './goals.ts';
+import { registerGroupHandlers } from './groups.ts';
 import type { JoinContext } from './context.ts';
 
 export function registerSocketHandlers(): void {
@@ -23,6 +24,7 @@ export function registerSocketHandlers(): void {
       registerInventoryHandlers(ctx);
       registerRestHandlers(ctx);
       registerGoalHandlers(ctx);
+      registerGroupHandlers(ctx);
       registerDisconnectHandler(ctx);
     });
   });

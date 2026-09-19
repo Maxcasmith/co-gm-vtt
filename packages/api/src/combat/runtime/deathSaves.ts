@@ -1,20 +1,20 @@
-import { updateCharacter, appendChatLog } from '../../storage.ts';
+import { updateCharacter } from '../../storage.ts';
 import { Participant } from '../../domain/encounter.ts';
-import { io, ROOM, combatState, encounters, playerSocketIds, getStateEngine } from '../../state.ts';
+import { io, campaignRoom, fightOf, playerSocketIds, getStateEngine } from '../../state.ts';
 import { D20Roll } from '../dice.ts';
 import { advanceTurn } from './lifecycle.ts';
 import { delay } from './shared.ts';
+import { postChat } from '../../partyGroups.ts';
 
 export async function runDeathSave(cid: string, actor: Participant): Promise<void> {
-  if (!combatState.get(cid)) return;
-  const encounter = encounters.get(cid);
+  const encounter = fightOf(cid, actor.id);
   if (!encounter) return;
 
   const participant = encounter.findParticipant(actor.id);
   if (!participant) return;
   const saves = participant.deathSaves;
 
-  if (saves.stable) { advanceTurn(cid); return; }
+  if (saves.stable) { advanceTurn(cid, encounter); return; }
 
   const roll = new D20Roll().roll();
   const isNat20 = roll === 20;
@@ -25,7 +25,7 @@ export async function runDeathSave(cid: string, actor: Participant): Promise<voi
   if (isNat20) {
     participant.currentHp = 1;
     void updateCharacter(cid, actor.id, c => ({ ...c, currentHp: 1 }));
-    io.to(ROOM).emit('combat:player:damage', {
+    io.to(campaignRoom(cid)).emit('combat:player:damage', {
       characterId: actor.id,
       characterName: actor.name,
       damage: -1,
@@ -62,24 +62,23 @@ export async function runDeathSave(cid: string, actor: Participant): Promise<voi
       text: `${actor.name} rolls a death save: ${roll}${isNat1 ? ' (natural 1, counts double)' : ''} — ${roll >= 10 ? 'SUCCESS' : 'FAILURE'} (${saves.successes}/3 successes, ${saves.failures}/3 failures).`,
       senderName: 'System', timestamp: Date.now(),
     };
-    io.to(ROOM).emit('chat:message', saveMsg);
-    void appendChatLog(cid, saveMsg);
+    void postChat(cid, saveMsg, [actor.id]);
   }
 
   if (dead) {
     await markPlayerDead(cid, participant, actor.id);
   } else if (stable && !isNat20) {
     const stableMsg = { text: `${actor.name} has stabilized.`, senderName: 'Combat', timestamp: Date.now() };
-    io.to(ROOM).emit('chat:message', stableMsg);
-    void appendChatLog(cid, stableMsg);
+    void postChat(cid, stableMsg, [actor.id]);
   } else if (isNat20) {
     const miracleMsg = { text: `${actor.name} surges back to life!`, senderName: 'Combat', timestamp: Date.now() };
-    io.to(ROOM).emit('chat:message', miracleMsg);
-    void appendChatLog(cid, miracleMsg);
+    void postChat(cid, miracleMsg, [actor.id]);
   }
 
   await delay(1500);
-  advanceTurn(cid);
+  // Re-resolved after the wait — the fight may have ended, or merged into another, meanwhile.
+  const now = fightOf(cid, actor.id);
+  if (now?.currentActor?.id === actor.id) advanceTurn(cid, now);
 }
 
 /**
@@ -101,8 +100,7 @@ export async function stabilizeParticipant(cid: string, participant: Participant
     });
   }
   const stableMsg = { text: `${participant.name} has stabilized.`, senderName: 'Combat', timestamp: Date.now() };
-  io.to(ROOM).emit('chat:message', stableMsg);
-  void appendChatLog(cid, stableMsg);
+  void postChat(cid, stableMsg, [participant.id]);
 }
 
 /**
@@ -111,10 +109,9 @@ export async function stabilizeParticipant(cid: string, participant: Participant
  * `onKill` hook wired into one would silently miss the other.
  */
 export async function markPlayerDead(cid: string, participant: Participant, charId: string, sourceId?: string): Promise<void> {
-  io.to(ROOM).emit('combat:player:dead', { characterId: charId, characterName: participant.name });
+  io.to(campaignRoom(cid)).emit('combat:player:dead', { characterId: charId, characterName: participant.name });
   const deadMsg = { text: `${participant.name} has perished.`, senderName: 'Combat', timestamp: Date.now() };
-  io.to(ROOM).emit('chat:message', deadMsg);
-  void appendChatLog(cid, deadMsg);
+  void postChat(cid, deadMsg, [participant.id]);
   await getStateEngine(cid).trigger('onKill', {
     participantId: charId, participantName: participant.name, isPlayer: true, sourceId,
   });

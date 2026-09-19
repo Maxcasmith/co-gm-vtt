@@ -1,5 +1,5 @@
 import { appendNote } from '../storage.ts';
-import { io, ROOM } from '../state.ts';
+import { io, campaignRoom } from '../state.ts';
 import type { JoinContext } from './context.ts';
 
 export function registerNoteHandlers(ctx: JoinContext): void {
@@ -9,7 +9,7 @@ export function registerNoteHandlers(ctx: JoinContext): void {
     void (async () => {
       const payload = { text, authorName, timestamp: Date.now(), ...(pinnedBy ? { pinnedBy } : {}) };
       await appendNote(campaignId, payload);
-      io.to(ROOM).emit('note:added', payload);
+      io.to(campaignRoom(campaignId)).emit('note:added', payload);
     })();
   });
 }

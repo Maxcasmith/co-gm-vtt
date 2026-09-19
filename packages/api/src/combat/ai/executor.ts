@@ -2,8 +2,8 @@ import { randomUUID } from 'crypto';
 import type { EnemyAction, EnemyStatBlock } from 'shared';
 import type { Creature } from '../../domain/creature.ts';
 import type { Participant } from '../../domain/encounter.ts';
-import { io, ROOM, encounters, tokenPositions, getStateEngine } from '../../state.ts';
-import { appendChatLog } from '../../storage.ts';
+import { io, campaignRoom, fightOf, toFight, tokenPositions, getStateEngine } from '../../state.ts';
+import { } from '../../storage.ts';
 import { rollDice } from '../dice.ts';
 import { applyDamageToCreature, applyDamageToPlayer, applyHealingToCreature, applyHealingToPlayer } from '../runtime/damage.ts';
 import { rollSavingThrow } from '../runtime/rolls.ts';
@@ -11,6 +11,7 @@ import { addToTurnOrder } from '../runtime/lifecycle.ts';
 import { RollModifierHook } from '../stateEngine/hooks/RollModifierHook.ts';
 import { AcModifierHook } from '../stateEngine/hooks/AcModifierHook.ts';
 import { RoundExpiryHook } from '../stateEngine/hooks/ExpiryHook.ts';
+import { postChat } from '../../partyGroups.ts';
 
 /**
  * Runs whatever a plan's actions[]-sourced action does — the counterpart to runEnemyAI's existing
@@ -39,14 +40,12 @@ async function dealDamage(cid: string, sourceId: string, sourceName: string, tar
   await engine.trigger('afterDamage', dmgCtx);
 }
 
-function announce(cid: string, text: string): void {
-  const msg = { text, senderName: 'Combat', timestamp: Date.now() };
-  io.to(ROOM).emit('chat:message', msg);
-  void appendChatLog(cid, msg);
+function announce(cid: string, actor: Participant, text: string): void {
+  void postChat(cid, { text, senderName: 'Combat', timestamp: Date.now() }, [actor.id]);
 }
 
 async function executeAoe(cid: string, actor: Participant, action: Extract<EnemyAction, { kind: 'aoe' }>, target: Participant): Promise<void> {
-  const encounter = encounters.get(cid);
+  const encounter = fightOf(cid, actor.id);
   if (!encounter) return;
   const positions = tokenPositions.get(cid) ?? {};
   const centerKey = target.isPlayer ? target.name : target.id;
@@ -67,21 +66,21 @@ async function executeAoe(cid: string, actor: Participant, action: Extract<Enemy
     }
     await dealDamage(cid, actor.id, action.name, p, damage);
   }
-  announce(cid, `${actor.name} unleashes ${action.name}!`);
+  announce(cid, actor, `${actor.name} unleashes ${action.name}!`);
 }
 
 async function executeHeal(cid: string, actor: Participant, action: Extract<EnemyAction, { kind: 'heal' }>, target: Participant): Promise<void> {
   const amount = rollDice(action.healFormula);
   if (target.isPlayer) applyHealingToPlayer(cid, target, target.id, amount, action.name);
   else applyHealingToCreature(cid, target.id, amount);
-  announce(cid, `${actor.name} casts ${action.name} on ${target.name}, restoring ${amount} HP.`);
+  announce(cid, actor, `${actor.name} casts ${action.name} on ${target.name}, restoring ${amount} HP.`);
 }
 
 /** Buff and debuff share one execution path — same hook primitives, opposite sign, debuff gated by a save. */
 async function executeModifier(cid: string, actor: Participant, action: Extract<EnemyAction, { kind: 'buff' | 'debuff' }>, target: Participant, round: number): Promise<void> {
   if (action.kind === 'debuff' && action.saveAbility && action.saveDC !== undefined) {
     const { saved } = await rollSavingThrow(cid, target.id, action.saveAbility, action.saveDC);
-    if (saved) { announce(cid, `${target.name} resists ${action.name}.`); return; }
+    if (saved) { announce(cid, actor, `${target.name} resists ${action.name}.`); return; }
   }
 
   const engine = getStateEngine(cid);
@@ -104,7 +103,7 @@ async function executeModifier(cid: string, actor: Participant, action: Extract<
     engine.register(new RoundExpiryHook({ ownerId: target.id, source: action.name, targetHookIds: hookIds, expiresOnRound: round + action.durationRounds }));
   }
 
-  announce(cid, action.kind === 'buff'
+  announce(cid, actor, action.kind === 'buff'
     ? `${actor.name} bolsters ${target.name} with ${action.name}.`
     : `${actor.name} afflicts ${target.name} with ${action.name}.`);
 }
@@ -142,26 +141,28 @@ export function findOpenAdjacent(positions: Record<string, { gx: number; gy: num
 }
 
 async function executeSummon(cid: string, actor: Participant, action: Extract<EnemyAction, { kind: 'summon' }>): Promise<void> {
-  const encounter = encounters.get(cid);
+  const encounter = fightOf(cid, actor.id);
   const creature = actor.creature;
   if (!encounter || !creature) return;
+  // Summons fight for whoever summoned them, not for the generic enemy side.
+  const summonerTeam = encounter.teams.find(t => t.id === actor.teamId) ?? { id: actor.teamId, name: actor.teamId };
 
   const positions = tokenPositions.get(cid) ?? {};
   const selfPos = positions[actor.id];
   const spawned: Participant[] = [];
 
   for (let i = 0; i < action.count; i++) {
-    const participant = encounter.spawnEnemy(deriveSummonStatBlock(creature, action, i));
+    const participant = encounter.spawnEnemy(deriveSummonStatBlock(creature, action, i), summonerTeam);
     spawned.push(participant);
     if (selfPos) {
       const pos = findOpenAdjacent(positions, selfPos.gx, selfPos.gy);
       positions[participant.id] = pos;
-      io.to(ROOM).emit('token:moved', { tokenId: participant.id, gx: pos.gx, gy: pos.gy });
+      io.to(campaignRoom(cid)).emit('token:moved', { tokenId: participant.id, gx: pos.gx, gy: pos.gy });
     }
   }
   tokenPositions.set(cid, positions);
-  addToTurnOrder(cid, spawned);
+  addToTurnOrder(cid, encounter, spawned);
 
-  io.to(ROOM).emit('encounter:ready', encounter.enemies.filter(p => p.creature).map(p => p.creature!.toStatBlock()));
-  announce(cid, `${actor.name} summons ${spawned.map(p => p.name).join(', ')}!`);
+  toFight(encounter).emit('encounter:ready', encounter.enemies.filter(p => p.creature).map(p => p.creature!.toStatBlock()));
+  announce(cid, actor, `${actor.name} summons ${spawned.map(p => p.name).join(', ')}!`);
 }

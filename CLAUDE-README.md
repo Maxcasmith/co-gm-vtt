@@ -16,6 +16,10 @@ Death saves / `stabilizeParticipant` / `markPlayerDead` (`runtime.ts:210-298`, `
 exist and still matter for multi-PC parties. Revisit only if Max asks for a solo-death-save
 mode — until then, don't propose changing it.
 
+With Party Groups (2026-09-19): a wipe ends the *session* only when the defeated fight held every
+online player (`lifecycle.ts` `endCombatDefeated`'s `wholeParty`). One split group falling while
+another is still up elsewhere just ends that group's fight — intentional, not a missed TPK.
+
 ### Combat system — reviewed, no open issues
 
 Full pass done on turn order, damage application, death saves, nemesis binding. Confirmed
@@ -83,3 +87,24 @@ no `[[REQUEST_CHECK:...]]` tag and no roll — only a second, repeated ask actua
 the roll. The tag mechanism and its rule (`prompts.ts` — "write only narrative setup, do NOT
 name the check, stop and wait") exist and are usually followed elsewhere in the same session;
 this looks like an intermittent prompt-compliance miss rather than a missing feature.
+
+### Party Groups ("split the party") — confirmed design, 2026-09-19
+
+Decided with Max; don't re-flag these as bugs:
+
+- **Chat is hidden per track while split.** Players see only their own track's lines (and the DM
+  only reads them) until everyone is back on one track; closed branches then show to everyone as
+  an inline split block in the Adventure Log. No metagaming is the point. (`partyGroups.ts`
+  `postChat` / `chatHistoryFor` / `readChatContext`.)
+- **Combat joining is per individual, split or not.** A player joins a dungeon fight only once
+  within `COMBAT_CHAIN_RADIUS` (7) cells *and* line of sight of anyone in it, chaining through
+  whoever just joined (`dungeon/index.ts` `chainClosure`). Bystanders out of range stay exploring.
+- **Several fights can run at once in one campaign** (dungeon only). Fights whose combatants come
+  within chain range merge — the older one absorbs the newer (`resolveFightChains`). Open-world
+  combat (DM `COMBAT_INIT`) is per acting group, no chaining.
+- **Creatures can be on different sides.** An LLM groups creatures joining a fight by who'd fight
+  whom (`assignCombatTeams`); every different side is hostile to every other, the party included.
+  Victory = every non-player side down.
+- **XP splits among the fight's own player characters**, not the whole campaign.
+- **Rest stays party-wide** even while split (timeline consistency). **Re-merging tracks is
+  manual.** **Changing track is blocked mid-fight.**

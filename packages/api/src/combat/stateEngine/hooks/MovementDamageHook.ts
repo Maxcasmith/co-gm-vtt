@@ -2,7 +2,7 @@ import type { MoveContext, Scaling } from 'shared';
 import { resolveSpellDamageDice } from 'shared';
 import { Hook, type HookProps } from '../Hook.ts';
 import type { StateEngine } from '../StateEngine.ts';
-import { encounters } from '../../../state.ts';
+import { fightOf } from '../../../state.ts';
 import { rollDice } from '../../dice.ts';
 import { applyDamageToCreature, applyDamageToPlayer } from '../../runtime/damage.ts';
 
@@ -52,7 +52,7 @@ export class MovementDamageHook extends Hook<'onMove'> {
 
   async apply(ctx: MoveContext, engine: StateEngine): Promise<void> {
     const cid = engine.campaignId;
-    const participant = encounters.get(cid)?.findParticipant(this.ownerId);
+    const participant = fightOf(cid, this.ownerId)?.findParticipant(this.ownerId);
     if (!participant || participant.isDead()) return;
 
     const dice = resolveSpellDamageDice(this.scaling, this.casterLevel, this.slotLevel) ?? this.scaling.base;

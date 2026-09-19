@@ -1,14 +1,15 @@
 import type { CreatureType, SpellSaveResult, TrapEffect } from 'shared';
-import { appendChatLog, saveDungeon, listCharacters } from '../../storage.ts';
+import { saveDungeon, listCharacters } from '../../storage.ts';
 import { toClientDungeon } from '../../dungeon/index.ts';
 import { Participant } from '../../domain/encounter.ts';
 import { logDebug } from '../../logger.ts';
-import { io, ROOM, encounters, playerSocketIds, dungeons, withLivePositions } from '../../state.ts';
+import { io, campaignRoom, fightOf, toFightOf, playerSocketIds, dungeons, withLivePositions } from '../../state.ts';
 import { calcMaxHp, rollApplicableDamage } from '../dice.ts';
 import { applyDamageToCreature, applyDamageToPlayer } from './damage.ts';
 import { advanceTurn } from './lifecycle.ts';
 import { rollSavingThrow } from './rolls.ts';
 import { applyCondition } from './statusEffects.ts';
+import { postChat } from '../../partyGroups.ts';
 
 // Fallback only for a trap entity saved before manifest-authored traps carried real effect data
 // (placer.ts now always populates entity.trap). No damage — guessing a lethal formula for a trap
@@ -39,17 +40,16 @@ export async function checkTrapAt(cid: string, gx: number, gy: number, triggerId
   if (trapDef.kind === 'seal') {
     entity.discovered = true;
     void saveDungeon(cid, dungeon);
-    io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+    io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
     const msg = { text: `${triggerName} triggers ${entity.name}!`, senderName: 'System', timestamp: Date.now() };
-    io.to(ROOM).emit('chat:message', msg);
-    void appendChatLog(cid, msg);
+    void postChat(cid, msg, [isPlayer ? triggerName : triggerId]);
     logDebug(`[trap] ${entity.name} (seal) triggered by ${triggerName} at (${gx},${gy})`);
     return;
   }
 
   dungeon.entities = dungeon.entities.filter(e => e.id !== entity.id);
   void saveDungeon(cid, dungeon);
-  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
 
   // Alert-only trap (Alarm) — no save, no effects, nothing to resolve. Notify just the caster
   // who set it rather than broadcasting a "triggers!" line to the whole table.
@@ -63,7 +63,6 @@ export async function checkTrapAt(cid: string, gx: number, gy: number, triggerId
     return;
   }
 
-  const encounter = encounters.get(cid);
   let participant: Participant | undefined;
   let targetId = triggerId;
 
@@ -71,12 +70,12 @@ export async function checkTrapAt(cid: string, gx: number, gy: number, triggerId
     const char = (await listCharacters(cid)).find(c => c.name === triggerName);
     if (!char) return;
     targetId = char.id;
-    participant = encounter?.findParticipant(char.id) ?? new Participant({
+    participant = fightOf(cid, char.id)?.findParticipant(char.id) ?? new Participant({
       id: char.id, name: char.name, initiative: 0, isPlayer: true,
       currentHp: char.currentHp ?? calcMaxHp(char), maxHp: calcMaxHp(char), tempHp: char.tempHp ?? 0,
     });
   } else {
-    participant = encounter?.findParticipant(triggerId);
+    participant = fightOf(cid, triggerId)?.findParticipant(triggerId);
     if (!participant) return;
   }
 
@@ -111,8 +110,7 @@ export async function checkTrapAt(cid: string, gx: number, gy: number, triggerId
   }
 
   const msg = { text: `${triggerName} triggers ${entity.name}!`, senderName: 'System', timestamp: Date.now() };
-  io.to(ROOM).emit('chat:message', msg);
-  void appendChatLog(cid, msg);
+  void postChat(cid, msg, [isPlayer ? triggerName : triggerId]);
 
   // Reuses the same SpellSaveResult broadcast every other save-based spell renders through the
   // combat log — a trap's save roll should be just as visible as Snare's DC was when it was cast.
@@ -132,7 +130,7 @@ export async function checkTrapAt(cid: string, gx: number, gy: number, triggerId
         targetDead: participant.isDead(),
       }],
     };
-    io.to(ROOM).emit('combat:spell:save:result', result);
+    toFightOf(cid, targetId).emit('combat:spell:save:result', result);
   }
 }
 

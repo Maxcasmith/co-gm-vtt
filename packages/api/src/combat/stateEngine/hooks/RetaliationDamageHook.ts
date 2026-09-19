@@ -2,7 +2,7 @@ import type { DamageContext, Scaling } from 'shared';
 import { resolveSpellDamageDice } from 'shared';
 import { Hook, type HookProps } from '../Hook.ts';
 import type { StateEngine } from '../StateEngine.ts';
-import { encounters } from '../../../state.ts';
+import { fightOf } from '../../../state.ts';
 import { rollDice } from '../../dice.ts';
 import { applyDamageToCreature } from '../../runtime/damage.ts';
 
@@ -38,14 +38,14 @@ export class RetaliationDamageHook extends Hook<'afterDamage'> {
   async apply(ctx: DamageContext, engine: StateEngine): Promise<void> {
     const cid = engine.campaignId;
     const dice = resolveSpellDamageDice(this.scaling, 1, 1) ?? this.scaling?.base;
-    const attacker = encounters.get(cid)?.findParticipant(ctx.sourceId);
+    const attacker = fightOf(cid, ctx.sourceId)?.findParticipant(ctx.sourceId);
     if (dice && attacker && !attacker.isPlayer && !attacker.isDead()) {
       const amount = rollDice(dice);
       console.log(`[hook] ${attacker.name} takes ${amount} ${this.damageType ?? ''} retaliation from ${this.source}`.replace('  ', ' '));
       await applyDamageToCreature(cid, attacker.id, amount);
     }
 
-    const owner = encounters.get(cid)?.findParticipant(this.ownerId);
+    const owner = fightOf(cid, this.ownerId)?.findParticipant(this.ownerId);
     if (owner && owner.tempHp <= 0) engine.unregister(this.id);
   }
 }

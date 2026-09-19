@@ -1,6 +1,6 @@
 import { readManifest } from '../../storage.ts';
 import { toClientDungeon } from '../../dungeon/index.ts';
-import { io, ROOM, dungeons, withLivePositions, getStateEngine, stateEngines } from '../../state.ts';
+import { io, campaignRoom, dungeons, withLivePositions, getStateEngine, stateEngines } from '../../state.ts';
 import type { GameTimeExpiryHook } from '../stateEngine/hooks/ExpiryHook.ts';
 import type { IlluminationSourceHook } from '../stateEngine/hooks/IlluminationSourceHook.ts';
 import { tokenKey } from '../ai/planEvaluator.ts';
@@ -22,7 +22,7 @@ export function recomputeIllumination(cid: string): void {
   const effective = sources.reduce((max, h) => Math.max(max, h.level), base);
   if (effective === (dungeon.illumination ?? 1)) return;
   dungeon.illumination = effective;
-  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
 }
 
 /**
@@ -42,7 +42,7 @@ export function setLightSourceFor(cid: string, tokenKey: string, rangeFt: number
   const lightSources = { ...dungeon.lightSources };
   if (rangeFt > 0) lightSources[tokenKey] = rangeFt; else delete lightSources[tokenKey];
   dungeon.lightSources = lightSources;
-  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
 }
 
 /**

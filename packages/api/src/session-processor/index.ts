@@ -10,6 +10,7 @@ import { getTextStore } from '../storage/index.ts';
 import { getConfig } from '../storage.ts';
 import { getFeatureProvider, type ChatMessage, type StoryProviderAdapter } from '../providers/index.ts';
 import { toSlug } from '../combat/dice.ts';
+import { readChatContext, sceneFor, audienceTracks, describeOtherGroups, type ChatAudience } from '../partyGroups.ts';
 import { buildTriagePrompt, buildResolvePrompt, buildDMSystemPrompt, buildDungeonNarrationPrompt, buildDmBriefPrompt, buildSessionQuestsPrompt, buildPlotHookCandidatePrompt, buildDungeonQuestPrompt, buildStoryTagsPrompt, buildSessionNotesPrompt, buildGoalReviewPrompt, type EntityType, type ExistingEntitySummary } from './prompts.ts';
 import { PLOT_HOOK_TAGS } from 'shared';
 import type { AppConfig, ChatPayload, Character, CurrencyDenomination, Dungeon, Quest, Goal, PlotHook, ActivePlotArc, PlotHookTag } from 'shared';
@@ -163,7 +164,8 @@ async function readWorldFile(campaignSlug: string, filename: string): Promise<st
   }
 }
 
-async function buildEntitySummaries(campaignSlug: string): Promise<string> {
+/** `audience` picks whose scene (location, NPCs, factions) this describes — a split group's own, or the manifest's. */
+async function buildEntitySummaries(campaignSlug: string, audience: ChatAudience = 'all'): Promise<string> {
   const lines: string[] = [];
 
   // World bible — generated campaigns use world.md/factions.md; modules use dm-brief.md
@@ -181,6 +183,7 @@ async function buildEntitySummaries(campaignSlug: string): Promise<string> {
   }
 
   const manifest = await readManifest(campaignSlug);
+  const scene = manifest ? await sceneFor(campaignSlug, manifest, await audienceTracks(campaignSlug, audience)) : null;
 
   // Quests — pending shown as story beats to trigger, active shown as ongoing goals
   const quests = await readQuests(campaignSlug);
@@ -191,7 +194,7 @@ async function buildEntitySummaries(campaignSlug: string): Promise<string> {
       // A quest's relatedNpc is a concrete cross-reference to an entity file — spell it out when
       // that NPC is actually in the current scene instead of leaving the match to inference (the
       // gap that let "an old lamplighter" and NPC Obed Marsh sit unlinked in the same session).
-      const inScene = q.relatedNpc && manifest?.npcs.includes(q.relatedNpc);
+      const inScene = q.relatedNpc && scene?.npcs.includes(q.relatedNpc);
       const flag = inScene ? ` [${q.relatedNpc} is in the current scene — this is their hook]` : '';
       return `- ${q.id}: ${q.name} — ${q.description}${flag}`;
     }).join('\n');
@@ -206,6 +209,7 @@ async function buildEntitySummaries(campaignSlug: string): Promise<string> {
   }
 
   if (!manifest) return lines.join('\n\n') || '(no entity notes yet)';
+  const here = scene ?? manifest;
 
   const totalSecs = manifest.worldTimeSecs ?? 43200;
   const day = Math.floor(totalSecs / 86400) + 1;
@@ -215,7 +219,7 @@ async function buildEntitySummaries(campaignSlug: string): Promise<string> {
   const h12 = h % 12 || 12;
   lines.push(`### World Time\nDay ${day}, ${h12}:${String(m).padStart(2, '0')} ${period}`);
 
-  if (!manifest.currentLocation) {
+  if (!here.currentLocation) {
     // Cold start — no scene established yet. Build a compact world index so the DM
     // knows the geography and can place the players correctly from turn one.
     const locationSlugs = await listEntitySlugs(campaignSlug, 'location');
@@ -229,26 +233,26 @@ async function buildEntitySummaries(campaignSlug: string): Promise<string> {
   }
 
   // Current location — full content (scene text + DM notes)
-  const locContent = await readEntity(campaignSlug, 'location', manifest.currentLocation);
-  if (locContent) lines.push(`### location/${manifest.currentLocation} [CURRENT]\n${locContent}`);
+  const locContent = await readEntity(campaignSlug, 'location', here.currentLocation);
+  if (locContent) lines.push(`### location/${here.currentLocation} [CURRENT]\n${locContent}`);
 
   // NPCs and factions in current scene — full content, not truncated. A blind character-count
   // slice here used to silently drop whatever fell past the cutoff, including the DM Notes
   // section (an NPC's actual secret/true identity) on any entity that had grown past ~800 chars
   // after a single session. See ADD-IT-TO-THE-LATERBASE.md for the cost/latency tradeoff this
   // reintroduces once an entity file grows large over a long campaign.
-  for (const slug of manifest.npcs) {
+  for (const slug of here.npcs) {
     const content = await readEntity(campaignSlug, 'npc', slug);
     if (content) lines.push(`### npc/${slug}\n${content}`);
   }
-  for (const slug of manifest.factions) {
+  for (const slug of here.factions) {
     const content = await readEntity(campaignSlug, 'faction', slug);
     if (content) lines.push(`### faction/${slug}\n${content}`);
   }
 
   // Adjacent zones — names only so DM can narrate transitions
-  if (manifest.connectedZones.length) {
-    lines.push(`### Connected zones\n${manifest.connectedZones.join(', ')}`);
+  if (here.connectedZones.length) {
+    lines.push(`### Connected zones\n${here.connectedZones.join(', ')}`);
   }
 
   return lines.join('\n\n') || '(no entity notes yet)';
@@ -523,14 +527,15 @@ function buildChatMessages(log: ChatPayload[]): ChatMessage[] {
 
 // Open-world narration only — anything inside a dungeon goes through
 // getDungeonNarrationResponse instead.
-export async function getDMResponse(campaignSlug: string): Promise<string> {
+export async function getDMResponse(campaignSlug: string, audience: ChatAudience): Promise<string> {
   const [config, meta, log] = await Promise.all([
     getConfig(),
     getWorldMeta(campaignSlug),
-    readChatLog(campaignSlug),
+    readChatContext(campaignSlug, audience),
   ]);
 
-  const entitySummaries = await buildEntitySummaries(campaignSlug);
+  const [baseSummaries, elsewhere] = await Promise.all([buildEntitySummaries(campaignSlug, audience), describeOtherGroups(campaignSlug, audience)]);
+  const entitySummaries = elsewhere ? `${baseSummaries}\n\n${elsewhere}` : baseSummaries;
   const characterSummaries = await getCharacterSummaries(campaignSlug);
 
   const messages = buildChatMessages(log);
@@ -558,13 +563,15 @@ export async function getDungeonNarrationResponse(
   dungeon: Dungeon,
   groundTruth: string,
   combatActive: boolean,
+  audience: ChatAudience,
 ): Promise<string> {
-  const [config, quests, log, characterNames, characterSummaries] = await Promise.all([
+  const [config, quests, log, characterNames, characterSummaries, elsewhere] = await Promise.all([
     getConfig(),
     readQuests(campaignSlug),
-    readChatLog(campaignSlug),
+    readChatContext(campaignSlug, audience),
     getCharacterNames(campaignSlug),
     getCharacterSummaries(campaignSlug),
+    describeOtherGroups(campaignSlug, audience),
   ]);
 
   const messages = buildChatMessages(log);
@@ -576,7 +583,7 @@ export async function getDungeonNarrationResponse(
     dungeonQuests,
     characterNames,
     characterSummaries,
-    groundTruth,
+    groundTruth: elsewhere ? `${groundTruth}\n\n${elsewhere}` : groundTruth,
     combatActive,
   });
 

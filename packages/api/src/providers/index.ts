@@ -5,6 +5,7 @@ import { deepseekComplete, deepseekStream, deepseekValidateKey, deepseekChat } f
 import { kimiComplete, kimiStream, kimiValidateKey, kimiChat } from './kimi.ts';
 import { qwenComplete, qwenStream, qwenValidateKey, qwenChat } from './qwen.ts';
 import { logError } from '../logger.ts';
+import { LLM_STUB, stubAdapter } from './stub.ts';
 
 export type { ChatMessage } from './claude.ts';
 
@@ -121,11 +122,13 @@ export function getWorkflowForFeature(config: AppConfig, feature: AiFeature): Ai
 }
 
 export function hasFeatureProvider(config: AppConfig, feature: AiFeature): boolean {
+  if (LLM_STUB) return true;
   const workflow = getWorkflowForFeature(config, feature);
   return !!workflow && workflow.models.length > 0;
 }
 
 export function getFeatureProvider(config: AppConfig, feature: AiFeature): StoryProviderAdapter {
+  if (LLM_STUB) return stubAdapter;
   const workflow = getWorkflowForFeature(config, feature);
   if (!workflow) throw new Error(`No enabled workflow configured for "${feature}"`);
   return buildChainAdapter(workflow.models, config.apiKeys);

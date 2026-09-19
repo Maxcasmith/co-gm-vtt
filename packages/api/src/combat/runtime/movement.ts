@@ -1,8 +1,8 @@
 import type { Character, ActiveCondition } from 'shared';
 import { statMod, calcAC, effectiveWeaponProfs, findPath, isWeapon, isMonkWeapon, closedDoorCells, unarmedStrikeFor, monkMartialArtsActive, monkLevel, martialArtsDie } from 'shared';
-import { getCharacter, appendChatLog, listCharacters, getHouseRules } from '../../storage.ts';
+import { getCharacter, listCharacters, getHouseRules } from '../../storage.ts';
 import { Participant } from '../../domain/encounter.ts';
-import { io, ROOM, combatState, encounters, tokenPositions, dungeons, getStateEngine } from '../../state.ts';
+import { io, campaignRoom, fightOf, toFightOf, tokenPositions, dungeons, getStateEngine } from '../../state.ts';
 import { D20Roll, rollDice, fmtMod, resolveHit, maxDiceValue } from '../dice.ts';
 import { rollModeFor, attackModeAgainstTarget, combineModes } from '../conditions/rollModeFor.ts';
 import { offerReaction } from '../stateEngine/reactionPrompt.ts';
@@ -13,6 +13,7 @@ import { advanceTurn } from './lifecycle.ts';
 import { delay, emitResources } from './shared.ts';
 import { conditionsHolder } from './statusEffects.ts';
 import { checkTrapAt } from './traps.ts';
+import { postChat } from '../../partyGroups.ts';
 
 function isOccupied(positions: Record<string, { gx: number; gy: number }>, gx: number, gy: number, excludeId: string): boolean {
   return Object.entries(positions).some(([id, p]) => id !== excludeId && p.gx === gx && p.gy === gy);
@@ -83,14 +84,14 @@ export async function walkParticipant(
     gy = next.gy;
 
     await delay(220);
-    if (!combatState.get(cid)) break;
+    if (!fightOf(cid, actor.id)) break;
 
     const updatedPos = tokenPositions.get(cid) ?? {};
     updatedPos[key] = { gx, gy };
     tokenPositions.set(cid, updatedPos);
-    io.to(ROOM).emit('token:moved', { tokenId: key, gx, gy });
+    io.to(campaignRoom(cid)).emit('token:moved', { tokenId: key, gx, gy });
     await checkTrapAt(cid, gx, gy, key, actor.name, actor.isPlayer);
-    if (!combatState.get(cid)) break;
+    if (!fightOf(cid, actor.id)) break;
     // maxSteps was fixed before this loop started off the pre-move speed — a trap sprung
     // mid-walk (Snare) needs its own check here, or a restrained actor just keeps stepping
     // for the rest of its already-decided move.
@@ -135,8 +136,7 @@ function cellDistFt(ax: number, ay: number, bx: number, by: number): number {
 export async function checkMovementTriggers(
   cid: string, moverId: string, fromGx: number, fromGy: number, toGx: number, toGy: number,
 ): Promise<void> {
-  const encounter = encounters.get(cid);
-  const mover = encounter?.findParticipant(moverId);
+  const mover = fightOf(cid, moverId)?.findParticipant(moverId);
   if (!mover) return;
   const distanceFt = cellDistFt(fromGx, fromGy, toGx, toGy);
   if (distanceFt === 0) return;
@@ -145,7 +145,7 @@ export async function checkMovementTriggers(
     participantId: moverId, participantName: mover.name, fromGx, fromGy, toGx, toGy, distanceFt,
   });
 
-  if (combatState.get(cid)) await checkOpportunityAttacks(cid, mover, fromGx, fromGy, toGx, toGy);
+  if (fightOf(cid, moverId)) await checkOpportunityAttacks(cid, mover, fromGx, fromGy, toGx, toGy);
 }
 
 /** Conditions that already strip reactions outright per RAW — the first place any of these four actually block one, rather than just being a narrated marker. */
@@ -177,9 +177,10 @@ async function checkOpportunityAttacks(
 ): Promise<void> {
   if (mover.disengaging || mover.isDead()) return;
   if ((await getHouseRules(cid)).noAttacksOfOpportunity) return;
-  const encounter = encounters.get(cid);
+  const encounter = fightOf(cid, mover.id);
   if (!encounter) return;
-  const reactors = mover.teamId === 'players' ? encounter.enemies : encounter.players;
+  // Anyone on another team — with several creature factions in one fight, they swing at each other too.
+  const reactors = encounter.hostilesOf(mover);
   const positions = tokenPositions.get(cid) ?? {};
 
   for (const reactor of reactors) {
@@ -201,11 +202,11 @@ async function checkOpportunityAttacks(
       const picked = await offerReaction(cid, reactor.id, [{
         spellName: 'Attack of Opportunity', attackerName: reactor.name, sourceName: mover.name, kind: 'opportunity',
       }]);
-      if (!picked || !combatState.get(cid) || !reactor.hasResource('reaction')) continue;
+      if (!picked || !fightOf(cid, reactor.id) || !reactor.hasResource('reaction')) continue;
     }
 
     reactor.trySpend('reaction');
-    emitResources(reactor);
+    emitResources(cid, reactor);
     await resolveOpportunityAttack(cid, reactor, mover);
   }
 }
@@ -227,7 +228,7 @@ async function reactorReachFt(cid: string, reactor: Participant): Promise<number
  */
 async function resolveOpportunityAttack(cid: string, reactor: Participant, target: Participant): Promise<void> {
   const engine = getStateEngine(cid);
-  const encounter = encounters.get(cid);
+  const encounter = fightOf(cid, reactor.id);
   if (!encounter) return;
 
   let weaponName = 'Unarmed Strike';
@@ -287,7 +288,7 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
   // Lucky — offered pre-roll same as runEnemyAI's attack path; opportunity attacks are a
   // separate resolution function so they need their own offer, not shared plumbing.
   const luckDisadvantage = target.isPlayer && await offerLuckDisadvantage(cid, targetKeyId, target.name, reactor.name);
-  if (!combatState.get(cid)) return;
+  if (encounter.ended) return;
   const mode = combineModes(
     rollModeFor(reactorChar ?? reactor.creature ?? {}, 'attack'),
     attackModeAgainstTarget(targetChar ?? target.creature ?? {}),
@@ -301,7 +302,7 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
     sourceName: weaponName, d20: roll, attackBonus, ac: targetAc,
     total: roll + attackBonus, hit: resolveHit(roll, attackBonus, targetAc),
   }));
-  if (!combatState.get(cid)) return;
+  if (encounter.ended) return;
   atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
   atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
   const isCrit = atkCtx.d20 === 20;
@@ -335,15 +336,14 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
   }
 
   console.log(`[aoo] ${reactor.name} makes an Opportunity Attack on ${target.name}: ${roll}${fmtMod(attackBonus)}=${atkCtx.total} vs AC ${targetAc} — ${atkCtx.hit ? `HIT ${damage}` : 'MISS'}`);
-  io.to(ROOM).emit('combat:attack:result', {
+  toFightOf(cid, reactor.id).emit('combat:attack:result', {
     attackerName: reactor.name, targetName: target.name, targetId: targetKeyId,
     weaponName, isMelee: true, d20: roll, attackBonus, statBonus, statName, weaponBonus: attackBonus - statBonus,
     total: atkCtx.total, ac: targetAc, hit: atkCtx.hit, isCrit, damage, damageRoll, damageFormula: atkCtx.hit ? damageFormula : undefined,
     damageStatBonus, remainingHp, targetDead,
   });
   const msg = { text: `${reactor.name} makes an Opportunity Attack on ${target.name}${atkCtx.hit ? ` — hit for ${damage}!` : ' — misses.'}`, senderName: 'System', timestamp: Date.now() };
-  void appendChatLog(cid, msg);
-  io.to(ROOM).emit('chat:message', msg);
+  void postChat(cid, msg, [reactor.id]);
 }
 
 /**
@@ -355,14 +355,13 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
  * Missile, reused rather than building a fall-specific negation path).
  */
 export async function applyElevationChange(cid: string, targetId: string, elevationFt: number): Promise<void> {
-  const encounter = encounters.get(cid);
-  const participant = encounter?.findParticipant(targetId);
+  const participant = fightOf(cid, targetId)?.findParticipant(targetId);
   if (!participant) return;
 
   const clamped = Math.max(0, elevationFt);
   const fellFt = participant.elevationFt - clamped;
   participant.elevationFt = clamped;
-  io.to(ROOM).emit('combat:elevation:update', { targetId, elevationFt: clamped });
+  toFightOf(cid, targetId).emit('combat:elevation:update', { targetId, elevationFt: clamped });
   if (fellFt < 10) return;
 
   // Flying is a controlled descent, not a fall — no damage regardless of how far it drops.

@@ -15,6 +15,7 @@ export default function QuickChat({ open, onClose, senderName, sessionActive, di
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => on('vtt:chat:message-received', msg => setLastMessage(msg)), []);
+  useEffect(() => on('vtt:chat:history', msgs => setLastMessage(msgs.at(-1) ?? null)), []);
 
   useEffect(() => {
     if (open) {

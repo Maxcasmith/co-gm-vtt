@@ -2,7 +2,7 @@ import type { DamageContext, Spell, SpellSaveResult, CreatureType, AbilityKey, H
 import { CLASS_SPELLCASTING_ABILITY, statMod, effectApplies, parseRangeFeet } from 'shared';
 import { Hook, type HookProps } from '../Hook.ts';
 import type { StateEngine } from '../StateEngine.ts';
-import { encounters, tokenPositions, pendingWeaponBonuses, io, ROOM } from '../../../state.ts';
+import { tokenPositions, pendingWeaponBonuses, fightOf, toFightOf } from '../../../state.ts';
 import { getCharacter } from '../../../storage.ts';
 import { offerReaction } from '../reactionPrompt.ts';
 import { trySpendSpellSlot } from '../../runtime/resources.ts';
@@ -39,7 +39,7 @@ export class RetaliationOfferHook extends Hook<'afterDamage'> {
 
   async apply(ctx: DamageContext, engine: StateEngine): Promise<void> {
     const cid = engine.campaignId;
-    const encounter = encounters.get(cid);
+    const encounter = fightOf(cid, this.ownerId);
     const participant = encounter?.findParticipant(this.ownerId);
     if (!participant?.hasResource('reaction')) return;
     if (engine.hasHookOwnedBy(this.ownerId, 'reactionLock')) return;
@@ -94,10 +94,10 @@ export class RetaliationOfferHook extends Hook<'afterDamage'> {
     if (!spell) return;
 
     // Re-check after the await — the player spent the whole window deciding.
-    if (!encounters.get(cid) || !participant.hasResource('reaction') || attacker.isDead()) return;
+    if (!fightOf(cid, this.ownerId) || !participant.hasResource('reaction') || attacker.isDead()) return;
     if (!(await trySpendSpellSlot(cid, this.ownerId, char, spell.level))) return;
     participant.trySpend('reaction');
-    emitResources(participant);
+    emitResources(cid, participant);
 
     if (spell.combat?.reactionTrigger?.resolve === 'resist') {
       await this.resolveResist(spell, ctx, engine, char.level ?? 1);
@@ -153,7 +153,7 @@ export class RetaliationOfferHook extends Hook<'afterDamage'> {
         targetDead: attacker.isDead(),
       }],
     };
-    io.to(ROOM).emit('combat:spell:save:result', result);
+    toFightOf(cid, this.ownerId).emit('combat:spell:save:result', result);
   }
 
   /**
@@ -178,7 +178,7 @@ export class RetaliationOfferHook extends Hook<'afterDamage'> {
     };
     await registerSpellHooks(engine, [spec], spell.name, {
       ownerId: this.ownerId, casterId: this.ownerId, casterLevel, slotLevel: spell.level,
-      currentRound: encounters.get(cid)?.currentRound?.number ?? 1,
+      currentRound: fightOf(cid, this.ownerId)?.currentRound?.number ?? 1,
     });
 
     const bonuses = pendingWeaponBonuses.get(cid) ?? {};

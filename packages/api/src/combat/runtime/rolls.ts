@@ -1,7 +1,7 @@
 import type { AbilityKey } from 'shared';
 import { statMod, CLASS_SAVING_THROWS, SKILL_ABILITY } from 'shared';
 import { getCharacter } from '../../storage.ts';
-import { encounters, getStateEngine } from '../../state.ts';
+import { fightOf, getStateEngine } from '../../state.ts';
 import { D20Roll } from '../dice.ts';
 import { rollModeFor } from '../conditions/rollModeFor.ts';
 import { sumAndConsumeRollMods, type RollModifierHook } from '../stateEngine/hooks/RollModifierHook.ts';
@@ -16,8 +16,7 @@ import type { IllusionTagHook } from '../stateEngine/hooks/IllusionTagHook.ts';
 export async function rollSavingThrow(
   cid: string, targetId: string, ability: AbilityKey, dc: number,
 ): Promise<{ saved: boolean; roll: number; bonus: number; total: number }> {
-  const encounter = encounters.get(cid);
-  const participant = encounter?.findParticipant(targetId);
+  const participant = fightOf(cid, targetId)?.findParticipant(targetId);
   const creature = participant?.creature;
   const char = creature ? undefined : await getCharacter(cid, participant?.id ?? targetId);
   const stats = creature?.stats ?? char?.stats;
@@ -56,8 +55,7 @@ export async function rollSkillCheck(
   const ability = SKILL_ABILITY[skill];
   if (!ability) return { succeeded: true, roll: 0, bonus: 0, total: 0 };
 
-  const encounter = encounters.get(cid);
-  const participant = encounter?.findParticipant(targetId);
+  const participant = fightOf(cid, targetId)?.findParticipant(targetId);
   const creature = participant?.creature;
   const char = creature ? undefined : await getCharacter(cid, participant?.id ?? targetId);
   const stats = creature?.stats ?? char?.stats;

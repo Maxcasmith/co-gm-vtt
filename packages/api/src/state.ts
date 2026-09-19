@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import type { ServerToClientEvents, ClientToServerEvents, Player, Dungeon, EffectSpec, HookSpec, AbilityKey } from 'shared';
+import type { ServerToClientEvents, ClientToServerEvents, Player, Dungeon, EffectSpec, HookSpec, AbilityKey, PartyGroups } from 'shared';
 import { Encounter } from './domain/encounter.ts';
 import { StateEngine } from './combat/stateEngine/StateEngine.ts';
 import { logError } from './logger.ts';
@@ -16,7 +16,12 @@ export const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpSer
   cors: { origin: '*' },
 });
 
-export const ROOM = 'sandbox';
+// Every campaign's clients join its own room — emits scoped by campaign instead of one global room
+// every campaign on this server shared. Narrower audiences (a Party Groups track, a fight) aren't
+// rooms: they're resolved to socket ids at emit time — see toSockets/toFight/toTracks.
+export const campaignRoom = (cid: string): string => `campaign:${cid}`;
+// The console.log mirror below has no campaign in scope, so it keeps one server-wide room.
+export const DEBUG_LOG_ROOM = 'debug-log';
 
 // ponytail: intercept console.log to broadcast logs to connected clients for the combat log overlay
 const _origLog = console.log;
@@ -24,14 +29,66 @@ console.log = (...args: unknown[]) => {
   _origLog(...args);
   try {
     const text = args.map(a => { if (typeof a === 'string') return a; try { return JSON.stringify(a); } catch (err) { logError('index:consoleLogOverride:stringify', err); return String(a); } }).join(' ');
-    io.to(ROOM).emit('combat:log', { text, timestamp: Date.now() });
+    io.to(DEBUG_LOG_ROOM).emit('combat:log', { text, timestamp: Date.now() });
   } catch (err) { logError('index:consoleLogOverride', err); }
 };
 
 export const connected = new Set<Player>();
 export const sessionState = new Map<string, boolean>();
-export const combatState = new Map<string, boolean>();
-export const encounters = new Map<string, Encounter>();
+// cid → fightId → Encounter. A campaign runs any number of independent fights at once (split
+// groups in different parts of a dungeon); every combatant is in at most one of them. Per-fight
+// state (scores, marks, readiness, …) lives on the Encounter itself.
+const fights = new Map<string, Map<string, Encounter>>();
+
+/** Every live fight in the campaign — one that's been decided (ended, awaiting teardown) no longer counts. */
+export function fightsIn(cid: string): Encounter[] {
+  return [...(fights.get(cid)?.values() ?? [])].filter(f => !f.ended);
+}
+
+/** The live fight `key` (participant id, character id, or player name) is in, if any. */
+export function fightOf(cid: string, key: string): Encounter | undefined {
+  return fightsIn(cid).find(f => f.findParticipant(key) || f.pendingPlayerNames.includes(key));
+}
+
+export function registerFight(cid: string, fight: Encounter): void {
+  const byId = fights.get(cid) ?? new Map<string, Encounter>();
+  byId.set(fight.id, fight);
+  fights.set(cid, byId);
+}
+
+/** False once endCombat has removed it — how a delayed teardown knows it's still the one to tear down. */
+export function isRegisteredFight(cid: string, fight: Encounter): boolean {
+  return fights.get(cid)?.get(fight.id) === fight;
+}
+
+export function unregisterFight(cid: string, fight: Encounter): void {
+  fights.get(cid)?.delete(fight.id);
+}
+
+// io.to([]) broadcasts to EVERY socket on the server — an audience that resolves to nobody must
+// reach nobody, so it targets a room no socket ever joins instead.
+const NOBODY_ROOM = 'nobody';
+export function toSockets(socketIds: string[]) {
+  return io.to(socketIds.length ? socketIds : NOBODY_ROOM);
+}
+export type Audience = ReturnType<typeof toSockets>;
+
+/** toFight for whichever fight `key` (participant id/name) is in — or the whole campaign when
+ * they're in none (a trap sprung while exploring still shows its save result to everyone). */
+export function toFightOf(cid: string, key: string) {
+  const fight = fightOf(cid, key);
+  return fight ? toFight(fight) : io.to(campaignRoom(cid));
+}
+
+/** The fight's own players (by live socket) — the audience for every combat event. Computed at emit
+ * time from the fight itself rather than kept as room membership, so joins, merges, reconnects and
+ * lane changes can never leave it stale. */
+export function toFight(fight: Encounter) {
+  return toSockets(fight.turnOrder.concat(fight.players)
+    .filter(p => p.isPlayer)
+    .map(p => playerSocketIds.get(p.id))
+    .filter((sid): sid is string => !!sid));
+}
 // Combat hook registry, lifecycle-matched to `encounters` — created on demand at combat start,
 // deleted by endCombat so a finished fight's hooks can never leak into the next one.
 export const stateEngines = new Map<string, StateEngine>();
@@ -48,11 +105,6 @@ export const tokenPositions = new Map<string, Record<string, { gx: number; gy: n
 export const dmQueue = new Map<string, Promise<void>>();
 export const campaignPlayers = new Map<string, string[]>();
 export const playerSocketIds = new Map<string, string>(); // charId → socketId (for private events)
-export const enemiesReady   = new Map<string, boolean>();  // true once rollEnemyInitiatives has fired
-export const combatStartedAt = new Map<string, number>();  // timestamp when combat_init fired, for nemesis transcript slicing
-// cid → charId → running kill/damage tally for the current encounter, flushed onto the
-// character sheet once in endCombat (see bumpScore/runtime.ts) rather than persisted per-hit.
-export const combatScores = new Map<string, Map<string, { enemiesKilled: number; damageDealt: number; damageReceived: number }>>();
 export const dungeons = new Map<string, Dungeon>(); // in-memory mirror of saveDungeon/loadDungeon, mutated on reveal
 // cid → casterId → self-buff spell (e.g. Divine Smite) queued to trigger on that caster's next
 // weapon hit. Effects are stored unresolved (not pre-rolled) so appliesIf (e.g. vs Fiend/Undead)
@@ -78,10 +130,6 @@ export const pendingWeaponBonuses = new Map<string, Record<string, {
   casterAbilityMod?: number | undefined;
 }>>();
 export const microDungeons = new Set<string>(); // cids whose current dungeon is an ephemeral combat arena — discarded on victory instead of continued
-// cid → casterId → the single creature a concentration-sustained curse (Hunter's Mark, Hex) has
-// target-locked, so breakConcentration can find and clear it without having to search every
-// hook. Drives the client's "marked" token icon (combat:mark) — see resolvePlayerCast.
-export const activeMarks = new Map<string, Map<string, { targetId: string; targetName: string; spellName: string }>>();
 
 export interface RestChoice {
   resting: boolean; restType: 'short' | 'long'; hitDiceSpent: number;
@@ -90,6 +138,9 @@ export interface RestChoice {
   /** Origin feat Musician — play an instrument to grant Heroic Inspiration, see grantMusicianInspiration. */
   grantInspiration?: boolean;
 }
+// In-memory mirror of groups.json — read on every chat message to route it, so kept hot rather than
+// re-read from storage each time. See partyGroups.ts getPartyGroups.
+export const partyGroups = new Map<string, PartyGroups>();
 export const pendingRests = new Map<string, Map<string, RestChoice>>(); // campaignId → charId → choice, cleared once every online charId has voted
 
 // A campaign delete only wipes the persisted store — call this alongside it so a slug reused
@@ -97,24 +148,22 @@ export const pendingRests = new Map<string, Map<string, RestChoice>>(); // campa
 // predecessor's cached dungeon/combat state still sitting in these Maps.
 export function clearCampaignRuntimeState(cid: string): void {
   sessionState.delete(cid);
-  combatState.delete(cid);
-  encounters.delete(cid);
+  fights.delete(cid);
   stateEngines.delete(cid);
   tokenPositions.delete(cid);
   dmQueue.delete(cid);
   campaignPlayers.delete(cid);
-  enemiesReady.delete(cid);
-  combatStartedAt.delete(cid);
-  combatScores.delete(cid);
   dungeons.delete(cid);
   pendingWeaponBonuses.delete(cid);
   microDungeons.delete(cid);
-  activeMarks.delete(cid);
   pendingRests.delete(cid);
+  partyGroups.delete(cid);
 }
 
 export const PLAYER_SIGHT_RADIUS = 20; // square (Chebyshev) radius, in cells
 export const ENEMY_AGGRO_RADIUS  = 12;
+// A player outside every fight joins one once within this many cells (and in sight) of anyone in it — see chainClosure.
+export const COMBAT_CHAIN_RADIUS = 7;
 
 export const NEMESIS_COOLDOWN_SESSIONS = 2;
 export const NEMESIS_CAP_PER_TARGET = 3;

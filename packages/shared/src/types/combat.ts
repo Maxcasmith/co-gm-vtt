@@ -1,3 +1,4 @@
+import type { GroupColor } from "./partyGroups.ts";
 import type { CharacterStats, AbilityKey } from "./character.ts";
 import type { ActiveCondition } from "./conditions.ts";
 
@@ -9,6 +10,9 @@ export interface RollResult {
   modifier: number;
   total: number;
   description: string;
+  /** Same split tagging as ChatPayload — set only while the party is split. */
+  splitId?: string;
+  trackIds?: GroupColor[];
 }
 
 export interface CheckRequest {

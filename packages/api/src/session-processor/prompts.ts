@@ -765,6 +765,20 @@ ${entitySummaries}
 Write a "previously on…" recap of 3–4 sentences in second person. Summarise the most consequential things the players did and any unresolved tensions. Stop after the summary — do not write a new scene, do not describe where the players are now, do not add a transition line. The session will resume naturally from where it left off. No preamble — begin immediately with "Previously on…".`;
 }
 
+// Party Groups reunion — condenses one track's branch (everything it saw while the party was
+// split) into a DM-only note, so the narrator after the reunion knows what each group did without
+// the raw interleaved branches crowding its context.
+export function buildSplitBranchSummaryPrompt(trackLabel: string, members: string[], transcript: string): string {
+  return `You are summarising what one group of a split tabletop RPG party did while apart from the others.
+
+Group: ${trackLabel} (${members.join(', ') || 'unknown members'})
+
+Transcript of this group's scene:
+${transcript}
+
+Write 2–4 sentences in plain past tense, third person, naming the characters. Record only consequential facts the Dungeon Master must remember: where they went, who they met, what they learned or took, fights and their outcomes, anything left unresolved. No flourish, no preamble, no speculation beyond the transcript.`;
+}
+
 // Dungeon-crawl session open, closed-world — mirrors buildDungeonNarrationPrompt's constraints
 // rather than buildRecapPrompt's: no world.md/factions.md/entitySummaries reach this pathway,
 // only the dungeon's own seeded quests and its floor plan.

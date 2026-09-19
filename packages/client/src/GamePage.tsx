@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
-import type { Character, Player, EnemyStatBlock, TokenPosition, Dungeon, Quest, TurnOrderEntry, StoryboardQueuePayload, HouseRules, Goal } from 'shared';
-import { DEFAULT_HOUSE_RULES } from 'shared';
+import type { Character, Player, EnemyStatBlock, TokenPosition, Dungeon, Quest, TurnOrderEntry, StoryboardQueuePayload, HouseRules, Goal, PartyGroups } from 'shared';
+import { DEFAULT_HOUSE_RULES, trackOf, activeSplit } from 'shared';
 import { HIT_DICE } from './character-creation/srd.ts';
 import { Button } from './components/Button/Button.tsx';
 import Canvas from './Canvas.tsx';
@@ -24,6 +24,7 @@ import RestModal from './RestModal.tsx';
 import BattleMapBackground from './BattleMapBackground.tsx';
 import CombatDock from './CombatDock.tsx';
 import PartyHud from './PartyHud.tsx';
+import PartyGroupsModal from './PartyGroupsModal.tsx';
 import TurnOrderBar from './TurnOrderBar.tsx';
 import VictoryScreen from './VictoryScreen.tsx';
 import DefeatScreen from './DefeatScreen.tsx';
@@ -94,6 +95,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   useEffect(() => { partyCharacterIdsRef.current = partyCharacterIds; }, [partyCharacterIds]);
   const [partyAiControlled, setPartyAiControlled] = useState<Record<string, boolean>>({});
   const [viewingMemberId, setViewingMemberId] = useState<string | null>(null);
+  const [partyGroups, setPartyGroups] = useState<PartyGroups | null>(null);
+  const [groupsOpen, setGroupsOpen] = useState(false);
   const [acquisitions, setAcquisitions] = useState<Character['inventory']>([]);
   const [itemQtyOverrides, setItemQtyOverrides] = useState<Record<string, number>>({});
   const [resourceOverrides, setResourceOverrides] = useState<Record<string, number> | null>(null);
@@ -316,10 +319,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     const unsubSave  = on('vtt:roll:save',  payload => socket.emit('roll:save',  payload));
     const unsubCastExploration = on('vtt:spell:cast:exploration', payload => socket.emit('spell:cast:exploration', payload));
 
-    // Replay persisted history into chat on join
-    socket.on('chat:history', messages => {
-      messages.forEach(msg => dispatch('vtt:chat:message-received', msg));
-    });
+    // Persisted history, as one replacement — on join, and again whenever Party Groups changes what this player may see.
+    socket.on('chat:history', messages => dispatch('vtt:chat:history', messages));
 
     // Bridge roll results → chat + typed event
     socket.on('roll:result', result => {
@@ -327,6 +328,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         text: result.description,
         senderName: 'System',
         timestamp: Date.now(),
+        splitId: result.splitId,
+        trackIds: result.trackIds,
       });
       dispatch('vtt:roll:result', result);
     });
@@ -443,8 +446,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     });
     socket.on('encounter:generating', () => dispatch('vtt:encounter:generating', {}));
     socket.on('encounter:ready', enemies => { setEncounter(enemies); dispatch('vtt:encounter:ready', { enemies }); });
-    socket.on('session:recap', ({ text, senderName, checkRequests }) => {
-      dispatch('vtt:chat:message-received', { text, senderName, timestamp: Date.now(), variant: 'recap', checkRequests });
+    socket.on('session:recap', ({ text, senderName, checkRequests, splitId, trackIds }) => {
+      dispatch('vtt:chat:message-received', { text, senderName, timestamp: Date.now(), variant: 'recap', checkRequests, splitId, trackIds });
     });
     socket.on('combat:player:resources', data => dispatch('vtt:combat:player:resources', data));
     socket.on('rest:open', () => dispatch('vtt:rest:open', {}));
@@ -469,6 +472,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         .catch(() => setCongrats({ dungeon: dungeonNow, quests: resolvedChain, roster: [] }));
     });
     socket.on('clock:update', ({ worldTimeSecs: t }) => { setWorldTimeSecs(t); });
+    socket.on('groups:update', setPartyGroups);
 
     const unsubTokenMove = on('vtt:token:move', pos => {
       socket.emit('token:move', pos);
@@ -785,7 +789,22 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         hp={partyHp}
         selfTempHp={playerHpState?.temp}
         onSelectMember={setViewingMemberId}
+        selfTrack={partyGroups ? trackOf(partyGroups, character.name) : undefined}
+        onOpenGroups={() => setGroupsOpen(open => !open)}
       />
+      {groupsOpen && partyGroups && (
+        <PartyGroupsModal
+          groups={partyGroups}
+          roster={Object.keys(partyCharacterIds)}
+          portraitUrls={portraitUrls}
+          self={character.name}
+          locked={combatActive}
+          onMove={track => socketRef.current?.emit('groups:move', { track })}
+          onAddTrack={() => socketRef.current?.emit('groups:track:add')}
+          onRemoveTrack={track => socketRef.current?.emit('groups:track:remove', { track })}
+          onClose={() => setGroupsOpen(false)}
+        />
+      )}
       <CombatDock character={liveCharacter} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} activeBuffs={activeBuffs} elevationFt={elevations[character.id] ?? 0} connectedAllies={connected} allyCharacterIds={partyCharacterIds} />
       <EncounterLoadingOverlay />
       <DungeonLoadingOverlay visible={!!dungeon && !dungeonReady} generating={dungeonGenerating} />
@@ -799,7 +818,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         sessionActive={sessionActive}
         goals={goals}
       />
-      <JournalOverlay open={journalOpen} variant={journalVariant} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} />
+      <JournalOverlay open={journalOpen} variant={journalVariant} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} liveSplitId={partyGroups ? activeSplit(partyGroups)?.id : undefined} />
       <QuestLog open={questLogOpen} onClose={() => setQuestLogOpen(false)} quests={quests} act={act} />
       <CombatLogOverlay open={combatLogOpen} onClose={() => setCombatLogOpen(false)} />
       <NotesOverlay open={notesOpen} onClose={() => setNotesOpen(false)} character={character} />

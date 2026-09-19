@@ -2,7 +2,7 @@ import type { TurnContext, Scaling, Condition, AbilityKey } from 'shared';
 import { resolveSpellDamageDice } from 'shared';
 import { Hook, type HookProps } from '../Hook.ts';
 import type { StateEngine } from '../StateEngine.ts';
-import { encounters } from '../../../state.ts';
+import { fightOf } from '../../../state.ts';
 import { rollDice, fmtMod } from '../../dice.ts';
 import { applyDamageToCreature, applyDamageToPlayer, grantTempHpToPlayer } from '../../runtime/damage.ts';
 import { clearCondition } from '../../runtime/statusEffects.ts';
@@ -124,7 +124,7 @@ export class RecurringDamageHook extends Hook<'beforeTurn' | 'afterTurn'> {
 
   async apply(_ctx: TurnContext, engine: StateEngine): Promise<void> {
     const cid = engine.campaignId;
-    const participant = encounters.get(cid)?.findParticipant(this.ownerId);
+    const participant = fightOf(cid, this.ownerId)?.findParticipant(this.ownerId);
     if (!participant || participant.isDead()) return;
 
     const dice = resolveSpellDamageDice(this.scaling, this.casterLevel, this.slotLevel, this.casterAbilityMod) ?? this.scaling?.base;

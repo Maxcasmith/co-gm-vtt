@@ -1,20 +1,21 @@
 import type { DungeonEntity, EnemyStatBlock } from 'shared';
 import { hasLineOfSight, closedDoorCells, statMod } from 'shared';
 import { randomUUID } from 'crypto';
-import { saveDungeon, saveEncounter, getConfig, readChatLog, listCharacters, getCharacter, readNemeses, readManifest, appendChatLog } from '../storage.ts';
+import { saveDungeon, saveEncounter, getConfig, listCharacters, getCharacter, readNemeses, readManifest } from '../storage.ts';
 import { D20Roll } from '../combat/dice.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
-import { generateEncounterEnemies } from '../session-processor/imagePrompts.ts';
-import { generateEncounterDungeon, toClientDungeon, roomAt } from './index.ts';
+import { generateEncounterEnemies, assignCombatTeams, DEFAULT_ENEMY_SIDE, type CombatSide } from '../session-processor/imagePrompts.ts';
+import { generateEncounterDungeon, toClientDungeon, roomAt, chainClosure } from './index.ts';
 import { templateRoomEntry, type SearchFind } from './narrateEvents.ts';
 import { dungeonEvents } from './events.ts';
-import { Encounter, Team, Participant } from '../domain/encounter.ts';
+import { Encounter, Participant, PLAYERS_TEAM_ID } from '../domain/encounter.ts';
 import { Creature } from '../domain/creature.ts';
-import { logError, logDebug } from '../logger.ts';
-import { io, ROOM, combatState, encounters, tokenPositions, dungeons, microDungeons, withLivePositions, PLAYER_SIGHT_RADIUS, ENEMY_AGGRO_RADIUS, enemiesReady, combatStartedAt } from '../state.ts';
-import { addToTurnOrder, rollPlayerInitiatives, rollEnemyInitiatives } from '../combat/runtime/lifecycle.ts';
+import { logError } from '../logger.ts';
+import { io, campaignRoom, tokenPositions, dungeons, microDungeons, withLivePositions, PLAYER_SIGHT_RADIUS, ENEMY_AGGRO_RADIUS, COMBAT_CHAIN_RADIUS, campaignPlayers, connected, fightOf, registerFight, toFight } from '../state.ts';
+import { addToTurnOrder, rollPlayerInitiatives, rollEnemyInitiatives, resolveFightChains, syncFight } from '../combat/runtime/lifecycle.ts';
 import { checkTrapAt } from '../combat/runtime/traps.ts';
 import { checkQuestChainTriggers } from './questChain.ts';
+import { postChat, readChatContext } from '../partyGroups.ts';
 
 // Live cell positions of every participant currently in the fight — players keyed by name,
 // everyone else (creatures, allies) keyed by id, matching tokenPositions' own convention.
@@ -26,16 +27,18 @@ function combatantPositions(cid: string, encounter: Encounter): { gx: number; gy
 }
 
 // Runs on every player token move while a dungeon is loaded: reveals creatures within sight,
-// fires room_entered the first time a room is stepped into, and either starts combat (not
-// already fighting) or pulls newly-aggro'd creatures into the running fight (already fighting)
-// when one comes within aggro radius of ANY live combatant — not just the player who moved, so a
-// creature lurking near an already-engaged ally or enemy still gets pulled in even though it's
-// out of range of whoever happened to trigger this check.
+// fires room_entered the first time a room is stepped into, merges/joins fights by the chain rule,
+// and either starts a new fight (the mover isn't in one — even if another group is fighting
+// elsewhere) or pulls newly-aggro'd creatures into the mover's own fight when one comes within
+// aggro radius of ANY of its live combatants — not just the player who moved, so a creature lurking
+// near an already-engaged ally or enemy still gets pulled in even though it's out of range of
+// whoever happened to trigger this check.
 export async function checkDungeonProximity(cid: string, gx: number, gy: number, characterName: string): Promise<void> {
   const dungeon = dungeons.get(cid);
   if (!dungeon) return;
-  const inCombat = combatState.get(cid);
-  const encounter = inCombat ? encounters.get(cid) : undefined;
+  // Chain first: stepping within range of a fight joins it, rather than starting a second one beside it.
+  await resolveFightChains(cid);
+  const encounter = fightOf(cid, characterName);
   // The entrance room is the placement safe zone (see placer.ts's isEntranceRoom) — nothing hostile
   // spawns inside it, but a creature can still be placed just past its threshold. Without this, that
   // creature's aggro radius could still reach in and ambush a party that hasn't even left the room
@@ -62,7 +65,7 @@ export async function checkDungeonProximity(cid: string, gx: number, gy: number,
 
   for (const entity of dungeon.entities) {
     if (entity.type !== 'creature') continue;
-    if (encounter?.findParticipant(entity.id)) continue; // already in this fight
+    if (fightOf(cid, entity.id)) continue; // already in a fight — this one or another group's
     // Discovery (fog of war) stays scoped to what the moving player themself can actually see.
     const dist = Math.max(Math.abs(gx - entity.x), Math.abs(gy - entity.y));
     const seen = dist <= PLAYER_SIGHT_RADIUS && hasLineOfSight(dungeon.cells, gx, gy, entity.x, entity.y, blocked);
@@ -80,11 +83,32 @@ export async function checkDungeonProximity(cid: string, gx: number, gy: number,
 
   if (changed) {
     void saveDungeon(cid, dungeon);
-    io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+    io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
   }
   if (!aggro.length) return;
-  if (inCombat) joinReinforcements(cid, aggro);
-  else await startDungeonCombat(cid, aggro);
+  if (encounter) joinReinforcements(cid, encounter, aggro);
+  else await startDungeonCombat(cid, aggro, characterName);
+}
+
+/** LLM side assignment for creatures joining `fight` (see assignCombatTeams), then applied —
+ * they joined on the default side synchronously; this re-homes them once the model answers. */
+async function assignSides(cid: string, fight: Encounter, joining: EnemyStatBlock[], contextFor: string[]): Promise<void> {
+  const joiningIds = new Set(joining.map(sb => sb.id));
+  const existing = fight.teams
+    .filter(t => t.id !== PLAYERS_TEAM_ID)
+    .map(t => ({ side: { id: t.id, name: t.name } as CombatSide, members: t.participants.filter(p => !joiningIds.has(p.id)).map(p => p.name) }))
+    .filter(e => e.members.length);
+  const [config, recent] = await Promise.all([getConfig(), readChatContext(cid, contextFor)]);
+  const adapter = hasFeatureProvider(config, 'encounterGeneration') ? getFeatureProvider(config, 'encounterGeneration') : undefined;
+  const sides = await assignCombatTeams(joining, existing, recent.slice(-6).map(m => `[${m.senderName}]: ${m.text}`).join('\n'), adapter);
+  if (fight.ended) return;
+  for (const [id, side] of Object.entries(sides)) {
+    const p = fight.findParticipant(id);
+    if (p) fight.moveToTeam(p, side);
+  }
+  const sideNames = [...new Set(Object.values(sides).map(sd => sd.name))];
+  if (sideNames.length > 1) console.log(`[combat] sides: ${sideNames.join(' vs ')}`);
+  void saveEncounter(cid, fight);
 }
 
 // Perception/Investigation checks compare against hideDC for undiscovered loot/traps within sight,
@@ -134,7 +158,7 @@ export async function checkDungeonHiddenReveal(cid: string, characterName: strin
 
   if (changed) {
     void saveDungeon(cid, dungeon);
-    io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+    io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
   }
   if (!found.length && !nearbyUncleared) return null;
   return found;
@@ -175,7 +199,7 @@ export async function toggleDoor(cid: string, doorId: string, characterName: str
     console.log(`[dungeon] ${characterName} ${door.doorState === 'open' ? 'opens' : 'closes'} a door`);
   }
   await saveDungeon(cid, dungeon);
-  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
   // Opening a door can put a creature on the other side within sight/aggro range for the first
   // time — without this, it stayed hidden until the opener's next token:move re-ran this scan,
   // reading as the creature "spawning" a beat late rather than being revealed the instant the
@@ -200,7 +224,7 @@ export async function useStairs(cid: string, stairsId: string, characterName: st
   const positions = tokenPositions.get(cid) ?? {};
   positions[characterName] = { gx: target.x, gy: target.y };
   tokenPositions.set(cid, positions);
-  io.to(ROOM).emit('token:moved', { tokenId: characterName, gx: target.x, gy: target.y });
+  io.to(campaignRoom(cid)).emit('token:moved', { tokenId: characterName, gx: target.x, gy: target.y });
   console.log(`[dungeon] ${characterName} takes the stairs`);
   // Handles room-visited/quest-trigger/trap-check/aggro on landing — same post-move checks a
   // normal token:move gets (see socketHandlers/combat.ts), just triggered by a teleport instead.
@@ -224,7 +248,7 @@ export async function unlockDoorNear(cid: string, characterName: string): Promis
   door.doorState = 'open';
   console.log(`[dungeon] ${characterName} narrates a door unlocked`);
   await saveDungeon(cid, dungeon);
-  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
   await checkDungeonProximity(cid, pos.gx, pos.gy, characterName);
 }
 
@@ -242,22 +266,22 @@ export async function resolveLockpickAttempt(cid: string, characterId: string, c
 
   const d20 = new D20Roll().roll();
   const total = d20 + statMod(char.stats.dex);
-  await appendChatLogAndBroadcast(cid, `${characterName} rolls Thieves' Tools (DEX) to pick a lock: ${total}.`);
+  await appendChatLogAndBroadcast(cid, characterName, `${characterName} rolls Thieves' Tools (DEX) to pick a lock: ${total}.`);
 
   const door = dungeon.entities.find(e => e.type === 'door' && e.doorState === 'locked' && feetToEntity(pos, e) <= 5);
   if (!door) {
-    await appendChatLogAndBroadcast(cid, `${characterName} has no locked door within reach.`);
+    await appendChatLogAndBroadcast(cid, characterName, `${characterName} has no locked door within reach.`);
     return;
   }
   if (total < (door.lockpickDC ?? 15)) {
-    await appendChatLogAndBroadcast(cid, `${characterName} fails to pick the lock.`);
+    await appendChatLogAndBroadcast(cid, characterName, `${characterName} fails to pick the lock.`);
     return;
   }
   door.doorState = 'open';
   await saveDungeon(cid, dungeon);
-  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
   await checkDungeonProximity(cid, pos.gx, pos.gy, characterName);
-  await appendChatLogAndBroadcast(cid, `${characterName} picks the lock — the door swings open.`);
+  await appendChatLogAndBroadcast(cid, characterName, `${characterName} picks the lock — the door swings open.`);
 }
 
 // A consumable Trap Disarm Kit's whole job — same DEX-check convention as resolveLockpickAttempt,
@@ -272,38 +296,37 @@ export async function resolveTrapDisarmAttempt(cid: string, characterId: string,
 
   const d20 = new D20Roll().roll();
   const total = d20 + statMod(char.stats.dex);
-  await appendChatLogAndBroadcast(cid, `${characterName} rolls Thieves' Tools (DEX) to disarm a trap: ${total}.`);
+  await appendChatLogAndBroadcast(cid, characterName, `${characterName} rolls Thieves' Tools (DEX) to disarm a trap: ${total}.`);
 
   const trap = dungeon.entities.find(e => e.type === 'trap' && e.discovered && feetToEntity(pos, e) <= 5);
   if (!trap) {
-    await appendChatLogAndBroadcast(cid, `${characterName} has no discovered trap within reach.`);
+    await appendChatLogAndBroadcast(cid, characterName, `${characterName} has no discovered trap within reach.`);
     return;
   }
   if (total < (trap.trap?.disarmDC ?? 13)) {
-    await appendChatLogAndBroadcast(cid, `${characterName} fails to disarm the trap.`);
+    await appendChatLogAndBroadcast(cid, characterName, `${characterName} fails to disarm the trap.`);
     return;
   }
   dungeon.entities = dungeon.entities.filter(e => e.id !== trap.id);
   await saveDungeon(cid, dungeon);
-  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
-  await appendChatLogAndBroadcast(cid, `${characterName} disarms the trap safely.`);
+  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  await appendChatLogAndBroadcast(cid, characterName, `${characterName} disarms the trap safely.`);
 }
 
-async function appendChatLogAndBroadcast(cid: string, text: string): Promise<void> {
-  const msg = { text, senderName: 'System', timestamp: Date.now() };
-  await appendChatLog(cid, msg);
-  io.to(ROOM).emit('chat:message', msg);
+async function appendChatLogAndBroadcast(cid: string, characterName: string, text: string): Promise<void> {
+  await postChat(cid, { text, senderName: 'System', timestamp: Date.now() }, [characterName]);
 }
 
-export async function generateAndBroadcastEnemies(campaignId: string, combatants: string[] = []): Promise<void> {
+/** World-map combat (DM's COMBAT_INIT): generates the enemies for `encounter`, whose players are already in it. */
+export async function generateAndBroadcastEnemies(campaignId: string, encounter: Encounter, combatants: string[] = []): Promise<void> {
   try {
-    io.to(ROOM).emit('encounter:generating');
+    toFight(encounter).emit('encounter:generating');
     const config = await getConfig();
     if (!hasFeatureProvider(config, 'encounterGeneration')) console.warn('[encounter] no combat models configured, using fallback');
     const adapter = getFeatureProvider(config, 'encounterGeneration');
 
     const [messages, characters, nemeses, manifest] = await Promise.all([
-      readChatLog(campaignId),
+      readChatContext(campaignId, encounter.players.map(p => p.id)),
       listCharacters(campaignId),
       readNemeses(campaignId),
       readManifest(campaignId),
@@ -319,18 +342,12 @@ export async function generateAndBroadcastEnemies(campaignId: string, combatants
 
     const statBlocks = await generateEncounterEnemies(messages, characters, adapter, availableNemeses, combatants);
 
-    const encounter = encounters.get(campaignId);
-    if (!encounter) return;
-
-    let enemyTeam = encounter.teams.find(t => t.name === 'Enemies');
-    if (!enemyTeam) {
-      enemyTeam = new Team('enemies', 'Enemies');
-      encounter.addTeam(enemyTeam);
-    }
+    if (encounter.ended) return;
 
     // Assign a fresh UUID per combat slot so duplicate-name enemies have unique IDs
     const uniqueStatBlocks = statBlocks.map(sb => ({ ...sb, id: randomUUID() }));
 
+    const enemyTeam = encounter.team(DEFAULT_ENEMY_SIDE.id, DEFAULT_ENEMY_SIDE.name);
     for (const sb of uniqueStatBlocks) {
       const creature = Creature.from(sb);
       enemyTeam.addParticipant(new Participant({
@@ -338,14 +355,15 @@ export async function generateAndBroadcastEnemies(campaignId: string, combatants
         name: creature.name,
         initiative: 0,
         isPlayer: false,
-        teamId: 'enemies',
+        teamId: DEFAULT_ENEMY_SIDE.id,
         creature,
       }));
     }
+    await assignSides(campaignId, encounter, uniqueStatBlocks, encounter.players.map(p => p.id));
 
     encounter.expectedParticipantCount += uniqueStatBlocks.length;
     await saveEncounter(campaignId, encounter);
-    io.to(ROOM).emit('encounter:ready', uniqueStatBlocks);
+    toFight(encounter).emit('encounter:ready', uniqueStatBlocks);
     console.log('[encounter] ready:', statBlocks.map(e => `${e.name} (CR ${e.cr})`).join(', '));
 
     // World-map combat (no dungeon already loaded — the only case that reaches this function at
@@ -358,17 +376,17 @@ export async function generateAndBroadcastEnemies(campaignId: string, combatants
       dungeons.set(campaignId, dungeon);
       microDungeons.add(campaignId);
       await saveDungeon(campaignId, dungeon);
-      io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(campaignId, dungeon)));
+      io.to(campaignRoom(campaignId)).emit('dungeon:loaded', toClientDungeon(withLivePositions(campaignId, dungeon)));
 
       const positions = tokenPositions.get(campaignId) ?? {};
       for (const entity of dungeon.entities) {
         positions[entity.id] = { gx: entity.x, gy: entity.y };
-        io.to(ROOM).emit('token:moved', { tokenId: entity.id, gx: entity.x, gy: entity.y });
+        io.to(campaignRoom(campaignId)).emit('token:moved', { tokenId: entity.id, gx: entity.x, gy: entity.y });
       }
       tokenPositions.set(campaignId, positions);
     }
 
-    if (combatState.get(campaignId)) rollEnemyInitiatives(campaignId);
+    if (!encounter.ended) rollEnemyInitiatives(campaignId, encounter);
   } catch (err) {
     logError('index:generateAndBroadcastEnemies', err);
   }
@@ -377,25 +395,18 @@ export async function generateAndBroadcastEnemies(campaignId: string, combatants
 // Starts combat straight from dungeon-placed creatures (their stat blocks were already generated
 // at dungeon-gen time) — same shape as combat_init/generateAndBroadcastEnemies, minus the LLM calls
 // and map regeneration, since the dungeon map stays as-is.
-export async function startDungeonCombat(cid: string, triggerEntities: DungeonEntity[]): Promise<void> {
-  if (combatState.get(cid)) return;
-  combatState.set(cid, true);
-  enemiesReady.set(cid, false);
-  combatStartedAt.set(cid, Date.now());
-  encounters.set(cid, Encounter.empty(cid));
-  io.to(ROOM).emit('combat:state', true);
+export async function startDungeonCombat(cid: string, triggerEntities: DungeonEntity[], triggeredBy: string): Promise<void> {
+  if (fightOf(cid, triggeredBy)) return;
+  const fight = Encounter.empty(cid);
+  registerFight(cid, fight);
 
-  void listCharacters(cid).then(chars => rollPlayerInitiatives(cid, chars));
-
-  const encounter = encounters.get(cid)!;
-  const enemyTeam = new Team('enemies', 'Enemies');
-  encounter.addTeam(enemyTeam);
-
+  // Everyone in it is claimed synchronously, before the first await, so a second move racing this
+  // one can't start a parallel fight over the same creatures or players.
   // id = the originating DungeonEntity's id, not a fresh one — keeps the combat participant and the
   // dungeon entity as the same row, so a post-combat victory can trace kills back to remove them.
-  const triggered = triggerEntities.filter((e): e is DungeonEntity & { statBlock: EnemyStatBlock } => !!e.statBlock);
+  const triggered = triggerEntities.filter((e): e is DungeonEntity & { statBlock: EnemyStatBlock } => !!e.statBlock && !fightOf(cid, e.id));
   const uniqueStatBlocks = triggered.map(e => ({ ...e.statBlock, id: e.id }));
-
+  const enemyTeam = fight.team(DEFAULT_ENEMY_SIDE.id, DEFAULT_ENEMY_SIDE.name);
   for (const sb of uniqueStatBlocks) {
     const creature = Creature.from(sb);
     enemyTeam.addParticipant(new Participant({
@@ -403,51 +414,63 @@ export async function startDungeonCombat(cid: string, triggerEntities: DungeonEn
       name: creature.name,
       initiative: 0,
       isPlayer: false,
-      teamId: 'enemies',
+      teamId: DEFAULT_ENEMY_SIDE.id,
       creature,
     }));
   }
+  fight.expectedParticipantCount += uniqueStatBlocks.length;
 
-  encounter.expectedParticipantCount += uniqueStatBlocks.length;
-  await saveEncounter(cid, encounter);
-  io.to(ROOM).emit('encounter:ready', uniqueStatBlocks);
-  console.log('[dungeon] combat triggered:', uniqueStatBlocks.map(e => `${e.name} (CR ${e.cr})`).join(', '));
+  // Not everyone online — whoever triggered it, plus anyone not already fighting who's chained to
+  // them or to the creatures they aggroed (COMBAT_CHAIN_RADIUS + sight). Everyone else joins later
+  // if they close the chain.
+  const livePositions = tokenPositions.get(cid) ?? {};
+  const dungeon = dungeons.get(cid);
+  const seeds = [livePositions[triggeredBy], ...triggered.map(e => ({ gx: e.x, gy: e.y }))].filter((p): p is { gx: number; gy: number } => !!p);
+  const candidates = Object.fromEntries((campaignPlayers.get(cid) ?? []).flatMap(name => {
+    const pos = livePositions[name];
+    return pos && name !== triggeredBy && connected.has(name) && !fightOf(cid, name) ? [[name, pos] as const] : [];
+  }));
+  const fighters = [triggeredBy, ...(dungeon ? chainClosure(dungeon, seeds, candidates, COMBAT_CHAIN_RADIUS) : Object.keys(candidates))];
+  fight.pendingPlayerNames.push(...fighters);
 
-  const positions = tokenPositions.get(cid) ?? {};
   for (const e of triggered) {
-    positions[e.id] = { gx: e.x, gy: e.y };
-    io.to(ROOM).emit('token:moved', { tokenId: e.id, gx: e.x, gy: e.y });
+    livePositions[e.id] = { gx: e.x, gy: e.y };
+    io.to(campaignRoom(cid)).emit('token:moved', { tokenId: e.id, gx: e.x, gy: e.y });
   }
-  tokenPositions.set(cid, positions);
+  tokenPositions.set(cid, livePositions);
+  console.log('[dungeon] combat triggered:', uniqueStatBlocks.map(e => `${e.name} (CR ${e.cr})`).join(', '), '— fighters:', fighters.join(', '));
 
-  rollEnemyInitiatives(cid);
+  const [chars] = await Promise.all([listCharacters(cid), assignSides(cid, fight, uniqueStatBlocks, fighters)]);
+  if (fight.ended) return;
+  await rollPlayerInitiatives(cid, fight, chars, fighters);
+  syncFight(fight);
+  await saveEncounter(cid, fight);
+  rollEnemyInitiatives(cid, fight);
 }
 
 // Mid-fight version of startDungeonCombat: splices newly-aggro'd creatures into the running
 // encounter — rolls initiative, doesn't touch whose turn it currently is (addToTurnOrder re-anchors
 // the current actor), and re-broadcasts the full enemy list so their tokens render.
-export function joinReinforcements(cid: string, triggerEntities: DungeonEntity[]): void {
-  const encounter = encounters.get(cid);
-  if (!encounter) { logDebug('joinReinforcements BLOCKED — no live encounter'); return; }
+export function joinReinforcements(cid: string, encounter: Encounter, triggerEntities: DungeonEntity[]): void {
+  const joined = triggerEntities.filter((e): e is DungeonEntity & { statBlock: EnemyStatBlock } => !!e.statBlock && !fightOf(cid, e.id));
+  const statBlocks = joined.map(e => ({ ...e.statBlock, id: e.id }));
+  const entries = statBlocks.map(sb => encounter.spawnEnemy(sb));
 
-  const joined = triggerEntities.filter((e): e is DungeonEntity & { statBlock: EnemyStatBlock } => !!e.statBlock);
-  const entries = joined.map(e => encounter.spawnEnemy({ ...e.statBlock, id: e.id }));
+  addToTurnOrder(cid, encounter, entries);
+  // Sides settle a beat later — a newcomer may belong to a side already fighting here, or to a rival one.
+  void assignSides(cid, encounter, statBlocks, encounter.players.map(p => p.id));
 
-  addToTurnOrder(cid, entries);
-
-  io.to(ROOM).emit('encounter:ready', encounter.enemies.filter(p => p.creature).map(p => p.creature!.toStatBlock()));
+  toFight(encounter).emit('encounter:ready', encounter.enemies.filter(p => p.creature).map(p => p.creature!.toStatBlock()));
 
   const positions = tokenPositions.get(cid) ?? {};
   for (const e of joined) {
     positions[e.id] = { gx: e.x, gy: e.y };
-    io.to(ROOM).emit('token:moved', { tokenId: e.id, gx: e.x, gy: e.y });
+    io.to(campaignRoom(cid)).emit('token:moved', { tokenId: e.id, gx: e.x, gy: e.y });
   }
   tokenPositions.set(cid, positions);
 
-  for (const name of joined.map(e => e.name)) {
-    const joinMsg = { text: `${name} joins the fight!`, senderName: 'Combat', timestamp: Date.now() };
-    io.to(ROOM).emit('chat:message', joinMsg);
-    void appendChatLog(cid, joinMsg);
+  for (const e of joined) {
+    void postChat(cid, { text: `${e.name} joins the fight!`, senderName: 'Combat', timestamp: Date.now() }, [e.id]);
   }
 }
 
@@ -458,12 +481,10 @@ export function joinReinforcements(cid: string, triggerEntities: DungeonEntity[]
 // rather than posting filler. room.visited (set in checkDungeonProximity) is what keeps this to
 // once per room. senderName is 'Virtual DM' so the line lands as an assistant turn in the LLM's
 // chat history rather than being replayed back to it as if a player had said it.
-dungeonEvents.on('room_entered', ({ cid, room }) => {
+dungeonEvents.on('room_entered', ({ cid, room, characterName }) => {
   const dungeon = dungeons.get(cid);
   if (!dungeon) return;
   const text = templateRoomEntry(dungeon, room);
   if (!text) return;
-  const msg = { text, senderName: 'Virtual DM', timestamp: Date.now() };
-  io.to(ROOM).emit('chat:message', msg);
-  void appendChatLog(cid, msg);
+  void postChat(cid, { text, senderName: 'Virtual DM', timestamp: Date.now() }, [characterName]);
 });

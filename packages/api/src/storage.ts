@@ -1,6 +1,6 @@
 import path from 'path';
 import { randomUUID } from 'crypto';
-import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, NotePayload, BattleMap, WorldState, WorldActor, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord, CharacterStoryboard, ScenarioStoryboard, StoryboardTestRecord, HouseRules, PlotHook, ActivePlotArc, Goal, GenreTileMap } from 'shared';
+import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, NotePayload, BattleMap, WorldState, WorldActor, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord, CharacterStoryboard, ScenarioStoryboard, StoryboardTestRecord, HouseRules, PlotHook, ActivePlotArc, Goal, GenreTileMap, PartyGroups } from 'shared';
 import { DEFAULT_HOUSE_RULES } from 'shared';
 import { Encounter } from './domain/encounter.ts';
 import { renderDungeonAscii } from './dungeon/index.ts';
@@ -318,25 +318,34 @@ export async function listMaps(slug: string): Promise<BattleMap[]> {
   }
 }
 
+// One file per fight (encounters/<id>.json) — a campaign can have several running at once.
 export async function saveEncounter(slug: string, encounter: Encounter): Promise<void> {
-  await writeCampaignFile(slug, 'encounter.json', JSON.stringify(encounter.toJSON(), null, 2));
+  await writeCampaignFile(slug, `encounters/${encounter.id}.json`, JSON.stringify(encounter.toJSON(), null, 2));
 }
 
-export async function loadEncounter(slug: string): Promise<Encounter | null> {
+/** Every fight saved for the campaign, plus a legacy single encounter.json (pre-Party-Groups saves) if it still holds enemies. */
+export async function loadEncounters(slug: string): Promise<Encounter[]> {
+  const out: Encounter[] = [];
   try {
-    const raw = await getTextStore().get(path.join(campaignDir(slug), 'encounter.json'));
-    return raw === null ? null : Encounter.fromJSON(JSON.parse(raw));
-  } catch (err) {
-    logError('storage:loadEncounter', err);
-    return null;
-  }
-}
-
-export async function clearEncounter(slug: string): Promise<void> {
-  try {
-    if (await getTextStore().exists(path.join(campaignDir(slug), 'encounter.json'))) {
-      await getTextStore().put(path.join(campaignDir(slug), 'encounter.json'), JSON.stringify({ enemies: [] }));
+    const dir = path.join(campaignDir(slug), 'encounters');
+    for (const name of await getTextStore().list(dir)) {
+      const raw = await getTextStore().get(path.join(dir, name));
+      if (raw !== null) out.push(Encounter.fromJSON(JSON.parse(raw)));
     }
+    const legacy = await getTextStore().get(path.join(campaignDir(slug), 'encounter.json'));
+    if (legacy !== null) out.push(Encounter.fromJSON(JSON.parse(legacy)));
+  } catch (err) {
+    logError('storage:loadEncounters', err);
+  }
+  return out;
+}
+
+export async function clearEncounter(slug: string, encounter: Encounter): Promise<void> {
+  try {
+    const key = path.join(campaignDir(slug), 'encounters', `${encounter.id}.json`);
+    if (await getTextStore().exists(key)) await getTextStore().delete(key);
+    const legacy = path.join(campaignDir(slug), 'encounter.json');
+    if (await getTextStore().exists(legacy)) await getTextStore().delete(legacy);
   } catch (err) { logError('storage:clearEncounter', err); }
 }
 
@@ -468,6 +477,17 @@ export async function readNemeses(slug: string): Promise<NemesisRecord[]> {
 
 export async function writeNemeses(slug: string, records: NemesisRecord[]): Promise<void> {
   await writeCampaignFile(slug, 'nemeses.json', JSON.stringify(records, null, 2));
+}
+
+export async function readPartyGroups(slug: string): Promise<PartyGroups | null> {
+  try {
+    const raw = await getTextStore().get(path.join(campaignDir(slug), 'groups.json'));
+    return raw === null ? null : (JSON.parse(raw) as PartyGroups);
+  } catch (err) { logError('storage:readPartyGroups', err); return null; }
+}
+
+export async function writePartyGroups(slug: string, groups: PartyGroups): Promise<void> {
+  await writeCampaignFile(slug, 'groups.json', JSON.stringify(groups, null, 2));
 }
 
 export async function readQuests(slug: string): Promise<Quest[]> {

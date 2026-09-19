@@ -1,7 +1,7 @@
 import type { AttackContext, Spell, HookSpec } from 'shared';
 import { Hook, type HookProps } from '../Hook.ts';
 import type { StateEngine } from '../StateEngine.ts';
-import { encounters } from '../../../state.ts';
+import { fightOf } from '../../../state.ts';
 import { getCharacter } from '../../../storage.ts';
 import { offerReaction } from '../reactionPrompt.ts';
 import { trySpendSpellSlot } from '../../runtime/resources.ts';
@@ -38,7 +38,7 @@ export class ReactionOfferHook extends Hook<'afterAttackRoll'> {
 
   async apply(ctx: AttackContext, engine: StateEngine): Promise<void> {
     const cid = engine.campaignId;
-    const participant = encounters.get(cid)?.findParticipant(this.ownerId);
+    const participant = fightOf(cid, this.ownerId)?.findParticipant(this.ownerId);
     if (!participant?.hasResource('reaction')) return;
     if (engine.hasHookOwnedBy(this.ownerId, 'reactionLock')) return;
 
@@ -75,17 +75,17 @@ export class ReactionOfferHook extends Hook<'afterAttackRoll'> {
 
     // Re-check after the await — the player spent the whole window deciding, and anything could
     // have changed in it (another reaction resolved, the fight ended, the last slot went).
-    if (!encounters.get(cid) || !participant.hasResource('reaction')) return;
+    if (!fightOf(cid, this.ownerId) || !participant.hasResource('reaction')) return;
     if (!(await trySpendSpellSlot(cid, this.ownerId, char, chosen.spell.level))) return;
     participant.trySpend('reaction');
-    emitResources(participant);
+    emitResources(cid, participant);
 
     await registerSpellHooks(engine, chosen.spell.combat?.hooks ?? [], chosen.spell.name, {
       ownerId: this.ownerId,
       casterId: this.ownerId,
       casterLevel: char.level ?? 1,
       slotLevel: chosen.spell.level,
-      currentRound: encounters.get(cid)?.currentRound?.number ?? 1,
+      currentRound: fightOf(cid, this.ownerId)?.currentRound?.number ?? 1,
     });
 
     // Shield protects against the attack that triggered it, but the hook just registered only

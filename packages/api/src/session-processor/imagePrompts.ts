@@ -979,3 +979,63 @@ PRIORITIES
 2. Palette, terrain, and iconography faithfully reflect the campaign tags and world context above
 3. Rich, cohesive, hand-drawn cartography aesthetic with no empty/dead space`;
 }
+
+export interface CombatSide { id: string; name: string }
+
+/** The generic side, used when there's nothing to judge (one creature, no provider, a bad reply). */
+export const DEFAULT_ENEMY_SIDE: CombatSide = { id: 'enemies', name: 'Enemies' };
+
+const sideFor = (name: string): CombatSide => {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'enemies';
+  // 'players' is reserved for the party's own side.
+  return { id: slug === 'players' ? 'creature-players' : slug, name };
+};
+
+/**
+ * Groups creatures joining a fight into sides by how likely they are to fight each other —
+ * creatures that would cooperate share a side, rivals (two factions, predator and prey, a guard and
+ * the thieves it's hunting) get different ones. Every different side is hostile to every other,
+ * the party included. `existing` are sides already in the fight (reinforcements, a merge) — a
+ * newcomer can join one. Returns creature id → side; anyone the model skips gets the first side.
+ */
+export async function assignCombatTeams(
+  creatures: EnemyStatBlock[],
+  existing: { side: CombatSide; members: string[] }[],
+  context: string,
+  adapter: StoryProviderAdapter | undefined,
+): Promise<Record<string, CombatSide>> {
+  const fallback = existing[0]?.side ?? DEFAULT_ENEMY_SIDE;
+  const everyone = (side: CombatSide) => Object.fromEntries(creatures.map(c => [c.id, side]));
+  if (!adapter || (creatures.length + existing.reduce((n, e) => n + e.members.length, 0)) < 2) return everyone(fallback);
+
+  const describe = (c: EnemyStatBlock) => `- ${c.id}: ${c.name}${c.creatureType ? ` (${c.creatureType}${c.role ? `, ${c.role}` : ''})` : ''}`;
+  const existingBlock = existing.length
+    ? `Sides already in this fight:\n${existing.map(e => `- "${e.side.name}": ${e.members.join(', ')}`).join('\n')}\nA newcomer that belongs with one of these must use that side's exact name.\n`
+    : '';
+  const result = await llmJson<{ assignments?: { id: string; side: string }[] }>([
+    {
+      role: 'system',
+      content: `You are a D&D 5e DM deciding who fights whom as creatures enter combat. The player party is always its own side — do not include it.
+Group the creatures below into sides. Creatures that would cooperate or share an allegiance go on the SAME side. Creatures that would plausibly attack each other — rival factions, predator and prey, a guard and the thieves it is hunting, a monster indifferent to everyone — go on DIFFERENT sides. Most encounters are a single side; only split them when the fiction clearly supports it.
+
+${existingBlock}Creatures joining now:
+${creatures.map(describe).join('\n')}
+
+Recent scene:
+${context || '(none)'}
+
+Respond with JSON only: {"assignments":[{"id":"<creature id>","side":"<short side name, e.g. The Thieves' Guild>"}]}`,
+    },
+  ], adapter);
+
+  const bySide = new Map(existing.map(e => [e.side.name.toLowerCase(), e.side]));
+  const out = everyone(fallback);
+  for (const a of result?.assignments ?? []) {
+    if (!(a.id in out) || !a.side?.trim()) continue;
+    const key = a.side.trim().toLowerCase();
+    const side = bySide.get(key) ?? sideFor(a.side.trim());
+    bySide.set(key, side);
+    out[a.id] = side;
+  }
+  return out;
+}

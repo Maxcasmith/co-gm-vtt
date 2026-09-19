@@ -1,13 +1,14 @@
 import type { Condition as ConditionName, ActiveCondition } from 'shared';
-import { getCharacter, updateCharacter, appendChatLog, saveEncounter } from '../../storage.ts';
+import { getCharacter, updateCharacter, saveEncounter } from '../../storage.ts';
 import { logDebug } from '../../logger.ts';
-import { io, ROOM, encounters, getStateEngine } from '../../state.ts';
+import { io, campaignRoom, fightOf, getStateEngine } from '../../state.ts';
 import { addCondition, removeCondition } from '../conditions/rollModeFor.ts';
 import type { SanctuaryWardHook } from '../stateEngine/hooks/SanctuaryWardHook.ts';
 import type { ConditionImmunityHook } from '../stateEngine/hooks/ConditionImmunityHook.ts';
 import { breakConcentration } from './concentration.ts';
 import { canMove } from './movement.ts';
 import { rollSavingThrow } from './rolls.ts';
+import { postChat } from '../../partyGroups.ts';
 
 /**
  * Resolves targetId to whoever holds its live conditions array — a creature or player mid-combat
@@ -19,7 +20,7 @@ export async function conditionsHolder(cid: string, targetId: string): Promise<
   | { label: string; conditions: ActiveCondition[] | undefined; write: (c: ActiveCondition[]) => void }
   | undefined
 > {
-  const encounter = encounters.get(cid);
+  const encounter = fightOf(cid, targetId);
   const participant = encounter?.findParticipant(targetId);
 
   if (participant?.creature) {
@@ -48,7 +49,7 @@ async function setCondition(
   if (!holder) return undefined;
   const conditions = fn(holder.conditions, name);
   holder.write(conditions);
-  io.to(ROOM).emit('character:condition:update', { targetId, conditions });
+  io.to(campaignRoom(cid)).emit('character:condition:update', { targetId, conditions });
   return holder.label;
 }
 
@@ -61,8 +62,7 @@ export async function applyCondition(cid: string, targetId: string, name: Condit
   if (!label) return;
   console.log(`[condition] ${label} gains ${name}`);
   const msg = { text: `${label} is now ${name}.`, senderName: 'System', timestamp: Date.now() };
-  void appendChatLog(cid, msg);
-  io.to(ROOM).emit('chat:message', msg);
+  void postChat(cid, msg, [targetId]);
   // 5e: incapacitated ends concentration outright, no save.
   if (name === 'Incapacitated') await breakConcentration(cid, targetId);
 }
@@ -75,8 +75,7 @@ export async function clearCondition(cid: string, targetId: string, name: Condit
   if (!label) return;
   console.log(`[condition] ${label} loses ${name}`);
   const msg = { text: `${label} is no longer ${name}.`, senderName: 'System', timestamp: Date.now() };
-  void appendChatLog(cid, msg);
-  io.to(ROOM).emit('chat:message', msg);
+  void postChat(cid, msg, [targetId]);
 }
 
 /**
@@ -104,10 +103,9 @@ export async function breakSanctuaryOn(cid: string, actorId: string): Promise<vo
   const ward = engine.getHooksOwnedBy(actorId, 'sanctuaryWard')[0];
   if (!ward) return;
   engine.unregister(ward.id);
-  const label = encounters.get(cid)?.findParticipant(actorId)?.name ?? actorId;
+  const label = fightOf(cid, actorId)?.findParticipant(actorId)?.name ?? actorId;
   console.log(`[sanctuary] ${label}'s Sanctuary ends — they acted`);
   const msg = { text: `${label}'s Sanctuary ends.`, senderName: 'System', timestamp: Date.now() };
-  void appendChatLog(cid, msg);
-  io.to(ROOM).emit('chat:message', msg);
+  void postChat(cid, msg, [actorId]);
 }
 

@@ -1,11 +1,11 @@
 import type { CharacterStats } from 'shared';
 import { Weapon as WeaponClass, statMod } from 'shared';
-import { appendChatLog, listCharacters, getConfig, readChatLog } from '../storage.ts';
+import { listCharacters, getConfig } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { resolveImprovisedAction, generateCombatFlavour } from '../session-processor/imagePrompts.ts';
 import { handleAdminCommand } from '../effects.ts';
 import { logError } from '../logger.ts';
-import { io, ROOM, combatState, encounters, dungeons, tokenPositions } from '../state.ts';
+import { fightOf, dungeons, tokenPositions } from '../state.ts';
 import { D20Roll, rollDice, fmtMod, resolveHit } from '../combat/dice.ts';
 import { applyDamageToCreature, applyDamageToPlayer } from '../combat/runtime/damage.ts';
 import { rollSavingThrow } from '../combat/runtime/rolls.ts';
@@ -13,10 +13,11 @@ import { resolvePlayerItemUse } from './inventory.ts';
 import { participantsNearPoint, trySpendAction } from './combat.ts';
 import { nearbyObjects, roomAt } from '../dungeon/index.ts';
 import { dispatchDMResponse } from '../session.ts';
+import { postChat, audienceTracks, toTracks, readChatContext } from '../partyGroups.ts';
 import type { JoinContext } from './context.ts';
 
 export function registerChatHandlers(ctx: JoinContext): void {
-  const { socket, charId, campaignId } = ctx;
+  const { socket, player, charId, campaignId } = ctx;
 
   socket.on('chat:message', ({ text, senderName }) => {
     if (text.startsWith('/admin ')) {
@@ -25,22 +26,21 @@ export function registerChatHandlers(ctx: JoinContext): void {
     }
 
     void (async () => {
-      const payload = { text, senderName, timestamp: Date.now() };
-      await appendChatLog(campaignId, payload);
-      io.to(ROOM).emit('chat:message', payload);
+      await postChat(campaignId, { text, senderName, timestamp: Date.now() }, [player]);
 
-      if (combatState.get(campaignId)) {
-        const encounter = encounters.get(campaignId);
-        const currentActor = encounter?.currentActor;
+      const encounter = fightOf(campaignId, player);
+      if (encounter) {
+        const currentActor = encounter.currentActor;
         if (currentActor?.name === senderName && currentActor.isPlayer) {
           void (async () => {
-            io.to(ROOM).emit('dm:thinking', true);
+            const to = await toTracks(campaignId, await audienceTracks(campaignId, [player]));
+            to.emit('dm:thinking', true);
             try {
               const config = await getConfig();
               if (!hasFeatureProvider(config, 'improvisedResolution')) return;
-              const recent = (await readChatLog(campaignId)).slice(-10).map(m => `[${m.senderName}]: ${m.text}`).join('\n');
+              const recent = (await readChatContext(campaignId, [player])).slice(-10).map(m => `[${m.senderName}]: ${m.text}`).join('\n');
               const char = await listCharacters(campaignId).then(cs => cs.find(c => c.name === senderName));
-              const enemies = encounter!.enemies
+              const enemies = encounter.enemies
                 .filter(p => p.creature && !p.creature.isDead())
                 .map(p => p.creature!.toStatBlock());
 
@@ -72,8 +72,7 @@ export function registerChatHandlers(ctx: JoinContext): void {
               if (result.type !== 'question' && char && !trySpendAction(campaignId, char.id, 'action')) return;
 
               const dmMsg = { text: result.answer, senderName: 'Virtual DM', timestamp: Date.now() };
-              await appendChatLog(campaignId, dmMsg);
-              io.to(ROOM).emit('chat:message', dmMsg);
+              await postChat(campaignId, dmMsg, [player]);
 
               if (result.type === 'attack' && result.dc && result.damageFormula && result.targetId && char) {
                 const statKey = (result.stat ?? 'str') as keyof CharacterStats;
@@ -85,8 +84,7 @@ export function registerChatHandlers(ctx: JoinContext): void {
                 const dmgRoll = hit ? (isCrit ? rollDice(result.damageFormula) + rollDice(result.damageFormula) : rollDice(result.damageFormula)) : undefined;
 
                 const rollMsg = { text: `${senderName} rolls ${result.stat?.toUpperCase() ?? 'STR'}: ${roll}${fmtMod(mod)} = ${total} vs DC ${result.dc} — ${hit ? `HIT! ${dmgRoll} ${result.damageType ?? ''} damage` : 'MISS'}.`, senderName: 'System', timestamp: Date.now() };
-                await appendChatLog(campaignId, rollMsg);
-                io.to(ROOM).emit('chat:message', rollMsg);
+                await postChat(campaignId, rollMsg, [player]);
 
                 if (hit && dmgRoll) {
                   void applyDamageToCreature(campaignId, result.targetId, dmgRoll, { isCrit });
@@ -120,15 +118,14 @@ export function registerChatHandlers(ctx: JoinContext): void {
                   isCrit,
                   damage: dmgRoll,
                   damageFormula: result.damageFormula,
-                  remainingHp: encounter!.findCreature(result.targetId)?.currentHp,
-                  targetDead: encounter!.findCreature(result.targetId)?.isDead() ?? false,
+                  remainingHp: encounter.findCreature(result.targetId)?.currentHp,
+                  targetDead: encounter.findCreature(result.targetId)?.isDead() ?? false,
                 };
                 if (hasFeatureProvider(config, 'combatNarration')) {
                   const flavour = await generateCombatFlavour(atkResult, getFeatureProvider(config, 'combatNarration'), text);
                   if (flavour) {
                     const flavourMsg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
-                    await appendChatLog(campaignId, flavourMsg);
-                    io.to(ROOM).emit('chat:message', flavourMsg);
+                    await postChat(campaignId, flavourMsg, [player]);
                   }
                 }
               } else if (result.type === 'use_item' && char) {
@@ -137,8 +134,7 @@ export function registerChatHandlers(ctx: JoinContext): void {
                   await resolvePlayerItemUse(campaignId, { characterId: char.id, characterName: senderName, itemId: item.id });
                 } else {
                   const rejectMsg = { text: `${senderName} has no such item to use.`, senderName: 'System', timestamp: Date.now() };
-                  await appendChatLog(campaignId, rejectMsg);
-                  io.to(ROOM).emit('chat:message', rejectMsg);
+                  await postChat(campaignId, rejectMsg, [player]);
                 }
               } else if (result.type === 'aoe_damage' && char && result.damageFormula && result.radiusFt) {
                 const matchedObject = result.originObjectId ? objects.find(o => o.id === result.originObjectId) : undefined;
@@ -153,13 +149,12 @@ export function registerChatHandlers(ctx: JoinContext): void {
 
                 if (!origin) {
                   const rejectMsg = { text: `${senderName} finds nothing there to target.`, senderName: 'System', timestamp: Date.now() };
-                  await appendChatLog(campaignId, rejectMsg);
-                  io.to(ROOM).emit('chat:message', rejectMsg);
+                  await postChat(campaignId, rejectMsg, [player]);
                 } else {
                   const saveAbility = result.saveAbility ?? 'dex';
                   const dc = result.dc ?? 13;
-                  for (const targetId of participantsNearPoint(campaignId, origin.gx, origin.gy, result.radiusFt)) {
-                    const participant = encounter!.findParticipant(targetId);
+                  for (const targetId of participantsNearPoint(campaignId, encounter, origin.gx, origin.gy, result.radiusFt)) {
+                    const participant = encounter.findParticipant(targetId);
                     if (!participant) continue;
 
                     const { saved, total } = await rollSavingThrow(campaignId, targetId, saveAbility, dc);
@@ -173,19 +168,18 @@ export function registerChatHandlers(ctx: JoinContext): void {
                       text: `${participant.name} rolls ${saveAbility.toUpperCase()} save: ${total} vs DC ${dc} — ${saved ? 'SAVED' : 'FAILS'}, takes ${damage} ${result.damageType ?? ''} damage.`,
                       senderName: 'System', timestamp: Date.now(),
                     };
-                    await appendChatLog(campaignId, saveMsg);
-                    io.to(ROOM).emit('chat:message', saveMsg);
+                    await postChat(campaignId, saveMsg, [player]);
                   }
                 }
               }
             } catch (err) { logError('index:improvisedAction', err); }
-            finally { io.to(ROOM).emit('dm:thinking', false); }
+            finally { to.emit('dm:thinking', false); }
           })();
           return;
         }
       }
 
-      dispatchDMResponse(campaignId);
+      dispatchDMResponse(campaignId, [player]);
     })();
   });
 }

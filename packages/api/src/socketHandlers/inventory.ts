@@ -1,7 +1,7 @@
 import { isWeapon, isArmor, effectiveWeaponProfs, effectiveArmorTraining, characterLightRangeFt } from 'shared';
 import type { Manoeuvre } from 'shared';
 import { getCharacter, updateCharacter } from '../storage.ts';
-import { io, ROOM, playerSocketIds, encounters } from '../state.ts';
+import { io, campaignRoom, playerSocketIds, fightOf } from '../state.ts';
 import { rollDice, calcMaxHp } from '../combat/dice.ts';
 import { setLightSourceFor } from '../combat/runtime/environment.ts';
 import { resolveLockpickAttempt, resolveTrapDisarmAttempt } from '../dungeon/runtime.ts';
@@ -42,9 +42,9 @@ export async function resolvePlayerItemUse(
     const healAmount = rollDice(healDice);
     const currentHp = Math.min(maxHp, (char.currentHp ?? maxHp) + healAmount);
     await updateCharacter(campaignId, characterId, c => ({ ...c, currentHp, maxHp }));
-    const participant = encounters.get(campaignId)?.findParticipant(characterId);
+    const participant = fightOf(campaignId, characterId)?.findParticipant(characterId);
     if (participant) { participant.maxHp = maxHp; participant.heal(healAmount); }
-    io.to(ROOM).emit('consumable:heal:result', { characterId, characterName, healAmount, currentHp, maxHp });
+    io.to(campaignRoom(campaignId)).emit('consumable:heal:result', { characterId, characterName, healAmount, currentHp, maxHp });
   }
 }
 
@@ -99,7 +99,7 @@ export function registerInventoryHandlers(ctx: JoinContext): void {
       const finalEquipment = Object.fromEntries(Object.entries({ ...char.equipment, ...updates }).filter(([, v]) => v !== undefined));
       await updateCharacter(campaignId, characterId, c => ({ ...c, equipment: finalEquipment }));
       for (const [s, id] of Object.entries(updates)) {
-        io.to(ROOM).emit('character:equipment:update', { characterId, slot: s as typeof slot, itemId: id ?? null });
+        io.to(campaignRoom(campaignId)).emit('character:equipment:update', { characterId, slot: s as typeof slot, itemId: id ?? null });
       }
       setLightSourceFor(campaignId, char.name, characterLightRangeFt({ ...char, equipment: finalEquipment }));
     })();
@@ -133,7 +133,7 @@ export function registerInventoryHandlers(ctx: JoinContext): void {
       const sid = playerSocketIds.get(characterId);
       if (sid) io.to(sid).emit('character:tactics:update', { characterId, tactics, aiControlled });
       // Unlike tactics (private), aiControlled needs to reach every client so the party roster's pip/offline styling stays live.
-      io.to(ROOM).emit('character:aiControlled:update', { characterId, aiControlled });
+      io.to(campaignRoom(campaignId)).emit('character:aiControlled:update', { characterId, aiControlled });
     })();
   });
 
@@ -152,13 +152,13 @@ export function registerInventoryHandlers(ctx: JoinContext): void {
 
       await updateCharacter(campaignId, characterId, c => ({ ...c, currentHp, maxHp }));
 
-      const participant = encounters.get(campaignId)?.findParticipant(characterId);
+      const participant = fightOf(campaignId, characterId)?.findParticipant(characterId);
       if (participant) {
         participant.maxHp = maxHp;
         participant.heal(healAmount);
       }
 
-      io.to(ROOM).emit('consumable:heal:result', { characterId, characterName, healAmount, currentHp, maxHp });
+      io.to(campaignRoom(campaignId)).emit('consumable:heal:result', { characterId, characterName, healAmount, currentHp, maxHp });
     })();
   });
 

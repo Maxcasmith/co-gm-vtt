@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Fragment, useEffect, useRef, useState } from 'react';
 import type { Character, CheckRequest } from 'shared';
 import { hasOriginFeat, resourceCurrent } from 'shared';
 import type { ChatMessageReceivedPayload } from './events.ts';
 import { on, dispatch } from './events.ts';
 import { SKILLS } from './character-creation/srd.ts';
 import { Button } from './components/Button/Button.tsx';
+import SplitBlock from './SplitBlock.tsx';
 
 const SAVE_STAT: Record<string, string> = {
   strength: 'STR', str: 'STR',
@@ -24,6 +25,25 @@ function reqStat(req: CheckRequest): string {
   return SAVE_STAT[req.skill.toLowerCase()] ?? req.skill.slice(0, 3).toUpperCase();
 }
 
+type LogEntry = { msg: ChatMessageReceivedPayload; index: number };
+type LogSegment = { kind: 'msg'; entry: LogEntry } | { kind: 'split'; splitId: string; entries: LogEntry[] };
+
+// Untagged messages render one by one; every message from the same split collects into a single
+// segment placed where that split's first message fell.
+function logSegments(messages: ChatMessageReceivedPayload[]): LogSegment[] {
+  const segments: LogSegment[] = [];
+  const bySplit = new Map<string, LogEntry[]>();
+  messages.forEach((msg, index) => {
+    if (!msg.splitId) { segments.push({ kind: 'msg', entry: { msg, index } }); return; }
+    const existing = bySplit.get(msg.splitId);
+    if (existing) { existing.push({ msg, index }); return; }
+    const entries = [{ msg, index }];
+    bySplit.set(msg.splitId, entries);
+    segments.push({ kind: 'split', splitId: msg.splitId, entries });
+  });
+  return segments;
+}
+
 interface Props {
   open: boolean;
   variant?: 'full' | 'side';
@@ -31,6 +51,8 @@ interface Props {
   character: Character;
   sessionActive: boolean;
   dmThinking: boolean;
+  /** The live Party Groups split, if any — its block renders expanded. */
+  liveSplitId?: string | undefined;
 }
 
 function formatSender(name: string): React.ReactNode {
@@ -39,7 +61,7 @@ function formatSender(name: string): React.ReactNode {
   return <>{match[1]} <span className="vdm-tag">(Virtual DM)</span></>;
 }
 
-export default function JournalOverlay({ open, variant = 'full', onClose, character, sessionActive, dmThinking }: Props) {
+export default function JournalOverlay({ open, variant = 'full', onClose, character, sessionActive, dmThinking, liveSplitId }: Props) {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -59,6 +81,7 @@ export default function JournalOverlay({ open, variant = 'full', onClose, charac
       setMessages(prev => [...prev, msg]);
     });
   }, []);
+  useEffect(() => on('vtt:chat:history', setMessages), []);
 
   useEffect(() => on('vtt:roll:result', result => {
     setRollingKeys(prev => {
@@ -128,6 +151,80 @@ export default function JournalOverlay({ open, variant = 'full', onClose, charac
     else dispatch('vtt:roll:save', base);
   }
 
+  function renderMessage(msg: ChatMessageReceivedPayload, i: number) {
+    const myRequests = (msg.checkRequests ?? []).filter(r => r.player === character.name);
+    return (
+      <div className={`journal-msg${msg.variant === 'recap' ? ' journal-msg--recap' : msg.senderName === 'System' ? ' journal-msg--system' : ''}`}>
+        <div className="journal-msg-header">
+          <span className="journal-msg-sender">{formatSender(msg.senderName)}</span>
+          <span className="journal-msg-time">
+            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          <Button
+            variant="ghost"
+            className="journal-roll-btn journal-pin-btn"
+            onClick={() => pinMessage(`${msg.timestamp}:${i}`, msg)}
+            disabled={pinnedKeys.has(`${msg.timestamp}:${i}`)}
+          >
+            {pinnedKeys.has(`${msg.timestamp}:${i}`) ? 'Pinned' : 'Pin'}
+          </Button>
+        </div>
+        <div className="journal-msg-text">{msg.text}</div>
+        {myRequests.length > 0 && (
+          <div className="journal-roll-requests">
+            {myRequests.map(req => {
+              const key = reqKey(msg.timestamp, req);
+              if (doneKeys.has(key)) return null;
+              const rolling = rollingKeys.has(key);
+              const luckPoints = hasOriginFeat(character, 'Lucky') ? resourceCurrent(character, 'luckPoints') : 0;
+              const luckArmed = luckKeys.has(key);
+              return (
+                <span key={key} className="journal-roll-request">
+                  <Button
+                    variant="ghost"
+                    className="journal-roll-btn"
+                    disabled={rolling}
+                    onClick={() => rollRequest(msg.timestamp, req)}
+                  >
+                    {rolling ? 'Rolling…' : `Roll ${req.skill} ${req.type === 'save' ? 'Save' : 'Check'}`}
+                  </Button>
+                  {luckPoints > 0 && !rolling && (
+                    <Button
+                      variant="ghost"
+                      className={`journal-luck-toggle${luckArmed ? ' journal-luck-toggle--active' : ''}`}
+                      title="Spend a Luck Point on this roll for Advantage"
+                      onClick={() => setLuckKeys(prev => {
+                        const next = new Set(prev);
+                        if (next.has(key)) next.delete(key); else next.add(key);
+                        return next;
+                      })}
+                    >
+                      Luck ({luckPoints})
+                    </Button>
+                  )}
+                  {character.heroicInspiration && !rolling && (
+                    <Button
+                      variant="ghost"
+                      className={`journal-luck-toggle${inspirationKeys.has(key) ? ' journal-luck-toggle--active' : ''}`}
+                      title="Spend Heroic Inspiration on this roll for Advantage"
+                      onClick={() => setInspirationKeys(prev => {
+                        const next = new Set(prev);
+                        if (next.has(key)) next.delete(key); else next.add(key);
+                        return next;
+                      })}
+                    >
+                      Inspiration
+                    </Button>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (variant === 'full' && !open) return null;
 
   return (
@@ -145,79 +242,9 @@ export default function JournalOverlay({ open, variant = 'full', onClose, charac
               <p className="journal-empty-hint">Roll a die or say something to begin the record.</p>
             </div>
           ) : (
-            messages.map((msg, i) => {
-              const myRequests = (msg.checkRequests ?? []).filter(r => r.player === character.name);
-              return (
-                <div key={i} className={`journal-msg${msg.variant === 'recap' ? ' journal-msg--recap' : msg.senderName === 'System' ? ' journal-msg--system' : ''}`}>
-                  <div className="journal-msg-header">
-                    <span className="journal-msg-sender">{formatSender(msg.senderName)}</span>
-                    <span className="journal-msg-time">
-                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      className="journal-roll-btn journal-pin-btn"
-                      onClick={() => pinMessage(`${msg.timestamp}:${i}`, msg)}
-                      disabled={pinnedKeys.has(`${msg.timestamp}:${i}`)}
-                    >
-                      {pinnedKeys.has(`${msg.timestamp}:${i}`) ? 'Pinned' : 'Pin'}
-                    </Button>
-                  </div>
-                  <div className="journal-msg-text">{msg.text}</div>
-                  {myRequests.length > 0 && (
-                    <div className="journal-roll-requests">
-                      {myRequests.map(req => {
-                        const key = reqKey(msg.timestamp, req);
-                        if (doneKeys.has(key)) return null;
-                        const rolling = rollingKeys.has(key);
-                        const luckPoints = hasOriginFeat(character, 'Lucky') ? resourceCurrent(character, 'luckPoints') : 0;
-                        const luckArmed = luckKeys.has(key);
-                        return (
-                          <span key={key} className="journal-roll-request">
-                            <Button
-                              variant="ghost"
-                              className="journal-roll-btn"
-                              disabled={rolling}
-                              onClick={() => rollRequest(msg.timestamp, req)}
-                            >
-                              {rolling ? 'Rolling…' : `Roll ${req.skill} ${req.type === 'save' ? 'Save' : 'Check'}`}
-                            </Button>
-                            {luckPoints > 0 && !rolling && (
-                              <Button
-                                variant="ghost"
-                                className={`journal-luck-toggle${luckArmed ? ' journal-luck-toggle--active' : ''}`}
-                                title="Spend a Luck Point on this roll for Advantage"
-                                onClick={() => setLuckKeys(prev => {
-                                  const next = new Set(prev);
-                                  if (next.has(key)) next.delete(key); else next.add(key);
-                                  return next;
-                                })}
-                              >
-                                Luck ({luckPoints})
-                              </Button>
-                            )}
-                            {character.heroicInspiration && !rolling && (
-                              <Button
-                                variant="ghost"
-                                className={`journal-luck-toggle${inspirationKeys.has(key) ? ' journal-luck-toggle--active' : ''}`}
-                                title="Spend Heroic Inspiration on this roll for Advantage"
-                                onClick={() => setInspirationKeys(prev => {
-                                  const next = new Set(prev);
-                                  if (next.has(key)) next.delete(key); else next.add(key);
-                                  return next;
-                                })}
-                              >
-                                Inspiration
-                              </Button>
-                            )}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })
+            logSegments(messages).map(seg => seg.kind === 'split'
+              ? <SplitBlock key={`split:${seg.splitId}`} entries={seg.entries} live={seg.splitId === liveSplitId} renderMessage={renderMessage} />
+              : <Fragment key={seg.entry.index}>{renderMessage(seg.entry.msg, seg.entry.index)}</Fragment>)
           )}
         </div>
 

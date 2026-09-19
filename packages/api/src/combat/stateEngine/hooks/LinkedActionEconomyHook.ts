@@ -1,7 +1,7 @@
 import type { TurnContext } from 'shared';
 import { Hook, type HookProps } from '../Hook.ts';
 import type { StateEngine } from '../StateEngine.ts';
-import { encounters } from '../../../state.ts';
+import { fightOf } from '../../../state.ts';
 
 /**
  * Wardaway's "on its next turn, it can take only an action or a Bonus Action, but not both."
@@ -18,7 +18,7 @@ export class LinkedActionEconomyHook extends Hook<'beforeTurn'> {
   }
 
   apply(ctx: TurnContext, engine: StateEngine): void {
-    const participant = encounters.get(engine.campaignId)?.findParticipant(this.ownerId);
+    const participant = fightOf(engine.campaignId, this.ownerId)?.findParticipant(this.ownerId);
     if (participant) participant.linkedActionEconomy = true;
     engine.unregister(this.id);
     engine.register(new LinkedActionEconomyClearHook({ ownerId: this.ownerId, source: this.source }));
@@ -33,7 +33,7 @@ class LinkedActionEconomyClearHook extends Hook<'afterTurn'> {
   }
 
   apply(ctx: TurnContext, engine: StateEngine): void {
-    const participant = encounters.get(engine.campaignId)?.findParticipant(this.ownerId);
+    const participant = fightOf(engine.campaignId, this.ownerId)?.findParticipant(this.ownerId);
     if (participant) participant.linkedActionEconomy = false;
     engine.unregister(this.id);
   }

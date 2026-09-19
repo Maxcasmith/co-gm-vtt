@@ -1,6 +1,6 @@
 import path from 'path';
-import { SKILL_ABILITY, type ChatPayload, type CheckRequest } from 'shared';
-import { CAMPAIGNS_DIR, listEntitySlugs, readEntity, getWorldMeta, getConfig, saveDungeon, loadDungeon, readManifest, writeManifest, emptyManifest, readQuests, appendChatLog, readChatLog, appendNote } from './storage.ts';
+import { SKILL_ABILITY, trackOf, type ChatPayload, type CheckRequest, type GroupColor } from 'shared';
+import { CAMPAIGNS_DIR, listEntitySlugs, readEntity, getWorldMeta, getConfig, saveDungeon, loadDungeon, readManifest, writeManifest, emptyManifest, readQuests, appendChatLog, appendNote } from './storage.ts';
 import { getTextStore } from './storage/index.ts';
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
 import { buildRecapPrompt, buildDungeonRecapPrompt } from './session-processor/prompts.ts';
@@ -8,19 +8,22 @@ import { processSession, getDMResponse, getDungeonNarrationResponse } from './se
 import { describeDungeonState, describeDungeonGroundTruth, describeCombatLocation } from './dungeon/index.ts';
 import { processVdmResponse, repairMissedPickup } from './tag-processor.ts';
 import { logError } from './logger.ts';
-import { io, ROOM, sessionState, combatState, dungeons, tokenPositions, connected, dmQueue } from './state.ts';
+import { io, campaignRoom, sessionState, dungeons, tokenPositions, connected, dmQueue, fightOf, toFight, type Audience } from './state.ts';
 import { endCombat } from './combat/runtime/lifecycle.ts';
 import { applyEffects } from './effects.ts';
+import { audienceTracks, toTracks, tagForSplit, readChatContext, getPartyGroups, type ChatAudience } from './partyGroups.ts';
 
-export function queueDMResponse(campaignId: string, fn: () => Promise<void>): void {
-  const prev = dmQueue.get(campaignId) ?? Promise.resolve();
-  dmQueue.set(campaignId, prev.then(fn).catch(err => logError('index:queueDMResponse', err)));
+// Keyed per campaign + audience tracks, not per campaign alone — two split groups' DM turns are
+// independent and shouldn't wait on each other; same-track turns still serialize.
+export function queueDMResponse(key: string, fn: () => Promise<void>): void {
+  const prev = dmQueue.get(key) ?? Promise.resolve();
+  dmQueue.set(key, prev.then(fn).catch(err => logError('index:queueDMResponse', err)));
 }
 
 export function endSession(cid: string): void {
   if (!sessionState.get(cid)) return;
   sessionState.set(cid, false);
-  io.to(ROOM).emit('session:state', false);
+  io.to(campaignRoom(cid)).emit('session:state', false);
   const dungeon = dungeons.get(cid);
   if (dungeon) {
     dungeon.positions = tokenPositions.get(cid) ?? {};
@@ -36,15 +39,15 @@ export function endSession(cid: string): void {
     const text = result.skipped
       ? 'Session ended — no chat to process.'
       : `Session ended — notes updated: ${names.join(', ') || 'nothing new'}`;
-    io.to(ROOM).emit('chat:message', { text, senderName: 'System', timestamp: Date.now() });
+    io.to(campaignRoom(cid)).emit('chat:message', { text, senderName: 'System', timestamp: Date.now() });
     const [quests, manifest] = await Promise.all([readQuests(cid), readManifest(cid)]);
-    io.to(ROOM).emit('quest:update', { quests, act: manifest?.act ?? 1 });
+    io.to(campaignRoom(cid)).emit('quest:update', { quests, act: manifest?.act ?? 1 });
 
     for (const noteText of result.notes ?? []) {
       try {
         const payload = { text: noteText, authorName: 'Virtual DM', timestamp: Date.now() };
         await appendNote(cid, payload);
-        io.to(ROOM).emit('note:added', payload);
+        io.to(campaignRoom(cid)).emit('note:added', payload);
       } catch (err) { logError('session:endSession:note', err); }
     }
   });
@@ -202,21 +205,31 @@ export function detectMissedSkillCheck(recentLog: ChatPayload[], existing: Check
   return { player: last.senderName, skill, type: 'check' };
 }
 
-export function dispatchDMResponse(cid: string, combatEndedNear?: { gx: number; gy: number }[]): void {
+/** `audience` — who the DM is answering (see ChatAudience): while the party is split, only their
+ * track(s) see the reply, and the DM only sees the chat those tracks saw. */
+export function dispatchDMResponse(cid: string, audience: ChatAudience, combatEndedNear?: { gx: number; gy: number }[]): void {
   if (!sessionState.get(cid)) return;
-  io.to(ROOM).emit('dm:thinking', true);
-  queueDMResponse(cid, async () => {
+  void audienceTracks(cid, audience).then(async tracks => dispatchToTracks(cid, audience, tracks, await toTracks(cid, tracks), combatEndedNear));
+}
+
+function dispatchToTracks(cid: string, audience: ChatAudience, tracks: GroupColor[] | null, to: Audience, combatEndedNear?: { gx: number; gy: number }[]): void {
+  to.emit('dm:thinking', true);
+  queueDMResponse(tracks ? `${cid}:${[...tracks].sort().join(',')}` : cid, async () => {
     try {
       const dungeon = dungeons.get(cid);
+      // Only this audience's own group — a split group's narrator mustn't treat the others' tokens as "the party".
+      const groups = await getPartyGroups(cid);
       const playerPositions = Object.fromEntries(
-        Object.entries(tokenPositions.get(cid) ?? {}).filter(([name]) => connected.has(name))
+        Object.entries(tokenPositions.get(cid) ?? {}).filter(([name]) => connected.has(name) && (!tracks || tracks.includes(trackOf(groups, name))))
       );
       // Anything inside a dungeon → the closed-world dungeon narrator, combat or not. Exploration
       // gets the full floor plan so spatial questions can be answered accurately; combat gets the
       // lighter discovered-only view, since between-turn narration has no spatial reasoning to do
       // and the mechanical combat log already carries the blow-by-blow. Only genuinely open-world
       // play still reaches the general narrator.
-      const combatActive = !!combatState.get(cid);
+      // This audience's own fight, not "is anyone in the campaign fighting" — another group's battle elsewhere doesn't make this an in-combat narration.
+      const audienceFights = audience === 'all' ? [] : [...new Set(audience.map(k => fightOf(cid, k)).filter(f => !!f))];
+      const combatActive = audienceFights.length > 0;
       let groundTruth = dungeon
         ? (combatActive ? describeDungeonState(dungeon, playerPositions) : describeDungeonGroundTruth(dungeon, playerPositions))
         : undefined;
@@ -228,14 +241,16 @@ export function dispatchDMResponse(cid: string, combatEndedNear?: { gx: number; 
       }
       if (dungeon) console.log(`[dm] dispatch cid=${cid} combatActive=${combatActive} positions=${JSON.stringify(playerPositions)} combatEndedNear=${JSON.stringify(combatEndedNear ?? [])}`);
       const response = dungeon
-        ? await getDungeonNarrationResponse(cid, dungeon, groundTruth!, combatActive)
-        : await getDMResponse(cid);
+        ? await getDungeonNarrationResponse(cid, dungeon, groundTruth!, combatActive, audience)
+        : await getDMResponse(cid, audience);
       if (!response) return;
 
-      if (response.includes('[COMBAT END]') && combatState.get(cid)) {
-        combatState.set(cid, false);
-        void endCombat(cid);
-        io.to(ROOM).emit('combat:state', false);
+      if (response.includes('[COMBAT END]')) {
+        for (const fight of audienceFights) {
+          const fightAudience = toFight(fight);
+          void endCombat(cid, fight);
+          fightAudience.emit('combat:state', false);
+        }
       }
 
       const rawResponse = response.replace(/\[COMBAT END\]/g, '').trim();
@@ -244,11 +259,11 @@ export function dispatchDMResponse(cid: string, combatEndedNear?: { gx: number; 
         ? await processVdmResponse(rawResponse, getFeatureProvider(config, 'tagEffectProcessing'))
         : { text: rawResponse, effects: [], speakingAs: undefined, checkRequests: [] };
 
-      const recentLog = await readChatLog(cid);
+      const recentLog = await readChatContext(cid, audience);
       const recentDmText = recentLog.slice(-12).filter(m => m.senderName === 'Virtual DM' || m.senderName.endsWith('(Virtual DM)')).map(m => m.text).join(' ');
       const cleanResponse = stripRepeatedSentences(taggedCleanResponse, recentDmText);
 
-      await applyEffects(cid, effects);
+      await applyEffects(cid, effects, audience);
 
       // The prompt makes the PICKED_UP_* tag mandatory alongside pickup narration, but that's an
       // instruction, not a guarantee. When narration reads like a pickup and no tag fired, run a
@@ -258,7 +273,7 @@ export function dispatchDMResponse(cid: string, combatEndedNear?: { gx: number; 
         console.warn(`[dm] cid=${cid} narration reads like an item pickup but no PICKED_UP_* tag was emitted — attempting repair: "${cleanResponse.slice(0, 200)}"`);
         if (hasFeatureProvider(config, 'tagEffectProcessing')) {
           void repairMissedPickup(cleanResponse, getFeatureProvider(config, 'tagEffectProcessing')).then(repaired => {
-            if (repaired) void applyEffects(cid, [repaired]);
+            if (repaired) void applyEffects(cid, [repaired], audience);
           });
         }
       }
@@ -268,13 +283,14 @@ export function dispatchDMResponse(cid: string, combatEndedNear?: { gx: number; 
       if (missedCheck) console.warn(`[dm] cid=${cid} ${missedCheck.player} asked for a ${missedCheck.skill} check but no REQUEST_CHECK tag was emitted — synthesizing one`);
 
       const senderName = speakingAs ? `${speakingAs} (Virtual DM)` : 'Virtual DM';
-      await appendChatLog(cid, { text: cleanResponse, senderName, timestamp: Date.now() });
-      io.to(ROOM).emit('session:recap', { text: cleanResponse, senderName, checkRequests: finalCheckRequests });
+      const tags = await tagForSplit(cid, tracks);
+      await appendChatLog(cid, { text: cleanResponse, senderName, timestamp: Date.now(), ...tags });
+      to.emit('session:recap', { text: cleanResponse, senderName, checkRequests: finalCheckRequests, ...tags });
     } catch (err) {
       logError('index:dmResponse', err);
-      io.to(ROOM).emit('chat:message', { text: `[DM error: ${(err as Error).message}]`, senderName: 'System', timestamp: Date.now() });
+      to.emit('chat:message', { text: `[DM error: ${(err as Error).message}]`, senderName: 'System', timestamp: Date.now() });
     } finally {
-      io.to(ROOM).emit('dm:thinking', false);
+      to.emit('dm:thinking', false);
     }
   });
 }

@@ -1,8 +1,9 @@
 import type { CharacterStats } from 'shared';
 import { statMod } from 'shared';
-import { getCharacter, appendChatLog } from '../storage.ts';
+import { getCharacter } from '../storage.ts';
+import { postChat } from '../partyGroups.ts';
 import { trySpendLuckForAdvantage, trySpendHeroicInspiration } from '../combat/runtime/resources.ts';
-import { io, ROOM, STAT_FULL, BG_SKILLS, SAVE_PROFS, getStateEngine, combatState } from '../state.ts';
+import { STAT_FULL, BG_SKILLS, SAVE_PROFS, getStateEngine, fightOf } from '../state.ts';
 import { D20Roll } from '../combat/dice.ts';
 import { rollModeFor } from '../combat/conditions/rollModeFor.ts';
 import { checkDungeonHiddenReveal } from '../dungeon/runtime.ts';
@@ -45,8 +46,8 @@ export function registerRollHandlers(ctx: JoinContext): void {
       const label = skill ?? (STAT_FULL[stat.toUpperCase()] ?? stat.toUpperCase());
       console.log(`[roll] ${char.name} rolls ${label}: ${total} | proficient=${proficient}`);
       const checkResult = { characterName: char.name, rollType: 'check' as const, stat: stat.toUpperCase(), d20: roll, modifier, total, description: `${char.name} rolls ${label}: ${total}` };
-      await appendChatLog(campaignId, { text: checkResult.description, senderName: 'System', timestamp: Date.now() });
-      io.to(ROOM).emit('roll:result', checkResult);
+      await postChat(campaignId, { text: checkResult.description, senderName: 'System', timestamp: Date.now() }, [char.name],
+        (to, tags) => to.emit('roll:result', { ...checkResult, ...tags }));
       if (skill && /^(perception|investigation)$/i.test(skill)) {
         const finds = await checkDungeonHiddenReveal(campaignId, char.name, total);
         // A dungeon hideDC actually resolved (a hit, or a clean miss against something hidden
@@ -56,12 +57,12 @@ export function registerRollHandlers(ctx: JoinContext): void {
         if (finds) {
           const text = (finds.length ? finds.map(f => templateSearchResult(char.name, f)) : [templateSearchResult(char.name, null)]).join('\n');
           const senderName = 'Virtual DM';
-          await appendChatLog(campaignId, { text, senderName, timestamp: Date.now() });
-          io.to(ROOM).emit('session:recap', { text, senderName, checkRequests: [] });
+          await postChat(campaignId, { text, senderName, timestamp: Date.now() }, [char.name],
+            (to, tags) => to.emit('session:recap', { text, senderName, checkRequests: [], ...tags }));
           return;
         }
       }
-      dispatchDMResponse(campaignId);
+      dispatchDMResponse(campaignId, [char.name]);
     })();
   });
 
@@ -82,9 +83,9 @@ export function registerRollHandlers(ctx: JoinContext): void {
       const statLabel = STAT_FULL[statUpper] ?? statUpper;
       console.log(`[roll] ${char.name} rolls ${statLabel} Save: ${total}`);
       const saveResult = { characterName: char.name, rollType: 'save' as const, stat: statUpper, d20: roll, modifier, total, description: `${char.name} rolls ${statLabel} Save: ${total}` };
-      await appendChatLog(campaignId, { text: saveResult.description, senderName: 'System', timestamp: Date.now() });
-      io.to(ROOM).emit('roll:result', saveResult);
-      dispatchDMResponse(campaignId);
+      await postChat(campaignId, { text: saveResult.description, senderName: 'System', timestamp: Date.now() }, [char.name],
+        (to, tags) => to.emit('roll:result', { ...saveResult, ...tags }));
+      dispatchDMResponse(campaignId, [char.name]);
     })();
   });
 
@@ -94,15 +95,14 @@ export function registerRollHandlers(ctx: JoinContext): void {
   // Combat has its own turn-based casting (combat:spell:cast) — this is exploration-only.
   socket.on('spell:cast:exploration', ({ campaignId, characterId, spellName }) => {
     void (async () => {
-      if (combatState.get(campaignId)) return;
+      if (fightOf(campaignId, characterId)) return;
       const char = await getCharacter(campaignId, characterId);
       if (!char) return;
       const result = await resolveSpellCast(campaignId, char.name, spellName);
       if (!result.ok) return;
       const msg = { text: `${char.name} casts ${spellName}.`, senderName: 'System', timestamp: Date.now() };
-      await appendChatLog(campaignId, msg);
-      io.to(ROOM).emit('chat:message', msg);
-      dispatchDMResponse(campaignId);
+      await postChat(campaignId, msg, [char.name]);
+      dispatchDMResponse(campaignId, [char.name]);
     })();
   });
 }

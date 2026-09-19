@@ -1,10 +1,10 @@
-import { updateCharacter, appendChatLog, saveEncounter, clearDungeon, saveDungeon, listCharacters, getConfig } from '../../storage.ts';
+import { updateCharacter, saveEncounter, clearDungeon, saveDungeon, listCharacters, getConfig } from '../../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../../providers/index.ts';
 import { generateCombatAftermath } from '../../session-processor/imagePrompts.ts';
 import { toClientDungeon } from '../../dungeon/index.ts';
 import { checkQuestChainTriggers } from '../../dungeon/questChain.ts';
-import { Participant } from '../../domain/encounter.ts';
-import { io, ROOM, combatState, encounters, tokenPositions, campaignPlayers, playerSocketIds, combatScores, dungeons, microDungeons, withLivePositions, getStateEngine, stateEngines } from '../../state.ts';
+import { Participant, type Encounter } from '../../domain/encounter.ts';
+import { io, campaignRoom, tokenPositions, playerSocketIds, dungeons, microDungeons, withLivePositions, getStateEngine, fightOf, toFight, toFightOf, isRegisteredFight } from '../../state.ts';
 import { rollDice, crToXp } from '../dice.ts';
 import { RecurringDamageHook } from '../stateEngine/hooks/RecurringDamageHook.ts';
 import type { RollModifierHook } from '../stateEngine/hooks/RollModifierHook.ts';
@@ -12,6 +12,7 @@ import { dispatchDMResponse } from '../../session.ts';
 import { breakConcentration, checkConcentration } from './concentration.ts';
 import { markPlayerDead, runDeathSave } from './deathSaves.ts';
 import { advanceTurn, emitTurn, endCombat, endCombatDefeated } from './lifecycle.ts';
+import { postChat } from '../../partyGroups.ts';
 
 /**
  * Blade Ward's "-1d4 from the attacker's roll" — sums every rollModifierVsAttacker hook the
@@ -34,8 +35,7 @@ export function bladeWardPenalty(cid: string, targetId: string): number {
  */
 function checkEndsIfCasterDamages(cid: string, targetId: string, sourceId: string | undefined): void {
   if (!sourceId) return;
-  const engine = stateEngines.get(cid);
-  if (!engine) return;
+  const engine = getStateEngine(cid);
   for (const hook of engine.getHooksOwnedBy(targetId, 'recurringDamage')) {
     if (hook instanceof RecurringDamageHook && hook.endsIfCasterDamages && hook.casterId === sourceId) {
       void hook.forceEnd(engine);
@@ -50,12 +50,11 @@ function checkEndsIfCasterDamages(cid: string, targetId: string, sourceId: strin
  * so it can't be used here) — skips allies, enemies, and self-inflicted hazards with no attacker.
  */
 function bumpScore(cid: string, charId: string | undefined, field: 'enemiesKilled' | 'damageDealt' | 'damageReceived', amount: number): void {
-  if (!charId || !encounters.get(cid)?.findParticipant(charId)?.isPlayer) return;
-  let scores = combatScores.get(cid);
-  if (!scores) { scores = new Map(); combatScores.set(cid, scores); }
-  const entry = scores.get(charId) ?? { enemiesKilled: 0, damageDealt: 0, damageReceived: 0 };
+  const fight = charId ? fightOf(cid, charId) : undefined;
+  if (!charId || !fight?.findParticipant(charId)?.isPlayer) return;
+  const entry = fight.scores.get(charId) ?? { enemiesKilled: 0, damageDealt: 0, damageReceived: 0 };
   entry[field] += amount;
-  scores.set(charId, entry);
+  fight.scores.set(charId, entry);
 }
 
 /**
@@ -74,7 +73,7 @@ export async function applyDamageToPlayer(
 
   participant.takeDamage(damage);
   void updateCharacter(cid, charId, c => ({ ...c, currentHp: participant.currentHp, tempHp: participant.tempHp }));
-  io.to(ROOM).emit('combat:player:damage', {
+  io.to(campaignRoom(cid)).emit('combat:player:damage', {
     characterId: charId,
     characterName: participant.name,
     damage,
@@ -84,7 +83,7 @@ export async function applyDamageToPlayer(
   });
   // One event drives the damage float/flash for every source — weapon hit, spell hit, spell-save
   // damage, recurring ticks — since they all funnel through this function to apply HP loss.
-  if (damage > 0) io.to(ROOM).emit('combat:damage:dealt', { targetId: charId, targetName: participant.name, damage, isCrit: !!opts?.isCrit });
+  if (damage > 0) toFightOf(cid, charId).emit('combat:damage:dealt', { targetId: charId, targetName: participant.name, damage, isCrit: !!opts?.isCrit });
   if (damage > 0) bumpScore(cid, charId, 'damageReceived', damage);
   if (damage > 0) checkEndsIfCasterDamages(cid, charId, opts?.sourceId);
 
@@ -114,14 +113,14 @@ export async function applyDamageToPlayer(
 
   // Every player-damage source funnels through this one function, so it's the single right place
   // to catch a wipe regardless of what caused it or whose turn it happened on.
-  if (combatState.get(cid)) {
-    const encounter = encounters.get(cid);
-    if (encounter?.allPlayersDown()) {
-      // Any damage that drops the last standing player is a TPK, full stop — don't wait for the
-      // turn cycle to notice (emitTurn's own allPlayersDown() check only runs on the *next* turn
-      // transition, which may never come: see the mid-turn case below).
-      endCombatDefeated(cid);
-    } else if (participant.isDown() && encounter?.currentActor?.id === participant.id) {
+  const encounter = fightOf(cid, charId);
+  if (encounter) {
+    if (encounter.allPlayersDown()) {
+      // Any damage that drops this fight's last standing player is a wipe, full stop — don't wait
+      // for the turn cycle to notice (emitTurn's own allPlayersDown() check only runs on the
+      // *next* turn transition, which may never come: see the mid-turn case below).
+      endCombatDefeated(cid, encounter);
+    } else if (participant.isDown() && encounter.currentActor?.id === participant.id) {
       // 5e: falling unconscious immediately ends your turn. Matters when the blow lands mid-turn —
       // an Opportunity Attack provoked by their own movement, a reaction, AoE damage mid-cast —
       // rather than at the start of it: CombatDock drops the End Turn button the instant HP hits 0
@@ -129,7 +128,7 @@ export async function applyDamageToPlayer(
       // turn-start, which already ran earlier this same turn while they were still up. Without
       // this, nothing ever advances the encounter again — it just stalls here (not a TPK, since
       // the branch above already caught that case; just this one player, party otherwise fine).
-      advanceTurn(cid);
+      advanceTurn(cid, encounter);
     }
   } else if (participant.isDown()) {
     // Exploration has no turn-cycle equivalent of emitTurn's allPlayersDown() check, so this is
@@ -143,7 +142,7 @@ export async function applyDamageToPlayer(
 export function applyHealingToPlayer(cid: string, participant: Participant, charId: string, amount: number, sourceName: string): void {
   participant.heal(amount);
   void updateCharacter(cid, charId, c => ({ ...c, currentHp: participant.currentHp }));
-  io.to(ROOM).emit('combat:player:heal', {
+  io.to(campaignRoom(cid)).emit('combat:player:heal', {
     characterId: charId,
     characterName: participant.name,
     healAmount: amount,
@@ -155,10 +154,10 @@ export function applyHealingToPlayer(cid: string, participant: Participant, char
 
 /** Same as applyHealingToPlayer but for an NPC/ally creature target. */
 export function applyHealingToCreature(cid: string, targetId: string, amount: number): void {
-  const creature = encounters.get(cid)?.findCreature(targetId);
+  const creature = fightOf(cid, targetId)?.findCreature(targetId);
   if (!creature) return;
   creature.heal(amount);
-  io.to(ROOM).emit('creature:update', {
+  toFightOf(cid, targetId).emit('creature:update', {
     id: targetId,
     currentHp: creature.currentHp,
     maxHp: creature.hp,
@@ -174,7 +173,7 @@ export function applyHealingToCreature(cid: string, targetId: string, amount: nu
 export function grantTempHpToPlayer(cid: string, participant: Participant, amount: number): void {
   participant.grantTempHp(amount);
   void updateCharacter(cid, participant.id, c => ({ ...c, tempHp: participant.tempHp }));
-  io.to(ROOM).emit('combat:player:tempHp', {
+  io.to(campaignRoom(cid)).emit('combat:player:tempHp', {
     characterId: participant.id,
     characterName: participant.name,
     tempHp: participant.tempHp,
@@ -182,7 +181,7 @@ export function grantTempHpToPlayer(cid: string, participant: Participant, amoun
 }
 
 export async function applyDamageToCreature(cid: string, targetId: string, damage: number, opts?: { sourceId?: string; isCrit?: boolean }): Promise<void> {
-  const encounter = encounters.get(cid);
+  const encounter = fightOf(cid, targetId);
   if (!encounter) return;
 
   const creature = encounter.findCreature(targetId);
@@ -192,13 +191,13 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
   // Conjurer's summon action reads this — "unchallenged for N rounds" means rounds since the
   // creature was last actually hit, not since combat started.
   if (damage > 0) creature.lastDamagedRound = encounter.currentRound?.number ?? creature.lastDamagedRound;
-  io.to(ROOM).emit('creature:update', {
+  toFight(encounter).emit('creature:update', {
     id: targetId,
     currentHp: creature.currentHp,
     maxHp: creature.hp,
     effects: creature.effects,
   });
-  if (damage > 0) io.to(ROOM).emit('combat:damage:dealt', { targetId, targetName: creature.name, damage, isCrit: !!opts?.isCrit });
+  if (damage > 0) toFight(encounter).emit('combat:damage:dealt', { targetId, targetName: creature.name, damage, isCrit: !!opts?.isCrit });
   if (damage > 0) bumpScore(cid, opts?.sourceId, 'damageDealt', damage);
   if (damage > 0) checkEndsIfCasterDamages(cid, targetId, opts?.sourceId);
   void saveEncounter(cid, encounter);
@@ -237,23 +236,22 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
       const enemyPositions = enemyStatBlocks
         .map(e => tokenPositions.get(cid)?.[e.id])
         .filter((p): p is { gx: number; gy: number } => !!p);
+      // XP splits among the characters who actually fought — a split group elsewhere earns none of it.
+      const fightChars = encounter.players.filter(p => p.isPlayer);
       const totalXp = enemyStatBlocks.reduce((sum, e) => sum + crToXp(e.cr), 0);
-      const playerCount = campaignPlayers.get(cid)?.length ?? 1;
-      const xpPerPlayer = Math.floor(totalXp / playerCount);
-      io.to(ROOM).emit('combat:victory', { xpPerPlayer, totalXp, kills: enemyStatBlocks.map(e => e.name) });
+      const xpPerPlayer = Math.floor(totalXp / Math.max(1, fightChars.length));
+      toFight(encounter).emit('combat:victory', { xpPerPlayer, totalXp, kills: enemyStatBlocks.map(e => e.name) });
       console.log(`[combat] victory! ${totalXp} XP total, ${xpPerPlayer} per player`);
 
-      void listCharacters(cid).then(chars => Promise.all(
-        chars.map(char => updateCharacter(cid, char.id, c => ({ ...c, xp: (c.xp ?? 0) + xpPerPlayer })))
-      ));
+      void Promise.all(fightChars.map(p => updateCharacter(cid, p.id, c => ({ ...c, xp: (c.xp ?? 0) + xpPerPlayer }))));
 
-      // combatState flips false right away so a player still moving on their last turn can't
-      // trigger checkDungeonProximity/joinReinforcements against this encounter mid-teardown —
-      // but the client-facing combat:state emit (which VictoryScreen clears itself on) stays on
-      // the narrative delay below, so the victory screen still gets its full display window.
-      combatState.set(cid, false);
+      // The fight counts as over right away so a player still moving on their last turn can't
+      // trigger checkDungeonProximity/joinReinforcements against it mid-teardown — but the
+      // client-facing combat:state emit (which VictoryScreen clears itself on) stays on the
+      // narrative delay below, so the victory screen still gets its full display window.
+      encounter.ended = true;
 
-      // combatState is already false above, so checkDungeonProximity treats any move in the 7s
+      // The fight is already over above, so checkDungeonProximity treats any move in the 7s
       // display window below as exploration and re-aggros whatever's still sitting in
       // dungeon.entities — strip the kills now, not in the delayed cleanup, so a corpse can never
       // restart combat. (The delayed block below re-filters the same ids; harmless no-op there.)
@@ -263,17 +261,18 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
         liveDungeon.entities = liveDungeon.entities.filter(e => !(e.type === 'creature' && killedIds.has(e.id)));
       }
 
-      // Captured so the delayed cleanup below can check it's still tearing down THIS fight — if
-      // the party found another encounter within the delay window, encounters.get(cid) is by then
-      // a brand new Encounter for that fight, and blindly tearing it down (endCombat deletes
-      // whatever's currently in the map) would silently kill the next fight mid-combat.
-      const wonEncounter = encounter;
+      // Captured so the delayed cleanup below can tell whether this fight was already torn down
+      // (a wipe/defeat path got there first) — endCombat must only ever run once per fight.
+      const wonEncounter: Encounter = encounter;
+      const fightAudience = toFight(encounter);
+      // Resolved by name, not participant — by the time the aftermath posts, endCombat has torn the encounter down.
+      const fightPlayers = encounter.turnOrder.filter(p => p.isPlayer).map(p => p.name);
 
       setTimeout(() => {
-        const superseded = encounters.get(cid) !== wonEncounter;
+        const superseded = !isRegisteredFight(cid, wonEncounter);
         if (!superseded) {
-          void endCombat(cid);
-          io.to(ROOM).emit('combat:state', false);
+          void endCombat(cid, wonEncounter);
+          fightAudience.emit('combat:state', false);
 
           const arenaDungeon = dungeons.get(cid);
           const arenaHasTraps = arenaDungeon?.entities.some(e => e.type === 'trap');
@@ -282,21 +281,21 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
             microDungeons.delete(cid);
             dungeons.delete(cid);
             void clearDungeon(cid);
-            io.to(ROOM).emit('dungeon:cleared');
+            io.to(campaignRoom(cid)).emit('dungeon:cleared');
           } else if (microDungeons.has(cid)) {
             // A trap (Snare, ...) is still armed on this arena — keep the map loaded instead of
             // discarding it, so the trap survives past this fight to be triggered later.
             const killedIds = new Set(enemyStatBlocks.map(e => e.id));
             arenaDungeon!.entities = arenaDungeon!.entities.filter(e => !(e.type === 'creature' && killedIds.has(e.id)));
             void saveDungeon(cid, arenaDungeon!);
-            io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, arenaDungeon!)));
+            io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, arenaDungeon!)));
           } else {
             const dungeon = dungeons.get(cid);
             if (dungeon) {
               const killedIds = new Set(enemyStatBlocks.map(e => e.id));
               dungeon.entities = dungeon.entities.filter(e => !(e.type === 'creature' && killedIds.has(e.id)));
               void saveDungeon(cid, dungeon);
-              io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+              io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
             }
           }
         } else {
@@ -307,7 +306,7 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
             const killedIds = new Set(enemyStatBlocks.map(e => e.id));
             dungeon.entities = dungeon.entities.filter(e => !(e.type === 'creature' && killedIds.has(e.id)));
             void saveDungeon(cid, dungeon);
-            io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+            io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
           }
         }
 
@@ -318,14 +317,15 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
             ? await generateCombatAftermath(kills, getFeatureProvider(config, 'combatNarration'))
             : null;
           if (aftermath) {
-            await appendChatLog(cid, { text: aftermath, senderName: 'Virtual DM', timestamp: Date.now() });
-            io.to(ROOM).emit('session:recap', { text: aftermath, senderName: 'Virtual DM' });
+            await postChat(cid, { text: aftermath, senderName: 'Virtual DM', timestamp: Date.now() }, fightPlayers,
+              (to, tags) => to.emit('session:recap', { text: aftermath, senderName: 'Virtual DM', ...tags }));
           } else {
             // No combatNarration provider configured — fall back to the general narrator rather
             // than leaving the aftermath beat silent.
             const summary = `[Combat over — party victorious. Defeated: ${kills.join(', ')}. ${xpPerPlayer} XP awarded per player. Describe the immediate aftermath and give the party something to act on.]`;
-            await appendChatLog(cid, { text: summary, senderName: 'System', timestamp: Date.now() });
-            dispatchDMResponse(cid, enemyPositions);
+            // DM-only context line (bracketed — see connection.ts's history filter): logged, never emitted.
+            await postChat(cid, { text: summary, senderName: 'System', timestamp: Date.now() }, fightPlayers, () => {});
+            dispatchDMResponse(cid, fightPlayers, enemyPositions);
           }
         })();
       }, 7000);

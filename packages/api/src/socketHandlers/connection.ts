@@ -1,29 +1,29 @@
 import { characterLightRangeFt } from 'shared';
-import { readChatLog, readNotes, readQuests, readManifest, listCharacters, loadDungeon, loadEncounter } from '../storage.ts';
+import { readNotes, readQuests, readManifest, listCharacters, loadDungeon, loadEncounters } from '../storage.ts';
 import { toClientDungeon } from '../dungeon/index.ts';
-import { io, ROOM, connected, playerSocketIds, campaignPlayers, sessionState, combatState, dungeons, tokenPositions, microDungeons, encounters, enemiesReady, withLivePositions } from '../state.ts';
+import { io, campaignRoom, DEBUG_LOG_ROOM, connected, playerSocketIds, campaignPlayers, sessionState, dungeons, tokenPositions, microDungeons, withLivePositions, fightOf, fightsIn, registerFight } from '../state.ts';
 import { maybeResolveRest, broadcastRestProgress } from './rest.ts';
 import { conditionsHolder } from '../combat/runtime/statusEffects.ts';
+import { chatHistoryFor } from '../partyGroups.ts';
 import type { JoinContext } from './context.ts';
+
+// Campaigns whose persisted fights have been reloaded into memory this process — see registerJoin.
+const restoredCampaigns = new Set<string>();
 
 export function registerJoin(ctx: JoinContext): void {
   const { socket, player, charId, campaignId } = ctx;
 
   connected.add(player);
   playerSocketIds.set(charId, socket.id);
-  void socket.join(ROOM);
-  io.to(ROOM).emit('players:update', [...connected]);
+  void socket.join([campaignRoom(campaignId), DEBUG_LOG_ROOM]);
+  io.to(campaignRoom(campaignId)).emit('players:update', [...connected]);
   const cpl = campaignPlayers.get(campaignId) ?? [];
   if (!cpl.includes(player)) { cpl.push(player); campaignPlayers.set(campaignId, cpl); }
 
-  // Bracket-wrapped System entries (e.g. "[Combat over — ... Describe the aftermath.]") are
-  // DM-only instructions persisted so the narration prompt sees them as context — never meant
-  // for a player's chat log, same convention as [COMBAT END]/[Roll Result] elsewhere.
-  void readChatLog(campaignId).then(history =>
-    socket.emit('chat:history', history.filter(m => !(m.senderName === 'System' && /^\[.*\]$/.test(m.text)))));
+  void chatHistoryFor(campaignId, player).then(history => socket.emit('chat:history', history));
   void readNotes(campaignId).then(notes => socket.emit('note:history', notes));
   socket.emit('session:state', sessionState.get(campaignId) ?? false);
-  socket.emit('combat:state', combatState.get(campaignId) ?? false);
+  socket.emit('combat:state', !!fightOf(campaignId, player));
   void Promise.all([readQuests(campaignId), readManifest(campaignId)]).then(([quests, manifest]) => {
     socket.emit('quest:update', { quests, act: manifest?.act ?? 1 });
     socket.emit('clock:update', { worldTimeSecs: manifest?.worldTimeSecs ?? 43200 });
@@ -32,7 +32,7 @@ export function registerJoin(ctx: JoinContext): void {
   void listCharacters(campaignId).then(chars => {
     const map: Record<string, string> = {};
     for (const c of chars) map[c.name] = c.id;
-    io.to(ROOM).emit('players:characters', map);
+    io.to(campaignRoom(campaignId)).emit('players:characters', map);
   });
 
   // Restores dungeon + combat state for a reconnecting player. Prefers in-memory state (may
@@ -61,19 +61,26 @@ export function registerJoin(ctx: JoinContext): void {
       Object.entries(tokenPositions.get(campaignId) ?? {}).forEach(([tokenId, pos]) => socket.emit('token:moved', { tokenId, ...pos }));
     }
 
-    let encounter = encounters.get(campaignId);
-    let active = combatState.get(campaignId) ?? false;
-    if (!active) {
-      const saved = encounter ?? await loadEncounter(campaignId);
-      if (saved && saved.enemies.length > 0 && !saved.allEnemiesDead()) {
-        encounters.set(campaignId, saved);
-        encounter = saved;
-        combatState.set(campaignId, true);
-        enemiesReady.set(campaignId, true);
-        active = true;
-        socket.emit('combat:state', true); // corrects the optimistic `false` sent above
+    // A server restart wipes the in-memory fight registry — every fight was persisted as it
+    // happened (saveEncounter), so reload them all once, the first time anyone rejoins.
+    if (!restoredCampaigns.has(campaignId)) {
+      restoredCampaigns.add(campaignId);
+      if (!fightsIn(campaignId).length) {
+        const everyone = (await listCharacters(campaignId)).map(c => c.name);
+        for (const saved of await loadEncounters(campaignId)) {
+          if (!saved.enemies.length || saved.allEnemiesDead()) continue;
+          // A legacy single-fight save doesn't record who was in it — back then, everyone was.
+          if (!saved.pendingPlayerNames.length) saved.pendingPlayerNames = everyone;
+          saved.enemiesReady = true;
+          registerFight(campaignId, saved);
+        }
       }
     }
+
+    // Only this player's own fight — another group's battle elsewhere isn't theirs to see.
+    const encounter = fightOf(campaignId, player);
+    const active = !!encounter;
+    if (active) socket.emit('combat:state', true); // corrects the optimistic `false` sent above
 
     if (active && encounter) {
       socket.emit('encounter:ready', encounter.enemies
@@ -105,7 +112,7 @@ export function registerDisconnectHandler(ctx: JoinContext): void {
   socket.on('disconnect', () => {
     connected.delete(player);
     playerSocketIds.delete(charId);
-    io.to(ROOM).emit('players:update', [...connected]);
+    io.to(campaignRoom(campaignId)).emit('players:update', [...connected]);
     // Removing this player may have been the last thing blocking a pending group rest.
     void broadcastRestProgress(campaignId);
     void maybeResolveRest(campaignId);

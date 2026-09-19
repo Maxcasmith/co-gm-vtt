@@ -127,12 +127,17 @@ export class StateEngine {
    *
    * Logs once per call regardless of how many hooks fired — including zero — so every stage is
    * provably reached in the combat log, not just the ones with something registered on them.
+   *
+   * `scope` limits the stage to hooks owned by those participant ids. The registry is shared by
+   * every fight in the campaign, so fight-wide stages (before/afterCombat, before/afterRound) pass
+   * their own fight's combatants — one fight's round never ticks another's durations.
    */
-  async trigger<S extends HookStage>(stage: S, ctx: HookContextMap[S]): Promise<HookContextMap[S]> {
+  async trigger<S extends HookStage>(stage: S, ctx: HookContextMap[S], scope?: ReadonlySet<string>): Promise<HookContextMap[S]> {
     const snapshot = [...(this.hooks.get(stage) ?? [])] as Hook<S>[];
     let fired = 0;
     for (const hook of snapshot) {
       if (!this.has(hook.id)) continue;
+      if (scope && !scope.has(hook.ownerId)) continue;
       try {
         if (!hook.matches(ctx)) continue;
         await hook.apply(ctx, this);

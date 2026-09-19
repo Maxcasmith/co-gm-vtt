@@ -9,6 +9,7 @@ export * from "./types/dungeon.ts";
 export * from "./types/config.ts";
 export * from "./types/world.ts";
 export * from "./types/goals.ts";
+export * from "./types/partyGroups.ts";
 export * from "./types/events.ts";
 export * from "./types/tactics.ts";
 export * from "./types/storyboard.ts";

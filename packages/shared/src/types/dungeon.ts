@@ -269,6 +269,8 @@ export interface Dungeon {
   hazardCells?: {
     gx: number; gy: number;
     multiplier?: number | undefined; obscures?: boolean | undefined; expiresOnRound?: number | undefined;
+    /** The fight whose rounds `expiresOnRound` counts — several fights can run at once, each with its own round number. */
+    fightId?: string | undefined;
     /** How this cell is drawn (Canvas.tsx's drawHazardCell) — omitted entirely for a hazard with no visual (none exist today, but the mechanic doesn't require one). */
     style?: 'vines' | 'smudge' | undefined;
     color?: string | undefined;

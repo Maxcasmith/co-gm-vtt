@@ -1,26 +1,27 @@
-import type { Character, EnemyStatBlock } from 'shared';
-import { statMod, addCurrency, removeCurrency } from 'shared';
+import type { Character, EnemyStatBlock, GroupColor } from 'shared';
+import { statMod, addCurrency, removeCurrency, trackOf } from 'shared';
 import { randomUUID } from 'crypto';
-import { updateCharacter, listCharacters, readEntity, writeEntity, readManifest, writeManifest, emptyManifest, parseEntityLinks, clearDungeon, getConfig, readChatLog, saveDungeon, saveDungeonAscii, readQuests, writeQuests, loadPartyAllies, savePartyAllies, appendChatLog, readNemeses, writeNemeses, getWorldMeta } from './storage.ts';
+import { updateCharacter, listCharacters, readEntity, writeEntity, readManifest, writeManifest, emptyManifest, parseEntityLinks, clearDungeon, getConfig, saveDungeon, saveDungeonAscii, readQuests, writeQuests, loadPartyAllies, savePartyAllies, readNemeses, writeNemeses, getWorldMeta } from './storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
 import { generateDungeon, toClientDungeon } from './dungeon/index.ts';
 import { generateDungeonQuests } from './session-processor/index.ts';
-import { Encounter, Team, Participant } from './domain/encounter.ts';
+import { Encounter, Participant, PLAYERS_TEAM_ID } from './domain/encounter.ts';
 import { Creature } from './domain/creature.ts';
 import type { TagEffect, AcquiredItem } from './tag-processor.ts';
 import { logDebug } from './logger.ts';
 import {
-  io, ROOM, dungeons, combatState, enemiesReady, combatStartedAt, encounters, playerSocketIds, microDungeons,
+  io, campaignRoom, dungeons, playerSocketIds, microDungeons, campaignPlayers, connected, fightOf, fightsIn, registerFight,
   NEMESIS_COOLDOWN_SESSIONS, NEMESIS_CAP_PER_TARGET, NEMESIS_MAX_DEATHS, ALLY_XP_PER_LEVEL, withLivePositions,
 } from './state.ts';
 import { D20Roll, toSlug, escalateCr } from './combat/dice.ts';
-import { rollPlayerInitiatives, addToTurnOrder } from './combat/runtime/lifecycle.ts';
+import { rollPlayerInitiatives, addToTurnOrder, syncFight } from './combat/runtime/lifecycle.ts';
 import { sweepGameTimeExpiries } from './combat/runtime/environment.ts';
 import { trySpendSpellSlot } from './combat/runtime/resources.ts';
 import { generateAndBroadcastEnemies, unlockDoorNear, resolveLockpickAttempt, resolveTrapDisarmAttempt } from './dungeon/runtime.ts';
 import { checkQuestChainTriggers } from './dungeon/questChain.ts';
 import { advancePlotArc } from './plotArcs.ts';
 import { findSpell } from './routes/spells.ts';
+import { postChat, audienceTracks, updateScene, sceneFor, readChatContext, getPartyGroups, type ChatAudience } from './partyGroups.ts';
 
 // A player name in a tag comes from the model's narration, not a dropdown — it's never going to
 // reproduce a stored name's exact casing/whitespace byte-for-byte (a character sheet with a
@@ -41,18 +42,21 @@ type QuestEffect = Extract<TagEffect, { type: 'quest_add' | 'quest_update' | 'qu
 const isQuestEffect = (e: TagEffect): e is QuestEffect =>
   e.type === 'quest_add' || e.type === 'quest_update' || e.type === 'quest_resolve';
 
-export async function applyEffects(cid: string, effects: TagEffect[]): Promise<void> {
+/** `audience` — whose DM turn produced these effects (see ChatAudience): while the party is split,
+ * scene changes land on that group's own scene instead of everyone's. 'all' for campaign-wide sources. */
+export async function applyEffects(cid: string, effects: TagEffect[], audience: ChatAudience): Promise<void> {
   const consolidated = consolidateEffects(effects);
   const questEffects = consolidated.filter(isQuestEffect);
   const otherEffects = consolidated.filter(e => !isQuestEffect(e));
+  const tracks = await audienceTracks(cid, audience);
 
   // Quest effects all read-modify-write the same quests.json — run them as one sequential
   // batch (single read, single write) instead of racing inside the Promise.all below, where
   // two quest tags from the same DM turn could otherwise clobber each other's write.
-  if (questEffects.length) await applyQuestEffects(cid, questEffects);
+  if (questEffects.length) await applyQuestEffects(cid, questEffects, tracks);
 
   await Promise.all(otherEffects.map(async effect => {
-    if (effect.type === 'combat_init' && !combatState.get(cid)) {
+    if (effect.type === 'combat_init') {
       // Hard guard, not just a prompt instruction: while a real dungeon is loaded, combat must
       // only ever start through the dungeon's own aggro system (checkDungeonProximity /
       // startDungeonCombat), which spawns creatures already placed in dungeon.entities. The DM
@@ -64,13 +68,18 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
         logDebug(`combat_init ignored — real dungeon already loaded for ${cid}, DM should not have emitted this tag`);
         return;
       }
-      combatState.set(cid, true);
-      enemiesReady.set(cid, false);
-      combatStartedAt.set(cid, Date.now());
-      encounters.set(cid, Encounter.empty(cid));
-      io.to(ROOM).emit('combat:state', true);
-      void listCharacters(cid).then(chars => rollPlayerInitiatives(cid, chars));
-      void generateAndBroadcastEnemies(cid, effect.combatants);
+      // Open world has no positions to chain from — the fight is whichever group the DM was
+      // narrating for (everyone online, with the party together), minus anyone already fighting.
+      const groups = await getPartyGroups(cid);
+      const fighters = (campaignPlayers.get(cid) ?? []).filter(name =>
+        connected.has(name) && !fightOf(cid, name) && (!tracks || tracks.includes(trackOf(groups, name))));
+      if (!fighters.length) return;
+      const fight = Encounter.empty(cid);
+      fight.pendingPlayerNames.push(...fighters);
+      registerFight(cid, fight);
+      await rollPlayerInitiatives(cid, fight, await listCharacters(cid), fighters);
+      syncFight(fight);
+      void generateAndBroadcastEnemies(cid, fight, effect.combatants);
     } else if (effect.type === 'inventory_add') {
       const chars = await listCharacters(cid);
       const char = findCharByName(chars, effect.player);
@@ -101,16 +110,15 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
       await writeEntity(cid, 'location', locationSlug, updated);
       console.log(`[scene] updated location notes: ${locationSlug}`);
 
-      // Update manifest: new current location, parse linked entities from the file
+      // Update the scene (the group's own while split, else the manifest): new current location, parse linked entities from the file
       const links = parseEntityLinks(updated);
-      const manifest = await readManifest(cid) ?? emptyManifest();
-      manifest.currentLocation = locationSlug;
-      manifest.connectedZones = links.locations;
-      for (const npc of links.npcs) { if (!manifest.npcs.includes(npc)) manifest.npcs.push(npc); }
-      for (const faction of links.factions) { if (!manifest.factions.includes(faction)) manifest.factions.push(faction); }
-      manifest.updatedAt = new Date().toISOString();
-      await writeManifest(cid, manifest);
-      console.log(`[manifest] location → ${locationSlug}, zones: [${links.locations.join(', ')}]`);
+      await updateScene(cid, tracks, scene => {
+        scene.currentLocation = locationSlug;
+        scene.connectedZones = links.locations;
+        for (const npc of links.npcs) { if (!scene.npcs.includes(npc)) scene.npcs.push(npc); }
+        for (const faction of links.factions) { if (!scene.factions.includes(faction)) scene.factions.push(faction); }
+      });
+      console.log(`[scene] location → ${locationSlug}${tracks ? ` (tracks ${tracks.join(',')})` : ''}, zones: [${links.locations.join(', ')}]`);
     } else if (effect.type === 'npc_build') {
       const npcSlug = effect.npcName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       const existing = await readEntity(cid, 'npc', npcSlug);
@@ -120,19 +128,14 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
       await writeEntity(cid, 'npc', npcSlug, updated);
       console.log(`[npc] updated npc notes: ${npcSlug}`);
 
-      // Add to manifest so this NPC loads in future prompts
-      const manifest = await readManifest(cid) ?? emptyManifest();
-      if (!manifest.npcs.includes(npcSlug)) {
-        manifest.npcs.push(npcSlug);
-        manifest.updatedAt = new Date().toISOString();
-        await writeManifest(cid, manifest);
-      }
+      // Add to the scene so this NPC loads in future prompts
+      await updateScene(cid, tracks, scene => { if (!scene.npcs.includes(npcSlug)) scene.npcs.push(npcSlug); });
     } else if (effect.type === 'dungeon_gen') {
       const config = await getConfig();
       if (!hasFeatureProvider(config, 'dungeonGeneration')) { console.warn('[dungeon] no models configured — skipping dungeon generation'); return; }
       console.log(`[dungeon] generating: ${effect.name}`);
-      io.to(ROOM).emit('dungeon:generating');
-      const [recentChat, characters] = await Promise.all([readChatLog(cid), listCharacters(cid)]);
+      io.to(campaignRoom(cid)).emit('dungeon:generating');
+      const [recentChat, characters] = await Promise.all([readChatContext(cid, audience), listCharacters(cid)]);
       const storyContext = recentChat.slice(-10).map(m => `[${m.senderName}]: ${m.text}`).join('\n');
       const partySize = characters.length || 4;
       const partyLevel = characters.length
@@ -147,7 +150,7 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
       const predefinedQuests = await generateDungeonQuests(cid, dungeonId, effect.name, effect.dungeonType, storyContext, config);
       if (predefinedQuests.length) {
         await writeQuests(cid, [...(await readQuests(cid)), ...predefinedQuests]);
-        io.to(ROOM).emit('quest:update', { quests: await readQuests(cid), act: (await readManifest(cid))?.act ?? 1 });
+        io.to(campaignRoom(cid)).emit('quest:update', { quests: await readQuests(cid), act: (await readManifest(cid))?.act ?? 1 });
       }
       const predefinedChain = predefinedQuests.map(q => ({ id: q.id, name: q.name, description: q.description }));
 
@@ -156,17 +159,17 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
       dungeons.set(cid, dungeon);
       await saveDungeon(cid, dungeon);
       await saveDungeonAscii(cid, dungeon);
-      io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+      io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
       console.log(`[dungeon] generated and broadcast: ${dungeon.name} (${dungeon.rooms.length} rooms, ${dungeon.entities.length} entities)`);
     } else if (effect.type === 'dungeon_exit') {
-      if (combatState.get(cid) || !dungeons.has(cid)) return; // don't rip the map out from under an active fight, or if there's nothing loaded
+      if (fightsIn(cid).length || !dungeons.has(cid)) return; // don't rip the map out from under an active fight, or if there's nothing loaded
       // Must run before the dungeon is deleted below — checkQuestChainTriggers reads the live
       // in-memory dungeon (for its questChain), not storage.
       await checkQuestChainTriggers(cid, { kind: 'exit_dungeon' });
       dungeons.delete(cid);
       microDungeons.delete(cid);
       await clearDungeon(cid);
-      io.to(ROOM).emit('dungeon:cleared');
+      io.to(campaignRoom(cid)).emit('dungeon:cleared');
       console.log('[dungeon] party left — cleared');
     } else if (effect.type === 'door_unlock') {
       await unlockDoorNear(cid, effect.characterName);
@@ -198,33 +201,32 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
       if (alreadyPresent) return;
       await savePartyAllies(cid, [...currentAllies, effect.ally]);
 
-      const encounter = encounters.get(cid);
-      if (encounter && combatState.get(cid)) {
-        const playerTeam = encounter.teams.find(t => t.name === 'Players');
-        if (!playerTeam) return;
+      // Joins its owner's fight, if they're in one — not some other group's.
+      const encounter = effect.ally.ownerId ? fightOf(cid, effect.ally.ownerId) : undefined;
+      if (encounter) {
+        const playerTeam = encounter.team(PLAYERS_TEAM_ID, 'Players');
         const creature = Creature.from(effect.ally);
         const p = new Participant({
           id: creature.id,
           name: creature.name,
           initiative: new D20Roll().roll() + statMod(creature.stats.dex),
           isPlayer: false,
-          teamId: 'players',
+          teamId: PLAYERS_TEAM_ID,
           creature,
           ownerId: effect.ally.ownerId,
         });
         playerTeam.addParticipant(p);
         encounter.expectedParticipantCount += 1;
-        addToTurnOrder(cid, [p]);
+        addToTurnOrder(cid, encounter, [p]);
         const joinMsg = { text: `${creature.name} joins the fight!`, senderName: 'Combat', timestamp: Date.now() };
-        io.to(ROOM).emit('chat:message', joinMsg);
-        void appendChatLog(cid, joinMsg);
+        void postChat(cid, joinMsg, [creature.id]);
       }
     } else if (effect.type === 'clock') {
       const manifest = await readManifest(cid) ?? emptyManifest();
       manifest.worldTimeSecs = (manifest.worldTimeSecs ?? 43200) + effect.secs;
       manifest.updatedAt = new Date().toISOString();
       await writeManifest(cid, manifest);
-      io.to(ROOM).emit('clock:update', { worldTimeSecs: manifest.worldTimeSecs });
+      io.to(campaignRoom(cid)).emit('clock:update', { worldTimeSecs: manifest.worldTimeSecs });
       sweepGameTimeExpiries(cid, manifest.worldTimeSecs);
     } else if (effect.type === 'nemesis_create') {
       const slug = toSlug(effect.name);
@@ -306,18 +308,19 @@ export async function applyEffects(cid: string, effects: TagEffect[]): Promise<v
   }));
 }
 
-async function applyQuestEffects(cid: string, effects: QuestEffect[]): Promise<void> {
+async function applyQuestEffects(cid: string, effects: QuestEffect[], tracks: GroupColor[] | null): Promise<void> {
   const quests = await readQuests(cid);
   const today = new Date().toISOString().slice(0, 10);
   // Read once for the whole batch — a live guess should never clobber a better-grounded
   // pre-seeded relatedLocation, and there's no need to re-read per effect for that.
   const manifest = await readManifest(cid);
+  const scene = manifest ? await sceneFor(cid, manifest, tracks) : null;
 
   for (const effect of effects) {
     if (effect.type === 'quest_add') {
       const existing = quests.find(q => q.id === effect.id);
       const relatedNpc = existing?.relatedNpc ?? effect.relatedNpc;
-      const relatedLocation = existing?.relatedLocation ?? manifest?.currentLocation ?? undefined;
+      const relatedLocation = existing?.relatedLocation ?? scene?.currentLocation ?? undefined;
       if (existing) {
         existing.status = 'open';
         if (relatedNpc) existing.relatedNpc = relatedNpc;
@@ -341,7 +344,7 @@ async function applyQuestEffects(cid: string, effects: QuestEffect[]): Promise<v
   }
 
   await writeQuests(cid, quests);
-  io.to(ROOM).emit('quest:update', { quests, act: manifest?.act ?? 1 });
+  io.to(campaignRoom(cid)).emit('quest:update', { quests, act: manifest?.act ?? 1 });
 }
 
 /**
@@ -406,8 +409,7 @@ export async function handleAdminCommand(cid: string, senderId: string, senderNa
   const sayMatch = command.match(/^say\s+"([^"]+)"/);
   if (sayMatch) {
     const payload = { text: sayMatch[1]!, senderName: 'Virtual DM', timestamp: Date.now() };
-    await appendChatLog(cid, payload);
-    io.to(ROOM).emit('chat:message', payload);
+    await postChat(cid, payload, [senderName]);
     console.log(`[admin] say: "${sayMatch[1]}"`);
     return;
   }
@@ -430,7 +432,7 @@ export async function handleAdminCommand(cid: string, senderId: string, senderNa
   }
 
   if (effects.length) {
-    await applyEffects(cid, effects);
+    await applyEffects(cid, effects, [senderName]);
     console.log(`[admin] applied ${effects.length} effect(s) for ${senderName}`);
   }
 }

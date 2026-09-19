@@ -73,3 +73,54 @@ of KB before archiving.
 **Progress log:**
 - 2026-09-15 — entry created during the Mongo vs. DynamoDB architecture discussion. No NoSQL
   migration started yet.
+- 2026-09-19 — Party Groups: messages sent while the party is split now carry `splitId` +
+  `trackIds` (a few dozen bytes each), and the log is read more often — every DM turn and every
+  player's history resync filters the whole array per track (`partyGroups.ts`
+  `readChatContext`/`chatHistoryFor`). Growth per message is small; read frequency is the new cost.
+  Per-message items keyed on `(campaignId, timestamp)` with `splitId`/`trackIds` attributes would
+  make these per-track queries instead of full-array filters when the migration happens.
+
+---
+
+### A party split that spans a session end
+
+**What we accepted:** Party Groups splits (see `partyGroups.ts`) are tracked in `groups.json` and
+survive a session end, but `archiveChatLog` still resets `chat.json` to `[]` at session end. So a
+split that's still open when the session ends loses its branch lines from the live log — the
+reunion summary (`summarizeClosedSplit`) only sees what was said after the archive, and the split
+block in the Adventure Log only shows the post-archive part. Separately, `processSession` runs over
+the interleaved per-track lines, and session-end quest generation reads the manifest scene, which
+is stale while each track has its own scene (`groups.json` `scenes`).
+
+**Why it's deferred:** splitting and ending the session mid-split are both expected to be rare,
+and handling it properly means either blocking session end while split or teaching the archive and
+session processor about tracks. That's real work with no usage data yet.
+
+**What would tell us it's time to act:** players ending sessions mid-split in practice, or a
+reunion summary / session recap visibly missing what one group did.
+
+**Progress log:**
+- 2026-09-19 — entry created alongside Party Groups phases 1–3.
+
+---
+
+### One dungeon / combat arena per campaign while the party is split (Party Groups step 15)
+
+**What we accepted:** `dungeons` and `tokenPositions` are still one-per-campaign. In the open world
+with the party split, a dungeon one group enters is broadcast to every group, and an open-world
+`COMBAT_INIT` is refused while *any* dungeon or combat arena is loaded — so a second group can't
+start its own open-world fight until the first group's map is gone.
+
+**Why it's deferred:** it's a ~150-reference migration (dungeon registry, positions on the dungeon,
+per-occupant map events, arena per fight) on top of the step 14 fight re-key; worth doing once the
+multi-fight work has been played with. Dungeon-crawl campaigns (one dungeon, everyone in it) aren't
+affected at all.
+
+**What would tell us it's time to act:** a split party in the open world where one group goes into
+a dungeon or a fight and another group needs to fight or explore elsewhere at the same time.
+
+**The plan:** fully written up in `docs/PARTY-GROUPS.md` → "Step 15" (design, file list, order,
+open questions, done-looks-like).
+
+**Progress log:**
+- 2026-09-19 — deferred at the end of the Party Groups build (steps 1–14 done).

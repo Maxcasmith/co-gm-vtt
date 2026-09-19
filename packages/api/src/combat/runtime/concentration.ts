@@ -1,9 +1,10 @@
-import { appendChatLog } from '../../storage.ts';
-import { io, ROOM, activeMarks, getStateEngine } from '../../state.ts';
+import { } from '../../storage.ts';
+import { io, campaignRoom, fightOf, toFightOf, getStateEngine } from '../../state.ts';
 import { fmtMod } from '../dice.ts';
 import { removeCondition } from '../conditions/rollModeFor.ts';
 import { rollSavingThrow } from './rolls.ts';
 import { applyCondition, conditionsHolder } from './statusEffects.ts';
+import { postChat } from '../../partyGroups.ts';
 
 /** Ends whatever targetId is concentrating on — tears down its linked hooks. No-op if not concentrating. */
 export async function breakConcentration(cid: string, targetId: string): Promise<void> {
@@ -21,19 +22,19 @@ export async function breakConcentration(cid: string, targetId: string): Promise
   // concentration ended, so a caster who wanted to redirect Hex/Hunter's Mark to a new target for
   // free (RAW: no slot spent while already concentrating) saw the Cast button disabled once their
   // one spell slot was gone, even though the server would have let the redirect through free.
-  io.to(ROOM).emit('character:condition:update', { targetId, conditions });
+  io.to(campaignRoom(cid)).emit('character:condition:update', { targetId, conditions });
 
-  const mark = activeMarks.get(cid)?.get(targetId);
-  if (mark) {
-    activeMarks.get(cid)!.delete(targetId);
-    io.to(ROOM).emit('combat:mark', { casterId: targetId, targetId: mark.targetId, targetName: mark.targetName, spellName: mark.spellName, active: false });
+  const marks = fightOf(cid, targetId)?.marks;
+  const mark = marks?.get(targetId);
+  if (marks && mark) {
+    marks.delete(targetId);
+    toFightOf(cid, targetId).emit('combat:mark', { casterId: targetId, targetId: mark.targetId, targetName: mark.targetName, spellName: mark.spellName, active: false });
   }
 
   console.log(`[concentration] ${holder.label} loses concentration on ${link.spellName}`);
   const msg = { text: `${holder.label} loses concentration on ${link.spellName}.`, senderName: 'System', timestamp: Date.now() };
-  void appendChatLog(cid, msg);
-  io.to(ROOM).emit('chat:message', msg);
-  io.to(ROOM).emit('combat:concentration', { targetId, targetName: holder.label, spellName: null });
+  void postChat(cid, msg, [targetId]);
+  toFightOf(cid, targetId).emit('combat:concentration', { targetId, targetName: holder.label, spellName: null });
 }
 
 /** True when casterId is currently concentrating on exactly spellName — gates free recasts (Hunter's Mark, Witch Bolt). */
@@ -57,8 +58,8 @@ export async function startConcentrating(
   const conditions = [...withoutOld, { name: 'Concentrating' as const, concentration: { spellName, targetIds: hookedTargetIds } }];
   holder.write(conditions);
   console.log(`[concentration] ${holder.label} begins concentrating on ${spellName}`);
-  io.to(ROOM).emit('character:condition:update', { targetId: casterId, conditions });
-  io.to(ROOM).emit('combat:concentration', { targetId: casterId, targetName: holder.label, spellName });
+  io.to(campaignRoom(cid)).emit('character:condition:update', { targetId: casterId, conditions });
+  toFightOf(cid, casterId).emit('combat:concentration', { targetId: casterId, targetName: holder.label, spellName });
 }
 
 const CONCENTRATION_MIN_DC = 10;

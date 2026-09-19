@@ -53,16 +53,16 @@ async function main() {
 
   // ── currency_add / currency_remove effects — write straight to the denomination field, ────
   // never to inventory.
-  await applyEffects(SLUG, [{ type: 'currency_add', player: 'Fixture Hades', denom: 'silver', amount: 5 }]);
+  await applyEffects(SLUG, [{ type: 'currency_add', player: 'Fixture Hades', denom: 'silver', amount: 5 }], 'all');
   const afterAdd = await getCharacter(SLUG, CHAR_ID);
   if (afterAdd?.silver !== 5) throw new Error(`expected silver=5 after CURRENCY_ADD, got ${afterAdd?.silver}`);
   if (afterAdd?.inventory?.length) throw new Error('a currency grant must never add an inventory item');
 
-  await applyEffects(SLUG, [{ type: 'currency_remove', player: 'Fixture Hades', denom: 'silver', amount: 2 }]);
+  await applyEffects(SLUG, [{ type: 'currency_remove', player: 'Fixture Hades', denom: 'silver', amount: 2 }], 'all');
   const afterRemove = await getCharacter(SLUG, CHAR_ID);
   if (afterRemove?.silver !== 3) throw new Error(`expected silver=3 after removing 2, got ${afterRemove?.silver}`);
 
-  await applyEffects(SLUG, [{ type: 'currency_remove', player: 'Fixture Hades', denom: 'silver', amount: 100 }]);
+  await applyEffects(SLUG, [{ type: 'currency_remove', player: 'Fixture Hades', denom: 'silver', amount: 100 }], 'all');
   const afterOverRemove = await getCharacter(SLUG, CHAR_ID);
   if (afterOverRemove?.silver !== 0) throw new Error(`removing more than available should floor at 0, got ${afterOverRemove?.silver}`);
 }

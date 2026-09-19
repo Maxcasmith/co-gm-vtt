@@ -1,13 +1,13 @@
 import type { Character } from 'shared';
-import { statMod, hasOriginFeat } from 'shared';
+import { statMod, hasOriginFeat, trackOf } from 'shared';
 import { getCharacter, updateCharacter, readChatLog, saveEncounter, clearEncounter, saveDungeon, listCharacters, loadPartyAllies, readNemeses, getConfig } from '../../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../../providers/index.ts';
 import { evaluateNemesisCandidates } from '../../session-processor/imagePrompts.ts';
-import { toClientDungeon } from '../../dungeon/index.ts';
-import { Team, Participant } from '../../domain/encounter.ts';
+import { toClientDungeon, chainClosure } from '../../dungeon/index.ts';
+import { Participant, PLAYERS_TEAM_ID, type Encounter } from '../../domain/encounter.ts';
 import { Creature } from '../../domain/creature.ts';
 import { logError } from '../../logger.ts';
-import { io, ROOM, combatState, encounters, tokenPositions, campaignPlayers, enemiesReady, combatStartedAt, combatScores, dungeons, pendingWeaponBonuses, activeMarks, microDungeons, connected, withLivePositions, getStateEngine, stateEngines } from '../../state.ts';
+import { campaignRoom, io, tokenPositions, campaignPlayers, dungeons, pendingWeaponBonuses, microDungeons, connected, withLivePositions, getStateEngine, COMBAT_CHAIN_RADIUS, fightsIn, fightOf, unregisterFight, toFight, toSockets, playerSocketIds } from '../../state.ts';
 import { D20Roll, calcMaxHp } from '../dice.ts';
 import { ReactionOfferHook } from '../stateEngine/hooks/ReactionOfferHook.ts';
 import { RetaliationOfferHook } from '../stateEngine/hooks/RetaliationOfferHook.ts';
@@ -25,18 +25,21 @@ import { applyDamageToCreature } from './damage.ts';
 import { runDeathSave } from './deathSaves.ts';
 import { recomputeIllumination } from './environment.ts';
 import { delay, emitResources } from './shared.ts';
+import { getPartyGroups, postChat } from '../../partyGroups.ts';
 
 /**
  * Refills the incoming actor's action economy and fires `beforeTurn`. Shared by the combat-start
  * path and every turn advance, so the very first actor of a fight gets the same treatment as
  * everyone after them.
  */
-async function runTurnStart(cid: string): Promise<void> {
-  const encounter = encounters.get(cid);
-  const actor = encounter?.currentActor;
-  if (!encounter || !actor) return;
+async function runTurnStart(cid: string, encounter: Encounter): Promise<void> {
+  const actor = encounter.currentActor;
+  if (!actor) return;
+  // Whoever just moved last turn (a creature especially — its AI walk doesn't go through token:move)
+  // may have closed the chain on a bystander, or on another fight.
+  void resolveFightChains(cid);
   actor.refillResources();
-  emitResources(actor);
+  emitResources(cid, actor);
   if (actor.isPlayer) {
     const char = await getCharacter(cid, actor.id);
     if (char) {
@@ -59,29 +62,30 @@ async function runTurnStart(cid: string): Promise<void> {
  * callback and the combat:initiative:roll handler); they now share this one function so the
  * beforeCombat stage cannot fire on one path and not the other.
  */
-export function tryBeginCombat(cid: string): void {
-  const encounter = encounters.get(cid);
-  if (!encounter) return;
+/** Ids of everyone in the fight — the scope for fight-wide hook stages, so one fight's rounds never tick another's hooks. */
+export function fightScope(encounter: Encounter): Set<string> {
+  return new Set(encounter.teams.flatMap(t => t.participants.map(p => p.id)));
+}
+
+export function tryBeginCombat(cid: string, encounter: Encounter): void {
   const expected = encounter.expectedParticipantCount;
-  if (expected <= 0 || encounter.turnOrder.length < expected || encounter.currentRound || !enemiesReady.get(cid)) return;
+  if (encounter.ended || expected <= 0 || encounter.turnOrder.length < expected || encounter.currentRound || !encounter.enemiesReady) return;
 
   encounter.beginCombat();
   void (async () => {
-    await getStateEngine(cid).trigger('beforeCombat', { round: encounter.currentRound?.number ?? 1 });
-    if (!combatState.get(cid)) return;
-    await runTurnStart(cid);
-    if (!combatState.get(cid)) return;
-    emitTurn(cid);
+    await getStateEngine(cid).trigger('beforeCombat', { round: encounter.currentRound?.number ?? 1 }, fightScope(encounter));
+    if (encounter.ended) return;
+    await runTurnStart(cid, encounter);
+    if (encounter.ended) return;
+    emitTurn(cid, encounter);
   })();
 }
 
-export function emitTurn(cid: string) {
-  if (!combatState.get(cid)) return;
-  const encounter = encounters.get(cid);
-  if (!encounter) return;
+export function emitTurn(cid: string, encounter: Encounter) {
+  if (encounter.ended) return;
 
   if (encounter.allPlayersDown()) {
-    endCombatDefeated(cid);
+    endCombatDefeated(cid, encounter);
     return;
   }
 
@@ -100,7 +104,7 @@ export function emitTurn(cid: string) {
   // CombatDock's ACTION_UNLOCKS table turns each string into a button. Generic on purpose: a
   // future feat adds an `action` string and a table entry, nothing here changes.
   const buffs = (getStateEngine(cid).getHooksOwnedBy(actor.id, 'actionUnlock') as ActionUnlockHook[]).map(h => h.action);
-  io.to(ROOM).emit('combat:turn', {
+  toFight(encounter).emit('combat:turn', {
     actorId: actor.id,
     actorName: actor.name,
     ...(speedMultiplier !== 1 ? { speedMultiplier } : {}),
@@ -121,29 +125,29 @@ export function emitTurn(cid: string) {
 }
 
 /** Drops any Dungeon.hazardCells (Difficult Terrain) whose expiresOnRound has passed — called every time a new round starts (see advanceTurn). */
-function pruneExpiredHazardCells(cid: string, round: number): void {
+function pruneExpiredHazardCells(cid: string, encounter: Encounter, round: number): void {
   const dungeon = dungeons.get(cid);
   if (!dungeon?.hazardCells?.length) return;
-  const kept = dungeon.hazardCells.filter(h => h.expiresOnRound === undefined || h.expiresOnRound > round);
+  // Only this fight's hazards — another fight's round numbers mean nothing to them.
+  const kept = dungeon.hazardCells.filter(h => h.expiresOnRound === undefined || (h.fightId !== undefined && h.fightId !== encounter.id) || h.expiresOnRound > round);
   if (kept.length === dungeon.hazardCells.length) return;
   dungeon.hazardCells = kept;
   void saveDungeon(cid, dungeon);
-  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
 }
 
-export async function evaluateNemesisAfterCombat(cid: string): Promise<void> {
+export async function evaluateNemesisAfterCombat(cid: string, encounter: Encounter): Promise<void> {
   try {
     // Captured synchronously, before any await — endCombat() calls encounter.teardown()
     // right after this function's first await suspends it, which wipes encounter.teams.
-    const encounter = encounters.get(cid);
-    const enemyParticipants = encounter?.enemies.filter(p => p.creature) ?? [];
+    const enemyParticipants = encounter.enemies.filter(p => p.creature);
     const roster = enemyParticipants.map(p => p.creature!.toStatBlock());
     if (!roster.length) return;
     const statusLines = enemyParticipants.map(p =>
       `${p.name}: ${p.creature!.isDead() ? 'dead' : `${p.creature!.currentHp}/${p.creature!.hp} HP, alive`}`
     );
 
-    const startedAt = combatStartedAt.get(cid) ?? 0;
+    const startedAt = encounter.startedAt;
     const fullLog = await readChatLog(cid);
     const transcript = fullLog.filter(m => m.timestamp >= startedAt);
     if (!transcript.length) return;
@@ -167,92 +171,92 @@ export async function evaluateNemesisAfterCombat(cid: string): Promise<void> {
         name: c.name,
         detail: c.detail,
         ...(baseline ? { statBlock: baseline } : {}),
-      }]);
+      }], 'all');
     }
   } catch (err) {
     logError('index:evaluateNemesisAfterCombat', err);
   }
 }
 
-export async function endCombat(cid: string): Promise<void> {
-  const encounter = encounters.get(cid);
+export async function endCombat(cid: string, encounter: Encounter): Promise<void> {
+  encounter.ended = true;
+  const scope = fightScope(encounter);
   // Awaited before teardown so afterCombat hooks still see a live encounter.
-  const engine = stateEngines.get(cid);
-  if (engine) await engine.trigger('afterCombat', { round: encounter?.currentRound?.number ?? 0 });
+  const engine = getStateEngine(cid);
+  await engine.trigger('afterCombat', { round: encounter.currentRound?.number ?? 0 }, scope);
 
-  void evaluateNemesisAfterCombat(cid);
+  void evaluateNemesisAfterCombat(cid, encounter);
 
   // One process: every kill/damage tallied during the fight lands on each character sheet
   // in a single read-modify-write, rather than a write per hit.
-  const scores = combatScores.get(cid);
-  if (scores) {
-    void Promise.all([...scores].map(([charId, s]) =>
-      updateCharacter(cid, charId, c => ({
-        ...c,
-        enemiesKilled: (c.enemiesKilled ?? 0) + s.enemiesKilled,
-        damageDealt: (c.damageDealt ?? 0) + s.damageDealt,
-        damageReceived: (c.damageReceived ?? 0) + s.damageReceived,
-      }))
-    ));
-  }
-  combatScores.delete(cid);
+  void Promise.all([...encounter.scores].map(([charId, s]) =>
+    updateCharacter(cid, charId, c => ({
+      ...c,
+      enemiesKilled: (c.enemiesKilled ?? 0) + s.enemiesKilled,
+      damageDealt: (c.damageDealt ?? 0) + s.damageDealt,
+      damageReceived: (c.damageReceived ?? 0) + s.damageReceived,
+    }))
+  ));
 
   // Offline-AI-spawned party members (see rollPlayerInitiatives) only existed for this fight —
   // any player-participant whose name isn't currently connected was necessarily one of them,
   // since only connected names get added the normal way. Drop their token before teardown.
-  if (encounter) {
-    const positions = tokenPositions.get(cid);
-    if (positions) {
-      for (const p of encounter.players) {
-        if (!connected.has(p.name)) delete positions[p.name];
-      }
-      tokenPositions.set(cid, positions);
+  const positions = tokenPositions.get(cid);
+  if (positions) {
+    for (const p of encounter.players) {
+      if (p.isPlayer && !connected.has(p.name)) delete positions[p.name];
     }
+    tokenPositions.set(cid, positions);
   }
 
-  encounter?.teardown();
-  encounters.delete(cid);
-  stateEngines.delete(cid);
-  combatStartedAt.delete(cid);
-  pendingWeaponBonuses.delete(cid);
-  activeMarks.delete(cid);
-  void clearEncounter(cid);
+  // The campaign's hook registry is shared by every fight (and exploration) — drop only this
+  // fight's combatants' hooks, never the whole engine, or ending one fight would strip another's.
+  for (const id of scope) {
+    engine.unregisterByOwner(id);
+    delete pendingWeaponBonuses.get(cid)?.[id];
+  }
+  encounter.teardown();
+  unregisterFight(cid, encounter);
+  void clearEncounter(cid, encounter);
 }
 
-// Guards endCombatDefeated against firing twice for the same wipe — combatState can't serve
-// that purpose here since this now also fires with no active combat (an exploration death).
-const defeatedCampaigns = new Set<string>();
+// Guards endCombatDefeated against firing twice for the same wipe — `ended` can't serve that
+// purpose here since this also fires with no active combat (an exploration death).
+const defeatedFights = new Set<string>();
 
-export function endCombatDefeated(cid: string): void {
-  if (defeatedCampaigns.has(cid)) return;
-  defeatedCampaigns.add(cid);
-  combatState.set(cid, false);
-  enemiesReady.delete(cid);
-  io.to(ROOM).emit('combat:defeat');
+/** A fight's players all went down. Their fight ends; the session only ends if that was everyone
+ * (no other group still standing somewhere else). */
+export function endCombatDefeated(cid: string, encounter?: Encounter): void {
+  const key = encounter?.id ?? cid;
+  if (defeatedFights.has(key)) return;
+  defeatedFights.add(key);
+  if (encounter) encounter.ended = true;
+  const audience = encounter ? toFight(encounter) : io.to(campaignRoom(cid));
+  // Solo-party / whole-party wipe = game over (see CLAUDE-README). One split group falling while
+  // another is still up somewhere is just that group's defeat.
+  const online = (campaignPlayers.get(cid) ?? []).filter(name => connected.has(name));
+  const wholeParty = !encounter || online.every(name => encounter.findParticipant(name));
+  audience.emit('combat:defeat');
   setTimeout(() => {
-    void endCombat(cid);
-    io.to(ROOM).emit('combat:state', false);
-    microDungeons.delete(cid);
-    endSession(cid);
-    defeatedCampaigns.delete(cid);
+    if (encounter) void endCombat(cid, encounter);
+    audience.emit('combat:state', false);
+    if (!fightsIn(cid).length) microDungeons.delete(cid);
+    if (wholeParty) endSession(cid);
+    defeatedFights.delete(key);
   }, 8000);
 }
 
 // Advancing a turn is asynchronous now that hook stages are awaited, which opens a window the old
 // synchronous version did not have: a second advanceTurn arriving mid-flight (a client's
 // combat:turn:end racing the enemy AI's own end-of-turn call) would fire afterTurn twice for the
-// same actor and skip a participant. One advance in flight per fight.
-const advancingTurn = new Set<string>();
-
-export function advanceTurn(cid: string) {
-  if (!combatState.get(cid)) return;
-  const encounter = encounters.get(cid);
-  if (!encounter?.turnOrder.length) return;
-  if (advancingTurn.has(cid)) {
+// same actor and skip a participant. One advance in flight per fight (encounter.advancing).
+export function advanceTurn(cid: string, encounter: Encounter) {
+  if (encounter.ended || !encounter.turnOrder.length) return;
+  if (encounter.advancing) {
     console.log('[turn] advanceTurn ignored — an advance is already in flight');
     return;
   }
-  advancingTurn.add(cid);
+  encounter.advancing = true;
 
   void (async () => {
     try {
@@ -264,9 +268,9 @@ export function advanceTurn(cid: string) {
         await engine.trigger('afterTurn', {
           participantId: outgoing.id, participantName: outgoing.name, isPlayer: outgoing.isPlayer, round,
         });
-        // Hook chains are awaited, so combat may have ended (or been superseded) while suspended —
+        // Hook chains are awaited, so combat may have ended (or been merged away) while suspended —
         // same re-guard the delay()-based paths in runEnemyAI already use.
-        if (!combatState.get(cid)) return;
+        if (encounter.ended) return;
       }
 
       // If afterTurn killed the outgoing actor (a DoT ticking on their own turn), applyDamageTo*
@@ -280,23 +284,24 @@ export function advanceTurn(cid: string) {
       console.log(`[turn] advanceTurn: ${before} → ${after} (order=[${encounter.turnOrder.map(p => p.name).join(',')}])`);
 
       if (roundStarted) {
-        await engine.trigger('afterRound', { round });
-        await engine.trigger('beforeRound', { round: encounter.currentRound?.number ?? round + 1 });
-        if (!combatState.get(cid)) return;
-        pruneExpiredHazardCells(cid, encounter.currentRound?.number ?? round + 1);
+        const scope = fightScope(encounter);
+        await engine.trigger('afterRound', { round }, scope);
+        await engine.trigger('beforeRound', { round: encounter.currentRound?.number ?? round + 1 }, scope);
+        if (encounter.ended) return;
+        pruneExpiredHazardCells(cid, encounter, encounter.currentRound?.number ?? round + 1);
       }
 
       // beforeTurn hooks can damage the incoming actor (a lingering acid/poison effect ticking at
       // the start of its turn). A creature killed here is spliced out of the turn order by
       // applyDamageToCreature, which leaves currentActor pointing at the next live participant —
       // so emitTurn below still lands correctly without needing to re-advance.
-      await runTurnStart(cid);
-      if (!combatState.get(cid)) return;
+      await runTurnStart(cid, encounter);
+      if (encounter.ended) return;
 
-      emitTurn(cid);
+      emitTurn(cid, encounter);
       void saveEncounter(cid, encounter);
     } finally {
-      advancingTurn.delete(cid);
+      encounter.advancing = false;
     }
   })();
 }
@@ -343,46 +348,53 @@ function registerReactionOffers(cid: string, char: Character): void {
   }
 }
 
-export async function rollPlayerInitiatives(cid: string, chars: Character[]): Promise<void> {
-  const encounter = encounters.get(cid);
-  if (!encounter) return;
-
-  let playerTeam = encounter.teams.find(t => t.name === 'Players');
-  if (!playerTeam) {
-    playerTeam = new Team('players', 'Players');
-    encounter.addTeam(playerTeam);
+function buildPlayerParticipant(cid: string, name: string, char: Character | undefined): Participant {
+  const alertBonus = char && hasOriginFeat(char, 'Alert') ? (char.proficiencyBonus ?? 2) : 0;
+  const mod = (char ? statMod(char.stats.dex) : 0) + (char?.initiativeBonus ?? 0) + alertBonus;
+  const maxHp = char ? calcMaxHp(char) : 0;
+  const participant = new Participant({
+    id: char?.id ?? name,
+    name,
+    initiative: new D20Roll().roll() + mod,
+    isPlayer: true,
+    teamId: 'players',
+    currentHp: char?.currentHp ?? maxHp,
+    maxHp,
+    tempHp: char?.tempHp ?? 0,
+  });
+  if (char) {
+    registerReactionOffers(cid, char);
+    registerStaticDamageModifiers(cid, char.id, char);
   }
+  return participant;
+}
 
-  const players = (campaignPlayers.get(cid) ?? []).filter(name => connected.has(name));
-  encounter.expectedParticipantCount += players.length;
-
-  const entries: Participant[] = players.map(name => {
-    const char = chars.find(c => c.name === name);
-    const alertBonus = char && hasOriginFeat(char, 'Alert') ? (char.proficiencyBonus ?? 2) : 0;
-    const mod = (char ? statMod(char.stats.dex) : 0) + (char?.initiativeBonus ?? 0) + alertBonus;
-    const maxHp = char ? calcMaxHp(char) : 0;
-    const participant = new Participant({
-      id: char?.id ?? name,
-      name,
-      initiative: new D20Roll().roll() + mod,
-      isPlayer: true,
-      teamId: 'players',
-      currentHp: char?.currentHp ?? maxHp,
-      maxHp,
-      tempHp: char?.tempHp ?? 0,
-    });
-    playerTeam!.addParticipant(participant);
-    if (char) {
-      registerReactionOffers(cid, char);
-      registerStaticDamageModifiers(cid, char.id, char);
-    }
+/** Rolls initiative for `names` and queues them into `encounter` — at combat start, or mid-fight
+ * when the chain rule pulls someone in. Skips anyone already in a fight (two moves racing to pull
+ * in the same player, or someone who got pulled into another fight first). Returns who was added. */
+export function addPlayersToFight(cid: string, encounter: Encounter, chars: Character[], names: string[], baseDelay = 0): Participant[] {
+  const team = encounter.team(PLAYERS_TEAM_ID, 'Players');
+  // Not already in this fight, and not claimed by a different one (this fight's own pending claims are fine).
+  const entries = [...new Set(names)].filter(name => !encounter.findParticipant(name) && (fightOf(cid, name) ?? encounter) === encounter).map(name => {
+    const participant = buildPlayerParticipant(cid, name, chars.find(c => c.name === name));
+    team.addParticipant(participant);
     return participant;
   });
+  encounter.expectedParticipantCount += entries.length;
+  addToTurnOrder(cid, encounter, entries, baseDelay);
+  return entries;
+}
 
-  addToTurnOrder(cid, entries);
+/** Combat start: `names` are the connected players in this fight (the chain rule's pick in a
+ * dungeon, the acting group in the open world) — not everyone online. Their allies and their
+ * group's AI-controlled offline members come with them; anyone else's stay out. */
+export async function rollPlayerInitiatives(cid: string, encounter: Encounter, chars: Character[], names: string[]): Promise<void> {
+  const team = encounter.team(PLAYERS_TEAM_ID, 'Players');
+  const entries = addPlayersToFight(cid, encounter, chars, names);
+  const inFight = new Set(names);
 
-  // Add any persistent party allies to initiative alongside players
-  const allies = await loadPartyAllies(cid);
+  // Persistent party allies follow their owner — one whose owner is off elsewhere stays out of this fight.
+  const allies = (await loadPartyAllies(cid)).filter(sb => !sb.ownerId || chars.some(c => c.id === sb.ownerId && inFight.has(c.name)));
   if (allies.length) {
     const allyEntries = allies.map(sb => {
       const creature = Creature.from(sb);
@@ -391,80 +403,131 @@ export async function rollPlayerInitiatives(cid: string, chars: Character[]): Pr
         name: creature.name,
         initiative: new D20Roll().roll() + statMod(creature.stats.dex),
         isPlayer: false,
-        teamId: 'players',
+        teamId: PLAYERS_TEAM_ID,
         creature,
         ownerId: sb.ownerId,
       });
-      playerTeam!.addParticipant(p);
+      team.addParticipant(p);
       registerStaticDamageModifiers(cid, creature.id, creature);
       return p;
     });
     encounter.expectedParticipantCount += allyEntries.length;
-    addToTurnOrder(cid, allyEntries, entries.length * 500);
+    addToTurnOrder(cid, encounter, allyEntries, entries.length * 500);
   }
 
   // Offline party members who opted into AI control (see the AI tab) spawn in for this fight
-  // only, adjacent to whichever online player happens to be first — same "adjacent, or stack if
-  // boxed in" rule combat/ai/executor.ts's findOpenAdjacent already gives summons. Skipped
-  // entirely if nobody's online to anchor the spawn point on; despawned again in endCombat.
-  const anchorPos = players[0] ? tokenPositions.get(cid)?.[players[0]] : undefined;
-  if (anchorPos) {
-    const offlineAiChars = chars.filter(c => !connected.has(c.name) && c.aiControlled);
-    if (offlineAiChars.length) {
-      const positions = tokenPositions.get(cid) ?? {};
-      const aiEntries = offlineAiChars.map(char => {
-        const pos = findOpenAdjacent(positions, anchorPos.gx, anchorPos.gy);
-        positions[char.name] = pos;
-        io.to(ROOM).emit('token:moved', { tokenId: char.name, gx: pos.gx, gy: pos.gy });
+  // only, adjacent to someone from their own Party Groups track who's in it (with the party
+  // together, that's simply the first fighter) — same "adjacent, or stack if boxed in" rule
+  // combat/ai/executor.ts's findOpenAdjacent already gives summons. A member whose track has
+  // nobody in the fight, or no token to anchor on, stays out; despawned again in endCombat.
+  const groups = await getPartyGroups(cid);
+  const positions = tokenPositions.get(cid) ?? {};
+  const aiEntries: Participant[] = [];
+  for (const char of chars.filter(c => !connected.has(c.name) && c.aiControlled && !fightOf(cid, c.id))) {
+    const anchorName = names.find(n => trackOf(groups, n) === trackOf(groups, char.name));
+    const anchorPos = anchorName ? positions[anchorName] : undefined;
+    if (!anchorPos) continue;
+    const pos = findOpenAdjacent(positions, anchorPos.gx, anchorPos.gy);
+    positions[char.name] = pos;
+    io.to(campaignRoom(cid)).emit('token:moved', { tokenId: char.name, gx: pos.gx, gy: pos.gy });
+    const participant = buildPlayerParticipant(cid, char.name, char);
+    team.addParticipant(participant);
+    aiEntries.push(participant);
+  }
+  if (aiEntries.length) {
+    tokenPositions.set(cid, positions);
+    encounter.expectedParticipantCount += aiEntries.length;
+    addToTurnOrder(cid, encounter, aiEntries, entries.length * 500);
+  }
+}
 
-        const alertBonus = hasOriginFeat(char, 'Alert') ? (char.proficiencyBonus ?? 2) : 0;
-        const mod = statMod(char.stats.dex) + (char.initiativeBonus ?? 0) + alertBonus;
-        const maxHp = calcMaxHp(char);
-        const participant = new Participant({
-          id: char.id,
-          name: char.name,
-          initiative: new D20Roll().roll() + mod,
-          isPlayer: true,
-          teamId: 'players',
-          currentHp: char.currentHp ?? maxHp,
-          maxHp,
-          tempHp: char.tempHp ?? 0,
-        });
-        playerTeam!.addParticipant(participant);
-        registerReactionOffers(cid, char);
-        registerStaticDamageModifiers(cid, char.id, char);
-        return participant;
-      });
-      tokenPositions.set(cid, positions);
-      encounter.expectedParticipantCount += aiEntries.length;
-      addToTurnOrder(cid, aiEntries, entries.length * 500);
+/** Full combat snapshot, for players whose client saw none of this fight happen — pulled in
+ * mid-fight by the chain rule, or merged in from another fight. */
+export function syncFight(encounter: Encounter, audience = toFight(encounter)): void {
+  audience.emit('combat:state', true);
+  audience.emit('encounter:ready', encounter.enemies.filter(p => p.creature).map(p => p.creature!.toStatBlock()));
+  if (!encounter.turnOrder.length) return;
+  audience.emit('combat:turn:order', encounter.turnOrder.map(p => p.toTurnOrderEntry()));
+  const actor = encounter.currentRound ? encounter.currentActor : undefined;
+  if (actor) audience.emit('combat:turn', { actorId: actor.id, actorName: actor.name });
+}
+
+function livePositionsOf(cid: string, encounter: Encounter): { gx: number; gy: number }[] {
+  const positions = tokenPositions.get(cid) ?? {};
+  return encounter.turnOrder
+    .filter(p => !p.isDead())
+    .map(p => positions[p.isPlayer ? p.name : p.id])
+    .filter((pos): pos is { gx: number; gy: number } => !!pos);
+}
+
+/** Oldest fight absorbs the newer one — its round count and current actor carry on. */
+function mergeFights(cid: string, keep: Encounter, gone: Encounter): void {
+  console.log(`[combat] fights merge: ${gone.id} → ${keep.id}`);
+  keep.absorb(gone);
+  unregisterFight(cid, gone);
+  void clearEncounter(cid, gone);
+  void saveEncounter(cid, keep);
+  syncFight(keep);
+  void postChat(cid, { text: 'The fights converge into one battle!', senderName: 'Combat', timestamp: Date.now() }, keep.turnOrder.map(p => p.id));
+}
+
+/** The chain rule (dungeon only — the open world has no positions): two fights whose combatants
+ * come within COMBAT_CHAIN_RADIUS cells and sight of each other merge; then every connected
+ * player outside any fight who is within range and sight of anyone in one (directly, or through
+ * someone who just joined) is pulled into it. Runs on every player move and every turn start, so
+ * a creature walking up to a bystander catches them too. */
+export async function resolveFightChains(cid: string): Promise<void> {
+  const dungeon = dungeons.get(cid);
+  // An open-world combat arena isn't a place anyone else is standing in — its grid shares
+  // coordinates with whatever stale positions other players still carry, so chaining there would
+  // drag in bystanders who are nowhere near. Open-world fights are per acting group, no chain.
+  if (!dungeon || dungeon.arena) return;
+
+  const byAge = fightsIn(cid).sort((a, b) => a.startedAt - b.startedAt);
+  for (const [i, keep] of byAge.entries()) {
+    for (const other of byAge.slice(i + 1)) {
+      if (keep.ended || other.ended) continue;
+      const otherCells = Object.fromEntries(livePositionsOf(cid, other).map((pos, k) => [String(k), pos]));
+      if (chainClosure(dungeon, livePositionsOf(cid, keep), otherCells, COMBAT_CHAIN_RADIUS).length) mergeFights(cid, keep, other);
+    }
+  }
+
+  const positions = tokenPositions.get(cid) ?? {};
+  let chars: Character[] | undefined;
+  for (const fight of fightsIn(cid)) {
+    const candidates = Object.fromEntries((campaignPlayers.get(cid) ?? []).flatMap(name => {
+      const pos = positions[name];
+      return pos && connected.has(name) && !fightOf(cid, name) ? [[name, pos] as const] : [];
+    }));
+    const names = chainClosure(dungeon, livePositionsOf(cid, fight), candidates, COMBAT_CHAIN_RADIUS);
+    if (!names.length) continue;
+    chars ??= await listCharacters(cid);
+    const added = addPlayersToFight(cid, fight, chars, names);
+    syncFight(fight, toSockets(added.map(p => playerSocketIds.get(p.id)).filter((sid): sid is string => !!sid)));
+    for (const p of added) {
+      void postChat(cid, { text: `${p.name} joins the fight!`, senderName: 'Combat', timestamp: Date.now() }, [p.id]);
     }
   }
 }
 
-export function rollEnemyInitiatives(cid: string): void {
-  const encounter = encounters.get(cid);
-  if (!encounter) return;
-  enemiesReady.set(cid, true);
+export function rollEnemyInitiatives(cid: string, encounter: Encounter): void {
+  encounter.enemiesReady = true;
   const existing = encounter.turnOrder.length;
   const entries = encounter.enemies.map(p => {
     p.initiative = new D20Roll().roll() + statMod(p.creature?.stats.dex ?? 10);
     if (p.creature) registerStaticDamageModifiers(cid, p.id, p.creature);
     return p;
   });
-  addToTurnOrder(cid, entries, existing * 500);
+  addToTurnOrder(cid, encounter, entries, existing * 500);
 }
 
-export function addToTurnOrder(cid: string, entries: Participant[], baseDelay = 0): void {
-  const encounter = encounters.get(cid);
-  if (!encounter) return;
-
+export function addToTurnOrder(cid: string, encounter: Encounter, entries: Participant[], baseDelay = 0): void {
   entries.forEach((entry, i) => {
     setTimeout(() => {
-      if (!combatState.get(cid)) return;
+      if (encounter.ended) return;
       encounter.addToTurnOrder(entry);
-      io.to(ROOM).emit('combat:initiative', entry.toTurnOrderEntry());
-      tryBeginCombat(cid);
+      toFight(encounter).emit('combat:initiative', entry.toTurnOrderEntry());
+      tryBeginCombat(cid, encounter);
       void saveEncounter(cid, encounter);
     }, baseDelay + i * 500);
   });
@@ -477,8 +540,7 @@ export function addToTurnOrder(cid: string, entries: Participant[], baseDelay = 
  * needs a live socket to prompt, which AI-controlled allies and summons don't have.
  */
 export async function requestAlertSwap(cid: string, characterId: string, targetId: string): Promise<void> {
-  if (!combatState.get(cid)) return;
-  const encounter = encounters.get(cid);
+  const encounter = fightOf(cid, characterId);
   if (!encounter) return;
 
   const requester = encounter.findParticipant(characterId);
@@ -495,7 +557,7 @@ export async function requestAlertSwap(cid: string, characterId: string, targetI
   if (!picked) return;
 
   // Re-check after the await — combat may have ended, or this got used elsewhere in the meantime.
-  if (!combatState.get(cid) || !encounters.get(cid) || requester.alertSwapUsed) return;
+  if (encounter.ended || requester.alertSwapUsed) return;
 
   const requesterInit = requester.initiative;
   requester.initiative = target.initiative;
@@ -503,8 +565,8 @@ export async function requestAlertSwap(cid: string, characterId: string, targetI
   requester.alertSwapUsed = true;
   encounter.addToTurnOrder(requester);
   encounter.addToTurnOrder(target);
-  io.to(ROOM).emit('combat:initiative', requester.toTurnOrderEntry());
-  io.to(ROOM).emit('combat:initiative', target.toTurnOrderEntry());
+  toFight(encounter).emit('combat:initiative', requester.toTurnOrderEntry());
+  toFight(encounter).emit('combat:initiative', target.toTurnOrderEntry());
   console.log(`[alert] ${requester.name} swaps Initiative with ${target.name}`);
 }
 

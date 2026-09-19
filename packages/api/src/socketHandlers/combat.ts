@@ -1,12 +1,12 @@
 import type { TurnOrderEntry, Weapon, Spell, SpellAttackResult, SpellSaveOutcome, SpellSaveResult, CreatureType, Character, ActionResource, AttackContext, DungeonEntity, EffectSpec, AbilityKey, HookSpec } from 'shared';
 import { effectiveWeaponProfs, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, isAmmunition, isWeapon, isMonkWeapon, statMod, parseRangeFeet, resolveForcedMovement, findPath, effectApplies, actionCostFromCastingTime, requiresConcentration, resolveSpellDamageDice, hasOriginFeat, hasClassLevel, crossesObscuredArea, ABILITY_DEFS, trySpendResource, trySpendResourceAmount, resourceCurrent, getSenses, hasLineOfSight, closedDoorCells, monkMartialArtsActive, monkLevel, martialArtsDie } from 'shared';
 import { randomUUID } from 'crypto';
-import { getCharacter, updateCharacter, saveEncounter, listCharacters, getConfig, appendChatLog, saveDungeon, getHouseRules } from '../storage.ts';
+import { getCharacter, updateCharacter, saveEncounter, listCharacters, getConfig, saveDungeon, getHouseRules } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateCombatFlavour, generateSpellSaveFlavour } from '../session-processor/imagePrompts.ts';
-import { Participant } from '../domain/encounter.ts';
+import { Participant, type Encounter } from '../domain/encounter.ts';
 import { logError, logDebug } from '../logger.ts';
-import { io, ROOM, combatState, encounters, tokenPositions, dungeons, playerSocketIds, pendingWeaponBonuses, activeMarks, connected, getStateEngine, withLivePositions, STAT_FULL, HIT_DICE, PLAYER_SIGHT_RADIUS } from '../state.ts';
+import { io, campaignRoom, fightOf, toFight, toFightOf, tokenPositions, dungeons, playerSocketIds, pendingWeaponBonuses, connected, getStateEngine, withLivePositions, STAT_FULL, HIT_DICE, PLAYER_SIGHT_RADIUS } from '../state.ts';
 import { toClientDungeon } from '../dungeon/index.ts';
 import { registerSpellHooks } from '../combat/stateEngine/registerSpellHooks.ts';
 import { RecurringDamageHook } from '../combat/stateEngine/hooks/RecurringDamageHook.ts';
@@ -30,6 +30,7 @@ import { stabilizeParticipant } from '../combat/runtime/deathSaves.ts';
 import { checkDungeonProximity, toggleDoor, useStairs } from '../dungeon/runtime.ts';
 import { applyEffects } from '../effects.ts';
 import type { JoinContext } from './context.ts';
+import { postChat } from '../partyGroups.ts';
 
 /** Staggers multi-target spell resolution (Magic Missile's darts, Bless's allies, ...) so results land one at a time rather than all at once. */
 function sleep(ms: number): Promise<void> {
@@ -37,9 +38,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** Every living participant within radiusFt (Chebyshev, 5ft/cell — same convention as checkTrapAt/RetaliationOfferHook's range check) of a grid point. Positions are best-effort; a participant with no placed token is skipped rather than assumed in range. Exported for origin points that aren't an existing participant (e.g. an environmental blast). */
-export function participantsNearPoint(cid: string, gx: number, gy: number, radiusFt: number, excludeIds: Set<string> = new Set()): string[] {
-  const encounter = encounters.get(cid);
-  if (!encounter) return [];
+export function participantsNearPoint(cid: string, encounter: Encounter, gx: number, gy: number, radiusFt: number, excludeIds: Set<string> = new Set()): string[] {
   const positions = tokenPositions.get(cid) ?? {};
   const all = [...encounter.players, ...encounter.enemies];
   return all
@@ -60,23 +59,23 @@ export function participantsNearPoint(cid: string, gx: number, gy: number, radiu
  * access to an arbitrary nearby participant's conditions from here; add if it matters in practice.
  */
 function hasHostileWithinMeleeRange(cid: string, actorId: string, gx: number, gy: number): boolean {
-  const encounter = encounters.get(cid);
+  const encounter = fightOf(cid, actorId);
   const actor = encounter?.findParticipant(actorId);
   if (!encounter || !actor) return false;
-  return participantsNearPoint(cid, gx, gy, 5, new Set([actorId]))
+  return participantsNearPoint(cid, encounter, gx, gy, 5, new Set([actorId]))
     .some(id => encounter.findParticipant(id)?.teamId !== actor.teamId);
 }
 
 /** Every living participant within radiusFt of centerId's own token, centerId included — see participantsNearPoint for the underlying distance rule. */
 function nearbyParticipantIds(cid: string, centerId: string, radiusFt: number): string[] {
-  const encounter = encounters.get(cid);
+  const encounter = fightOf(cid, centerId);
   if (!encounter) return [];
   const positions = tokenPositions.get(cid) ?? {};
   const all = [...encounter.players, ...encounter.enemies];
   const center = all.find(p => p.id === centerId);
   const centerPos = center ? (positions[center.id] ?? positions[center.name]) : undefined;
   if (!centerPos) return center && !center.isDead() ? [centerId] : [];
-  const rest = participantsNearPoint(cid, centerPos.gx, centerPos.gy, radiusFt, new Set([centerId]));
+  const rest = participantsNearPoint(cid, encounter, centerPos.gx, centerPos.gy, radiusFt, new Set([centerId]));
   return center?.isDead() ? rest : [centerId, ...rest];
 }
 
@@ -92,7 +91,7 @@ async function resolveSplashAoE(
   centerId: string, radiusFt: number, effects: EffectSpec[], saveAbility: AbilityKey, halfOnSave: boolean, dc: number,
   casterLevel: number, slotLevel: number, excludeIds: Set<string> = new Set(),
 ): Promise<void> {
-  const encounter = encounters.get(cid);
+  const encounter = fightOf(cid, centerId);
   if (!encounter) return;
   const engine = getStateEngine(cid);
   const outcomes: SpellSaveOutcome[] = [];
@@ -127,7 +126,7 @@ async function resolveSplashAoE(
   }
 
   if (outcomes.length) {
-    io.to(ROOM).emit('combat:spell:save:result', { casterName, spellName, dc, saveAbility, slotLevel, outcomes });
+    toFight(encounter).emit('combat:spell:save:result', { casterName, spellName, dc, saveAbility, slotLevel, outcomes });
   }
 }
 
@@ -154,13 +153,13 @@ async function grantItem(cid: string, casterId: string, spec: NonNullable<Spell[
 async function grantCompanion(cid: string, casterId: string, casterName: string, spec: NonNullable<Spell['combat']>['grantsCompanion']): Promise<void> {
   if (!spec) return;
   const id = randomUUID();
-  await applyEffects(cid, [{ type: 'party_join', ally: { ...spec, id, ownerId: casterId } }]);
+  await applyEffects(cid, [{ type: 'party_join', ally: { ...spec, id, ownerId: casterId } }], [casterId]);
   const pos = (tokenPositions.get(cid) ?? {})[casterName] ?? (tokenPositions.get(cid) ?? {})[casterId];
   if (pos) {
     const positions = tokenPositions.get(cid) ?? {};
     positions[id] = { gx: pos.gx, gy: pos.gy };
     tokenPositions.set(cid, positions);
-    io.to(ROOM).emit('token:moved', { tokenId: id, gx: pos.gx, gy: pos.gy });
+    io.to(campaignRoom(cid)).emit('token:moved', { tokenId: id, gx: pos.gx, gy: pos.gy });
   }
 }
 
@@ -172,10 +171,10 @@ async function grantCompanion(cid: string, casterId: string, casterName: string,
  * through ReactionOfferHook, which does its own check against the same budget.
  */
 export function trySpendAction(cid: string, actorId: string, kind: ActionResource): boolean {
-  const participant = encounters.get(cid)?.findParticipant(actorId);
+  const participant = fightOf(cid, actorId)?.findParticipant(actorId);
   if (!participant) return true; // not tracked in this encounter — don't block on missing state
   if (participant.trySpend(kind)) {
-    emitResources(participant);
+    emitResources(cid, participant);
     return true;
   }
   const sid = playerSocketIds.get(actorId);
@@ -191,7 +190,7 @@ export function trySpendAction(cid: string, actorId: string, kind: ActionResourc
  * prompt.
  */
 function pickChainTarget(cid: string, fromId: string, visited: Set<string>, radiusFt = 30): string | undefined {
-  const encounter = encounters.get(cid);
+  const encounter = fightOf(cid, fromId);
   if (!encounter) return undefined;
   const positions = tokenPositions.get(cid) ?? {};
   const fromPos = positions[fromId];
@@ -261,10 +260,9 @@ function placeTrapSpell(cid: string, char: Character, casterName: string, spell:
   };
   dungeon.entities = [...dungeon.entities, entity];
   void saveDungeon(cid, dungeon);
-  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
   const msg = { text: `${casterName} sets ${spell.name}.`, senderName: 'System', timestamp: Date.now() };
-  void appendChatLog(cid, msg);
-  io.to(ROOM).emit('chat:message', msg);
+  void postChat(cid, msg, [casterName]);
   console.log(`[trap] ${casterName} places ${spell.name} at (${originGx},${originGy}), DC${dc}`);
   logDebug(`[trap] ${casterName} places ${spell.name} at (${originGx},${originGy}), DC${dc}`);
 }
@@ -282,7 +280,7 @@ function placeFollowingObject(cid: string, casterId: string, casterName: string,
   };
   dungeon.entities = [...dungeon.entities, entity];
   void saveDungeon(cid, dungeon);
-  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
 }
 
 /** Drops Silent Image's stationary marker at the targeted cell — a labeled 'object' entity with no followsId, so it just sits there (see the spell's own todo for what's still missing: moving it, and revealing it on inspection). */
@@ -295,7 +293,7 @@ function placeIllusionMarker(cid: string, casterName: string, spell: Spell, orig
   };
   dungeon.entities = [...dungeon.entities, entity];
   void saveDungeon(cid, dungeon);
-  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
 }
 
 /**
@@ -308,7 +306,7 @@ function placeIllusionMarker(cid: string, casterName: string, spell: Spell, orig
  */
 function placeHazardCells(
   cid: string, originGx: number, originGy: number, sizeFt: number,
-  spec: { multiplier?: number; obscures?: boolean; durationRounds: number } | undefined, currentRound: number,
+  spec: { multiplier?: number; obscures?: boolean; durationRounds: number } | undefined, fight: Encounter,
   visual?: NonNullable<Spell['combat']>['hazardVisual'],
 ): void {
   if (!spec) return;
@@ -317,19 +315,19 @@ function placeHazardCells(
   const half = Math.floor(sizeFt / 5 / 2);
   const cx = Math.round(originGx);
   const cy = Math.round(originGy);
-  const expiresOnRound = currentRound + spec.durationRounds;
+  const expiresOnRound = (fight.currentRound?.number ?? 1) + spec.durationRounds;
   const added: NonNullable<typeof dungeon.hazardCells> = [];
   for (let dx = -half; dx <= half; dx++) {
     for (let dy = -half; dy <= half; dy++) {
       added.push({
-        gx: cx + dx, gy: cy + dy, multiplier: spec.multiplier, obscures: spec.obscures, expiresOnRound,
+        gx: cx + dx, gy: cy + dy, multiplier: spec.multiplier, obscures: spec.obscures, expiresOnRound, fightId: fight.id,
         style: visual?.style, color: visual?.color,
       });
     }
   }
   dungeon.hazardCells = [...(dungeon.hazardCells ?? []), ...added];
   void saveDungeon(cid, dungeon);
-  io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
 }
 
 /** Whether a straight line between two cells crosses a Heavily Obscured hazard cell (Fog Cloud) — see crossesObscuredArea. */
@@ -418,8 +416,7 @@ function updateFollowingObjects(cid: string, tokenId: string, gx: number, gy: nu
     if (distFt > 100) {
       changed = true;
       const msg = { text: `${e.name} can't keep up and fades away.`, senderName: 'System', timestamp: Date.now() };
-      void appendChatLog(cid, msg);
-      io.to(ROOM).emit('chat:message', msg);
+      void postChat(cid, msg, [tokenId]);
       return false;
     }
     if (distFt > (e.leashFt ?? 20)) {
@@ -433,7 +430,7 @@ function updateFollowingObjects(cid: string, tokenId: string, gx: number, gy: nu
   if (changed) {
     dungeon.entities = kept;
     void saveDungeon(cid, dungeon);
-    io.to(ROOM).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+    io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
   }
 }
 
@@ -444,8 +441,7 @@ export async function resolvePlayerAttack(
   },
 ): Promise<{ hit: boolean } | undefined> {
       const cid = campaignId;
-      if (!combatState.get(cid)) return;
-      const encounter = encounters.get(cid);
+      const encounter = fightOf(cid, attackerId);
       if (!encounter) return;
 
       const char = await getCharacter(cid, attackerId);
@@ -546,7 +542,7 @@ export async function resolvePlayerAttack(
         total: roll + attackBonus,
         hit: resolveHit(roll, attackBonus, creature.ac),
       }));
-      if (!combatState.get(cid)) return;
+      if (encounter.ended) return;
 
       // Re-derived from the context rather than the pre-hook locals — see CONTEXT MUTATION in
       // shared/types/combat-hooks.ts.
@@ -558,7 +554,7 @@ export async function resolvePlayerAttack(
       // reroll before damage/narration commit to it (replaces the old pre-roll HUD toggle).
       if (!hit) {
         const rerolled = await offerLuckAttackReroll(cid, attackerId, attackerName, weapon.name, creature.name, atkCtx.total, atkCtx.ac);
-        if (rerolled !== null && combatState.get(cid)) {
+        if (rerolled !== null && !encounter.ended) {
           roll = atkCtx.d20 = rerolled;
           total = atkCtx.total = rerolled + atkCtx.attackBonus;
           hit = atkCtx.hit = resolveHit(rerolled, atkCtx.attackBonus, atkCtx.ac);
@@ -620,9 +616,9 @@ export async function resolvePlayerAttack(
           const pending = bonuses?.[attackerId];
           if (pending) {
             delete bonuses![attackerId];
-            io.to(ROOM).emit('combat:effect:aura:end', { casterId: attackerId, casterName: attackerName });
+            toFight(encounter).emit('combat:effect:aura:end', { casterId: attackerId, casterName: attackerName });
             if (pending.impactColor) {
-              io.to(ROOM).emit('combat:effect:impact', { targetId, targetName: creature.name, color: pending.impactColor, style: pending.impactStyle });
+              toFight(encounter).emit('combat:effect:impact', { targetId, targetName: creature.name, color: pending.impactColor, style: pending.impactStyle });
             }
             // Save rolled once (if this spell has one) and reused below to gate damage,
             // secondary effects, and hooks alike — Hail of Thorns' damage is itself save-gated
@@ -690,8 +686,7 @@ export async function resolvePlayerAttack(
                     text: `${pending.spellName}'s flame leaps to ${splashParticipant.name} for ${splashDamage} ${splashRolled.damageType ?? ''} damage.`,
                     senderName: 'System', timestamp: Date.now(),
                   };
-                  void appendChatLog(cid, splashMsg);
-                  io.to(ROOM).emit('chat:message', splashMsg);
+                  void postChat(cid, splashMsg, [attackerId]);
                 }
               }
             }
@@ -720,7 +715,7 @@ export async function resolvePlayerAttack(
                       if (moved.gx !== targetPos2.gx || moved.gy !== targetPos2.gy) {
                         positions2[targetId] = moved;
                         tokenPositions.set(cid, positions2);
-                        io.to(ROOM).emit('token:moved', { tokenId: targetId, gx: moved.gx, gy: moved.gy });
+                        io.to(campaignRoom(cid)).emit('token:moved', { tokenId: targetId, gx: moved.gx, gy: moved.gy });
                       }
                     }
                   }
@@ -785,7 +780,7 @@ export async function resolvePlayerAttack(
           if (moved.gx !== targetPos.gx || moved.gy !== targetPos.gy) {
             positions[targetId] = moved;
             tokenPositions.set(cid, positions);
-            io.to(ROOM).emit('token:moved', { tokenId: targetId, gx: moved.gx, gy: moved.gy });
+            io.to(campaignRoom(cid)).emit('token:moved', { tokenId: targetId, gx: moved.gx, gy: moved.gy });
           }
           if (attackerParticipant) attackerParticipant.tavernBrawlerPushUsed = true;
         }
@@ -817,7 +812,7 @@ export async function resolvePlayerAttack(
         remainingHp: hit ? encounter.findCreature(targetId)?.currentHp : undefined,
         targetDead: encounter.findCreature(targetId)?.isDead() ?? false,
       };
-      io.to(ROOM).emit('combat:attack:result', atkResult);
+      toFight(encounter).emit('combat:attack:result', atkResult);
 
       void (async () => {
         try {
@@ -826,8 +821,7 @@ export async function resolvePlayerAttack(
           const flavour = await generateCombatFlavour(atkResult, getFeatureProvider(config, 'combatNarration'));
           if (!flavour) return;
           const msg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
-          await appendChatLog(cid, msg);
-          io.to(ROOM).emit('chat:message', msg);
+          await postChat(cid, msg, [attackerId]);
         } catch (err) { logError('index:combatFlavour', err); }
       })();
       return { hit };
@@ -840,8 +834,7 @@ export async function resolvePlayerSpellAttack(
   },
 ): Promise<{ hit: boolean } | undefined> {
       const cid = campaignId;
-      if (!combatState.get(cid)) return;
-      const encounter = encounters.get(cid);
+      const encounter = fightOf(cid, casterId);
       if (!encounter || !targetIds.length) return;
 
       const char = await getCharacter(cid, casterId);
@@ -893,7 +886,7 @@ export async function resolvePlayerSpellAttack(
         const targetId = queue.shift()!;
         if (!first) await sleep(500);
         first = false;
-        if (!combatState.get(cid)) return;
+        if (encounter.ended) return;
 
         const creature = encounter.findCreature(targetId);
         if (!creature || creature.isDead()) continue;
@@ -939,7 +932,7 @@ export async function resolvePlayerSpellAttack(
             total: roll + attackBonus,
             hit: resolveHit(roll, attackBonus, creature.ac),
           }));
-          if (!combatState.get(cid)) return;
+          if (encounter.ended) return;
 
           total = atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
           hit = atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
@@ -1017,7 +1010,7 @@ export async function resolvePlayerSpellAttack(
               if (moved2.gx !== targetPos2.gx || moved2.gy !== targetPos2.gy) {
                 positions2[targetId] = moved2;
                 tokenPositions.set(cid, positions2);
-                io.to(ROOM).emit('token:moved', { tokenId: targetId, gx: moved2.gx, gy: moved2.gy });
+                io.to(campaignRoom(cid)).emit('token:moved', { tokenId: targetId, gx: moved2.gx, gy: moved2.gy });
               }
             }
           }
@@ -1057,11 +1050,11 @@ export async function resolvePlayerSpellAttack(
           remainingHp: hit ? encounter.findCreature(targetId)?.currentHp : undefined,
           targetDead: encounter.findCreature(targetId)?.isDead() ?? false,
         };
-        io.to(ROOM).emit('combat:spell:attack:result', atkResult);
+        toFight(encounter).emit('combat:spell:attack:result', atkResult);
 
         if (hit) {
           const visual = impactVisualFor(spell.combat, rolledDamage?.damageType);
-          io.to(ROOM).emit('combat:effect:impact', { targetId, targetName: creature.name, color: visual.color, style: visual.style });
+          toFight(encounter).emit('combat:effect:impact', { targetId, targetName: creature.name, color: visual.color, style: visual.style });
         }
 
         // Only narrate the first attack roll of a multi-roll cast — a wall of AI flavour text
@@ -1074,8 +1067,7 @@ export async function resolvePlayerSpellAttack(
               const flavour = await generateCombatFlavour(atkResult, getFeatureProvider(config, 'combatNarration'));
               if (!flavour) return;
               const msg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
-              await appendChatLog(cid, msg);
-              io.to(ROOM).emit('chat:message', msg);
+              await postChat(cid, msg, [casterId]);
             } catch (err) { logError('index:combatFlavour', err); }
           })();
         }
@@ -1092,7 +1084,7 @@ export async function resolvePlayerSpellAttack(
 }
 
 export function registerCombatHandlers(ctx: JoinContext): void {
-  const { socket, campaignId } = ctx;
+  const { socket, campaignId, charId } = ctx;
 
   socket.on('token:move', ({ tokenId, gx, gy }) => {
     void (async () => {
@@ -1126,7 +1118,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
 
       positions[tokenId] = { gx, gy };
       tokenPositions.set(campaignId, positions);
-      socket.to(ROOM).emit('token:moved', { tokenId, gx, gy });
+      socket.to(campaignRoom(campaignId)).emit('token:moved', { tokenId, gx, gy });
       updateFollowingObjects(campaignId, tokenId, gx, gy);
       if (origin) void checkMovementTriggers(campaignId, tokenId, origin.gx, origin.gy, gx, gy);
 
@@ -1136,7 +1128,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         // GM-dragged enemy/ally token — the AI's own movement loop checks traps step-by-step as
         // it walks, but a manual drag jumps straight to the destination with no loop to hook, so
         // it needs its own check here. No-ops safely if tokenId isn't a live participant.
-        const name = encounters.get(campaignId)?.findParticipant(tokenId)?.name ?? tokenId;
+        const name = fightOf(campaignId, tokenId)?.findParticipant(tokenId)?.name ?? tokenId;
         void checkTrapAt(campaignId, gx, gy, tokenId, name, false);
       }
     })();
@@ -1169,7 +1161,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
   socket.on('combat:condition:escape', ({ targetId, name }) => {
     void (async () => {
       const cid = campaignId;
-      if (!combatState.get(cid)) return;
+      if (!fightOf(cid, targetId)) return;
 
       const engine = getStateEngine(cid);
       const hook = engine.getHooksOwnedBy(targetId, 'recurringDamage')
@@ -1180,16 +1172,15 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const result = await hook.attemptEscape(engine);
       if (!result) return;
 
-      const participant = encounters.get(cid)?.findParticipant(targetId);
+      const participant = fightOf(cid, targetId)?.findParticipant(targetId);
       const targetName = participant?.name ?? targetId;
       console.log(`[escape] ${targetName} attempts ${hook.escapeSkillCheck} vs DC${result.dc}: d20+${result.bonus}=${result.total} — ${result.succeeded ? 'FREE' : 'STUCK'}`);
       const msg = {
         text: `${targetName} attempts to escape (${hook.escapeSkillCheck} ${fmtMod(result.bonus)}, DC${result.dc}): ${result.total} — ${result.succeeded ? 'breaks free!' : 'still stuck.'}`,
         senderName: 'System', timestamp: Date.now(),
       };
-      void appendChatLog(cid, msg);
-      io.to(ROOM).emit('chat:message', msg);
-      io.to(ROOM).emit('combat:condition:escape:result', {
+      void postChat(cid, msg, [targetId]);
+      toFightOf(cid, targetId).emit('combat:condition:escape:result', {
         targetId, targetName, name, skill: hook.escapeSkillCheck,
         roll: result.roll, bonus: result.bonus, total: result.total, dc: result.dc, succeeded: result.succeeded,
       });
@@ -1200,14 +1191,14 @@ export function registerCombatHandlers(ctx: JoinContext): void {
   // No permission gate on who can set whose: GM narration ("you fall") and a player's own
   // Jump/climb both need to move it, same trust model as token:move.
   socket.on('combat:elevation:set', ({ targetId, elevationFt }) => {
-    if (!combatState.get(campaignId)) return;
+    if (!fightOf(campaignId, targetId)) return;
     void applyElevationChange(campaignId, targetId, elevationFt);
   });
 
   // Disengage — makes this actor's movement not provoke Opportunity Attacks for the rest of
   // their turn (checkOpportunityAttacks reads Participant.disengaging directly, no hook needed).
   socket.on('combat:disengage', ({ actorId }) => {
-    const participant = encounters.get(campaignId)?.findParticipant(actorId);
+    const participant = fightOf(campaignId, actorId)?.findParticipant(actorId);
     if (participant) participant.disengaging = true;
   });
 
@@ -1231,7 +1222,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const cid = campaignId;
       const tags = await investigateIllusion(cid, targetId, investigatorId);
       if (!tags.length) return;
-      const targetName = encounters.get(cid)?.findParticipant(targetId)?.name
+      const targetName = fightOf(cid, targetId)?.findParticipant(targetId)?.name
         ?? (await getCharacter(cid, targetId))?.name ?? targetId;
       const sid = playerSocketIds.get(investigatorId);
       if (sid) io.to(sid).emit('combat:illusion:investigate:result', { targetId, targetName, tags });
@@ -1240,8 +1231,8 @@ export function registerCombatHandlers(ctx: JoinContext): void {
 
   socket.on('combat:initiative:roll', (entry: TurnOrderEntry) => {
     const cid = campaignId;
-    if (!combatState.get(cid)) return;
-    const encounter = encounters.get(cid);
+    // The fight this entry's owner belongs to (their pending claim, if they haven't rolled yet).
+    const encounter = fightOf(cid, entry.id) ?? fightOf(cid, entry.name);
     if (!encounter) return;
 
     let participant = encounter.findParticipant(entry.id);
@@ -1258,8 +1249,8 @@ export function registerCombatHandlers(ctx: JoinContext): void {
     }
 
     encounter.addToTurnOrder(participant);
-    io.to(ROOM).emit('combat:initiative', entry);
-    tryBeginCombat(cid);
+    toFight(encounter).emit('combat:initiative', entry);
+    tryBeginCombat(cid, encounter);
     void saveEncounter(cid, encounter);
   });
 
@@ -1285,7 +1276,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       // Journal-only spells (Ceremony) never resolve mechanically and can't be cast while combat
       // is active — no action, no attack/save, just a slot spend and a journal/chat line.
       if (spell.combat?.journalOnly) {
-        if (combatState.get(cid)) {
+        if (fightOf(cid, casterId)) {
           const sid = playerSocketIds.get(casterId);
           if (sid) io.to(sid).emit('combat:attack:blocked', { reason: `${spell.name} can't be cast in combat` });
           return;
@@ -1298,8 +1289,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           return;
         }
         const msg = { text: `${casterName} performs the rite of ${spell.name}.`, senderName: 'System', timestamp: Date.now() };
-        void appendChatLog(cid, msg);
-        io.to(ROOM).emit('chat:message', msg);
+        void postChat(cid, msg, [casterId]);
         return;
       }
 
@@ -1309,7 +1299,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       // (Snare, Alarm) place on the battlefield; everything else (Detect Magic, Comprehend
       // Languages, ...) has no mechanical resolution of its own — just spend the slot and
       // announce so the GM can narrate what it senses/does.
-      if (spell.combat?.explorationCastable && !combatState.get(cid)) {
+      if (spell.combat?.explorationCastable && !fightOf(cid, casterId)) {
         const char = await getCharacter(cid, casterId);
         if (!char) return;
         if (!(await trySpendSpellSlot(cid, casterId, char, slotLevel))) {
@@ -1336,13 +1326,12 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           });
         }
         const msg = { text: `${casterName} casts ${spell.name}.`, senderName: 'System', timestamp: Date.now() };
-        void appendChatLog(cid, msg);
-        io.to(ROOM).emit('chat:message', msg);
+        void postChat(cid, msg, [casterId]);
         return;
       }
 
-      if (!combatState.get(cid)) return;
-      const encounter = encounters.get(cid);
+      // Combat casting — resolved within the caster's own fight.
+      const encounter = fightOf(cid, casterId);
       if (!encounter) return;
 
       const char = await getCharacter(cid, casterId);
@@ -1365,7 +1354,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         if (nextResourceUses) {
           spentFavoredEnemy = true;
           await updateCharacter(cid, casterId, fresh => ({ ...fresh, resourceUses: nextResourceUses }));
-          io.to(ROOM).emit('combat:player:featureResources', { characterId: casterId, resourceUses: nextResourceUses });
+          io.to(campaignRoom(cid)).emit('combat:player:featureResources', { characterId: casterId, resourceUses: nextResourceUses });
         }
       }
 
@@ -1440,7 +1429,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           };
           pendingWeaponBonuses.set(cid, bonuses);
           if (combat?.auraColor) {
-            io.to(ROOM).emit('combat:effect:aura:start', { casterId, casterName, color: combat.auraColor, style: combat.auraStyle });
+            toFight(encounter).emit('combat:effect:aura:start', { casterId, casterName, color: combat.auraColor, style: combat.auraStyle });
           }
         } else if (combat?.hooks?.length) {
           // Passive self-buff with no weapon-hit payload (Mage Armor, Protection from Evil and
@@ -1460,8 +1449,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           if (combat?.grantsCompanion) await grantCompanion(cid, casterId, casterName, combat.grantsCompanion);
           if (combat?.followingObject) placeFollowingObject(cid, casterId, casterName, combat.followingObject);
           const msg = { text: `${casterName} casts ${spell.name}.`, senderName: 'System', timestamp: Date.now() };
-          void appendChatLog(cid, msg);
-          io.to(ROOM).emit('chat:message', msg);
+          void postChat(cid, msg, [casterId]);
         }
         // Self-buff concentration spells (Detect Magic, Antimagic Field, ...) previously
         // returned above without starting concentration — harmless while none of them had
@@ -1484,17 +1472,15 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       // Multiple targets (Magic Missile's darts, Bless's up to three allies) resolve one at a
       // time, staggered, rather than all landing in the same instant.
       if (combat?.obscuresArea && originGx !== undefined && originGy !== undefined) {
-        placeHazardCells(cid, originGx, originGy, combat.area?.size ?? 20, { obscures: true, durationRounds: combat.obscuresArea.durationRounds }, encounter.currentRound?.number ?? 1, combat.hazardVisual);
+        placeHazardCells(cid, originGx, originGy, combat.area?.size ?? 20, { obscures: true, durationRounds: combat.obscuresArea.durationRounds }, encounter, combat.hazardVisual);
         const msg = { text: `${casterName} casts ${spell.name}.`, senderName: 'System', timestamp: Date.now() };
-        void appendChatLog(cid, msg);
-        io.to(ROOM).emit('chat:message', msg);
+        void postChat(cid, msg, [casterId]);
       }
 
       if (combat?.placesIllusion && originGx !== undefined && originGy !== undefined) {
         placeIllusionMarker(cid, casterName, spell, originGx, originGy);
         const msg = { text: `${casterName} casts ${spell.name}.`, senderName: 'System', timestamp: Date.now() };
-        void appendChatLog(cid, msg);
-        io.to(ROOM).emit('chat:message', msg);
+        void postChat(cid, msg, [casterId]);
       }
 
       if (combat?.autoHit || !combat?.save) {
@@ -1522,7 +1508,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         for (const targetId of targetIds) {
           if (!first) await sleep(500);
           first = false;
-          if (!combatState.get(cid)) return;
+          if (encounter.ended) return;
 
           const participant = encounter.findParticipant(targetId);
           if (!participant || participant.isDead()) continue;
@@ -1562,7 +1548,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
             }
             await engine.trigger('afterDamage', dmgCtx);
             const visual = impactVisualFor(spell.combat, rolledDamage.damageType);
-            io.to(ROOM).emit('combat:effect:impact', { targetId, targetName: participant.name, color: visual.color, style: visual.style });
+            toFight(encounter).emit('combat:effect:impact', { targetId, targetName: participant.name, color: visual.color, style: visual.style });
           }
 
           const rolledHeal = rollApplicableHeal(combat?.onHit, char.level ?? 1, slotLevel, healAbilityMod);
@@ -1577,8 +1563,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           const verb = rolledDamage ? 'hits' : rolledHeal ? 'heals' : (hookOwnerIsCaster ? 'marks' : 'blesses');
           console.log(`[spell-mark] ${casterName} ${verb} ${participant.name} with ${spell.name}`);
           const msg = { text: `${casterName} ${verb} ${participant.name} with ${spell.name}.`, senderName: 'System', timestamp: Date.now() };
-          void appendChatLog(cid, msg);
-          io.to(ROOM).emit('chat:message', msg);
+          void postChat(cid, msg, [casterId]);
         }
 
         if (requiresConcentration(spell)) {
@@ -1586,10 +1571,8 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           // records the new one. startConcentrating's own breakConcentration call is a no-op here.
           await startConcentrating(cid, casterId, spell.name, hookOwnerIsCaster ? [casterId] : targetIds);
           if (markedTarget) {
-            const marks = activeMarks.get(cid) ?? new Map();
-            marks.set(casterId, { ...markedTarget, spellName: spell.name });
-            activeMarks.set(cid, marks);
-            io.to(ROOM).emit('combat:mark', { casterId, ...markedTarget, spellName: spell.name, active: true });
+            encounter.marks.set(casterId, { ...markedTarget, spellName: spell.name });
+            toFight(encounter).emit('combat:mark', { casterId, ...markedTarget, spellName: spell.name, active: true });
           }
         }
         return;
@@ -1613,7 +1596,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const effectiveHooks = command?.hooks ?? combat?.hooks;
 
       if (combat?.difficultTerrain && originGx !== undefined && originGy !== undefined) {
-        placeHazardCells(cid, originGx, originGy, combat.area?.size ?? 10, combat.difficultTerrain, encounter.currentRound?.number ?? 1, combat.hazardVisual);
+        placeHazardCells(cid, originGx, originGy, combat.area?.size ?? 10, combat.difficultTerrain, encounter, combat.hazardVisual);
       }
 
       const chars = await listCharacters(cid);
@@ -1625,7 +1608,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       for (const targetId of targetIds) {
         if (!firstTarget) await sleep(500);
         firstTarget = false;
-        if (!combatState.get(cid)) return;
+        if (encounter.ended) return;
 
         const participant = encounter.findParticipant(targetId);
         if (!participant || participant.isDead()) continue;
@@ -1656,7 +1639,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           total: d20 + saveBonus,
           saved: d20 + saveBonus >= dc,
         });
-        if (!combatState.get(cid)) return;
+        if (encounter.ended) return;
 
         // Re-derived from the context, so a hook that moved the DC or the bonus is reflected
         // before afterSave (and everything downstream) reads the outcome.
@@ -1676,8 +1659,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
             text: saved ? `${participant.name} resists the command.` : `${participant.name} is commanded: "${chosenCommand}"!`,
             senderName: 'System', timestamp: Date.now(),
           };
-          void appendChatLog(cid, cmdMsg);
-          io.to(ROOM).emit('chat:message', cmdMsg);
+          void postChat(cid, cmdMsg, [casterId]);
         }
 
         const targetType: CreatureType = participant.isPlayer ? 'Humanoid' : (participant.creature?.creatureType ?? 'Humanoid');
@@ -1778,7 +1760,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
             if (moved.gx !== targetPos.gx || moved.gy !== targetPos.gy) {
               positions[targetKey] = moved;
               tokenPositions.set(cid, positions);
-              io.to(ROOM).emit('token:moved', { tokenId: targetKey, gx: moved.gx, gy: moved.gy });
+              io.to(campaignRoom(cid)).emit('token:moved', { tokenId: targetKey, gx: moved.gx, gy: moved.gy });
             }
           }
         }
@@ -1787,7 +1769,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         // save) a lingering condition/hook/forced-move with no damage of its own (Faerie Fire).
         if (damage !== undefined || !saved) {
           const visual = impactVisualFor(spell.combat, rolledDamage?.damageType);
-          io.to(ROOM).emit('combat:effect:impact', { targetId, targetName: participant.name, color: visual.color, style: visual.style });
+          toFight(encounter).emit('combat:effect:impact', { targetId, targetName: participant.name, color: visual.color, style: visual.style });
         }
 
         outcomes.push({
@@ -1811,7 +1793,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       }
 
       const result: SpellSaveResult = { casterName, spellName: spell.name, dc, saveAbility, slotLevel: spell.level, outcomes };
-      io.to(ROOM).emit('combat:spell:save:result', result);
+      toFight(encounter).emit('combat:spell:save:result', result);
 
       if (outcomes.length) {
         void (async () => {
@@ -1821,8 +1803,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
             const flavour = await generateSpellSaveFlavour(result, getFeatureProvider(config, 'combatNarration'));
             if (!flavour) return;
             const msg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
-            await appendChatLog(cid, msg);
-            io.to(ROOM).emit('chat:message', msg);
+            await postChat(cid, msg, [casterId]);
           } catch (err) { logError('index:combatFlavour', err); }
         })();
       }
@@ -1837,8 +1818,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
   socket.on('combat:ability:use', ({ casterId, casterName, abilityKey, targetId, chosenItem, chosenAmount, cureCondition }: { casterId: string; casterName: string; abilityKey: string; targetId?: string; chosenItem?: string; chosenAmount?: number; cureCondition?: boolean }) => {
     void (async () => {
       const cid = campaignId;
-      if (!combatState.get(cid)) return;
-      const encounter = encounters.get(cid);
+      const encounter = fightOf(cid, casterId);
       if (!encounter) return;
 
       const ability = ABILITY_DEFS[abilityKey];
@@ -1881,7 +1861,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         return;
       }
       await updateCharacter(cid, casterId, fresh => ({ ...fresh, resourceUses: nextResourceUses }));
-      io.to(ROOM).emit('combat:player:featureResources', { characterId: casterId, resourceUses: nextResourceUses });
+      io.to(campaignRoom(cid)).emit('combat:player:featureResources', { characterId: casterId, resourceUses: nextResourceUses });
 
       // Second Wind's "1d10 + Fighter level" reuses the ability-mod dice idiom (base die +
       // a flat number added once) with the caster's level standing in for an ability modifier —
@@ -1915,7 +1895,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       // Rage's damage-resistance hooks have no visible client state otherwise — drives the
       // "raging" token icon the same way combat:mark drives the marked-creature icon.
       if (abilityKey === 'rage') {
-        io.to(ROOM).emit('combat:raging', { targetId: effectId, targetName: effectParticipant.name, active: true });
+        toFight(encounter).emit('combat:raging', { targetId: effectId, targetName: effectParticipant.name, active: true });
       }
 
       // Tinker's Magic — a "pick a name from the list" ability grants that item to inventory
@@ -1934,8 +1914,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       }
 
       const msg = { text: `${casterName} uses ${ability.label}${craftedItem ? ` to craft a ${craftedItem}` : ability.amountChoice ? (isCure ? ` on ${effectParticipant.name}, curing Poisoned` : ` on ${effectParticipant.name}, restoring ${spentAmount} HP`) : ability.target === 'ally' ? ` on ${effectParticipant.name}` : ''}.`, senderName: 'System', timestamp: Date.now() };
-      void appendChatLog(cid, msg);
-      io.to(ROOM).emit('chat:message', msg);
+      void postChat(cid, msg, [casterId]);
     })();
   });
 
@@ -1953,8 +1932,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
   socket.on('combat:healerKit:use', ({ casterId, casterName, targetId }) => {
     void (async () => {
       const cid = campaignId;
-      if (!combatState.get(cid)) return;
-      const encounter = encounters.get(cid);
+      const encounter = fightOf(cid, casterId);
       if (!encounter) return;
 
       const char = await getCharacter(cid, casterId);
@@ -1994,23 +1972,24 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       applyHealingToPlayer(cid, targetParticipant, targetId, healAmount, 'Healer');
 
       const msg = { text: `${casterName} tends to ${targetParticipant.name} with a Healer's Kit, restoring ${healAmount} HP.`, senderName: 'System', timestamp: Date.now() };
-      void appendChatLog(cid, msg);
-      io.to(ROOM).emit('chat:message', msg);
+      void postChat(cid, msg, [casterId]);
     })();
   });
 
   socket.on('combat:turn:end', () => {
-    const encounter = encounters.get(campaignId);
+    const encounter = fightOf(campaignId, charId);
     const actor = encounter?.currentActor;
     console.log(`[turn] combat:turn:end received — currentActor=${actor?.name ?? 'none'} isPlayer=${actor?.isPlayer}`);
-    if (actor?.isPlayer) {
+    // Only the actor can end their own turn — a late click from someone whose fight was just merged
+    // into this one must not skip whoever's actually up.
+    if (actor?.isPlayer && actor.id === charId) {
       // Unused on-hit buffs (e.g. Divine Smite) expire if not spent by end of turn.
       const bonuses = pendingWeaponBonuses.get(campaignId);
       if (bonuses?.[actor.id]) {
         delete bonuses[actor.id];
-        io.to(ROOM).emit('combat:effect:aura:end', { casterId: actor.id, casterName: actor.name });
+        toFightOf(campaignId, actor.id).emit('combat:effect:aura:end', { casterId: actor.id, casterName: actor.name });
       }
-      advanceTurn(campaignId);
+      if (encounter) advanceTurn(campaignId, encounter);
     }
   });
 }

@@ -7,6 +7,7 @@ import type { Condition, ActiveCondition } from "./conditions.ts";
 import type { Manoeuvre } from "./tactics.ts";
 import type { StoryboardQueuePayload } from "./storyboard.ts";
 import type { Goal, GoalTier } from "./goals.ts";
+import type { GroupColor, PartyGroups } from "./partyGroups.ts";
 
 export type Player = string;
 
@@ -15,6 +16,10 @@ export interface ChatPayload {
   senderName: string;
   timestamp: number;
   checkRequests?: CheckRequest[];
+  /** Set only on messages sent while the party was split — the split they belong to. */
+  splitId?: string;
+  /** With splitId: every track that saw this message (more than one when e.g. a merged fight spans tracks). */
+  trackIds?: GroupColor[];
 }
 
 export interface NotePayload {
@@ -100,6 +105,9 @@ export interface ServerToClientEvents {
     text: string;
     senderName: string;
     checkRequests?: CheckRequest[];
+    /** Same split tagging as ChatPayload — set only while the party is split. */
+    splitId?: string;
+    trackIds?: GroupColor[];
   }) => void;
   "dm:thinking": (active: boolean) => void;
   "storyboard:queue": (payload: StoryboardQueuePayload) => void;
@@ -275,6 +283,8 @@ export interface ServerToClientEvents {
   "rest:result": (payload: RestResultBroadcast) => void;
   "rest:progress": (payload: { allCommitted: boolean }) => void;
   "goals:update": (data: { characterId: string; goals: Goal[] }) => void;
+  /** Full replacement, broadcast to the whole campaign on any track change. */
+  "groups:update": (groups: PartyGroups) => void;
 }
 
 export interface ClientToServerEvents {
@@ -419,4 +429,10 @@ export interface ClientToServerEvents {
   "goal:delete": (payload: { characterId: string; id: string }) => void;
   /** Requests this character's goals via `goals:update` — the character sheet's Goals tab fetches on open rather than caching from join, since goals can change (session-end review) while the sheet is closed. */
   "goals:fetch": (payload: { characterId: string }) => void;
+  /** Moves the sender's own character onto `track` — no payload for whom, the server only ever moves the requester. Rejected mid-fight. */
+  "groups:move": (payload: { track: GroupColor }) => void;
+  /** Adds the next unused colour from GROUP_COLORS as a new, empty track. */
+  "groups:track:add": () => void;
+  /** Deletes an added (non-permanent) track — a no-op unless it's empty. */
+  "groups:track:remove": (payload: { track: GroupColor }) => void;
 }

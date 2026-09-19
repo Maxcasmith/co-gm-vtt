@@ -1,10 +1,10 @@
 import type { Character, Weapon } from 'shared';
 import { calcAC, hasOriginFeat, isWeapon, isArmor, trySpendResource, resourceCurrent, unarmedStrikeFor } from 'shared';
-import { getCharacter, updateCharacter, appendChatLog, listCharacters, getConfig, getHouseRules } from '../../storage.ts';
+import { getCharacter, updateCharacter, listCharacters, getConfig, getHouseRules } from '../../storage.ts';
 import { getFeatureProvider } from '../../providers/index.ts';
 import { generateCombatFlavour } from '../../session-processor/imagePrompts.ts';
 import { Participant } from '../../domain/encounter.ts';
-import { io, ROOM, combatState, encounters, tokenPositions, getStateEngine } from '../../state.ts';
+import { io, campaignRoom, fightOf, toFight, tokenPositions, getStateEngine } from '../../state.ts';
 import { D20Roll, rollDice, fmtMod, resolveHit, maxDiceValue } from '../dice.ts';
 import { rollModeFor, attackModeAgainstTarget, combineModes } from '../conditions/rollModeFor.ts';
 import { offerReaction } from '../stateEngine/reactionPrompt.ts';
@@ -20,6 +20,7 @@ import { advanceTurn } from './lifecycle.ts';
 import { walkParticipant } from './movement.ts';
 import { delay, emitResources } from './shared.ts';
 import { checkSanctuary } from './statusEffects.ts';
+import { postChat } from '../../partyGroups.ts';
 
 /**
  * Protection Fighting Style: before an attack roll against targetKeyId is made, offers the
@@ -56,9 +57,9 @@ async function offerProtectionReaction(
       attackerName, sourceName: 'Fighting Style: Protection', targetName,
     }]);
     if (!picked) continue;
-    if (!combatState.get(cid) || !p.hasResource('reaction')) continue; // re-check after await
+    if (!fightOf(cid, p.id) || !p.hasResource('reaction')) continue; // re-check after await
     p.trySpend('reaction');
-    emitResources(p);
+    emitResources(cid, p);
     console.log(`[protection] ${p.name} imposes Disadvantage on ${attackerName}'s attack against ${targetName}`);
     return true;
   }
@@ -81,29 +82,28 @@ export async function offerLuckDisadvantage(cid: string, targetId: string, targe
 
   // Re-check after the await — the point may already be gone (another attack spent it).
   const fresh = await getCharacter(cid, targetId);
-  if (!combatState.get(cid) || !fresh) return false;
+  if (!fightOf(cid, targetId) || !fresh) return false;
   const nextResourceUses = trySpendResource(fresh, 'luckPoints');
   if (!nextResourceUses) return false;
   await updateCharacter(cid, targetId, c => ({ ...c, resourceUses: nextResourceUses }));
-  io.to(ROOM).emit('combat:player:featureResources', { characterId: targetId, resourceUses: nextResourceUses });
+  io.to(campaignRoom(cid)).emit('combat:player:featureResources', { characterId: targetId, resourceUses: nextResourceUses });
   console.log(`[lucky] ${targetName} spends a Luck Point to impose Disadvantage on ${attackerName}'s attack`);
   return true;
 }
 
 export async function runEnemyAI(cid: string, actor: Participant): Promise<void> {
-  if (!combatState.get(cid)) return;
-  const encounter = encounters.get(cid);
+  const encounter = fightOf(cid, actor.id);
   if (!encounter) return;
 
   const creature = encounter.findCreature(actor.id);
-  if (!creature) return advanceTurn(cid);
+  if (!creature) return advanceTurn(cid, encounter);
 
   const positions = tokenPositions.get(cid) ?? {};
   const epos = positions[actor.id];
   if (!epos) {
     console.log(`[ai] ${actor.name} has no position, skipping turn`);
     await delay(400);
-    return advanceTurn(cid);
+    return advanceTurn(cid, encounter);
   }
 
   // Layered decision: generatePlans seeds candidates off the creature's role (roleConfig.ts),
@@ -113,11 +113,11 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
   const round = encounter.currentRound?.number ?? 1;
   const tacticalCtx: TacticalContext = { cid, actor, positions, allParticipants: encounter.turnOrder, round };
   const scoredPlans = evaluatePlans(generatePlans(tacticalCtx), tacticalCtx);
-  if (!scoredPlans.length) return advanceTurn(cid);
+  if (!scoredPlans.length) return advanceTurn(cid, encounter);
   const plan = selectPlan(scoredPlans, creature.stats.int);
 
   const target = encounter.turnOrder.find(p => p.id === plan.targetId);
-  if (!target) return advanceTurn(cid);
+  if (!target) return advanceTurn(cid, encounter);
   // Players use name as token key; non-players (allies included) use id.
   const targetPosKey = target.isPlayer ? target.name : target.id;
   const targetPos = positions[targetPosKey];
@@ -129,7 +129,7 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
   const { gx, gy } = plan.movement !== 'hold' && targetPos && maxFt > 0
     ? await walkParticipant(cid, actor, epos, plan.movement === 'retreat' ? 'retreat' : 'approach', targetPos, maxFt, rangeFt, creature.conditions)
     : epos;
-  if (!combatState.get(cid)) return;
+  if (encounter.ended) return;
 
   const finalDistFt = targetPos ? Math.max(Math.abs(targetPos.gx - gx), Math.abs(targetPos.gy - gy)) * 5 : 0;
 
@@ -168,13 +168,13 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
         const protectedAgainst = targetParticipant.isPlayer && await offerProtectionReaction(
           cid, encounter.turnOrder, positions, targetKeyId, targetPos, targetParticipant.name, actor.name,
         );
-        if (!combatState.get(cid)) return;
+        if (encounter.ended) return;
         // Lucky — offered after Protection, so a player doesn't burn a Luck Point on an attack an
         // ally already turned to Disadvantage for free.
         const luckDisadvantage = targetParticipant.isPlayer && !protectedAgainst && await offerLuckDisadvantage(
           cid, targetKeyId, targetParticipant.name, actor.name,
         );
-        if (!combatState.get(cid)) return;
+        if (encounter.ended) return;
         const mode = combineModes(rollModeFor(creature, 'attack'), attackModeAgainstTarget(targetHolder ?? {}), wardedAgainst || protectedAgainst || luckDisadvantage ? -1 : 0);
         const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
         const attackBonus = atk.bonus + bladeWardPenalty(cid, targetKeyId);
@@ -196,7 +196,7 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
           total: roll + attackBonus,
           hit: resolveHit(roll, attackBonus, targetAc),
         }));
-        if (!combatState.get(cid)) return;
+        if (encounter.ended) return;
 
         atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
         atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
@@ -258,7 +258,7 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
         }
 
         const targetId = targetParticipant.isPlayer ? (targetCharForAttack?.id ?? targetParticipant.name) : targetParticipant.id;
-        io.to(ROOM).emit('combat:attack:result', {
+        toFight(encounter).emit('combat:attack:result', {
           attackerName: actor.name, targetName: targetParticipant.name, targetId,
           weaponName: atk.name, isMelee: true, d20: roll, attackBonus: atk.bonus, statBonus: atk.bonus, statName: 'Attack', weaponBonus: 0, total, ac: targetAc,
           hit, isCrit, damage, damageRoll, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
@@ -277,8 +277,7 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
           const flavour = await generateCombatFlavour(atkResult, cfgAdapter);
           if (flavour) {
             const msg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
-            io.to(ROOM).emit('chat:message', msg);
-            void appendChatLog(cid, msg);
+            void postChat(cid, msg, [actor.id]);
           }
         }
       }
@@ -288,7 +287,7 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
   }
 
   await delay(600);
-  advanceTurn(cid);
+  advanceTurn(cid, encounter);
 }
 
 /** The character's equipped main-hand weapon, or the universal unarmed strike — same shape client's CombatDock builds for the attack picker. */
@@ -307,12 +306,11 @@ export function weaponFor(char: Character): Weapon {
  * outcome is indistinguishable from a human playing that turn.
  */
 export async function runPlayerTactics(cid: string, actor: Participant): Promise<void> {
-  if (!combatState.get(cid)) return;
-  const encounter = encounters.get(cid);
+  const encounter = fightOf(cid, actor.id);
   if (!encounter) return;
 
   const char = await getCharacter(cid, actor.id);
-  if (!char) return advanceTurn(cid);
+  if (!char) return advanceTurn(cid, encounter);
 
   const positions = tokenPositions.get(cid) ?? {};
   const round = encounter.currentRound?.number ?? 1;
@@ -321,6 +319,6 @@ export async function runPlayerTactics(cid: string, actor: Participant): Promise
   await runManoeuvres(cid, actor, char, tacticalCtx);
 
   await delay(600);
-  advanceTurn(cid);
+  advanceTurn(cid, encounter);
 }
 

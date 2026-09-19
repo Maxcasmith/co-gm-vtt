@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { hasOriginFeat, trySpendResource, FAST_CRAFTING_TABLE } from 'shared';
 import type { WorldActor, Goal } from 'shared';
-import { io, ROOM, playerSocketIds, pendingRests, type RestChoice } from '../state.ts';
+import { io, campaignRoom, playerSocketIds, pendingRests, type RestChoice } from '../state.ts';
 import { listCharacters, updateCharacter, getConfig, readWorldState, writeWorldState, readCampaignFile, readGoals, writeGoals } from '../storage.ts';
 import { getFeatureProvider } from '../providers/index.ts';
 import { generateWorldState, tickWorldNarrative } from '../session-processor/imagePrompts.ts';
@@ -13,7 +13,7 @@ import type { JoinContext } from './context.ts';
 export function registerRestHandlers(ctx: JoinContext): void {
   const { socket } = ctx;
 
-  socket.on('rest:open', () => { io.to(ROOM).emit('rest:open'); });
+  socket.on('rest:open', () => { io.to(campaignRoom(ctx.campaignId)).emit('rest:open'); });
 
   socket.on('rest:choice', ({ campaignId, characterId, resting, restType, hitDiceSpent, craftedItem, grantInspiration }) => {
     let votes = pendingRests.get(campaignId);
@@ -37,7 +37,7 @@ export async function broadcastRestProgress(campaignId: string): Promise<void> {
   const party = await listCharacters(campaignId);
   const onlineIds = party.filter(c => playerSocketIds.has(c.id)).map(c => c.id);
   const allCommitted = onlineIds.length > 0 && !!votes && onlineIds.every(id => votes.has(id));
-  io.to(ROOM).emit('rest:progress', { allCommitted });
+  io.to(campaignRoom(campaignId)).emit('rest:progress', { allCommitted });
 }
 
 /** Resolves a campaign's pending rest once every currently-online party member has voted. */
@@ -60,7 +60,7 @@ export async function maybeResolveRest(campaignId: string): Promise<void> {
 
   let worldEvents: string | undefined;
   if (hours > 0) {
-    await applyEffects(campaignId, [{ type: 'clock', secs: hours * 3600 }]);
+    await applyEffects(campaignId, [{ type: 'clock', secs: hours * 3600 }], 'all');
   }
   if (longRestHappened) {
     worldEvents = await tickWorldForRest(campaignId, hours);
@@ -71,7 +71,7 @@ export async function maybeResolveRest(campaignId: string): Promise<void> {
     if (!char) continue;
 
     if (!choice.resting) {
-      io.to(ROOM).emit('rest:result', { characterId: charId, characterName: char.name, resting: false, restType: choice.restType });
+      io.to(campaignRoom(campaignId)).emit('rest:result', { characterId: charId, characterName: char.name, resting: false, restType: choice.restType });
       continue;
     }
 
@@ -114,7 +114,7 @@ export async function maybeResolveRest(campaignId: string): Promise<void> {
       }
     }
 
-    io.to(ROOM).emit('rest:result', {
+    io.to(campaignRoom(campaignId)).emit('rest:result', {
       characterId: charId, characterName: char.name, resting: true, restType: choice.restType,
       hpGained: outcome.hpGained, currentHp: outcome.currentHp, maxHp: outcome.maxHp,
       currentSpellSlots1: outcome.currentSpellSlots1, maxSpellSlots1: outcome.maxSpellSlots1,

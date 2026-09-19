@@ -1,7 +1,7 @@
 import type { Character } from 'shared';
 import { spellSlotsForCharacter, hasOriginFeat, trySpendResource, resourceCurrent, magicInitiateResourceKey } from 'shared';
 import { getCharacter, updateCharacter } from '../../storage.ts';
-import { io, ROOM, combatState, playerSocketIds } from '../../state.ts';
+import { io, campaignRoom, fightOf, playerSocketIds } from '../../state.ts';
 import { D20Roll } from '../dice.ts';
 import { offerReaction } from '../stateEngine/reactionPrompt.ts';
 
@@ -16,7 +16,7 @@ export async function trySpendLuckForAdvantage(cid: string, characterId: string,
   const nextResourceUses = trySpendResource(char, 'luckPoints');
   if (!nextResourceUses) return false;
   await updateCharacter(cid, characterId, c => ({ ...c, resourceUses: nextResourceUses }));
-  io.to(ROOM).emit('combat:player:featureResources', { characterId, resourceUses: nextResourceUses });
+  io.to(campaignRoom(cid)).emit('combat:player:featureResources', { characterId, resourceUses: nextResourceUses });
   return true;
 }
 
@@ -39,11 +39,11 @@ export async function offerLuckAttackReroll(
 
   // Re-check after the await — the point may already be gone (another prompt spent it).
   const fresh = await getCharacter(cid, attackerId);
-  if (!combatState.get(cid) || !fresh) return null;
+  if (!fightOf(cid, attackerId) || !fresh) return null;
   const nextResourceUses = trySpendResource(fresh, 'luckPoints');
   if (!nextResourceUses) return null;
   await updateCharacter(cid, attackerId, c => ({ ...c, resourceUses: nextResourceUses }));
-  io.to(ROOM).emit('combat:player:featureResources', { characterId: attackerId, resourceUses: nextResourceUses });
+  io.to(campaignRoom(cid)).emit('combat:player:featureResources', { characterId: attackerId, resourceUses: nextResourceUses });
   console.log(`[lucky] ${attackerName} spends a Luck Point to reroll a missed attack against ${targetName}`);
   return new D20Roll().roll();
 }
@@ -76,7 +76,7 @@ export async function trySpendSpellSlot(cid: string, charId: string, char: Chara
     const nextResourceUses = trySpendResource(char, key);
     if (!nextResourceUses) return false;
     await updateCharacter(cid, charId, c => ({ ...c, resourceUses: nextResourceUses }));
-    io.to(ROOM).emit('combat:player:featureResources', { characterId: charId, resourceUses: nextResourceUses });
+    io.to(campaignRoom(cid)).emit('combat:player:featureResources', { characterId: charId, resourceUses: nextResourceUses });
     return true;
   }
 
@@ -84,7 +84,7 @@ export async function trySpendSpellSlot(cid: string, charId: string, char: Chara
   if (current <= 0) return false;
   const next = current - 1;
   await updateCharacter(cid, charId, c => ({ ...c, currentSpellSlots1: next }));
-  io.to(ROOM).emit('combat:player:slots', { characterId: charId, currentSpellSlots1: next, maxSpellSlots1: char.maxSpellSlots1 ?? spellSlotsForCharacter(char) });
+  io.to(campaignRoom(cid)).emit('combat:player:slots', { characterId: charId, currentSpellSlots1: next, maxSpellSlots1: char.maxSpellSlots1 ?? spellSlotsForCharacter(char) });
   return true;
 }
 

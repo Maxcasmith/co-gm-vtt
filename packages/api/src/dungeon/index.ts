@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import type { AppConfig, Dungeon, DungeonEntity, DungeonRoom, EnemyStatBlock, CampaignGenre } from 'shared';
-import { slugifyTheme } from 'shared';
+import { slugifyTheme, hasLineOfSight, closedDoorCells } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { fetchManifest } from './manifest.ts';
 import { generateGrid, type DoorRect } from './generator.ts';
@@ -185,6 +185,33 @@ export function toClientDungeon(dungeon: Dungeon): Dungeon {
 
 export function roomAt(dungeon: Dungeon, gx: number, gy: number): DungeonRoom | undefined {
   return dungeon.rooms.find(r => gx >= r.x && gx < r.x + r.width && gy >= r.y && gy < r.y + r.height);
+}
+
+type Cell = { gx: number; gy: number };
+
+/** Chained aggro for joining a fight: starting from `seeds` (everyone already in it, enemies
+ * included), a candidate joins once within `radius` cells (Chebyshev) AND in line of sight of
+ * anyone already in — and from then on extends the chain itself. Returns the joined candidates'
+ * names in join order. */
+export function chainClosure(dungeon: Dungeon, seeds: Cell[], candidates: Record<string, Cell>, radius: number): string[] {
+  const blocked = closedDoorCells(dungeon);
+  const chain = [...seeds];
+  const joined: string[] = [];
+  let pending = Object.entries(candidates);
+  for (let grew = true; grew;) {
+    grew = false;
+    pending = pending.filter(([name, pos]) => {
+      const reached = chain.some(c =>
+        Math.max(Math.abs(c.gx - pos.gx), Math.abs(c.gy - pos.gy)) <= radius
+        && hasLineOfSight(dungeon.cells, c.gx, c.gy, pos.gx, pos.gy, blocked));
+      if (!reached) return true;
+      joined.push(name);
+      chain.push(pos);
+      grew = true;
+      return false;
+    });
+  }
+  return joined;
 }
 
 // Decorative props (type 'object', no followsId — a followed object like Mage Hand's disk isn't

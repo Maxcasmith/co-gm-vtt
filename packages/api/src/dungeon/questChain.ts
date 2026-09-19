@@ -1,6 +1,6 @@
 import type { Dungeon } from 'shared';
 import { readQuests, writeQuests, readManifest } from '../storage.ts';
-import { io, ROOM, dungeons } from '../state.ts';
+import { io, campaignRoom, dungeons } from '../state.ts';
 
 // Every kind of in-dungeon event that can resolve the active quest chain stage. See
 // DungeonQuestTrigger (shared/types/dungeon.ts) for what each kind means and how it's matched.
@@ -53,5 +53,5 @@ export async function checkQuestChainTriggers(cid: string, event: QuestChainEven
   // `final` — this resolution closed out the chain's last stage (no next stage queued), i.e. the
   // whole dungeon questline is done, not just one stage of it. The Congrats screen (client)
   // gates on this instead of "any quest resolved" so it only shows once, at the true end.
-  io.to(ROOM).emit('quest:update', { quests, act: manifest?.act ?? 1, final: !next });
+  io.to(campaignRoom(cid)).emit('quest:update', { quests, act: manifest?.act ?? 1, final: !next });
 }

@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import type { TurnOrderEntry, ActionResource, EnemyStatBlock } from 'shared';
 import { setTempHp, statMod } from 'shared';
 import { Creature } from './creature.ts';
@@ -229,7 +230,15 @@ export class Team {
 
 // ── Encounter ─────────────────────────────────────────────────────────────────
 
+/** The team every player character (and their allies/summons) is on. Every other team is a
+ * creature side the LLM grouped at combat start (see assignCombatTeams) — any two different teams
+ * are hostile to each other, players included. */
+export const PLAYERS_TEAM_ID = 'players';
+const DEFAULT_ENEMY_TEAM = { id: 'enemies', name: 'Enemies' };
+
 export class Encounter {
+  /** Unique per fight — a campaign can run several at once (split groups in different parts of a dungeon). */
+  id: string;
   campaignId: string;
   teams: Team[] = [];
   turnOrder: Participant[] = [];
@@ -240,8 +249,27 @@ export class Encounter {
   // Tracks how many participants are expected before combat can begin (players + enemies roll async)
   expectedParticipantCount = 0;
 
-  constructor(campaignId: string) {
+  // ── Per-fight runtime state (was per-campaign Maps in state.ts, back when a campaign had one fight) ──
+  /** Set the instant the fight is decided (victory/defeat) — before its delayed teardown — so nothing acts in it any more. */
+  ended = false;
+  /** True once rollEnemyInitiatives has fired. */
+  enemiesReady = false;
+  /** When combat started, for nemesis transcript slicing. */
+  startedAt = Date.now();
+  /** charId → running kill/damage tally, flushed onto the character sheet once in endCombat. */
+  scores = new Map<string, { enemiesKilled: number; damageDealt: number; damageReceived: number }>();
+  /** casterId → the creature a concentration curse (Hunter's Mark, Hex) is locked on — see resolvePlayerCast. */
+  marks = new Map<string, { targetId: string; targetName: string; spellName: string }>();
+  /** One advanceTurn in flight at a time — see advanceTurn. */
+  advancing = false;
+  /** Players who belong to this fight but have no participant yet — claimed the instant a fight
+   * starts (before initiative is rolled, so a racing second fight can't grab them too), or restored
+   * off disk (player participants aren't serialized). fightOf treats them as members. */
+  pendingPlayerNames: string[] = [];
+
+  constructor(campaignId: string, id: string = randomUUID()) {
     this.campaignId = campaignId;
+    this.id = id;
   }
 
   static empty(campaignId: string): Encounter {
@@ -250,42 +278,62 @@ export class Encounter {
 
   // ── Team helpers ────────────────────────────────────────────────────────────
 
+  /** Every non-player-side participant, across however many creature teams there are. */
   get enemies(): Participant[] {
-    return this.teams.find(t => t.name === 'Enemies')?.participants ?? [];
+    return this.teams.filter(t => t.id !== PLAYERS_TEAM_ID).flatMap(t => t.participants);
   }
 
   get players(): Participant[] {
-    return this.teams.find(t => t.name === 'Players')?.participants ?? [];
+    return this.teams.find(t => t.id === PLAYERS_TEAM_ID)?.participants ?? [];
+  }
+
+  /** Everyone in this fight on a different team from `p` — the only definition of "hostile". */
+  hostilesOf(p: Participant): Participant[] {
+    return this.teams.filter(t => t.id !== p.teamId).flatMap(t => t.participants);
   }
 
   addTeam(team: Team): void {
     this.teams.push(team);
   }
 
+  /** Re-homes a participant onto `side` (LLM side assignment lands after they've already joined), dropping a team it empties. */
+  moveToTeam(p: Participant, side: { id: string; name: string }): void {
+    if (p.teamId === side.id) return;
+    for (const t of this.teams) t.participants = t.participants.filter(x => x.id !== p.id);
+    this.teams = this.teams.filter(t => t.participants.length || t.id === PLAYERS_TEAM_ID);
+    this.team(side.id, side.name).addParticipant(p);
+    p.teamId = side.id;
+  }
+
+  /** Finds the team by id, creating it (named `name`) on first use. */
+  team(id: string, name: string): Team {
+    let team = this.teams.find(t => t.id === id);
+    if (!team) {
+      team = new Team(id, name);
+      this.addTeam(team);
+    }
+    return team;
+  }
+
   /**
-   * Adds a fresh creature to this fight, creating the "Enemies" team on first use. Rolls
+   * Adds a fresh creature to this fight on `team` (default: the generic enemies side). Rolls
    * initiative immediately (D20 + DEX mod) since every caller here is joining a fight already in
    * progress (dungeon proximity reinforcements, the Conjurer summon action) rather than the
    * enemies rolled at combat start. Bumps expectedParticipantCount so tryBeginCombat's readiness
    * gate still accounts for them. Previously this same six-line block was duplicated at every
    * call site in dungeon/runtime.ts — one copy here instead.
    */
-  spawnEnemy(statBlock: EnemyStatBlock): Participant {
-    let enemyTeam = this.teams.find(t => t.name === 'Enemies');
-    if (!enemyTeam) {
-      enemyTeam = new Team('enemies', 'Enemies');
-      this.addTeam(enemyTeam);
-    }
+  spawnEnemy(statBlock: EnemyStatBlock, team: { id: string; name: string } = DEFAULT_ENEMY_TEAM): Participant {
     const creature = Creature.from(statBlock);
     const participant = new Participant({
       id: creature.id,
       name: creature.name,
       initiative: new D20Roll().roll() + statMod(creature.stats.dex),
       isPlayer: false,
-      teamId: 'enemies',
+      teamId: team.id,
       creature,
     });
-    enemyTeam.addParticipant(participant);
+    this.team(team.id, team.name).addParticipant(participant);
     this.expectedParticipantCount += 1;
     return participant;
   }
@@ -297,8 +345,10 @@ export class Encounter {
       const p = team.findById(id);
       if (p) return p;
     }
-    // Also check by name (player participants are keyed by name in some paths)
-    return this.turnOrder.find(p => p.name === id || p.id === id);
+    // Also check by name (player participants are keyed by name in some paths) — on teams too, not
+    // just the turn order: a joiner sits on a team ~500ms before their initiative lands (addToTurnOrder).
+    return this.turnOrder.find(p => p.name === id || p.id === id)
+      ?? this.teams.flatMap(t => t.participants).find(p => p.isPlayer && p.name === id);
   }
 
   findCreature(id: string): Creature | undefined {
@@ -398,55 +448,73 @@ export class Encounter {
 
   // ── Victory / defeat ────────────────────────────────────────────────────────
 
+  /** Victory: every creature on every non-player team is down (factions that fought each other count too). */
   allEnemiesDead(): boolean {
-    const enemyTeam = this.teams.find(t => t.name === 'Enemies');
-    return (enemyTeam?.participants.length ?? 0) > 0 && (enemyTeam?.allDead() ?? false);
+    const enemies = this.enemies;
+    return enemies.length > 0 && enemies.every(p => p.isDead());
   }
 
   allPlayersDead(): boolean {
-    const playerTeam = this.teams.find(t => t.name === 'Players');
+    const playerTeam = this.teams.find(t => t.id === PLAYERS_TEAM_ID);
     return (playerTeam?.participants.length ?? 0) > 0 && (playerTeam?.allDead() ?? false);
   }
 
   allPlayersDown(): boolean {
-    const humanPlayers = this.teams.find(t => t.name === 'Players')?.participants.filter(p => p.isPlayer) ?? [];
+    const humanPlayers = this.players.filter(p => p.isPlayer);
     return humanPlayers.length > 0 && humanPlayers.every(p => p.isDown());
+  }
+
+  /**
+   * Folds `other` into this fight (their combatants came within chain range of each other).
+   * Its participants keep the initiative they already rolled and slot into this order; this
+   * fight's round count and current actor carry on. Teams merge by id, so two fights' copies of
+   * the same creature side (or the players) become one side.
+   */
+  absorb(other: Encounter): void {
+    for (const t of other.teams) {
+      const mine = this.team(t.id, t.name);
+      for (const p of t.participants) if (!mine.findById(p.id)) mine.addParticipant(p);
+    }
+    for (const p of other.turnOrder) this.addToTurnOrder(p);
+    this.expectedParticipantCount += other.expectedParticipantCount;
+    for (const [k, v] of other.scores) this.scores.set(k, v);
+    for (const [k, v] of other.marks) this.marks.set(k, v);
+    this.pendingPlayerNames.push(...other.pendingPlayerNames);
+    other.ended = true;
   }
 
   // ── Serialization ───────────────────────────────────────────────────────────
 
   toJSON(): object {
     return {
+      id: this.id,
       campaignId: this.campaignId,
-      enemies: this.enemies
-        .filter(p => p.creature)
-        .map(p => p.creature!.toStatBlock()),
+      playerNames: [...new Set([...this.players.filter(p => p.isPlayer).map(p => p.name), ...this.pendingPlayerNames])],
+      teams: this.teams.filter(t => t.id !== PLAYERS_TEAM_ID).map(t => ({
+        id: t.id,
+        name: t.name,
+        enemies: t.participants.filter(p => p.creature).map(p => p.creature!.toStatBlock()),
+      })),
     };
   }
 
   static fromJSON(data: unknown): Encounter {
-    // ponytail: handle legacy format (plain EnemyStatBlock array)
+    // ponytail: handle legacy formats (plain EnemyStatBlock array; single-team { enemies })
     if (Array.isArray(data)) return Encounter.fromJSON({ enemies: data });
-    const obj = data as { campaignId?: string; enemies?: unknown[] };
-    const enc = new Encounter(obj.campaignId ?? '');
-    const enemyTeam = new Team('enemies', 'Enemies');
-    enc.addTeam(enemyTeam);
-
-    if (Array.isArray(obj.enemies)) {
-      for (const raw of obj.enemies) {
-        const statBlock = raw as Parameters<typeof Creature.from>[0];
-        const creature = Creature.from(statBlock);
-        const p = new Participant({
-          id: creature.id,
-          name: creature.name,
-          initiative: 0,
-          isPlayer: false,
-          creature,
-        });
-        enemyTeam.addParticipant(p);
+    const obj = data as {
+      id?: string; campaignId?: string; playerNames?: string[]; enemies?: unknown[];
+      teams?: { id: string; name: string; enemies: unknown[] }[];
+    };
+    const enc = new Encounter(obj.campaignId ?? '', obj.id);
+    enc.pendingPlayerNames = obj.playerNames ?? [];
+    const teams = obj.teams ?? [{ ...DEFAULT_ENEMY_TEAM, enemies: obj.enemies ?? [] }];
+    for (const t of teams) {
+      const team = enc.team(t.id, t.name);
+      for (const raw of t.enemies) {
+        const creature = Creature.from(raw as Parameters<typeof Creature.from>[0]);
+        team.addParticipant(new Participant({ id: creature.id, name: creature.name, initiative: 0, isPlayer: false, teamId: t.id, creature }));
       }
     }
-
     return enc;
   }
 

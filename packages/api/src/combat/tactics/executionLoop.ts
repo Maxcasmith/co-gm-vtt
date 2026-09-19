@@ -9,7 +9,7 @@ import { weaponFor } from '../runtime/ai.ts';
 import { resolvePlayerAttack, resolvePlayerSpellAttack } from '../../socketHandlers/combat.ts';
 import { resolvePlayerItemUse } from '../../socketHandlers/inventory.ts';
 import { findSpell } from '../../routes/spells.ts';
-import { combatState } from '../../state.ts';
+import { fightOf } from '../../state.ts';
 import { distanceFt, posOf, tokenKey } from '../ai/planEvaluator.ts';
 
 const SAFETY_MAX_ITERATIONS = 20;
@@ -149,7 +149,7 @@ export async function runManoeuvres(cid: string, actor: Participant, character: 
   let bonusActionAvailable = true;
 
   for (let i = 0; i < SAFETY_MAX_ITERATIONS; i++) {
-    if (!combatState.get(cid)) return;
+    if (!fightOf(cid, actor.id)) return;
     if (!actionAvailable && !bonusActionAvailable && movementFt <= 0) return;
 
     const candidates: Candidate[] = [];
@@ -192,7 +192,7 @@ export async function runManoeuvres(cid: string, actor: Participant, character: 
       actionAvailable = false;
       continue;
     }
-    if (!combatState.get(cid)) return;
+    if (!fightOf(cid, actor.id)) return;
 
     const hit = await executeDirective(cid, actor, character, chosen.directive, chosen.target);
     if (hit !== undefined) turnState.lastActionMissed = !hit;

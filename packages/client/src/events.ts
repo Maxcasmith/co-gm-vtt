@@ -1,4 +1,4 @@
-import type { EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon, ReactionOffer, Condition, Manoeuvre, GoalTier } from 'shared';
+import type { EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon, ReactionOffer, Condition, Manoeuvre, GoalTier, GroupColor } from 'shared';
 
 // ── Payload types ─────────────────────────────────────────────────────────────
 //
@@ -195,6 +195,9 @@ export interface ChatMessageReceivedPayload {
   timestamp: number;
   variant?: 'recap';
   checkRequests?: CheckRequest[];
+  /** Party Groups split tagging, passed through from ChatPayload — see SplitBlock. */
+  splitId?: string | undefined;
+  trackIds?: GroupColor[] | undefined;
 }
 
 export type RollResultPayload = RollResult;
@@ -207,6 +210,8 @@ export type RollResultPayload = RollResult;
 export interface VTTEventMap {
   'vtt:chat:message-sent':      ChatMessageSentPayload;
   'vtt:chat:message-received':  ChatMessageReceivedPayload;
+  /** Full replacement of the Adventure Log — on join, and re-sent when a split closes or you switch tracks mid-split. */
+  'vtt:chat:history':           ChatMessageReceivedPayload[];
   'vtt:note:add':                NoteAddPayload;
   'vtt:note:received':           NoteReceivedPayload;
   'vtt:sheet:item-inspected':   SheetItemInspectedPayload;
