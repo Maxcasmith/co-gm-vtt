@@ -720,6 +720,9 @@ export default function Canvas({ player, characterId, character, connected, show
     <canvas
       ref={ref}
       className={showBattleMap ? 'canvas' : 'canvas canvas--inactive'}
+      /* Which map is on screen ('world' when there's none) — the one externally visible signal that
+         a map swap actually reached the canvas, so a smoke test can catch a dropped update. */
+      data-map-id={dungeon?.id ?? 'world'}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onDoubleClick={handleDoubleClick}

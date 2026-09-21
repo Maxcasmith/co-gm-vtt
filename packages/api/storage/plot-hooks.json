@@ -46,7 +46,12 @@
       }
     ],
     "createdAt": "2026-09-03T21:18:51.569Z",
-    "usedIn": []
+    "usedIn": [
+      {
+        "campaignId": "__smoke-ui__",
+        "usedAt": "2026-09-21T01:04:30.607Z"
+      }
+    ]
   },
   {
     "id": "b9cbe801-05df-459c-aecd-fe6a3f047f3d",

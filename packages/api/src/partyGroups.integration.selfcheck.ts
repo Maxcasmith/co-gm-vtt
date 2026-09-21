@@ -161,6 +161,17 @@ async function main(): Promise<void> {
     assert.ok(!reply.includes('Aria'), `blue's DM context leaked red — "${reply}"`);
   });
 
+  await check("each group's DM can see what the other groups have been doing", async () => {
+    clear();
+    say('Cal', 'We search the common room');
+    await waitFor('blue gets its DM reply', () => got('Bex', 'session:recap'));
+    await sleep(300);
+    const reply = texts('Bex', 'session:recap').at(-1)!;
+    // Red (Aria) spoke earlier in this split — blue's narrator must be handed that transcript.
+    assert.match(reply, /others:red=[1-9]/, `blue's DM should see red's transcript — got "${reply}"`);
+    assert.ok(!reply.includes('heard:Aria'), "red's lines must stay out of blue's own conversation turns");
+  });
+
   await check('reuniting closes the split: everyone gets the full history, DM gets a hidden summary', async () => {
     clear();
     groupsMove('Aria', 'blue');
@@ -290,6 +301,17 @@ async function main(): Promise<void> {
     assert.ok(fight?.arenaId, 'the open-world fight should have its own arena');
     assert.equal(locationOf(SLUG, 'Dax'), fight!.arenaId);
     assert.equal(dungeonsIn(SLUG).length, 2, 'the dungeon and the arena should both be loaded');
+    // The arena is the map the fight is played on — its fighters must be sent it, or their client
+    // keeps rendering wherever they were before (the world map / their old exploration map).
+    assert.ok(got('Dax', 'dungeon:loaded', a => (a[0] as { id: string }).id === fight!.arenaId), 'Dax never received the arena map');
+    const arenaPayload = inbox.Dax.filter(r => r.ev === 'dungeon:loaded').map(r => r.args[0] as { id: string; occupants?: string[] }).at(-1)!;
+    assert.ok(arenaPayload.occupants?.includes('Dax'), `arena occupants should list its fighters — got ${JSON.stringify(arenaPayload.occupants)}`);
+    // Ordering matters: generating the enemies is a model call taking seconds in real play. The
+    // battle map must be on screen before them, or the fighters sit in combat mode looking at the
+    // map they just left until it returns.
+    const mapAt = inbox.Dax.findIndex(r => r.ev === 'dungeon:loaded' && (r.args[0] as { id: string }).id === fight!.arenaId);
+    const enemiesAt = inbox.Dax.findIndex(r => r.ev === 'encounter:ready');
+    assert.ok(mapAt >= 0 && (enemiesAt === -1 || mapAt < enemiesAt), `the arena map must arrive before the enemies (map@${mapAt}, enemies@${enemiesAt})`);
     for (const n of ['Aria', 'Bex', 'Cal'] as const) {
       assert.equal(fightOf(SLUG, n), undefined, `${n} was pulled into the world group's fight`);
       assert.ok(!got(n, 'dungeon:loaded'), `${n} (in the dungeon) got the arena map`);

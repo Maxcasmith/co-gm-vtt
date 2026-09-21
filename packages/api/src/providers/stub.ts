@@ -15,8 +15,16 @@ function stubChat(system: string, messages: ChatMessage[]): string {
   const heard = [...new Set([...userText.matchAll(SPEAKER_RE)].map(m => m[1]!).filter(s => s !== 'Roll Result'))];
   const last = messages.at(-1)?.content.split('\n').at(-1) ?? '';
   const elsewhere = system.includes('Elsewhere — the party is split') ? ' elsewhere:yes' : '';
+  // Reports the other groups' transcripts it was handed (the world connector), so a test can prove
+  // this narrator can see what the other branches did: "others:red=3,green=0".
+  const json = system.split('\n').find(l => l.trim().startsWith('{"'));
+  let others = '';
+  try {
+    const parsed = json ? (JSON.parse(json) as Record<string, string[]>) : undefined;
+    if (parsed) others = ` others:${Object.entries(parsed).map(([t, lines]) => `${t}=${lines.length}`).join(',') || '-'}`;
+  } catch { others = ' others:unparsable'; }
   const combat = /attack!/i.test(last) ? ' [[COMBAT_INIT:Stub Goblin]]' : '';
-  return `[stub DM] heard:${heard.join(',') || '-'}${elsewhere}${combat}`;
+  return `[stub DM] heard:${heard.join(',') || '-'}${elsewhere}${others}${combat}`;
 }
 
 /** One-shot prompts: answered by shape. Side assignment groups creatures by the first word of their

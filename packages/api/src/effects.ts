@@ -17,7 +17,7 @@ import { D20Roll, toSlug, escalateCr } from './combat/dice.ts';
 import { rollPlayerInitiatives, addToTurnOrder, syncFight } from './combat/runtime/lifecycle.ts';
 import { sweepGameTimeExpiries } from './combat/runtime/environment.ts';
 import { trySpendSpellSlot } from './combat/runtime/resources.ts';
-import { generateAndBroadcastEnemies, unlockDoorNear, resolveLockpickAttempt, resolveTrapDisarmAttempt } from './dungeon/runtime.ts';
+import { generateAndBroadcastEnemies, openArena, unlockDoorNear, resolveLockpickAttempt, resolveTrapDisarmAttempt } from './dungeon/runtime.ts';
 import { checkQuestChainTriggers } from './dungeon/questChain.ts';
 import { advancePlotArc } from './plotArcs.ts';
 import { findSpell } from './routes/spells.ts';
@@ -82,6 +82,9 @@ export async function applyEffects(cid: string, effects: TagEffect[], audience: 
       fight.pendingPlayerNames.push(...fighters);
       registerFight(cid, fight);
       await rollPlayerInitiatives(cid, fight, await listCharacters(cid), fighters);
+      // Arena first, enemies second: generating them is a model call, and the fight's players
+      // should be looking at the battle map while it runs, not at the map they just left.
+      openArena(cid, fight);
       syncFight(fight);
       void generateAndBroadcastEnemies(cid, fight, effect.combatants);
     } else if (effect.type === 'inventory_add') {

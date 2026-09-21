@@ -497,7 +497,10 @@ export async function generateDungeonQuests(
 // ── DM chat response ──────────────────────────────────────────────────────────
 
 const DM_SENDER = 'Virtual DM';
-const HISTORY_LIMIT = 20;
+// How much of the log each DM turn gets. Deliberately generous: the transcript is a few thousand
+// tokens at most, and running short is what makes the narrator re-invent details it already
+// established (a scene it forgot, an NPC's name) — far more expensive than the tokens saved.
+const HISTORY_LIMIT = 60;
 
 // Build alternating user/assistant turns from the recent chat log
 // Player messages → user role; DM messages → assistant role; System (rolls) → user role labelled as roll

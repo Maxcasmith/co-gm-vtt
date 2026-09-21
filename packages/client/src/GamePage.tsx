@@ -97,6 +97,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [viewingMemberId, setViewingMemberId] = useState<string | null>(null);
   const [partyGroups, setPartyGroups] = useState<PartyGroups | null>(null);
   const [groupsOpen, setGroupsOpen] = useState(false);
+  // The session ending closes the modal with it — every group change is refused outside one.
+  useEffect(() => { if (!sessionActive) setGroupsOpen(false); }, [sessionActive]);
   const [acquisitions, setAcquisitions] = useState<Character['inventory']>([]);
   const [itemQtyOverrides, setItemQtyOverrides] = useState<Record<string, number>>({});
   const [resourceOverrides, setResourceOverrides] = useState<Record<string, number> | null>(null);
@@ -458,16 +460,18 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('dungeon:generating', () => setDungeonGenerating(true));
     socket.on('dungeon:loaded', dungeon => {
       setDungeonGenerating(false);
-      // A different map entirely (this group walked into a dungeon, or out of one) — drop the old
-      // map's tokens instead of merging, or its party lingers as ghosts on the new floor.
-      setDungeon(prev => {
-        if (prev && prev.id !== dungeon.id) setTokenPositions(dungeon.positions ?? {});
-        return dungeon;
-      });
+      // A different map entirely (this group walked into a dungeon or a combat arena, or out of
+      // one) — drop the old map's tokens instead of merging, or its party lingers as ghosts on the
+      // new floor. Compared against the ref, never inside the setDungeon updater: React runs
+      // updaters during render, where a nested setState is dropped (which left the old map on
+      // screen until the next interaction forced a re-render).
+      if (dungeonRef.current && dungeonRef.current.id !== dungeon.id) setTokenPositions(dungeon.positions ?? {});
+      dungeonRef.current = dungeon;
+      setDungeon(dungeon);
       dispatch('vtt:dungeon:loaded', dungeon);
       loadRuntimeTilesets();
     });
-    socket.on('dungeon:cleared', () => { setDungeon(null); setTokenPositions({}); });
+    socket.on('dungeon:cleared', () => { dungeonRef.current = null; setDungeon(null); setTokenPositions({}); });
     socket.on('quest:update', ({ quests: q, act: a, final }) => {
       setQuests(q);
       setAct(a);
@@ -680,13 +684,17 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       } else if (e.key === 'n' && now - lastSpaceRef.current < DOUBLE_TAP_MS) {
         lastSpaceRef.current = 0;
         setNotesOpen(o => !o);
+      } else if (e.key === 'g' && now - lastSpaceRef.current < DOUBLE_TAP_MS) {
+        lastSpaceRef.current = 0;
+        // Same gate as the HUD button — splitting and rejoining only happens in play.
+        if (sessionActive) setGroupsOpen(o => !o);
       } else if (e.key === 'D' && e.shiftKey) {
         setDevModalOpen(o => !o);
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [journalOpen, storyboardQueue]);
+  }, [journalOpen, storyboardQueue, sessionActive]);
 
   const paletteItems = [
     {
@@ -803,6 +811,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         selfTempHp={playerHpState?.temp}
         onSelectMember={setViewingMemberId}
         selfTrack={partyGroups ? trackOf(partyGroups, character.name) : undefined}
+        groupsEnabled={sessionActive}
         onOpenGroups={() => setGroupsOpen(open => !open)}
       />
       {groupsOpen && partyGroups && (

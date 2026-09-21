@@ -15,10 +15,12 @@ interface Props {
   onSelectMember: (characterId: string) => void;
   /** Your current Party Groups track — tints the groups button beside your portrait. */
   selfTrack?: GroupColor | undefined;
+  /** Splitting and rejoining only happens in play, so the button is dead outside a running session. */
+  groupsEnabled: boolean;
   onOpenGroups: () => void;
 }
 
-export default function PartyHud({ roster, connected, aiControlled, portraitUrls, characterIds, self, hp, selfTempHp, onSelectMember, selfTrack, onOpenGroups }: Props) {
+export default function PartyHud({ roster, connected, aiControlled, portraitUrls, characterIds, self, hp, selfTempHp, onSelectMember, selfTrack, groupsEnabled, onOpenGroups }: Props) {
   if (!roster.length) return null;
 
   const connectedSet = new Set(connected);
@@ -59,7 +61,16 @@ export default function PartyHud({ roster, connected, aiControlled, portraitUrls
         return name === self ? (
           <div key={name} className="party-hud-self-row">
             {card}
-            <Button variant="outline" size="sm" className="party-hud-groups-btn" data-color={selfTrack} onClick={onOpenGroups} aria-label="Party groups">⑂</Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="party-hud-groups-btn"
+              data-color={selfTrack}
+              disabled={!groupsEnabled}
+              title={groupsEnabled ? 'Party groups' : 'Start the session to split or rejoin the party'}
+              onClick={onOpenGroups}
+              aria-label="Party groups"
+            >⑂</Button>
           </div>
         ) : card;
       })}

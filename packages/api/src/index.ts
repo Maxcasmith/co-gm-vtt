@@ -19,6 +19,7 @@ import { initLicensesTable } from './licenses/db.ts';
 import { app, httpServer } from './state.ts';
 import { registerSocketHandlers } from './socketHandlers/index.ts';
 import { logError } from './logger.ts';
+import { LLM_STUB } from './providers/stub.ts';
 
 app.use('/api/config', configRouter);
 app.use('/api/campaigns', campaignsRouter);
@@ -44,4 +45,7 @@ const PORT = 3001;
 initLicensesTable().catch(err => logError('index:initLicensesTable', err));
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`api listening on :${PORT}`);
+  // Says plainly which mode this server is in — a test run that expects the stub but silently
+  // reaches a real model costs money (and contacts an external service) without saying so.
+  console.log(LLM_STUB ? '[llm] STUB mode — no model calls will be made' : '[llm] live models — real API calls');
 });

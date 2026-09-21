@@ -12,8 +12,11 @@ Players can split into colour-coded **tracks** (blue, red, green, yellow, pink, 
 teal) from the button beside their own portrait in the party HUD. While more than one track is
 occupied the party is **split**:
 
-- Each track only sees its own chat, DM replies and rolls. The DM for a track only reads what that
-  track saw, plus a deterministic "Elsewhere" line per other group.
+- Each track only sees its own chat, DM replies and rolls. The DM for a track reads what that track
+  saw, plus a deterministic "Elsewhere" line per other group **and every other group's recent
+  transcript, keyed by track** (`describeOtherGroups`) — the world connector, so a character who
+  walked off to meet another group is actually there and a brawl one group had really happened.
+  DM-only: players still never see another track's lines.
 - Each track has its own open-world scene (location / NPCs / factions).
 - When everyone is back on one track the split **closes**: every branch becomes visible to everyone
   as an inline split block in the Adventure Log, and the DM gets a hidden LLM summary per branch.
@@ -35,7 +38,7 @@ Separately (split or not) combat is per individual and per fight — see "Combat
 | Persistence | `groups.json` per campaign (`storage.ts` `readPartyGroups`/`writePartyGroups`), mirrored in memory (`state.ts` `partyGroups`) |
 | Socket handlers (`groups:move`, `groups:track:add`, `groups:track:remove`) — all gated on `sessionState` | `packages/api/src/socketHandlers/groups.ts` |
 | Per-track scene (read/write/fold on reunion) | `partyGroups.ts` `sceneFor` / `updateScene` / `foldScenesOnReunion` |
-| UI | `client/src/PartyGroupsModal.tsx`, `PartyHud.tsx` (button), `styles/party-groups.css` |
+| UI | `client/src/PartyGroupsModal.tsx`, `PartyHud.tsx` (button, disabled outside a session), `styles/party-groups.css`; shortcut Space+G (`GamePage.tsx`, listed in `ShortcutsOverlay.tsx`) |
 
 ### Chat routing
 - **Every chat line goes through `postChat(cid, msg, audience)`** (`partyGroups.ts`). `audience` is
@@ -103,7 +106,7 @@ each open-world fight's own combat arena.
 | Track locations (a dungeon id per track; absent = the open world) | `groups.json` `locations`, shared `locationOfTrack`, api `setTrackLocations` / `locationsOfTracks` |
 | Storage | `dungeons/<id>.json` (`saveDungeon` / `loadDungeons` / `clearDungeon`); a legacy single `dungeon.json` still loads and puts the whole party in it |
 | Map audiences | `toDungeon(cid, id)` / `toDungeonOf(cid, token)`, plus `broadcastDungeon` (adds `occupants` to the payload) |
-| Arena per fight | `Encounter.arenaId`, created in `generateAndBroadcastEnemies`, discarded on victory in `damage.ts` |
+| Arena per fight | `Encounter.arenaId`; `openArena` puts the empty battle map on screen the instant the fight starts, `placeArenaEnemies` drops the enemies in once the model returns; discarded on victory in `damage.ts` |
 
 Rules that follow from it:
 

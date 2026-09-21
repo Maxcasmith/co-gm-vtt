@@ -235,6 +235,9 @@ export async function foldScenesOnReunion(cid: string, groups: PartyGroups, fina
 
 // ── Other groups, for the DM ────────────────────────────────────────────────────
 
+/** How many of each other group's lines the narrator gets — enough to know what actually happened there. */
+const OTHER_GROUP_HISTORY = 40;
+
 const titleCase = (slug: string) => slug.split('-').map(w => (w[0] ?? '').toUpperCase() + w.slice(1)).join(' ');
 
 /** One line per other occupied track — who, where, fighting or not — so a split group's narrator
@@ -245,7 +248,8 @@ export async function describeOtherGroups(cid: string, audience: ChatAudience): 
   if (!tracks) return '';
   const [groups, chars, manifest] = await Promise.all([getPartyGroups(cid), listCharacters(cid), readManifest(cid)]);
   const lines: string[] = [];
-  for (const track of groups.tracks.filter(t => !tracks.includes(t))) {
+  const others = groups.tracks.filter(t => !tracks.includes(t));
+  for (const track of others) {
     const members = chars.map(c => c.name).filter(n => trackOf(groups, n) === track);
     if (!members.length) continue;
     // Each group is described from the map it's actually standing on.
@@ -256,9 +260,27 @@ export async function describeOtherGroups(cid: string, audience: ChatAudience): 
     const fighting = members.some(n => fightOf(cid, n));
     lines.push(`- ${track} group (${members.join(', ')}): ${location ? `at ${room ?? titleCase(location)}` : 'location unknown'}, ${fighting ? 'in a fight' : 'exploring'}.`);
   }
-  return lines.length
-    ? `### Elsewhere — the party is split\nThese characters are NOT in this scene. Never narrate them here or have them act; at most, distant consequences (noise, a light, a shared goal) may reach this group.\n${lines.join('\n')}`
-    : '';
+  if (!lines.length) return '';
+
+  // The world connector: every other group's own recent transcript, keyed by track. Without it each
+  // branch narrates blind — a character who walked upstairs to meet another group isn't there, and a
+  // brawl one group just had never happened for anyone else. Always included (an idle group is an
+  // empty array) so the narrator can rely on the shape. This is DM-only context; players still
+  // never see another track's lines.
+  const log = await readChatLog(cid);
+  const transcripts = Object.fromEntries(others.map(track => [
+    track,
+    log.filter(m => m.trackIds?.includes(track)).slice(-OTHER_GROUP_HISTORY).map(m => `[${m.senderName}]: ${m.text}`),
+  ]));
+
+  return [
+    '### Elsewhere — the party is split',
+    'These characters are NOT in this scene. Never narrate them here or have them act; at most, distant consequences (noise, a light, a shared goal) may reach this group.',
+    ...lines,
+    '',
+    "What the other groups have been doing, by track — the one shared record of the world. Keep your narration consistent with it: people, places and events here are real and have already happened, even though this group hasn't seen them. Never let this group overhear or act on it.",
+    JSON.stringify(transcripts),
+  ].join('\n');
 }
 
 // ── Where tracks are ────────────────────────────────────────────────────────────

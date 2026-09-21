@@ -1,11 +1,11 @@
-import type { DungeonEntity, EnemyStatBlock } from 'shared';
+import type { Dungeon, DungeonEntity, EnemyStatBlock } from 'shared';
 import { hasLineOfSight, closedDoorCells, statMod } from 'shared';
 import { randomUUID } from 'crypto';
 import { saveDungeon, saveEncounter, getConfig, listCharacters, getCharacter, readNemeses, readManifest } from '../storage.ts';
 import { D20Roll } from '../combat/dice.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateEncounterEnemies, assignCombatTeams, DEFAULT_ENEMY_SIDE, type CombatSide } from '../session-processor/imagePrompts.ts';
-import { generateEncounterDungeon, toClientDungeon, roomAt, chainClosure } from './index.ts';
+import { generateEncounterDungeon, placeArenaEnemies, roomAt, chainClosure } from './index.ts';
 import { templateRoomEntry, type SearchFind } from './narrateEvents.ts';
 import { dungeonEvents } from './events.ts';
 import { Encounter, Participant, PLAYERS_TEAM_ID } from '../domain/encounter.ts';
@@ -89,6 +89,21 @@ export async function checkDungeonProximity(cid: string, gx: number, gy: number,
   if (!aggro.length) return;
   if (encounter) joinReinforcements(cid, encounter, aggro);
   else await startDungeonCombat(cid, aggro, characterName);
+}
+
+/** Opens an empty combat arena for an open-world fight and puts it on its players' screens right
+ * away — the enemies themselves take a model call, and until step 15 the map only appeared once
+ * that returned, leaving players in combat mode staring at the map they'd just left. */
+export function openArena(cid: string, fight: Encounter): Dungeon {
+  const arena = generateEncounterDungeon();
+  arena.arena = true;
+  // The fight owns its arena — its players stand in it (locationOf) until it's discarded on
+  // victory, so two groups can each have their own open-world fight at once.
+  fight.arenaId = arena.id;
+  registerDungeon(cid, arena);
+  void saveDungeon(cid, arena);
+  broadcastDungeon(cid, arena);
+  return arena;
 }
 
 /** LLM side assignment for creatures joining `fight` (see assignCombatTeams), then applied —
@@ -366,25 +381,16 @@ export async function generateAndBroadcastEnemies(campaignId: string, encounter:
     toFight(encounter).emit('encounter:ready', uniqueStatBlocks);
     console.log('[encounter] ready:', statBlocks.map(e => `${e.name} (CR ${e.cr})`).join(', '));
 
-    // World-map combat (no dungeon already loaded — the only case that reaches this function at
-    // all now that combat_init is hard-blocked while a real dungeon exists): spawn a bare
-    // combat-arena dungeon instead of an AI backdrop image — same rendering/fog/movement path as
-    // any other dungeon, discarded on victory.
-    if (!fightDungeon(campaignId, encounter)) {
-      const dungeon = generateEncounterDungeon(uniqueStatBlocks);
-      dungeon.arena = true;
-      // The fight owns its arena — its players stand in it (locationOf) until it's discarded on
-      // victory, so two groups can each have their own open-world fight at once.
-      encounter.arenaId = dungeon.id;
-      registerDungeon(campaignId, dungeon);
-      await saveDungeon(campaignId, dungeon);
-      broadcastDungeon(campaignId, dungeon);
-
-      const positions = dungeon.positions ??= {};
-      for (const entity of dungeon.entities) {
-        positions[entity.id] = { gx: entity.x, gy: entity.y };
+    // The arena was put on screen the moment the fight started (see openArena) — the enemies just
+    // took a model call to arrive. Place them on it now. A fight with no arena at all (shouldn't
+    // happen) gets one here rather than being left mapless.
+    const arena = fightDungeon(campaignId, encounter) ?? openArena(campaignId, encounter);
+    if (arena.arena) {
+      for (const entity of placeArenaEnemies(arena, uniqueStatBlocks)) {
         toDungeonOf(campaignId, entity.id).emit('token:moved', { tokenId: entity.id, gx: entity.x, gy: entity.y });
       }
+      await saveDungeon(campaignId, arena);
+      broadcastDungeon(campaignId, arena);
     }
 
     if (!encounter.ended) rollEnemyInitiatives(campaignId, encounter);

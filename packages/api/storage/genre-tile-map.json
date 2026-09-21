@@ -1,31 +1,59 @@
 {
   "fantasy": {
-    "ash": { "ash": "tilesets/ancient-egypt-three/ash" },
-    "brick": { "brick": "tilesets/ancient-egypt-three/brick" },
-    "dirt": { "dirt": "tilesets/ancient-egypt-three/dirt" },
-    "grass": { "grass": "tilesets/ancient-egypt-three/grass" },
-    "rubble": { "gravel": "tilesets/ancient-egypt-three/gravel" },
-    "ice": { "ice": "tilesets/ancient-egypt-three/ice" },
-    "metal": { "iron": "tilesets/ancient-egypt-three/iron" },
-    "lava": { "lava": "tilesets/ancient-egypt-three/lava" },
+    "ash": {
+      "ash": "tilesets/ancient-egypt-three/ash"
+    },
+    "brick": {
+      "brick": "tilesets/ancient-egypt-three/brick"
+    },
+    "dirt": {
+      "dirt": "tilesets/ancient-egypt-three/dirt"
+    },
+    "grass": {
+      "grass": "tilesets/ancient-egypt-three/grass"
+    },
+    "rubble": {
+      "gravel": "tilesets/ancient-egypt-three/gravel"
+    },
+    "ice": {
+      "ice": "tilesets/ancient-egypt-three/ice"
+    },
+    "metal": {
+      "iron": "tilesets/ancient-egypt-three/iron"
+    },
+    "lava": {
+      "lava": "tilesets/ancient-egypt-three/lava"
+    },
     "stone": {
       "marble": "tilesets/ancient-egypt-three/marble",
       "stone": "tilesets/ancient-egypt-three/stone"
     },
-    "moss": { "moss": "tilesets/ancient-egypt-three/moss" },
-    "mud": { "mud": "tilesets/ancient-egypt-three/mud" },
-    "sand": { "sand": "tilesets/ancient-egypt-three/sand" },
-    "snow": { "snow": "tilesets/ancient-egypt-three/snow" },
-    "water": { "water": "tilesets/ancient-egypt-three/water" },
-    "wood": { "wood": "tilesets/ancient-egypt-three/wood" }
+    "moss": {
+      "moss": "tilesets/ancient-egypt-three/moss"
+    },
+    "mud": {
+      "mud": "tilesets/ancient-egypt-three/mud"
+    },
+    "sand": {
+      "sand": "tilesets/ancient-egypt-three/sand"
+    },
+    "snow": {
+      "snow": "tilesets/ancient-egypt-three/snow"
+    },
+    "water": {
+      "water": "tilesets/ancient-egypt-three/water"
+    },
+    "wood": {
+      "wood": "tilesets/ancient-egypt-three/wood"
+    }
   },
   "horror": {
     "stone": {
       "algae-stone": "tilesets/cosmic-horror-2d20b8bc08/algae-stone",
       "barnacled-stone": "tilesets/cosmic-horror-2d20b8bc08/barnacled-stone",
-      "wet-stone": "tilesets/cosmic-horror-2d20b8bc08/wet-stone",
+      "wet-stone": "tilesets/victorian-horror--032b06694b/wet-stone",
       "cracked-tile": "tilesets/cosmic-horror-89f12707c2/cracked-tile",
-      "stone": "tilesets/dark-academia-760c618ef9/stone",
+      "stone": "tilesets/victorian-horror--032b06694b/stone",
       "warded-stone": "tilesets/dark-academia-760c618ef9/warded-stone",
       "marble": "tilesets/gothic-horror-d42fd63791/marble",
       "tile": "tilesets/gothic-horror-d42fd63791/tile",
@@ -58,7 +86,7 @@
       "silt": "tilesets/sunken-temple-3a03ccc96f/silt"
     },
     "dirt": {
-      "dirt": "tilesets/post-apocalyptic-rural-2f1247e1b1/dirt"
+      "dirt": "tilesets/victorian-horror--032b06694b/dirt"
     },
     "rubble": {
       "gravel": "tilesets/post-apocalyptic-rural-2f1247e1b1/gravel"

@@ -127,7 +127,10 @@ export function resolveDoorState(
 
 // Combat-arena dungeon: one bare room sized for the encounter, no LLM calls — who spawns is
 // already decided (the stat blocks), this only needs geometry to drop them into.
-export function generateEncounterDungeon(statBlocks: EnemyStatBlock[]): Dungeon {
+/** The bare combat arena an open-world fight is played on. Built with no enemies at combat start
+ * (so the map is on screen immediately, not after the enemy-generation model call), then filled in
+ * by placeArenaEnemies once the stat blocks arrive. */
+export function generateEncounterDungeon(statBlocks: EnemyStatBlock[] = []): Dungeon {
   const { cells, rooms } = generateGrid({ rooms: [{ name: 'Battle', size: 'large' }], structureType: 'organic', theme: 'high_fantasy', questChain: [], illumination: 1, materials: [], props: [] });
   const room = rooms[0]!;
   const entities = placeEncounterEntities(room, statBlocks);
@@ -189,6 +192,16 @@ export function broadcastDungeon(cid: string, dungeon: Dungeon, audience: Audien
 export function toClientDungeon(dungeon: Dungeon): Dungeon {
   // Party-placed traps skip the discovered gate — you always know where your own trap is.
   return { ...dungeon, entities: dungeon.entities.filter(e => e.discovered || e.placedBy) };
+}
+
+/** Drops freshly generated enemies into an existing arena, returning the entities placed. */
+export function placeArenaEnemies(arena: Dungeon, statBlocks: EnemyStatBlock[]): DungeonEntity[] {
+  const room = arena.rooms[0];
+  if (!room) return [];
+  arena.entities = placeEncounterEntities(room, statBlocks);
+  const positions = arena.positions ??= {};
+  for (const entity of arena.entities) positions[entity.id] = { gx: entity.x, gy: entity.y };
+  return arena.entities;
 }
 
 export function roomAt(dungeon: Dungeon, gx: number, gy: number): DungeonRoom | undefined {
