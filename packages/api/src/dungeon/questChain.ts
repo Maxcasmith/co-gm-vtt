@@ -1,6 +1,6 @@
 import type { Dungeon } from 'shared';
 import { readQuests, writeQuests, readManifest } from '../storage.ts';
-import { io, campaignRoom, dungeons } from '../state.ts';
+import { io, campaignRoom } from '../state.ts';
 
 // Every kind of in-dungeon event that can resolve the active quest chain stage. See
 // DungeonQuestTrigger (shared/types/dungeon.ts) for what each kind means and how it's matched.
@@ -19,8 +19,7 @@ export type QuestChainEvent =
 // n is the first stage whose Quest is 'open' rather than 'resolved' or not yet created). Resolving
 // it here both closes it out and opens the next stage's Quest, reusing the exact quest:update
 // broadcast the Congrats modal already listens for — nothing else needed client-side.
-export async function checkQuestChainTriggers(cid: string, event: QuestChainEvent): Promise<void> {
-  const dungeon: Dungeon | undefined = dungeons.get(cid);
+export async function checkQuestChainTriggers(cid: string, event: QuestChainEvent, dungeon: Dungeon | undefined): Promise<void> {
   const chain = dungeon?.questChain;
   if (!dungeon || !chain?.length) return;
 

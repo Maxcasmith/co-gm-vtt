@@ -1,5 +1,7 @@
 import { randomUUID } from 'crypto';
-import type { AppConfig, Dungeon, DungeonEntity, DungeonRoom, EnemyStatBlock, CampaignGenre } from 'shared';
+import type { AppConfig, Dungeon, DungeonEntity, DungeonRoom, EnemyStatBlock, CampaignGenre, ClientToServerEvents, ServerToClientEvents } from 'shared';
+import type { Socket } from 'socket.io';
+import { toDungeon, occupantsOf, type Audience } from '../state.ts';
 import { slugifyTheme, hasLineOfSight, closedDoorCells } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { fetchManifest } from './manifest.ts';
@@ -178,6 +180,12 @@ export function renderDungeonAscii(dungeon: Dungeon): string {
 
 // Server keeps the full dungeon (hidden entities included) in storage/memory —
 // this strips anything not yet discovered before it goes out over the wire.
+/** Sends `dungeon` to the players standing in it (or to `audience` — one reconnecting socket),
+ * with its occupant list, so each client's entrance placement only places this dungeon's group. */
+export function broadcastDungeon(cid: string, dungeon: Dungeon, audience: Audience | Socket<ClientToServerEvents, ServerToClientEvents> = toDungeon(cid, dungeon.id)): void {
+  audience.emit('dungeon:loaded', { ...toClientDungeon(dungeon), occupants: occupantsOf(cid, dungeon.id) });
+}
+
 export function toClientDungeon(dungeon: Dungeon): Dungeon {
   // Party-placed traps skip the discovered gate — you always know where your own trap is.
   return { ...dungeon, entities: dungeon.entities.filter(e => e.discovered || e.placedBy) };

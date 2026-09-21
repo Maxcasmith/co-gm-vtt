@@ -239,6 +239,10 @@ export interface Dungeon {
   rooms: DungeonRoom[];
   entities: DungeonEntity[];
   positions?: Record<string, { gx: number; gy: number }>;
+  /** Players standing in this dungeon right now (their Party Groups track is located here, or
+   * they're fighting in this arena) — set on every payload sent to clients, so the entrance
+   * placement only places this dungeon's own group, not the whole party. */
+  occupants?: string[];
   arena?: boolean;
   /** Ordered narrative quest chain for this dungeon — may be empty, never forced. See DungeonQuestStage. */
   questChain?: DungeonQuestStage[];

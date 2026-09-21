@@ -10,7 +10,7 @@ import {
   getScenarioStoryboard,
   readCampaignFile, writeEntity,
   listEntitySlugs, readEntity, saveDungeon, saveDungeonAscii, writeManifest, readManifest, emptyManifest, readQuests, writeQuests,
-  loadDungeon, deleteCampaign,
+  loadDungeons, deleteCampaign,
 } from '../storage.ts';
 import { getTextStore, getMediaStore } from '../storage/index.ts';
 import { deleteUnusedResources, type ResourceCleanupRequest } from '../resourceUsage.ts';
@@ -81,7 +81,7 @@ campaignsRouter.delete('/:id', async (req, res) => {
     const { resources } = req.body as { resources?: ResourceCleanupRequest };
     let messages: string[] = [];
     if (resources && (resources.tiles || resources.creatures || resources.props)) {
-      const dungeon = await loadDungeon(campaignId);
+      const dungeon = (await loadDungeons(campaignId))[0] ?? null;
       if (dungeon) messages = await deleteUnusedResources(dungeon, resources, { excludeId: campaignId, excludeKind: 'campaign' });
     }
     await deleteCampaign(campaignId);

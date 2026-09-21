@@ -25,6 +25,7 @@ import { WeaponAttackOverrideHook } from './hooks/WeaponAttackOverrideHook.ts';
 import { DcModifierHook } from './hooks/DcModifierHook.ts';
 import { applyCondition } from '../runtime/statusEffects.ts';
 import { recomputeIllumination } from '../runtime/environment.ts';
+import { dungeonOf } from '../../state.ts';
 
 export interface SpellHookContext {
   /** Who the hook attaches to — the caster for 'self' specs, an affected target otherwise. */
@@ -250,5 +251,5 @@ export async function registerSpellHooks(engine: StateEngine, specs: HookSpec[],
   // Light spells need their brightness reflected the instant they're cast, not on the next
   // turn-start sweep — cheap no-op for every other spell (recomputeIllumination bails out fast
   // when nothing changed).
-  if (specs.some(s => s.type === 'illuminationSource')) recomputeIllumination(engine.campaignId);
+  if (specs.some(s => s.type === 'illuminationSource')) recomputeIllumination(engine.campaignId, dungeonOf(engine.campaignId, ctx.ownerId));
 }

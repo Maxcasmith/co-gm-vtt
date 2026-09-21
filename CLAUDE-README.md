@@ -107,4 +107,11 @@ Decided with Max; don't re-flag these as bugs:
   Victory = every non-player side down.
 - **XP splits among the fight's own player characters**, not the whole campaign.
 - **Rest stays party-wide** even while split (timeline consistency). **Re-merging tracks is
-  manual.** **Changing track is blocked mid-fight.**
+  manual.** **Changing track is blocked mid-fight, and outside a running session** (Max,
+  2026-09-21) — splitting is something the party does in play. A session ending mid-split leaves
+  the split standing; it just can't be changed until play resumes.
+- **A track belongs to a place** (a dungeon, or the open world) — `groups.json` `locations`. Only
+  the group the DM was narrating for enters/leaves a dungeon, you can only switch between tracks
+  in your own location, and a dungeon stays loaded while any group is still inside it. Several
+  dungeons (and an arena per open-world fight) can be loaded at once; positions live on each
+  `Dungeon`, not in a campaign-wide table. See `docs/PARTY-GROUPS.md`.

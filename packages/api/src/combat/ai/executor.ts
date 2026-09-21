@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import type { EnemyAction, EnemyStatBlock } from 'shared';
 import type { Creature } from '../../domain/creature.ts';
 import type { Participant } from '../../domain/encounter.ts';
-import { io, campaignRoom, fightOf, toFight, tokenPositions, getStateEngine } from '../../state.ts';
+import { campaignRoom, fightOf, toFight, toDungeonOf, positionsOf, getStateEngine } from '../../state.ts';
 import { } from '../../storage.ts';
 import { rollDice } from '../dice.ts';
 import { applyDamageToCreature, applyDamageToPlayer, applyHealingToCreature, applyHealingToPlayer } from '../runtime/damage.ts';
@@ -47,7 +47,7 @@ function announce(cid: string, actor: Participant, text: string): void {
 async function executeAoe(cid: string, actor: Participant, action: Extract<EnemyAction, { kind: 'aoe' }>, target: Participant): Promise<void> {
   const encounter = fightOf(cid, actor.id);
   if (!encounter) return;
-  const positions = tokenPositions.get(cid) ?? {};
+  const positions = positionsOf(cid, actor.id);
   const centerKey = target.isPlayer ? target.name : target.id;
   const center = positions[centerKey];
   if (!center) return;
@@ -147,7 +147,7 @@ async function executeSummon(cid: string, actor: Participant, action: Extract<En
   // Summons fight for whoever summoned them, not for the generic enemy side.
   const summonerTeam = encounter.teams.find(t => t.id === actor.teamId) ?? { id: actor.teamId, name: actor.teamId };
 
-  const positions = tokenPositions.get(cid) ?? {};
+  const positions = positionsOf(cid, actor.id);
   const selfPos = positions[actor.id];
   const spawned: Participant[] = [];
 
@@ -157,10 +157,9 @@ async function executeSummon(cid: string, actor: Participant, action: Extract<En
     if (selfPos) {
       const pos = findOpenAdjacent(positions, selfPos.gx, selfPos.gy);
       positions[participant.id] = pos;
-      io.to(campaignRoom(cid)).emit('token:moved', { tokenId: participant.id, gx: pos.gx, gy: pos.gy });
+      toDungeonOf(cid, participant.id).emit('token:moved', { tokenId: participant.id, gx: pos.gx, gy: pos.gy });
     }
   }
-  tokenPositions.set(cid, positions);
   addToTurnOrder(cid, encounter, spawned);
 
   toFight(encounter).emit('encounter:ready', encounter.enemies.filter(p => p.creature).map(p => p.creature!.toStatBlock()));

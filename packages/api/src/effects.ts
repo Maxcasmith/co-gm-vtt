@@ -3,15 +3,15 @@ import { statMod, addCurrency, removeCurrency, trackOf } from 'shared';
 import { randomUUID } from 'crypto';
 import { updateCharacter, listCharacters, readEntity, writeEntity, readManifest, writeManifest, emptyManifest, parseEntityLinks, clearDungeon, getConfig, saveDungeon, saveDungeonAscii, readQuests, writeQuests, loadPartyAllies, savePartyAllies, readNemeses, writeNemeses, getWorldMeta } from './storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
-import { generateDungeon, toClientDungeon } from './dungeon/index.ts';
+import { generateDungeon, toClientDungeon, broadcastDungeon } from './dungeon/index.ts';
 import { generateDungeonQuests } from './session-processor/index.ts';
 import { Encounter, Participant, PLAYERS_TEAM_ID } from './domain/encounter.ts';
 import { Creature } from './domain/creature.ts';
 import type { TagEffect, AcquiredItem } from './tag-processor.ts';
 import { logDebug } from './logger.ts';
 import {
-  io, campaignRoom, dungeons, playerSocketIds, microDungeons, campaignPlayers, connected, fightOf, fightsIn, registerFight,
-  NEMESIS_COOLDOWN_SESSIONS, NEMESIS_CAP_PER_TARGET, NEMESIS_MAX_DEATHS, ALLY_XP_PER_LEVEL, withLivePositions,
+  io, campaignRoom, dungeonById, registerDungeon, unregisterDungeon, occupantsOf, locationOf, playerSocketIds, campaignPlayers, connected, fightOf, fightsIn, registerFight,
+  NEMESIS_COOLDOWN_SESSIONS, NEMESIS_CAP_PER_TARGET, NEMESIS_MAX_DEATHS, ALLY_XP_PER_LEVEL,
 } from './state.ts';
 import { D20Roll, toSlug, escalateCr } from './combat/dice.ts';
 import { rollPlayerInitiatives, addToTurnOrder, syncFight } from './combat/runtime/lifecycle.ts';
@@ -21,7 +21,7 @@ import { generateAndBroadcastEnemies, unlockDoorNear, resolveLockpickAttempt, re
 import { checkQuestChainTriggers } from './dungeon/questChain.ts';
 import { advancePlotArc } from './plotArcs.ts';
 import { findSpell } from './routes/spells.ts';
-import { postChat, audienceTracks, updateScene, sceneFor, readChatContext, getPartyGroups, type ChatAudience } from './partyGroups.ts';
+import { postChat, audienceTracks, updateScene, sceneFor, readChatContext, getPartyGroups, setTrackLocations, locationsOfTracks, toTracks, type ChatAudience } from './partyGroups.ts';
 
 // A player name in a tag comes from the model's narration, not a dropdown — it's never going to
 // reproduce a stored name's exact casing/whitespace byte-for-byte (a character sheet with a
@@ -64,16 +64,20 @@ export async function applyEffects(cid: string, effects: TagEffect[], audience: 
       // emit it (e.g. right after a combat-flavoured victory narration), and if unguarded this
       // routes into the world-map path (generateAndBroadcastEnemies, a fresh LLM call unrelated
       // to any dungeon entity) — a second, parallel combat system running alongside the real one.
-      if (dungeons.has(cid)) {
-        logDebug(`combat_init ignored — real dungeon already loaded for ${cid}, DM should not have emitted this tag`);
-        return;
-      }
       // Open world has no positions to chain from — the fight is whichever group the DM was
       // narrating for (everyone online, with the party together), minus anyone already fighting.
       const groups = await getPartyGroups(cid);
       const fighters = (campaignPlayers.get(cid) ?? []).filter(name =>
         connected.has(name) && !fightOf(cid, name) && (!tracks || tracks.includes(trackOf(groups, name))));
       if (!fighters.length) return;
+      // Hard guard, not just a prompt instruction: inside a dungeon, combat must only ever start
+      // through the dungeon's own aggro system (checkDungeonProximity / startDungeonCombat), which
+      // spawns creatures already placed in dungeon.entities. Only this group's own location matters
+      // — another group being in a dungeon says nothing about where these players are standing.
+      if (fighters.some(name => locationOf(cid, name))) {
+        logDebug(`combat_init ignored — ${cid}'s acting group is in a dungeon, DM should not have emitted this tag`);
+        return;
+      }
       const fight = Encounter.empty(cid);
       fight.pendingPlayerNames.push(...fighters);
       registerFight(cid, fight);
@@ -134,7 +138,7 @@ export async function applyEffects(cid: string, effects: TagEffect[], audience: 
       const config = await getConfig();
       if (!hasFeatureProvider(config, 'dungeonGeneration')) { console.warn('[dungeon] no models configured — skipping dungeon generation'); return; }
       console.log(`[dungeon] generating: ${effect.name}`);
-      io.to(campaignRoom(cid)).emit('dungeon:generating');
+      (await toTracks(cid, tracks)).emit('dungeon:generating');
       const [recentChat, characters] = await Promise.all([readChatContext(cid, audience), listCharacters(cid)]);
       const storyContext = recentChat.slice(-10).map(m => `[${m.senderName}]: ${m.text}`).join('\n');
       const partySize = characters.length || 4;
@@ -156,21 +160,29 @@ export async function applyEffects(cid: string, effects: TagEffect[], audience: 
 
       const worldMeta = await getWorldMeta(cid);
       const dungeon = await generateDungeon(effect.name, effect.dungeonType, getFeatureProvider(config, 'dungeonGeneration'), storyContext, { partySize, partyLevel, id: dungeonId, predefinedChain, genre: worldMeta?.genre }, undefined, config);
-      dungeons.set(cid, dungeon);
+      registerDungeon(cid, dungeon);
+      // The groups this narration was for are the ones who walked in; everyone else stays put.
+      await setTrackLocations(cid, tracks, dungeon.id);
       await saveDungeon(cid, dungeon);
       await saveDungeonAscii(cid, dungeon);
-      io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+      broadcastDungeon(cid, dungeon);
       console.log(`[dungeon] generated and broadcast: ${dungeon.name} (${dungeon.rooms.length} rooms, ${dungeon.entities.length} entities)`);
     } else if (effect.type === 'dungeon_exit') {
-      if (fightsIn(cid).length || !dungeons.has(cid)) return; // don't rip the map out from under an active fight, or if there's nothing loaded
-      // Must run before the dungeon is deleted below — checkQuestChainTriggers reads the live
-      // in-memory dungeon (for its questChain), not storage.
-      await checkQuestChainTriggers(cid, { kind: 'exit_dungeon' });
-      dungeons.delete(cid);
-      microDungeons.delete(cid);
-      await clearDungeon(cid);
-      io.to(campaignRoom(cid)).emit('dungeon:cleared');
-      console.log('[dungeon] party left — cleared');
+      // Only the group this narration was for leaves. Never mid-fight.
+      const leaving = await toTracks(cid, tracks);
+      for (const dungeonId of await locationsOfTracks(cid, tracks)) {
+        const dungeon = dungeonById(cid, dungeonId);
+        if (!dungeon || fightsIn(cid).some(f => f.arenaId === dungeonId)) continue;
+        // Must run before the dungeon is dropped below — checkQuestChainTriggers reads its questChain.
+        await checkQuestChainTriggers(cid, { kind: 'exit_dungeon' }, dungeon);
+        await setTrackLocations(cid, tracks, undefined);
+        leaving.emit('dungeon:cleared');
+        // Kept loaded while another group is still inside it; discarded once the last one leaves.
+        if (occupantsOf(cid, dungeonId).length) { console.log(`[dungeon] a group left ${dungeon.name} — others still inside`); continue; }
+        unregisterDungeon(cid, dungeonId);
+        await clearDungeon(cid, dungeonId);
+        console.log(`[dungeon] last group left ${dungeon.name} — cleared`);
+      }
     } else if (effect.type === 'door_unlock') {
       await unlockDoorNear(cid, effect.characterName);
     } else if (effect.type === 'item_used') {

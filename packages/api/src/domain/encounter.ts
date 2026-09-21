@@ -266,6 +266,9 @@ export class Encounter {
    * starts (before initiative is rolled, so a racing second fight can't grab them too), or restored
    * off disk (player participants aren't serialized). fightOf treats them as members. */
   pendingPlayerNames: string[] = [];
+  /** Open-world fights only: the combat arena dungeon this fight is played on. Its players stand in
+   * it (locationOf) until the fight ends and the arena is discarded. */
+  arenaId: string | undefined = undefined;
 
   constructor(campaignId: string, id: string = randomUUID()) {
     this.campaignId = campaignId;
@@ -489,6 +492,7 @@ export class Encounter {
     return {
       id: this.id,
       campaignId: this.campaignId,
+      ...(this.arenaId ? { arenaId: this.arenaId } : {}),
       playerNames: [...new Set([...this.players.filter(p => p.isPlayer).map(p => p.name), ...this.pendingPlayerNames])],
       teams: this.teams.filter(t => t.id !== PLAYERS_TEAM_ID).map(t => ({
         id: t.id,
@@ -502,11 +506,12 @@ export class Encounter {
     // ponytail: handle legacy formats (plain EnemyStatBlock array; single-team { enemies })
     if (Array.isArray(data)) return Encounter.fromJSON({ enemies: data });
     const obj = data as {
-      id?: string; campaignId?: string; playerNames?: string[]; enemies?: unknown[];
+      id?: string; campaignId?: string; arenaId?: string; playerNames?: string[]; enemies?: unknown[];
       teams?: { id: string; name: string; enemies: unknown[] }[];
     };
     const enc = new Encounter(obj.campaignId ?? '', obj.id);
     enc.pendingPlayerNames = obj.playerNames ?? [];
+    enc.arenaId = obj.arenaId;
     const teams = obj.teams ?? [{ ...DEFAULT_ENEMY_TEAM, enemies: obj.enemies ?? [] }];
     for (const t of teams) {
       const team = enc.team(t.id, t.name);

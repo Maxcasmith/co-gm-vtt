@@ -7,19 +7,24 @@ const SELF_DRAG_TYPE = 'application/x-party-group-self';
 
 interface Props {
   groups: PartyGroups;
+  /** Where the viewer is standing (a dungeon id, or undefined for the open world) — tracks
+   * anywhere else can't be joined, so their drop target and Join button are disabled. */
+  myLocation?: string | undefined;
   /** Every party member, online or not — each gets a tile on whichever track they're on. */
   roster: string[];
   portraitUrls: Record<string, string>;
   self: string;
-  /** Mid-fight: the server rejects track changes, so the UI stops offering them. */
+  /** Mid-fight, or outside a running session: the server rejects group changes, so the UI stops
+   * offering them. `lockReason` says which, for the note under the lanes. */
   locked: boolean;
+  lockReason?: string | undefined;
   onMove: (track: GroupColor) => void;
   onAddTrack: () => void;
   onRemoveTrack: (track: GroupColor) => void;
   onClose: () => void;
 }
 
-export default function PartyGroupsModal({ groups, roster, portraitUrls, self, locked, onMove, onAddTrack, onRemoveTrack, onClose }: Props) {
+export default function PartyGroupsModal({ groups, roster, portraitUrls, self, locked, lockReason, myLocation, onMove, onAddTrack, onRemoveTrack, onClose }: Props) {
   const [dragOver, setDragOver] = useState<GroupColor | null>(null);
   // Same fallback RestModal uses — a missing portrait shows the initial, not a broken image.
   const [brokenPortraits, setBrokenPortraits] = useState<Set<string>>(new Set());
@@ -37,14 +42,17 @@ export default function PartyGroupsModal({ groups, roster, portraitUrls, self, l
         {groups.tracks.map(track => {
           const members = roster.filter(name => trackOf(groups, name) === track);
           const deletable = !PERMANENT_GROUP_TRACKS.includes(track);
+          // A track belongs to the place its group is in — you can only switch within your own.
+          const elsewhere = (groups.locations?.[track] ?? undefined) !== myLocation;
+          const joinable = !locked && !elsewhere;
           return (
             <div
               key={track}
               data-color={track}
               className={`groups-track${dragOver === track ? ' groups-track--over' : ''}`}
-              onDragOver={e => { if (!locked && isSelfDrag(e)) { e.preventDefault(); setDragOver(track); } }}
+              onDragOver={e => { if (joinable && isSelfDrag(e)) { e.preventDefault(); setDragOver(track); } }}
               onDragLeave={() => setDragOver(null)}
-              onDrop={e => { e.preventDefault(); setDragOver(null); if (isSelfDrag(e) && track !== selfTrack) onMove(track); }}
+              onDrop={e => { e.preventDefault(); setDragOver(null); if (joinable && isSelfDrag(e) && track !== selfTrack) onMove(track); }}
             >
               <div className="groups-track-lane">
                 {members.map(name => (
@@ -63,12 +71,13 @@ export default function PartyGroupsModal({ groups, roster, portraitUrls, self, l
               </div>
               {/* Keyboard-reachable alternative to dragging your own tile here. */}
               {track !== selfTrack && (
-                <Button variant="ghost" size="sm" className="groups-track-join" disabled={locked} onClick={() => onMove(track)} aria-label={`Join ${track} group`}>
-                  Join
+                <Button variant="ghost" size="sm" className="groups-track-join" disabled={!joinable} onClick={() => onMove(track)} aria-label={`Join ${track} group`}
+                  title={elsewhere ? 'That group is somewhere else — you can only join a group where you are' : undefined}>
+                  {elsewhere ? 'Elsewhere' : 'Join'}
                 </Button>
               )}
               {deletable && (
-                <Button variant="ghost" size="sm" className="groups-track-delete" disabled={members.length > 0} onClick={() => onRemoveTrack(track)} aria-label={`Delete ${track} group`}>
+                <Button variant="ghost" size="sm" className="groups-track-delete" disabled={locked || members.length > 0} onClick={() => onRemoveTrack(track)} aria-label={`Delete ${track} group`}>
                   ×
                 </Button>
               )}
@@ -78,9 +87,9 @@ export default function PartyGroupsModal({ groups, roster, portraitUrls, self, l
       </div>
 
       <div className="rest-footer">
-        <Button onClick={onAddTrack} disabled={groups.tracks.length >= GROUP_COLORS.length}>New group</Button>
+        <Button onClick={onAddTrack} disabled={locked || groups.tracks.length >= GROUP_COLORS.length}>New group</Button>
       </div>
-      {locked && <p className="groups-locked">Groups are locked during combat.</p>}
+      {locked && <p className="groups-locked">{lockReason ?? 'Groups are locked.'}</p>}
     </div>
   );
 }

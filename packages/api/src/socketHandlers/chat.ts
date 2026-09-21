@@ -5,7 +5,7 @@ import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { resolveImprovisedAction, generateCombatFlavour } from '../session-processor/imagePrompts.ts';
 import { handleAdminCommand } from '../effects.ts';
 import { logError } from '../logger.ts';
-import { fightOf, dungeons, tokenPositions } from '../state.ts';
+import { fightOf, dungeonOf } from '../state.ts';
 import { D20Roll, rollDice, fmtMod, resolveHit } from '../combat/dice.ts';
 import { applyDamageToCreature, applyDamageToPlayer } from '../combat/runtime/damage.ts';
 import { rollSavingThrow } from '../combat/runtime/rolls.ts';
@@ -48,8 +48,8 @@ export function registerChatHandlers(ctx: JoinContext): void {
                 .filter(i => i.quantity > 0)
                 .map(i => ({ id: i.id, name: i.name, quantity: i.quantity }));
 
-              const dungeon = dungeons.get(campaignId);
-              const pos = tokenPositions.get(campaignId)?.[senderName];
+              const dungeon = dungeonOf(campaignId, player);
+              const pos = dungeon?.positions?.[player];
               const objects = dungeon && pos ? nearbyObjects(dungeon, pos.gx, pos.gy, 60) : [];
               const room = dungeon && pos ? roomAt(dungeon, pos.gx, pos.gy) : undefined;
 

@@ -4,7 +4,7 @@ import { readPartyGroups, writePartyGroups, listCharacters, appendChatLog, readC
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
 import { buildSplitBranchSummaryPrompt } from './session-processor/prompts.ts';
 import { logError } from './logger.ts';
-import { io, partyGroups, campaignRoom, fightOf, dungeons, tokenPositions, playerSocketIds, toSockets, type Audience } from './state.ts';
+import { io, partyGroups, campaignRoom, fightOf, dungeonById, playerSocketIds, toSockets, type Audience } from './state.ts';
 import { roomAt } from './dungeon/index.ts';
 
 export function defaultPartyGroups(): PartyGroups {
@@ -42,11 +42,13 @@ export function moveMember(groups: PartyGroups, name: string, track: GroupColor,
   return syncSplit(groups, roster, now);
 }
 
-/** Mutates `groups`. Returns the new track, or null once every palette colour is in use. */
-export function addTrack(groups: PartyGroups): GroupColor | null {
+/** Mutates `groups`. Returns the new track, or null once every palette colour is in use. A new
+ * track belongs to wherever its creator is standing — a group inside a dungeon splits within it. */
+export function addTrack(groups: PartyGroups, location?: string | undefined): GroupColor | null {
   const next = GROUP_COLORS.find(c => !groups.tracks.includes(c));
   if (!next) return null;
   groups.tracks.push(next);
+  if (location) (groups.locations ??= {})[next] = location;
   return next;
 }
 
@@ -242,13 +244,13 @@ export async function describeOtherGroups(cid: string, audience: ChatAudience): 
   const tracks = await audienceTracks(cid, audience);
   if (!tracks) return '';
   const [groups, chars, manifest] = await Promise.all([getPartyGroups(cid), listCharacters(cid), readManifest(cid)]);
-  const dungeon = dungeons.get(cid);
-  const positions = tokenPositions.get(cid) ?? {};
   const lines: string[] = [];
   for (const track of groups.tracks.filter(t => !tracks.includes(t))) {
     const members = chars.map(c => c.name).filter(n => trackOf(groups, n) === track);
     if (!members.length) continue;
-    const pos = members.map(n => positions[n]).find(p => !!p);
+    // Each group is described from the map it's actually standing on.
+    const dungeon = dungeonById(cid, groups.locations?.[track]);
+    const pos = members.map(n => dungeon?.positions?.[n]).find(p => !!p);
     const room = dungeon && pos ? roomAt(dungeon, pos.gx, pos.gy)?.name : undefined;
     const location = room ?? (groups.scenes?.[track] ?? manifest)?.currentLocation ?? undefined;
     const fighting = members.some(n => fightOf(cid, n));
@@ -257,4 +259,25 @@ export async function describeOtherGroups(cid: string, audience: ChatAudience): 
   return lines.length
     ? `### Elsewhere — the party is split\nThese characters are NOT in this scene. Never narrate them here or have them act; at most, distant consequences (noise, a light, a shared goal) may reach this group.\n${lines.join('\n')}`
     : '';
+}
+
+// ── Where tracks are ────────────────────────────────────────────────────────────
+
+/** The dungeons `tracks` are in (null = the whole party's), ignoring tracks out in the world. */
+export async function locationsOfTracks(cid: string, tracks: GroupColor[] | null): Promise<string[]> {
+  const groups = await getPartyGroups(cid);
+  const which = tracks ?? groups.tracks;
+  return [...new Set(which.map(t => groups.locations?.[t]).filter((id): id is string => !!id))];
+}
+
+/** Moves `tracks` (null = every track — the party is together) into `dungeonId`, or out to the
+ * open world when it's undefined. */
+export async function setTrackLocations(cid: string, tracks: GroupColor[] | null, dungeonId: string | undefined): Promise<void> {
+  const groups = await getPartyGroups(cid);
+  groups.locations ??= {};
+  for (const track of tracks ?? groups.tracks) {
+    if (dungeonId) groups.locations[track] = dungeonId;
+    else delete groups.locations[track];
+  }
+  await savePartyGroups(cid, groups);
 }

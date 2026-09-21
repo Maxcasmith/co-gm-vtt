@@ -1,6 +1,6 @@
 import path from 'path';
 import { SKILL_ABILITY, trackOf, type ChatPayload, type CheckRequest, type GroupColor } from 'shared';
-import { CAMPAIGNS_DIR, listEntitySlugs, readEntity, getWorldMeta, getConfig, saveDungeon, loadDungeon, readManifest, writeManifest, emptyManifest, readQuests, appendChatLog, appendNote } from './storage.ts';
+import { CAMPAIGNS_DIR, listEntitySlugs, readEntity, getWorldMeta, getConfig, saveDungeon, loadDungeons, readManifest, writeManifest, emptyManifest, readQuests, appendChatLog, appendNote } from './storage.ts';
 import { getTextStore } from './storage/index.ts';
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
 import { buildRecapPrompt, buildDungeonRecapPrompt } from './session-processor/prompts.ts';
@@ -8,7 +8,7 @@ import { processSession, getDMResponse, getDungeonNarrationResponse } from './se
 import { describeDungeonState, describeDungeonGroundTruth, describeCombatLocation } from './dungeon/index.ts';
 import { processVdmResponse, repairMissedPickup } from './tag-processor.ts';
 import { logError } from './logger.ts';
-import { io, campaignRoom, sessionState, dungeons, tokenPositions, connected, dmQueue, fightOf, toFight, type Audience } from './state.ts';
+import { io, campaignRoom, sessionState, dungeonsIn, dungeonOf, connected, dmQueue, fightOf, toFight, type Audience } from './state.ts';
 import { endCombat } from './combat/runtime/lifecycle.ts';
 import { applyEffects } from './effects.ts';
 import { audienceTracks, toTracks, tagForSplit, readChatContext, getPartyGroups, type ChatAudience } from './partyGroups.ts';
@@ -24,11 +24,8 @@ export function endSession(cid: string): void {
   if (!sessionState.get(cid)) return;
   sessionState.set(cid, false);
   io.to(campaignRoom(cid)).emit('session:state', false);
-  const dungeon = dungeons.get(cid);
-  if (dungeon) {
-    dungeon.positions = tokenPositions.get(cid) ?? {};
-    void saveDungeon(cid, dungeon);
-  }
+  // Positions live on each dungeon already — just flush every loaded map.
+  for (const dungeon of dungeonsIn(cid)) void saveDungeon(cid, dungeon);
   void readManifest(cid).then(manifest => {
     const m = manifest ?? emptyManifest();
     m.sessionsPlayed = (m.sessionsPlayed ?? 0) + 1;
@@ -129,7 +126,7 @@ export async function runRecap(campaignId: string): Promise<{ text: string; isFi
   // the hallucinated rope-ladder/gills prose. Route through the dungeon's own seeded goals/quests
   // and floor plan instead, same as every other narration path into a dungeon.
   if (meta?.type === 'dungeon-crawl') {
-    const dungeon = dungeons.get(campaignId) ?? await loadDungeon(campaignId);
+    const dungeon = dungeonsIn(campaignId)[0] ?? (await loadDungeons(campaignId))[0];
     const dungeonQuests = dungeon ? (await readQuests(campaignId)).filter(q => q.sourceDungeonId === dungeon.id) : [];
     const groundTruth = dungeon ? describeDungeonGroundTruth(dungeon, {}) : '(no dungeon generated yet)';
     const text = await provider.complete(buildDungeonRecapPrompt({
@@ -216,11 +213,13 @@ function dispatchToTracks(cid: string, audience: ChatAudience, tracks: GroupColo
   to.emit('dm:thinking', true);
   queueDMResponse(tracks ? `${cid}:${[...tracks].sort().join(',')}` : cid, async () => {
     try {
-      const dungeon = dungeons.get(cid);
-      // Only this audience's own group — a split group's narrator mustn't treat the others' tokens as "the party".
+      // Only this audience's own group — a split group's narrator mustn't treat the others' tokens
+      // as "the party", and it only ever describes the map its own group is standing on.
       const groups = await getPartyGroups(cid);
+      const ourPlayers = [...connected].filter(name => !tracks || tracks.includes(trackOf(groups, name)));
+      const dungeon = ourPlayers.map(name => dungeonOf(cid, name)).find(d => !!d);
       const playerPositions = Object.fromEntries(
-        Object.entries(tokenPositions.get(cid) ?? {}).filter(([name]) => connected.has(name) && (!tracks || tracks.includes(trackOf(groups, name))))
+        Object.entries(dungeon?.positions ?? {}).filter(([name]) => ourPlayers.includes(name))
       );
       // Anything inside a dungeon → the closed-world dungeon narrator, combat or not. Exploration
       // gets the full floor plan so spatial questions can be answered accurately; combat gets the

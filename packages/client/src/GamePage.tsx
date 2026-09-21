@@ -456,8 +456,18 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('combat:reaction:close', data => dispatch('vtt:combat:reaction:close', data));
     socket.on('combat:log', data => dispatch('vtt:combat:log', { kind: 'text', ...data }));
     socket.on('dungeon:generating', () => setDungeonGenerating(true));
-    socket.on('dungeon:loaded', dungeon => { setDungeonGenerating(false); setDungeon(dungeon); dispatch('vtt:dungeon:loaded', dungeon); loadRuntimeTilesets(); });
-    socket.on('dungeon:cleared', () => setDungeon(null));
+    socket.on('dungeon:loaded', dungeon => {
+      setDungeonGenerating(false);
+      // A different map entirely (this group walked into a dungeon, or out of one) — drop the old
+      // map's tokens instead of merging, or its party lingers as ghosts on the new floor.
+      setDungeon(prev => {
+        if (prev && prev.id !== dungeon.id) setTokenPositions(dungeon.positions ?? {});
+        return dungeon;
+      });
+      dispatch('vtt:dungeon:loaded', dungeon);
+      loadRuntimeTilesets();
+    });
+    socket.on('dungeon:cleared', () => { setDungeon(null); setTokenPositions({}); });
     socket.on('quest:update', ({ quests: q, act: a, final }) => {
       setQuests(q);
       setAct(a);
@@ -622,7 +632,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     // every reconnect/refresh silently stomps their real position with a fresh entrance spawn.
     const saved = dungeon.positions ?? {};
     const defaults: Record<string, { gx: number; gy: number }> = {};
-    connected.forEach((name, i) => {
+    // Only the group standing in THIS dungeon — another group is on its own map (or out in the
+    // world) and must not be placed here. Older payloads carry no occupants: then it's everyone.
+    const here = dungeon.occupants ?? connected;
+    connected.filter(name => here.includes(name)).forEach((name, i) => {
       if (saved[name]) return;
       const pos = findFree(cx + i, cy);
       used.add(key(pos.gx, pos.gy));
@@ -798,7 +811,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
           roster={Object.keys(partyCharacterIds)}
           portraitUrls={portraitUrls}
           self={character.name}
-          locked={combatActive}
+          locked={combatActive || !sessionActive}
+          lockReason={combatActive ? 'Groups are locked during combat.' : 'Start the session to split or rejoin the party.'}
+          myLocation={partyGroups?.locations?.[trackOf(partyGroups, character.name)]}
           onMove={track => socketRef.current?.emit('groups:move', { track })}
           onAddTrack={() => socketRef.current?.emit('groups:track:add')}
           onRemoveTrack={track => socketRef.current?.emit('groups:track:remove', { track })}

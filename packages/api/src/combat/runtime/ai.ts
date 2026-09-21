@@ -4,7 +4,7 @@ import { getCharacter, updateCharacter, listCharacters, getConfig, getHouseRules
 import { getFeatureProvider } from '../../providers/index.ts';
 import { generateCombatFlavour } from '../../session-processor/imagePrompts.ts';
 import { Participant } from '../../domain/encounter.ts';
-import { io, campaignRoom, fightOf, toFight, tokenPositions, getStateEngine } from '../../state.ts';
+import { io, campaignRoom, fightOf, toFight, positionsOf, getStateEngine } from '../../state.ts';
 import { D20Roll, rollDice, fmtMod, resolveHit, maxDiceValue } from '../dice.ts';
 import { rollModeFor, attackModeAgainstTarget, combineModes } from '../conditions/rollModeFor.ts';
 import { offerReaction } from '../stateEngine/reactionPrompt.ts';
@@ -98,7 +98,7 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
   const creature = encounter.findCreature(actor.id);
   if (!creature) return advanceTurn(cid, encounter);
 
-  const positions = tokenPositions.get(cid) ?? {};
+  const positions = positionsOf(cid, actor.id);
   const epos = positions[actor.id];
   if (!epos) {
     console.log(`[ai] ${actor.name} has no position, skipping turn`);
@@ -312,7 +312,7 @@ export async function runPlayerTactics(cid: string, actor: Participant): Promise
   const char = await getCharacter(cid, actor.id);
   if (!char) return advanceTurn(cid, encounter);
 
-  const positions = tokenPositions.get(cid) ?? {};
+  const positions = positionsOf(cid, actor.id);
   const round = encounter.currentRound?.number ?? 1;
   const tacticalCtx: TacticalContext = { cid, actor, positions, allParticipants: encounter.turnOrder, round };
 

@@ -1,20 +1,23 @@
 import { characterLightRangeFt } from 'shared';
-import { readNotes, readQuests, readManifest, listCharacters, loadDungeon, loadEncounters } from '../storage.ts';
-import { toClientDungeon } from '../dungeon/index.ts';
-import { io, campaignRoom, DEBUG_LOG_ROOM, connected, playerSocketIds, campaignPlayers, sessionState, dungeons, tokenPositions, microDungeons, withLivePositions, fightOf, fightsIn, registerFight } from '../state.ts';
+import { readNotes, readQuests, readManifest, listCharacters, loadDungeons, loadEncounters } from '../storage.ts';
+import { broadcastDungeon } from '../dungeon/index.ts';
+import { io, campaignRoom, DEBUG_LOG_ROOM, connected, playerSocketIds, playerCharIds, campaignPlayers, sessionState, dungeonsIn, dungeonOf, registerDungeon, fightOf, fightsIn, registerFight } from '../state.ts';
 import { maybeResolveRest, broadcastRestProgress } from './rest.ts';
 import { conditionsHolder } from '../combat/runtime/statusEffects.ts';
-import { chatHistoryFor } from '../partyGroups.ts';
+import { chatHistoryFor, getPartyGroups, setTrackLocations } from '../partyGroups.ts';
 import type { JoinContext } from './context.ts';
 
 // Campaigns whose persisted fights have been reloaded into memory this process — see registerJoin.
-const restoredCampaigns = new Set<string>();
+const restoredFights = new Set<string>();
 
 export function registerJoin(ctx: JoinContext): void {
   const { socket, player, charId, campaignId } = ctx;
 
   connected.add(player);
   playerSocketIds.set(charId, socket.id);
+  const names = playerCharIds.get(campaignId) ?? new Map<string, string>();
+  names.set(player, charId);
+  playerCharIds.set(campaignId, names);
   void socket.join([campaignRoom(campaignId), DEBUG_LOG_ROOM]);
   io.to(campaignRoom(campaignId)).emit('players:update', [...connected]);
   const cpl = campaignPlayers.get(campaignId) ?? [];
@@ -40,14 +43,21 @@ export function registerJoin(ctx: JoinContext): void {
   // server restart (e.g. resuming a session a week later) wipes combatState/encounters/dungeons,
   // even though everything relevant was persisted via saveEncounter/saveDungeon as it happened.
   void (async () => {
-    let dungeon = dungeons.get(campaignId);
-    if (!dungeon) {
-      const loaded = await loadDungeon(campaignId);
-      if (loaded) { dungeons.set(campaignId, loaded); dungeon = loaded; }
+    // A server restart wipes the in-memory registries — everything was persisted as it happened
+    // (saveDungeon/saveEncounter), so reload the campaign's maps once, the first time anyone rejoins.
+    if (!dungeonsIn(campaignId).length) {
+      const loaded = await loadDungeons(campaignId);
+      for (const d of loaded) registerDungeon(campaignId, d);
+      // A save from before per-group locations (or a dungeon-crawl campaign) has exactly one
+      // dungeon and the whole party inside it.
+      const groups = await getPartyGroups(campaignId);
+      const real = loaded.filter(d => !d.arena);
+      if (!groups.locations && real.length === 1) await setTrackLocations(campaignId, null, real[0]!.id);
     }
+
+    // Only the map this player is standing on — another group's dungeon isn't theirs to see.
+    const dungeon = dungeonOf(campaignId, player);
     if (dungeon) {
-      if (dungeon.arena) microDungeons.add(campaignId);
-      if (!tokenPositions.has(campaignId) && dungeon.positions) tokenPositions.set(campaignId, dungeon.positions);
       // Rebuild lightSources from scratch on (re)connect — the in-memory dungeon may be freshly
       // loaded from disk (server restart) with no idea who's currently holding a lit torch.
       const chars = await listCharacters(campaignId);
@@ -57,14 +67,14 @@ export function registerJoin(ctx: JoinContext): void {
         if (range > 0) lightSources[c.name] = range;
       }
       dungeon.lightSources = lightSources;
-      socket.emit('dungeon:loaded', toClientDungeon(withLivePositions(campaignId, dungeon)));
-      Object.entries(tokenPositions.get(campaignId) ?? {}).forEach(([tokenId, pos]) => socket.emit('token:moved', { tokenId, ...pos }));
+      broadcastDungeon(campaignId, dungeon, socket);
+      Object.entries(dungeon.positions ?? {}).forEach(([tokenId, pos]) => socket.emit('token:moved', { tokenId, ...pos }));
     }
 
     // A server restart wipes the in-memory fight registry — every fight was persisted as it
     // happened (saveEncounter), so reload them all once, the first time anyone rejoins.
-    if (!restoredCampaigns.has(campaignId)) {
-      restoredCampaigns.add(campaignId);
+    if (!restoredFights.has(campaignId)) {
+      restoredFights.add(campaignId);
       if (!fightsIn(campaignId).length) {
         const everyone = (await listCharacters(campaignId)).map(c => c.name);
         for (const saved of await loadEncounters(campaignId)) {
@@ -87,8 +97,6 @@ export function registerJoin(ctx: JoinContext): void {
         .filter(p => p.creature)
         .map(p => p.creature!.toStatBlock()));
 
-      const positions = tokenPositions.get(campaignId) ?? {};
-      Object.entries(positions).forEach(([tokenId, pos]) => socket.emit('token:moved', { tokenId, ...pos }));
 
       if (encounter.turnOrder.length) {
         socket.emit('combat:turn:order', encounter.turnOrder.map(p => p.toTurnOrderEntry()));

@@ -5,7 +5,7 @@ import { randomUUID } from 'crypto';
 import sharp from 'sharp';
 import { slugifyTheme, iconSlug } from 'shared';
 import type { Dungeon, DungeonMaterialSpec, StoryboardTestRecord, PlotHook } from 'shared';
-import { CAMPAIGNS_DIR, PROPS_DIR, TILESETS_DIR, CREATURES_DIR, ICONS_DIR, STORYBOARD_TEST_DIR, getConfig, getWorldMeta, listCampaigns, loadDungeon, writeStoryboardTestFile, getStoryboardTestRecord, readPlotHooks, writePlotHooks, deleteCampaign } from '../storage.ts';
+import { CAMPAIGNS_DIR, PROPS_DIR, TILESETS_DIR, CREATURES_DIR, ICONS_DIR, STORYBOARD_TEST_DIR, getConfig, getWorldMeta, listCampaigns, loadDungeons, writeStoryboardTestFile, getStoryboardTestRecord, readPlotHooks, writePlotHooks, deleteCampaign } from '../storage.ts';
 import { getTextStore, getMediaStore } from '../storage/index.ts';
 import { saveCampaignAsAdventure, slugifyAdventureName, uniqueAdventureSlug, SAVED_ADVENTURES_DIR } from '../adventures/storage.ts';
 import { findCreatureUsage, deleteUnusedResources, type ResourceCleanupRequest } from '../resourceUsage.ts';
@@ -55,7 +55,7 @@ adminRouter.delete('/campaigns/:id', async (req, res) => {
     const { resources } = req.body as { resources?: ResourceCleanupRequest };
     let messages: string[] = [];
     if (resources && (resources.tiles || resources.creatures || resources.props)) {
-      const dungeon = await loadDungeon(campaignId);
+      const dungeon = (await loadDungeons(campaignId))[0] ?? null;
       if (dungeon) messages = await deleteUnusedResources(dungeon, resources, { excludeId: campaignId, excludeKind: 'campaign' });
     }
     await deleteCampaign(campaignId);

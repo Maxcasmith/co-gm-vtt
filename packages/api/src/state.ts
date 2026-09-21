@@ -3,6 +3,7 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import type { ServerToClientEvents, ClientToServerEvents, Player, Dungeon, EffectSpec, HookSpec, AbilityKey, PartyGroups } from 'shared';
+import { trackOf, locationOfTrack } from 'shared';
 import { Encounter } from './domain/encounter.ts';
 import { StateEngine } from './combat/stateEngine/StateEngine.ts';
 import { logError } from './logger.ts';
@@ -101,11 +102,11 @@ export function getStateEngine(cid: string): StateEngine {
   }
   return engine;
 }
-export const tokenPositions = new Map<string, Record<string, { gx: number; gy: number }>>();
 export const dmQueue = new Map<string, Promise<void>>();
 export const campaignPlayers = new Map<string, string[]>();
 export const playerSocketIds = new Map<string, string>(); // charId → socketId (for private events)
-export const dungeons = new Map<string, Dungeon>(); // in-memory mirror of saveDungeon/loadDungeon, mutated on reveal
+// cid → player name → charId, filled on join — lets name-keyed audiences (a dungeon's occupants) reach sockets.
+export const playerCharIds = new Map<string, Map<string, string>>();
 // cid → casterId → self-buff spell (e.g. Divine Smite) queued to trigger on that caster's next
 // weapon hit. Effects are stored unresolved (not pre-rolled) so appliesIf (e.g. vs Fiend/Undead)
 // can be evaluated against whichever creature actually gets hit. `save`/`hooks` are only present
@@ -129,7 +130,6 @@ export const pendingWeaponBonuses = new Map<string, Record<string, {
   /** Caster's spellcasting ability modifier, needed to resolve a 'cantrip-plus-ability-mod' or 'ability-mod' Scaling on splashOnHit. */
   casterAbilityMod?: number | undefined;
 }>>();
-export const microDungeons = new Set<string>(); // cids whose current dungeon is an ephemeral combat arena — discarded on victory instead of continued
 
 export interface RestChoice {
   resting: boolean; restType: 'short' | 'long'; hitDiceSpent: number;
@@ -150,12 +150,11 @@ export function clearCampaignRuntimeState(cid: string): void {
   sessionState.delete(cid);
   fights.delete(cid);
   stateEngines.delete(cid);
-  tokenPositions.delete(cid);
   dmQueue.delete(cid);
   campaignPlayers.delete(cid);
-  dungeons.delete(cid);
+  dungeonRegistry.delete(cid);
+  playerCharIds.delete(cid);
   pendingWeaponBonuses.delete(cid);
-  microDungeons.delete(cid);
   pendingRests.delete(cid);
   partyGroups.delete(cid);
 }
@@ -212,11 +211,96 @@ export const SAVE_PROFS: Record<string, string[]> = {
   Sorcerer:  ['CON', 'CHA'], Warlock: ['WIS', 'CHA'], Wizard:   ['INT', 'WIS'],
 };
 
-// Every dungeon:loaded broadcast must carry live positions, not just what was last saved to disk —
-// the client's entrance-spawn effect treats any player missing from `positions` as never-placed and
-// re-defaults (and re-broadcasts) their position, so a stale/absent snapshot here silently teleports
-// already-positioned players back to the entrance on the next reveal or reconnect.
-export function withLivePositions(cid: string, dungeon: Dungeon): Dungeon {
-  const positions = tokenPositions.get(cid);
-  return positions ? { ...dungeon, positions } : dungeon;
+// ── Dungeons ────────────────────────────────────────────────────────────────────
+// cid → dungeonId → Dungeon (in-memory mirror of saveDungeon/loadDungeons, mutated on reveal).
+// Several can be loaded at once: split groups in different dungeons, and each open-world fight's
+// own combat arena (Dungeon.arena). Everything's live position lives on the dungeon it's standing
+// in (Dungeon.positions) — there is no campaign-wide position table.
+const dungeonRegistry = new Map<string, Map<string, Dungeon>>();
+
+export function dungeonsIn(cid: string): Dungeon[] {
+  return [...(dungeonRegistry.get(cid)?.values() ?? [])];
+}
+
+export function dungeonById(cid: string, id: string | undefined): Dungeon | undefined {
+  return id ? dungeonRegistry.get(cid)?.get(id) : undefined;
+}
+
+export function registerDungeon(cid: string, dungeon: Dungeon): void {
+  dungeon.positions ??= {};
+  const byId = dungeonRegistry.get(cid) ?? new Map<string, Dungeon>();
+  byId.set(dungeon.id, dungeon);
+  dungeonRegistry.set(cid, byId);
+}
+
+export function unregisterDungeon(cid: string, id: string): void {
+  dungeonRegistry.get(cid)?.delete(id);
+}
+
+function isPlayerName(cid: string, key: string): boolean {
+  return playerCharIds.get(cid)?.has(key) || (campaignPlayers.get(cid) ?? []).includes(key);
+}
+
+/** A player's name for `key` (their name, or their character id). */
+function playerNameOf(cid: string, key: string): string | undefined {
+  if (isPlayerName(cid, key)) return key;
+  for (const [name, id] of playerCharIds.get(cid) ?? []) if (id === key) return name;
+  const p = fightOf(cid, key)?.findParticipant(key);
+  return p?.isPlayer ? p.name : undefined;
+}
+
+/** The dungeon id a player (name or character id) stands in — their open-world fight's arena while
+ * it lasts, otherwise their Party Groups track's location. undefined = the open world. */
+export function locationOf(cid: string, key: string): string | undefined {
+  const arenaId = fightOf(cid, key)?.arenaId;
+  if (arenaId) return arenaId;
+  const name = playerNameOf(cid, key) ?? key;
+  const groups = partyGroups.get(cid);
+  return groups ? locationOfTrack(groups, trackOf(groups, name)) : undefined;
+}
+
+/** The dungeon `key` is in: a player by their location; anything else (creature, object, summon)
+ * by its fight's arena, or whichever loaded dungeon holds its token or entity. */
+export function dungeonOf(cid: string, key: string): Dungeon | undefined {
+  if (playerNameOf(cid, key)) return dungeonById(cid, locationOf(cid, key));
+  const arena = dungeonById(cid, fightOf(cid, key)?.arenaId);
+  if (arena) return arena;
+  return dungeonsIn(cid).find(d => d.positions?.[key] || d.entities.some(e => e.id === key));
+}
+
+/** Live token positions of the dungeon `key` is standing in — {} in the open world, where there's
+ * no map to place anything on (writes to it go nowhere, by design). */
+export function positionsOf(cid: string, key: string): Record<string, { gx: number; gy: number }> {
+  return dungeonOf(cid, key)?.positions ?? {};
+}
+
+/** The dungeon a fight is being fought in — its open-world arena, or the dungeon its combatants stand in. */
+export function fightDungeon(cid: string, fight: Encounter): Dungeon | undefined {
+  const arena = dungeonById(cid, fight.arenaId);
+  if (arena) return arena;
+  for (const p of [...fight.enemies, ...fight.players]) {
+    const d = dungeonOf(cid, p.isPlayer ? p.name : p.id);
+    if (d) return d;
+  }
+  return undefined;
+}
+
+/** Players (by name) standing in `dungeonId` right now. */
+export function occupantsOf(cid: string, dungeonId: string): string[] {
+  const names = new Set([...(campaignPlayers.get(cid) ?? []), ...(playerCharIds.get(cid)?.keys() ?? [])]);
+  return [...names].filter(name => locationOf(cid, name) === dungeonId);
+}
+
+/** Everyone in the dungeon `key` (a token: player name or creature id) is standing in — nobody in the open world. */
+export function toDungeonOf(cid: string, key: string) {
+  const dungeon = dungeonOf(cid, key);
+  return dungeon ? toDungeon(cid, dungeon.id) : toSockets([]);
+}
+
+/** Everyone standing in `dungeonId` (live sockets, resolved now) — the audience for its map events. */
+export function toDungeon(cid: string, dungeonId: string) {
+  const ids = playerCharIds.get(cid);
+  return toSockets(occupantsOf(cid, dungeonId)
+    .map(name => { const charId = ids?.get(name); return charId ? playerSocketIds.get(charId) : undefined; })
+    .filter((sid): sid is string => !!sid));
 }

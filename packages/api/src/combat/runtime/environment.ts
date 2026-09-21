@@ -1,6 +1,7 @@
+import type { Dungeon } from 'shared';
 import { readManifest } from '../../storage.ts';
-import { toClientDungeon } from '../../dungeon/index.ts';
-import { io, campaignRoom, dungeons, withLivePositions, getStateEngine, stateEngines } from '../../state.ts';
+import { toClientDungeon, broadcastDungeon } from '../../dungeon/index.ts';
+import { dungeonOf, dungeonsIn, getStateEngine, stateEngines } from '../../state.ts';
 import type { GameTimeExpiryHook } from '../stateEngine/hooks/ExpiryHook.ts';
 import type { IlluminationSourceHook } from '../stateEngine/hooks/IlluminationSourceHook.ts';
 import { tokenKey } from '../ai/planEvaluator.ts';
@@ -14,15 +15,14 @@ import { tokenKey } from '../ai/planEvaluator.ts';
  * (covers a Dim Light/other timed source expiring — see runTurnStart, which runs after every
  * beforeRound/beforeTurn expiry prune). Cheap no-op when nothing changed.
  */
-export function recomputeIllumination(cid: string): void {
-  const dungeon = dungeons.get(cid);
+export function recomputeIllumination(cid: string, dungeon: Dungeon | undefined): void {
   if (!dungeon) return;
   const base = dungeon.baseIllumination ?? dungeon.illumination ?? 1;
   const sources = getStateEngine(cid).getHooksByKind('illuminationSource') as IlluminationSourceHook[];
   const effective = sources.reduce((max, h) => Math.max(max, h.level), base);
   if (effective === (dungeon.illumination ?? 1)) return;
   dungeon.illumination = effective;
-  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  broadcastDungeon(cid, dungeon);
 }
 
 /**
@@ -30,19 +30,19 @@ export function recomputeIllumination(cid: string): void {
  * actually changed — same broadcast convention as recomputeIllumination, but keyed per-character
  * rather than a single global scalar since each light source has its own position (resolved
  * client-side from the live token position; see Dungeon.lightSources and Canvas.tsx's litCells).
- * `tokenKey` must be the character's *name*, not id — tokenPositions/dungeon.positions are keyed
+ * `tokenKey` must be the character's *name*, not id — Dungeon.positions is keyed
  * by name for player tokens (see GamePage.tsx's `tokenPositions[character.name]`), and litCells
- * looks up `tokenPositions[key]` for every entry in lightSources — an id key would never resolve.
+ * looks up `positions[key]` for every entry in lightSources — an id key would never resolve.
  * Called on equip/unequip (socketHandlers/inventory.ts) — a rare user action, so unlike
  * recomputeIllumination there's no cheap-no-op guard here, it just always re-broadcasts.
  */
 export function setLightSourceFor(cid: string, tokenKey: string, rangeFt: number): void {
-  const dungeon = dungeons.get(cid);
+  const dungeon = dungeonOf(cid, tokenKey);
   if (!dungeon) return;
   const lightSources = { ...dungeon.lightSources };
   if (rangeFt > 0) lightSources[tokenKey] = rangeFt; else delete lightSources[tokenKey];
   dungeon.lightSources = lightSources;
-  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  broadcastDungeon(cid, dungeon);
 }
 
 /**
@@ -61,7 +61,7 @@ export function sweepGameTimeExpiries(cid: string, currentSecs: number): void {
     if (hook.expiresAtSecs > currentSecs) continue;
     void hook.apply({ round: 0 }, engine);
   }
-  if (due.length) recomputeIllumination(cid);
+  if (due.length) for (const d of dungeonsIn(cid)) recomputeIllumination(cid, d);
 }
 
 /** Current worldTimeSecs for a campaign — the anchor a `gameTime` duration's relative `gameSecs` is added to at cast time. */

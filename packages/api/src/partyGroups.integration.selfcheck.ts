@@ -15,9 +15,11 @@ import { io as connect, type Socket } from 'socket.io-client';
 import type { Character, Dungeon, EnemyStatBlock } from 'shared';
 import { LLM_STUB } from './providers/stub.ts';
 import { deleteCampaign, writeCharacter, getCharacter, readChatLog, saveDungeon } from './storage.ts';
-import { httpServer, sessionState, dungeons, tokenPositions, fightOf, fightsIn } from './state.ts';
+import { setTrackLocations } from './partyGroups.ts';
+import { httpServer, sessionState, registerDungeon, unregisterDungeon, dungeonsIn, locationOf, fightOf, fightsIn } from './state.ts';
 import { registerSocketHandlers } from './socketHandlers/index.ts';
 import { applyDamageToCreature } from './combat/runtime/damage.ts';
+import { applyEffects } from './effects.ts';
 
 if (!LLM_STUB) throw new Error('run with LLM_STUB=1 — this check must never call a real model');
 
@@ -90,9 +92,11 @@ async function main(): Promise<void> {
   if (process.env.VERBOSE !== '1') console.log = () => {};
   await deleteCampaign(SLUG);
   for (const n of NAMES) await writeCharacter(SLUG, idOf(n), character(n));
-  dungeons.set(SLUG, dungeon);
+  dungeon.positions = Object.fromEntries(NAMES.map(n => [n, START[n]!]));
+  registerDungeon(SLUG, dungeon);
   await saveDungeon(SLUG, dungeon);
-  tokenPositions.set(SLUG, Object.fromEntries(NAMES.map(n => [n, START[n]])));
+  // Everyone starts inside the fixture dungeon (every track located there).
+  await setTrackLocations(SLUG, null, dungeon.id);
   sessionState.set(SLUG, true);
 
   registerSocketHandlers();
@@ -112,6 +116,16 @@ async function main(): Promise<void> {
 
   // ── 1. Tracks + chat routing ──────────────────────────────────────────────────────────────
   console.info('\nTracks & chat');
+  await check('outside a running session, splitting and rejoining is refused', async () => {
+    sessionState.set(SLUG, false);
+    clear();
+    groupsMove('Aria', 'red');
+    sockets.Aria.emit('groups:track:add');
+    await sleep(500);
+    assert.ok(!got('Aria', 'groups:update'), 'a group change went through with no session running');
+    sessionState.set(SLUG, true);
+  });
+
   await check('moving Aria to red opens a split and tells everyone', async () => {
     groupsMove('Aria', 'red');
     await waitFor('groups:update with Aria on red', () => NAMES.every(n => got(n, 'groups:update', a => (a[0] as { members: Record<string, string> }).members['Aria'] === 'red')));
@@ -254,21 +268,50 @@ async function main(): Promise<void> {
     assert.equal(fightsIn(SLUG).length, 0);
   });
 
-  // ── 5. Open world: stub DM starts a fight for the acting group only ───────────────────────
-  console.info('\nOpen world');
-  await check('Dax (red, alone) says "attack!" — the stub DM starts a fight with only Dax in it', async () => {
-    dungeons.delete(SLUG);
-    await sleep(200);
+  // ── 5. Split across places: one group in the dungeon, one out in the world ────────────────
+  console.info('\nSplit locations');
+  await setTrackLocations(SLUG, ['red'], undefined); // Dax (red) steps out into the world
+
+  await check('a group out in the world sees none of the dungeon group\'s map', async () => {
+    clear();
+    move('Aria', 4, 5);
+    await waitFor('Bex sees Aria move', () => got('Bex', 'token:moved'));
+    await sleep(300);
+    assert.ok(!got('Dax', 'token:moved'), "Dax (world) saw the dungeon group's tokens");
+    assert.ok(!got('Dax', 'dungeon:loaded'), 'Dax (world) got the dungeon map');
+  });
+
+  await check('the world group starts its own open-world fight, on its own arena', async () => {
     clear();
     say('Dax', 'attack!');
     await waitFor('Dax in a fight', () => got('Dax', 'combat:state', a => a[0] === true));
     await sleep(800);
-    const f = fightOf(SLUG, 'Dax');
-    assert.ok(f, 'no fight for Dax');
+    const fight = fightOf(SLUG, 'Dax');
+    assert.ok(fight?.arenaId, 'the open-world fight should have its own arena');
+    assert.equal(locationOf(SLUG, 'Dax'), fight!.arenaId);
+    assert.equal(dungeonsIn(SLUG).length, 2, 'the dungeon and the arena should both be loaded');
     for (const n of ['Aria', 'Bex', 'Cal'] as const) {
-      assert.equal(fightOf(SLUG, n), undefined, `${n} was pulled into Dax's open-world fight`);
-      assert.ok(!got(n, 'combat:state', a => a[0] === true), `${n} got combat:state`);
+      assert.equal(fightOf(SLUG, n), undefined, `${n} was pulled into the world group's fight`);
+      assert.ok(!got(n, 'dungeon:loaded'), `${n} (in the dungeon) got the arena map`);
     }
+    assert.equal(locationOf(SLUG, 'Aria'), dungeon.id, 'the dungeon group should still be in the dungeon');
+  });
+
+  await check('joining a group inside a dungeon you are not in is refused', async () => {
+    clear();
+    groupsMove('Dax', 'blue');
+    await sleep(500);
+    assert.ok(!got('Dax', 'groups:update'), 'Dax joined a group inside a dungeon he is not in');
+    assert.equal(locationOf(SLUG, 'Dax'), fightOf(SLUG, 'Dax')?.arenaId);
+  });
+
+  await check('the dungeon is discarded once its last group leaves', async () => {
+    clear();
+    await applyEffects(SLUG, [{ type: 'dungeon_exit' }], ['Aria']);
+    await waitFor('the dungeon group gets dungeon:cleared', () => got('Aria', 'dungeon:cleared'));
+    assert.ok(!got('Dax', 'dungeon:cleared'), "Dax (world) got the dungeon group's cleared event");
+    assert.ok(!dungeonsIn(SLUG).some(d => d.id === dungeon.id), 'the emptied dungeon should be discarded');
+    assert.equal(locationOf(SLUG, 'Aria'), undefined, 'the group that left should be out in the world');
   });
 }
 

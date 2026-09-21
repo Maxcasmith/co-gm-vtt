@@ -8,7 +8,7 @@ import {
   campaignDir, writeWorldMeta, getWorldMeta, listCampaigns,
   writeCharacter, getCharacter, listCharacters, updateCharacter, findCharacterByPassword,
   appendChatLog, readChatLog, writeCharacterImage, writeCampaignImage,
-  saveMap, appendMapIndex, listMaps, saveDungeon, loadDungeon, clearDungeon,
+  saveMap, appendMapIndex, listMaps, saveDungeon, loadDungeons, clearDungeon,
   writeQuests, readQuests, writeEntity, readEntity, listEntitySlugs, deleteCampaign,
   getConfig, saveConfig, readPlotHooks, writePlotHooks,
 } from './storage.ts';
@@ -96,10 +96,10 @@ async function main() {
     cells: [[1, 1], [1, 1]], rooms: [], tilesetSlug: 'none', entities: [],
   } as unknown as Dungeon;
   await saveDungeon(SLUG, dungeon);
-  const loadedDungeon = await loadDungeon(SLUG);
+  const loadedDungeon = (await loadDungeons(SLUG))[0] ?? null;
   assert(loadedDungeon?.id === 'd1', 'dungeon round-trip failed');
-  await clearDungeon(SLUG);
-  assert((await loadDungeon(SLUG)) === null, 'clearDungeon should remove the dungeon file');
+  await clearDungeon(SLUG, loadedDungeon!.id);
+  assert((await loadDungeons(SLUG)).length === 0, 'clearDungeon should remove the dungeon file');
 
   // --- quests ---
   const quests: Quest[] = [{ id: 'q1', title: 'Fixture Quest', status: 'open', log: [] } as unknown as Quest];

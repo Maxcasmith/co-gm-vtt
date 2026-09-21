@@ -6,8 +6,8 @@ import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateCombatFlavour, generateSpellSaveFlavour } from '../session-processor/imagePrompts.ts';
 import { Participant, type Encounter } from '../domain/encounter.ts';
 import { logError, logDebug } from '../logger.ts';
-import { io, campaignRoom, fightOf, toFight, toFightOf, tokenPositions, dungeons, playerSocketIds, pendingWeaponBonuses, connected, getStateEngine, withLivePositions, STAT_FULL, HIT_DICE, PLAYER_SIGHT_RADIUS } from '../state.ts';
-import { toClientDungeon } from '../dungeon/index.ts';
+import { io, campaignRoom, fightOf, toFight, toFightOf, positionsOf, dungeonOf, fightDungeon, toDungeon, playerSocketIds, pendingWeaponBonuses, connected, getStateEngine, STAT_FULL, HIT_DICE, PLAYER_SIGHT_RADIUS, toDungeonOf } from '../state.ts';
+import { toClientDungeon, broadcastDungeon } from '../dungeon/index.ts';
 import { registerSpellHooks } from '../combat/stateEngine/registerSpellHooks.ts';
 import { RecurringDamageHook } from '../combat/stateEngine/hooks/RecurringDamageHook.ts';
 import { sumAndConsumeRollMods, type RollModifierHook } from '../combat/stateEngine/hooks/RollModifierHook.ts';
@@ -39,7 +39,7 @@ function sleep(ms: number): Promise<void> {
 
 /** Every living participant within radiusFt (Chebyshev, 5ft/cell — same convention as checkTrapAt/RetaliationOfferHook's range check) of a grid point. Positions are best-effort; a participant with no placed token is skipped rather than assumed in range. Exported for origin points that aren't an existing participant (e.g. an environmental blast). */
 export function participantsNearPoint(cid: string, encounter: Encounter, gx: number, gy: number, radiusFt: number, excludeIds: Set<string> = new Set()): string[] {
-  const positions = tokenPositions.get(cid) ?? {};
+  const positions = fightDungeon(cid, encounter)?.positions ?? {};
   const all = [...encounter.players, ...encounter.enemies];
   return all
     .filter(p => !p.isDead() && !excludeIds.has(p.id))
@@ -70,7 +70,7 @@ function hasHostileWithinMeleeRange(cid: string, actorId: string, gx: number, gy
 function nearbyParticipantIds(cid: string, centerId: string, radiusFt: number): string[] {
   const encounter = fightOf(cid, centerId);
   if (!encounter) return [];
-  const positions = tokenPositions.get(cid) ?? {};
+  const positions = positionsOf(cid, centerId);
   const all = [...encounter.players, ...encounter.enemies];
   const center = all.find(p => p.id === centerId);
   const centerPos = center ? (positions[center.id] ?? positions[center.name]) : undefined;
@@ -154,12 +154,11 @@ async function grantCompanion(cid: string, casterId: string, casterName: string,
   if (!spec) return;
   const id = randomUUID();
   await applyEffects(cid, [{ type: 'party_join', ally: { ...spec, id, ownerId: casterId } }], [casterId]);
-  const pos = (tokenPositions.get(cid) ?? {})[casterName] ?? (tokenPositions.get(cid) ?? {})[casterId];
+  const pos = positionsOf(cid, casterName)[casterName] ?? positionsOf(cid, casterName)[casterId];
   if (pos) {
-    const positions = tokenPositions.get(cid) ?? {};
+    const positions = positionsOf(cid, casterName);
     positions[id] = { gx: pos.gx, gy: pos.gy };
-    tokenPositions.set(cid, positions);
-    io.to(campaignRoom(cid)).emit('token:moved', { tokenId: id, gx: pos.gx, gy: pos.gy });
+    toDungeonOf(cid, id).emit('token:moved', { tokenId: id, gx: pos.gx, gy: pos.gy });
   }
 }
 
@@ -192,7 +191,7 @@ export function trySpendAction(cid: string, actorId: string, kind: ActionResourc
 function pickChainTarget(cid: string, fromId: string, visited: Set<string>, radiusFt = 30): string | undefined {
   const encounter = fightOf(cid, fromId);
   if (!encounter) return undefined;
-  const positions = tokenPositions.get(cid) ?? {};
+  const positions = positionsOf(cid, fromId);
   const fromPos = positions[fromId];
   if (!fromPos) return undefined;
   let best: string | undefined;
@@ -242,7 +241,7 @@ function impactVisualFor(spellCombat: Spell['combat'], damageType: string | unde
  */
 function placeTrapSpell(cid: string, char: Character, casterName: string, spell: Spell, originGx: number | undefined, originGy: number | undefined): void {
   const combat = spell.combat;
-  const dungeon = dungeons.get(cid);
+  const dungeon = dungeonOf(cid, casterName);
   if (!dungeon || originGx === undefined || originGy === undefined) {
     logDebug(`[trap] placesTrap cast blocked — dungeon=${!!dungeon} originGx=${originGx} originGy=${originGy}`);
     return;
@@ -260,7 +259,7 @@ function placeTrapSpell(cid: string, char: Character, casterName: string, spell:
   };
   dungeon.entities = [...dungeon.entities, entity];
   void saveDungeon(cid, dungeon);
-  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  broadcastDungeon(cid, dungeon);
   const msg = { text: `${casterName} sets ${spell.name}.`, senderName: 'System', timestamp: Date.now() };
   void postChat(cid, msg, [casterName]);
   console.log(`[trap] ${casterName} places ${spell.name} at (${originGx},${originGy}), DC${dc}`);
@@ -270,8 +269,8 @@ function placeTrapSpell(cid: string, char: Character, casterName: string, spell:
 /** Conjures a spell's `followingObject` spec at the caster's own token position (Tenser's Floating Disk) — see DungeonEntity.followsId. No-ops quietly if there's no dungeon or the caster has no placed token yet, same as placeTrapSpell. */
 function placeFollowingObject(cid: string, casterId: string, casterName: string, spec: NonNullable<Spell['combat']>['followingObject']): void {
   if (!spec) return;
-  const dungeon = dungeons.get(cid);
-  const pos = (tokenPositions.get(cid) ?? {})[casterId] ?? (tokenPositions.get(cid) ?? {})[casterName];
+  const dungeon = dungeonOf(cid, casterName);
+  const pos = positionsOf(cid, casterName)[casterId] ?? positionsOf(cid, casterName)[casterName];
   if (!dungeon || !pos) return;
 
   const entity: DungeonEntity = {
@@ -280,12 +279,12 @@ function placeFollowingObject(cid: string, casterId: string, casterName: string,
   };
   dungeon.entities = [...dungeon.entities, entity];
   void saveDungeon(cid, dungeon);
-  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  broadcastDungeon(cid, dungeon);
 }
 
 /** Drops Silent Image's stationary marker at the targeted cell — a labeled 'object' entity with no followsId, so it just sits there (see the spell's own todo for what's still missing: moving it, and revealing it on inspection). */
 function placeIllusionMarker(cid: string, casterName: string, spell: Spell, originGx: number, originGy: number): void {
-  const dungeon = dungeons.get(cid);
+  const dungeon = dungeonOf(cid, casterName);
   if (!dungeon) return;
   const entity: DungeonEntity = {
     id: randomUUID(), type: 'object', x: originGx, y: originGy, name: spell.name,
@@ -293,7 +292,7 @@ function placeIllusionMarker(cid: string, casterName: string, spell: Spell, orig
   };
   dungeon.entities = [...dungeon.entities, entity];
   void saveDungeon(cid, dungeon);
-  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  broadcastDungeon(cid, dungeon);
 }
 
 /**
@@ -310,7 +309,7 @@ function placeHazardCells(
   visual?: NonNullable<Spell['combat']>['hazardVisual'],
 ): void {
   if (!spec) return;
-  const dungeon = dungeons.get(cid);
+  const dungeon = fightDungeon(cid, fight);
   if (!dungeon) return;
   const half = Math.floor(sizeFt / 5 / 2);
   const cx = Math.round(originGx);
@@ -327,12 +326,12 @@ function placeHazardCells(
   }
   dungeon.hazardCells = [...(dungeon.hazardCells ?? []), ...added];
   void saveDungeon(cid, dungeon);
-  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  broadcastDungeon(cid, dungeon);
 }
 
 /** Whether a straight line between two cells crosses a Heavily Obscured hazard cell (Fog Cloud) — see crossesObscuredArea. */
-function isLineObscured(cid: string, x0: number, y0: number, x1: number, y1: number): boolean {
-  const obscured = dungeons.get(cid)?.hazardCells?.filter(h => h.obscures) ?? [];
+function isLineObscured(cid: string, viewer: string, x0: number, y0: number, x1: number, y1: number): boolean {
+  const obscured = dungeonOf(cid, viewer)?.hazardCells?.filter(h => h.obscures) ?? [];
   return crossesObscuredArea(obscured, x0, y0, x1, y1);
 }
 
@@ -353,10 +352,10 @@ function targetBeyondAttackerVisionInDarkness(
   cid: string, char: Character,
   attackerGx: number, attackerGy: number, targetGx: number, targetGy: number,
 ): boolean {
-  const dungeon = dungeons.get(cid);
+  const dungeon = dungeonOf(cid, char.name);
   if ((dungeon?.illumination ?? 1) > DARKVISION_THRESHOLD) return false;
 
-  const positions = tokenPositions.get(cid) ?? {};
+  const positions = positionsOf(cid, char.name);
   const targetLit = (dungeon?.pointLights ?? []).some(l =>
     Math.max(Math.abs(l.gx - targetGx), Math.abs(l.gy - targetGy)) * 5 <= l.rangeFt
   ) || Object.entries(dungeon?.lightSources ?? {}).some(([key, rangeFt]) => {
@@ -405,7 +404,7 @@ function commandEffectsFor(word: string | undefined): { onHit: EffectSpec[]; hoo
  */
 
 function updateFollowingObjects(cid: string, tokenId: string, gx: number, gy: number): void {
-  const dungeon = dungeons.get(cid);
+  const dungeon = dungeonOf(cid, tokenId);
   const followers = dungeon?.entities.filter(e => e.type === 'object' && e.followsId === tokenId);
   if (!dungeon || !followers?.length) return;
 
@@ -430,7 +429,7 @@ function updateFollowingObjects(cid: string, tokenId: string, gx: number, gy: nu
   if (changed) {
     dungeon.entities = kept;
     void saveDungeon(cid, dungeon);
-    io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+    broadcastDungeon(cid, dungeon);
   }
 }
 
@@ -507,7 +506,7 @@ export async function resolvePlayerAttack(
       const archeryBonus = char.fightingStyle === 'Archery' && !isMelee ? 2 : 0;
       const attackBonus = statBonus + weaponBonus + archeryBonus + sumAndConsumeRollMods(getStateEngine(cid), rollMods) + bladeWardPenalty(cid, targetId);
 
-      const positions = tokenPositions.get(cid) ?? {};
+      const positions = positionsOf(cid, attackerName);
       const attackerPos = positions[attackerName];
       const targetPos = positions[targetId];
       const inExtendedRange = !!(weapon.extendedRange && attackerPos && targetPos &&
@@ -523,7 +522,7 @@ export async function resolvePlayerAttack(
       const attackerHasSelfAdvantage = engine.hasHookOwnedBy(attackerId, 'grantAdvantageSelf');
       const attackerHasSelfDisadvantage = engine.hasHookOwnedBy(attackerId, 'grantDisadvantageSelf');
       const targetRestrained = attackModeAgainstTarget(creature) > 0;
-      const obscured = !!(attackerPos && targetPos && isLineObscured(cid, attackerPos.gx, attackerPos.gy, targetPos.gx, targetPos.gy));
+      const obscured = !!(attackerPos && targetPos && isLineObscured(cid, attackerName, attackerPos.gx, attackerPos.gy, targetPos.gx, targetPos.gy));
       // Ranged weapon, hostile breathing down your neck — PHB Disadvantage rule, not a melee-only concern.
       const rangedThreatened = !isMelee && !!attackerPos && hasHostileWithinMeleeRange(cid, attackerId, attackerPos.gx, attackerPos.gy);
       // Can't see the target clearly — dark, no light reaching them, and no sense that works in
@@ -699,11 +698,11 @@ export async function resolvePlayerAttack(
                 for (const e of gated) {
                   if (e.type === 'condition' && e.condition) await applyCondition(cid, targetId, e.condition);
                   if ((e.type === 'push' || e.type === 'pull') && e.distance) {
-                    const positions2 = tokenPositions.get(cid) ?? {};
+                    const positions2 = positionsOf(cid, attackerName);
                     const casterPos = positions2[attackerName] ?? positions2[attackerId];
                     const targetPos2 = positions2[targetId];
                     if (casterPos && targetPos2) {
-                      const dungeon = dungeons.get(cid);
+                      const dungeon = dungeonOf(cid, attackerName);
                       const occupied = new Set(
                         Object.entries(positions2).filter(([id]) => id !== targetId).map(([, p]) => `${p.gx},${p.gy}`),
                       );
@@ -714,8 +713,7 @@ export async function resolvePlayerAttack(
                       );
                       if (moved.gx !== targetPos2.gx || moved.gy !== targetPos2.gy) {
                         positions2[targetId] = moved;
-                        tokenPositions.set(cid, positions2);
-                        io.to(campaignRoom(cid)).emit('token:moved', { tokenId: targetId, gx: moved.gx, gy: moved.gy });
+                        toDungeonOf(cid, targetId).emit('token:moved', { tokenId: targetId, gx: moved.gx, gy: moved.gy });
                       }
                     }
                   }
@@ -769,7 +767,7 @@ export async function resolvePlayerAttack(
 
         // Tavern Brawler: once per turn, push the target 5 feet on an Unarmed Strike hit.
         if (weapon.id === 'unarmed-strike' && hasOriginFeat(char, 'Tavern Brawler') && attackerPos && targetPos && !attackerParticipant?.tavernBrawlerPushUsed) {
-          const dungeon = dungeons.get(cid);
+          const dungeon = dungeonOf(cid, attackerName);
           const occupied = new Set(
             Object.entries(positions).filter(([id]) => id !== targetId).map(([, p]) => `${p.gx},${p.gy}`),
           );
@@ -779,8 +777,7 @@ export async function resolvePlayerAttack(
           );
           if (moved.gx !== targetPos.gx || moved.gy !== targetPos.gy) {
             positions[targetId] = moved;
-            tokenPositions.set(cid, positions);
-            io.to(campaignRoom(cid)).emit('token:moved', { tokenId: targetId, gx: moved.gx, gy: moved.gy });
+            toDungeonOf(cid, targetId).emit('token:moved', { tokenId: targetId, gx: moved.gx, gy: moved.gy });
           }
           if (attackerParticipant) attackerParticipant.tavernBrawlerPushUsed = true;
         }
@@ -916,10 +913,10 @@ export async function resolvePlayerSpellAttack(
           // grantAdvantageSelf-only check, which deliberately does NOT read this narrower kind.
           const casterHasSelfAdvantage = engine.hasHookOwnedBy(casterId, 'grantAdvantageSelf') || engine.hasHookOwnedBy(casterId, 'grantAdvantageSelfSpellOnly');
           const targetRestrained = attackModeAgainstTarget(creature) > 0;
-          const positions = tokenPositions.get(cid) ?? {};
+          const positions = positionsOf(cid, casterName);
           const casterPos = positions[casterName] ?? positions[casterId];
           const targetPos = positions[targetId];
-          const obscured = !!(casterPos && targetPos && isLineObscured(cid, casterPos.gx, casterPos.gy, targetPos.gx, targetPos.gy));
+          const obscured = !!(casterPos && targetPos && isLineObscured(cid, casterName, casterPos.gx, casterPos.gy, targetPos.gx, targetPos.gy));
           roll = new D20Roll({ withDisadvantage: spellMode < 0 || obscured, withAdvantage: spellMode > 0 || targetHasAdvantageGrant || casterHasSelfAdvantage || targetRestrained }).roll();
           atkCtx = await engine.trigger('afterAttackRoll', await engine.trigger('beforeAttackRoll', {
             attackerId: casterId, attackerName: casterName,
@@ -994,11 +991,11 @@ export async function resolvePlayerSpellAttack(
           // generalized to any onHit push/pull effect on an attack-resolution spell.
           const forcedMove = (spell.combat?.onHit ?? []).find(e => e.type === 'push' || e.type === 'pull');
           if (forcedMove?.distance) {
-            const positions2 = tokenPositions.get(cid) ?? {};
+            const positions2 = positionsOf(cid, casterName);
             const casterPos2 = positions2[casterName] ?? positions2[casterId];
             const targetPos2 = positions2[targetId];
             if (casterPos2 && targetPos2) {
-              const dungeon2 = dungeons.get(cid);
+              const dungeon2 = dungeonOf(cid, casterName);
               const occupied2 = new Set(
                 Object.entries(positions2).filter(([id]) => id !== targetId).map(([, p]) => `${p.gx},${p.gy}`),
               );
@@ -1009,8 +1006,7 @@ export async function resolvePlayerSpellAttack(
               );
               if (moved2.gx !== targetPos2.gx || moved2.gy !== targetPos2.gy) {
                 positions2[targetId] = moved2;
-                tokenPositions.set(cid, positions2);
-                io.to(campaignRoom(cid)).emit('token:moved', { tokenId: targetId, gx: moved2.gx, gy: moved2.gy });
+                toDungeonOf(cid, targetId).emit('token:moved', { tokenId: targetId, gx: moved2.gx, gy: moved2.gy });
               }
             }
           }
@@ -1090,17 +1086,20 @@ export function registerCombatHandlers(ctx: JoinContext): void {
     void (async () => {
       if (!(await canMove(campaignId, tokenId))) return;
 
-      const positions = tokenPositions.get(campaignId) ?? {};
+      // Moves happen on the map the token is standing in — a player in a different dungeon, or out
+      // in the open world, has no position here to move.
+      const dungeon = dungeonOf(campaignId, tokenId);
+      if (!dungeon) return;
+      const positions = dungeon.positions ??= {};
       const origin = positions[tokenId];
 
       // Backstop for the client's own wall-aware drop gating — reject a destination no walkable
       // route reaches from the token's last known cell (or, with no known cell yet, that isn't
       // floor at all), rather than trusting whatever gx/gy the socket message carries. A shut
       // door blocks a route the same as a wall.
-      const dungeon = dungeons.get(campaignId);
-      const cells = dungeon?.cells;
+      const cells = dungeon.cells;
       if (cells) {
-        const doorBlocked = dungeon ? closedDoorCells(dungeon, { forMovement: true }) : undefined;
+        const doorBlocked = closedDoorCells(dungeon, { forMovement: true });
         const blocked = origin
           ? !findPath(cells, origin.gx, origin.gy, gx, gy, undefined, doorBlocked)
           : cells[gy]?.[gx] !== 1 || doorBlocked?.has(`${gx},${gy}`);
@@ -1108,7 +1107,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
 
         // A player can't drag their own token to a tile outside their own line of sight — a
         // GM-dragged creature/ally isn't gated (the GM already sees the whole map).
-        if (connected.has(tokenId) && origin && dungeon) {
+        if (connected.has(tokenId) && origin) {
           const sightBlocked = closedDoorCells(dungeon);
           const dist = Math.max(Math.abs(gx - origin.gx), Math.abs(gy - origin.gy));
           const visible = dist <= PLAYER_SIGHT_RADIUS && hasLineOfSight(cells, origin.gx, origin.gy, gx, gy, sightBlocked);
@@ -1117,8 +1116,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       }
 
       positions[tokenId] = { gx, gy };
-      tokenPositions.set(campaignId, positions);
-      socket.to(campaignRoom(campaignId)).emit('token:moved', { tokenId, gx, gy });
+      toDungeon(campaignId, dungeon.id).except(socket.id).emit('token:moved', { tokenId, gx, gy });
       updateFollowingObjects(campaignId, tokenId, gx, gy);
       if (origin) void checkMovementTriggers(campaignId, tokenId, origin.gx, origin.gy, gx, gy);
 
@@ -1672,11 +1670,11 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         // damage; the token doesn't actually move until the block further down.
         let pullDamageGateOk = true;
         if (!saved && forcedMove?.distance && forcedMove.requireEndWithinFt !== undefined) {
-          const positions0 = tokenPositions.get(cid) ?? {};
+          const positions0 = positionsOf(cid, casterName);
           const casterPos0 = positions0[casterName] ?? positions0[casterId];
           const targetPos0 = positions0[targetId] ?? positions0[participant.name];
           if (casterPos0 && targetPos0) {
-            const dungeon0 = dungeons.get(cid);
+            const dungeon0 = dungeonOf(cid, casterName);
             const occupied0 = new Set(
               Object.entries(positions0).filter(([id]) => id !== targetId && id !== participant.name).map(([, p]) => `${p.gx},${p.gy}`),
             );
@@ -1741,12 +1739,12 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         }
 
         if (!saved && forcedMove?.distance) {
-          const positions = tokenPositions.get(cid) ?? {};
+          const positions = positionsOf(cid, casterName);
           const casterPos = positions[casterName] ?? positions[casterId];
           const targetKey = positions[targetId] ? targetId : participant.name;
           const targetPos = positions[targetKey];
           if (casterPos && targetPos) {
-            const dungeon = dungeons.get(cid);
+            const dungeon = dungeonOf(cid, casterName);
             const occupied = new Set(
               Object.entries(positions)
                 .filter(([id]) => id !== targetKey)
@@ -1759,8 +1757,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
             );
             if (moved.gx !== targetPos.gx || moved.gy !== targetPos.gy) {
               positions[targetKey] = moved;
-              tokenPositions.set(cid, positions);
-              io.to(campaignRoom(cid)).emit('token:moved', { tokenId: targetKey, gx: moved.gx, gy: moved.gy });
+              toDungeonOf(cid, targetKey).emit('token:moved', { tokenId: targetKey, gx: moved.gx, gy: moved.gy });
             }
           }
         }
@@ -1837,7 +1834,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const effectParticipant = ability.target === 'self' ? casterParticipant : encounter.findParticipant(rawTargetId);
       if (!effectParticipant || effectParticipant.isDead()) return;
       // The client sends a player's display NAME for an ally pick (Canvas's targeting loop keys
-      // off `connected: Player[]`, which is names — see tokenPositions), not their character id.
+      // off `connected: Player[]`, which is names — see Dungeon.positions), not their character id.
       // findParticipant resolves either, but everything past this point (persisting HP,
       // registering a hook by owner) needs the real id, which only the resolved participant has.
       const effectId = effectParticipant.id;
@@ -1944,7 +1941,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const targetParticipant = encounter.findParticipant(targetId);
       if (!casterParticipant || casterParticipant.isDead() || !targetParticipant || targetParticipant.isDead() || !targetParticipant.isPlayer) return;
 
-      const positions = tokenPositions.get(cid) ?? {};
+      const positions = positionsOf(cid, casterId);
       const casterPos = positions[casterParticipant.name] ?? positions[casterId];
       const targetPos = positions[targetParticipant.name] ?? positions[targetId];
       if (!casterPos || !targetPos || Math.max(Math.abs(casterPos.gx - targetPos.gx), Math.abs(casterPos.gy - targetPos.gy)) > 1) return;

@@ -3,11 +3,11 @@ import { statMod, hasOriginFeat, trackOf } from 'shared';
 import { getCharacter, updateCharacter, readChatLog, saveEncounter, clearEncounter, saveDungeon, listCharacters, loadPartyAllies, readNemeses, getConfig } from '../../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../../providers/index.ts';
 import { evaluateNemesisCandidates } from '../../session-processor/imagePrompts.ts';
-import { toClientDungeon, chainClosure } from '../../dungeon/index.ts';
+import { toClientDungeon, chainClosure, broadcastDungeon } from '../../dungeon/index.ts';
 import { Participant, PLAYERS_TEAM_ID, type Encounter } from '../../domain/encounter.ts';
 import { Creature } from '../../domain/creature.ts';
 import { logError } from '../../logger.ts';
-import { campaignRoom, io, tokenPositions, campaignPlayers, dungeons, pendingWeaponBonuses, microDungeons, connected, withLivePositions, getStateEngine, COMBAT_CHAIN_RADIUS, fightsIn, fightOf, unregisterFight, toFight, toSockets, playerSocketIds } from '../../state.ts';
+import { campaignRoom, io, positionsOf, dungeonOf, dungeonsIn, fightDungeon, occupantsOf, campaignPlayers, pendingWeaponBonuses, connected, getStateEngine, COMBAT_CHAIN_RADIUS, fightsIn, fightOf, unregisterFight, toFight, toSockets, playerSocketIds, toDungeonOf } from '../../state.ts';
 import { D20Roll, calcMaxHp } from '../dice.ts';
 import { ReactionOfferHook } from '../stateEngine/hooks/ReactionOfferHook.ts';
 import { RetaliationOfferHook } from '../stateEngine/hooks/RetaliationOfferHook.ts';
@@ -53,7 +53,7 @@ async function runTurnStart(cid: string, encounter: Encounter): Promise<void> {
     isPlayer: actor.isPlayer,
     round: encounter.currentRound?.number ?? 1,
   });
-  recomputeIllumination(cid);
+  recomputeIllumination(cid, fightDungeon(cid, encounter));
 }
 
 /**
@@ -126,14 +126,14 @@ export function emitTurn(cid: string, encounter: Encounter) {
 
 /** Drops any Dungeon.hazardCells (Difficult Terrain) whose expiresOnRound has passed — called every time a new round starts (see advanceTurn). */
 function pruneExpiredHazardCells(cid: string, encounter: Encounter, round: number): void {
-  const dungeon = dungeons.get(cid);
+  const dungeon = fightDungeon(cid, encounter);
   if (!dungeon?.hazardCells?.length) return;
   // Only this fight's hazards — another fight's round numbers mean nothing to them.
   const kept = dungeon.hazardCells.filter(h => h.expiresOnRound === undefined || (h.fightId !== undefined && h.fightId !== encounter.id) || h.expiresOnRound > round);
   if (kept.length === dungeon.hazardCells.length) return;
   dungeon.hazardCells = kept;
   void saveDungeon(cid, dungeon);
-  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  broadcastDungeon(cid, dungeon);
 }
 
 export async function evaluateNemesisAfterCombat(cid: string, encounter: Encounter): Promise<void> {
@@ -201,12 +201,11 @@ export async function endCombat(cid: string, encounter: Encounter): Promise<void
   // Offline-AI-spawned party members (see rollPlayerInitiatives) only existed for this fight —
   // any player-participant whose name isn't currently connected was necessarily one of them,
   // since only connected names get added the normal way. Drop their token before teardown.
-  const positions = tokenPositions.get(cid);
+  const positions = fightDungeon(cid, encounter)?.positions;
   if (positions) {
     for (const p of encounter.players) {
       if (p.isPlayer && !connected.has(p.name)) delete positions[p.name];
     }
-    tokenPositions.set(cid, positions);
   }
 
   // The campaign's hook registry is shared by every fight (and exploration) — drop only this
@@ -240,7 +239,6 @@ export function endCombatDefeated(cid: string, encounter?: Encounter): void {
   setTimeout(() => {
     if (encounter) void endCombat(cid, encounter);
     audience.emit('combat:state', false);
-    if (!fightsIn(cid).length) microDungeons.delete(cid);
     if (wholeParty) endSession(cid);
     defeatedFights.delete(key);
   }, 8000);
@@ -421,7 +419,7 @@ export async function rollPlayerInitiatives(cid: string, encounter: Encounter, c
   // combat/ai/executor.ts's findOpenAdjacent already gives summons. A member whose track has
   // nobody in the fight, or no token to anchor on, stays out; despawned again in endCombat.
   const groups = await getPartyGroups(cid);
-  const positions = tokenPositions.get(cid) ?? {};
+  const positions = fightDungeon(cid, encounter)?.positions ?? {};
   const aiEntries: Participant[] = [];
   for (const char of chars.filter(c => !connected.has(c.name) && c.aiControlled && !fightOf(cid, c.id))) {
     const anchorName = names.find(n => trackOf(groups, n) === trackOf(groups, char.name));
@@ -429,13 +427,12 @@ export async function rollPlayerInitiatives(cid: string, encounter: Encounter, c
     if (!anchorPos) continue;
     const pos = findOpenAdjacent(positions, anchorPos.gx, anchorPos.gy);
     positions[char.name] = pos;
-    io.to(campaignRoom(cid)).emit('token:moved', { tokenId: char.name, gx: pos.gx, gy: pos.gy });
+    toDungeonOf(cid, char.name).emit('token:moved', { tokenId: char.name, gx: pos.gx, gy: pos.gy });
     const participant = buildPlayerParticipant(cid, char.name, char);
     team.addParticipant(participant);
     aiEntries.push(participant);
   }
   if (aiEntries.length) {
-    tokenPositions.set(cid, positions);
     encounter.expectedParticipantCount += aiEntries.length;
     addToTurnOrder(cid, encounter, aiEntries, entries.length * 500);
   }
@@ -453,7 +450,7 @@ export function syncFight(encounter: Encounter, audience = toFight(encounter)): 
 }
 
 function livePositionsOf(cid: string, encounter: Encounter): { gx: number; gy: number }[] {
-  const positions = tokenPositions.get(cid) ?? {};
+  const positions = fightDungeon(cid, encounter)?.positions ?? {};
   return encounter.turnOrder
     .filter(p => !p.isDead())
     .map(p => positions[p.isPlayer ? p.name : p.id])
@@ -477,35 +474,39 @@ function mergeFights(cid: string, keep: Encounter, gone: Encounter): void {
  * someone who just joined) is pulled into it. Runs on every player move and every turn start, so
  * a creature walking up to a bystander catches them too. */
 export async function resolveFightChains(cid: string): Promise<void> {
-  const dungeon = dungeons.get(cid);
-  // An open-world combat arena isn't a place anyone else is standing in — its grid shares
-  // coordinates with whatever stale positions other players still carry, so chaining there would
-  // drag in bystanders who are nowhere near. Open-world fights are per acting group, no chain.
-  if (!dungeon || dungeon.arena) return;
-
-  const byAge = fightsIn(cid).sort((a, b) => a.startedAt - b.startedAt);
-  for (const [i, keep] of byAge.entries()) {
-    for (const other of byAge.slice(i + 1)) {
-      if (keep.ended || other.ended) continue;
-      const otherCells = Object.fromEntries(livePositionsOf(cid, other).map((pos, k) => [String(k), pos]));
-      if (chainClosure(dungeon, livePositionsOf(cid, keep), otherCells, COMBAT_CHAIN_RADIUS).length) mergeFights(cid, keep, other);
-    }
-  }
-
-  const positions = tokenPositions.get(cid) ?? {};
   let chars: Character[] | undefined;
-  for (const fight of fightsIn(cid)) {
-    const candidates = Object.fromEntries((campaignPlayers.get(cid) ?? []).flatMap(name => {
-      const pos = positions[name];
-      return pos && connected.has(name) && !fightOf(cid, name) ? [[name, pos] as const] : [];
-    }));
-    const names = chainClosure(dungeon, livePositionsOf(cid, fight), candidates, COMBAT_CHAIN_RADIUS);
-    if (!names.length) continue;
-    chars ??= await listCharacters(cid);
-    const added = addPlayersToFight(cid, fight, chars, names);
-    syncFight(fight, toSockets(added.map(p => playerSocketIds.get(p.id)).filter((sid): sid is string => !!sid)));
-    for (const p of added) {
-      void postChat(cid, { text: `${p.name} joins the fight!`, senderName: 'Combat', timestamp: Date.now() }, [p.id]);
+  // Per map: fights in different dungeons can never reach each other. An open-world combat arena
+  // isn't a place anyone else is standing in — its grid shares coordinates with every other arena,
+  // so chaining there would drag in bystanders who are nowhere near. Open-world fights don't chain.
+  for (const dungeon of dungeonsIn(cid)) {
+    if (dungeon.arena) continue;
+    const here = (fight: Encounter) => fightDungeon(cid, fight)?.id === dungeon.id;
+
+    const byAge = fightsIn(cid).filter(here).sort((a, b) => a.startedAt - b.startedAt);
+    for (const [i, keep] of byAge.entries()) {
+      for (const other of byAge.slice(i + 1)) {
+        if (keep.ended || other.ended) continue;
+        const otherCells = Object.fromEntries(livePositionsOf(cid, other).map((pos, k) => [String(k), pos]));
+        if (chainClosure(dungeon, livePositionsOf(cid, keep), otherCells, COMBAT_CHAIN_RADIUS).length) mergeFights(cid, keep, other);
+      }
+    }
+
+    const positions = dungeon.positions ?? {};
+    for (const fight of fightsIn(cid).filter(here)) {
+      // Only players standing in this dungeon — someone in another dungeon (or out in the world)
+      // shares its coordinates but none of its space.
+      const candidates = Object.fromEntries(occupantsOf(cid, dungeon.id).flatMap(name => {
+        const pos = positions[name];
+        return pos && connected.has(name) && !fightOf(cid, name) ? [[name, pos] as const] : [];
+      }));
+      const names = chainClosure(dungeon, livePositionsOf(cid, fight), candidates, COMBAT_CHAIN_RADIUS);
+      if (!names.length) continue;
+      chars ??= await listCharacters(cid);
+      const added = addPlayersToFight(cid, fight, chars, names);
+      syncFight(fight, toSockets(added.map(p => playerSocketIds.get(p.id)).filter((sid): sid is string => !!sid)));
+      for (const p of added) {
+        void postChat(cid, { text: `${p.name} joins the fight!`, senderName: 'Combat', timestamp: Date.now() }, [p.id]);
+      }
     }
   }
 }

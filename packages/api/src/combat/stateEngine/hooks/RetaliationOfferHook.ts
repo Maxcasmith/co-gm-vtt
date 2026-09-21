@@ -2,7 +2,7 @@ import type { DamageContext, Spell, SpellSaveResult, CreatureType, AbilityKey, H
 import { CLASS_SPELLCASTING_ABILITY, statMod, effectApplies, parseRangeFeet } from 'shared';
 import { Hook, type HookProps } from '../Hook.ts';
 import type { StateEngine } from '../StateEngine.ts';
-import { tokenPositions, pendingWeaponBonuses, fightOf, toFightOf } from '../../../state.ts';
+import { positionsOf, pendingWeaponBonuses, fightOf, toFightOf } from '../../../state.ts';
 import { getCharacter } from '../../../storage.ts';
 import { offerReaction } from '../reactionPrompt.ts';
 import { trySpendSpellSlot } from '../../runtime/resources.ts';
@@ -54,7 +54,7 @@ export class RetaliationOfferHook extends Hook<'afterDamage'> {
     // feet is the trigger's own range check, not just where the resulting spell can land.
     // Positions are best-effort (grid tokens might not be placed yet in a test encounter), so a
     // missing position doesn't block the offer — only a confirmed out-of-range one does.
-    const positions = tokenPositions.get(cid) ?? {};
+    const positions = positionsOf(cid, this.ownerId);
     const ownerPos = positions[this.ownerId];
     const attackerPos = positions[attacker.id] ?? positions[attacker.name];
     const inRange = (spell: Spell): boolean => {

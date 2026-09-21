@@ -1,10 +1,10 @@
 import { updateCharacter, saveEncounter, clearDungeon, saveDungeon, listCharacters, getConfig } from '../../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../../providers/index.ts';
 import { generateCombatAftermath } from '../../session-processor/imagePrompts.ts';
-import { toClientDungeon } from '../../dungeon/index.ts';
+import { toClientDungeon, broadcastDungeon } from '../../dungeon/index.ts';
 import { checkQuestChainTriggers } from '../../dungeon/questChain.ts';
 import { Participant, type Encounter } from '../../domain/encounter.ts';
-import { io, campaignRoom, tokenPositions, playerSocketIds, dungeons, microDungeons, withLivePositions, getStateEngine, fightOf, toFight, toFightOf, isRegisteredFight } from '../../state.ts';
+import { io, campaignRoom, positionsOf, dungeonOf, fightDungeon, unregisterDungeon, playerSocketIds, getStateEngine, fightOf, toFight, toFightOf, isRegisteredFight } from '../../state.ts';
 import { rollDice, crToXp } from '../dice.ts';
 import { RecurringDamageHook } from '../stateEngine/hooks/RecurringDamageHook.ts';
 import type { RollModifierHook } from '../stateEngine/hooks/RollModifierHook.ts';
@@ -221,8 +221,9 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
     // Creature.from() doesn't carry isBoss (combat participants only need combat-relevant fields),
     // so check the dungeon entity itself rather than the live creature/encounter — it's the one
     // place the flag survives the manifest -> entity -> Creature hop unmodified.
-    if (dungeons.get(cid)?.entities.find(e => e.id === targetId)?.statBlock?.isBoss) {
-      void checkQuestChainTriggers(cid, { kind: 'defeat_boss' });
+    const targetMap = dungeonOf(cid, targetId);
+    if (targetMap?.entities.find(e => e.id === targetId)?.statBlock?.isBoss) {
+      void checkQuestChainTriggers(cid, { kind: 'defeat_boss' }, targetMap);
     }
 
     if (encounter.allEnemiesDead()) {
@@ -232,9 +233,9 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
       // Where the fight actually happened, not wherever the player's own token last sat — for
       // dungeon-crawl aggro combat especially, the player may never have walked fully into the
       // room a ranged fight was triggered in. See startDungeonCombat: this id is the same one
-      // tokenPositions was seeded with when the creature entered combat.
+      // the dungeon's positions were seeded with when the creature entered combat.
       const enemyPositions = enemyStatBlocks
-        .map(e => tokenPositions.get(cid)?.[e.id])
+        .map(e => positionsOf(cid, e.id)[e.id])
         .filter((p): p is { gx: number; gy: number } => !!p);
       // XP splits among the characters who actually fought — a split group elsewhere earns none of it.
       const fightChars = encounter.players.filter(p => p.isPlayer);
@@ -255,7 +256,9 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
       // display window below as exploration and re-aggros whatever's still sitting in
       // dungeon.entities — strip the kills now, not in the delayed cleanup, so a corpse can never
       // restart combat. (The delayed block below re-filters the same ids; harmless no-op there.)
-      const liveDungeon = dungeons.get(cid);
+      // Captured before teardown — once the fight ends, an arena is no longer anyone's location.
+      const fightMap = fightDungeon(cid, encounter);
+      const liveDungeon = fightMap;
       if (liveDungeon) {
         const killedIds = new Set(enemyStatBlocks.map(e => e.id));
         liveDungeon.entities = liveDungeon.entities.filter(e => !(e.type === 'creature' && killedIds.has(e.id)));
@@ -274,39 +277,22 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
           void endCombat(cid, wonEncounter);
           fightAudience.emit('combat:state', false);
 
-          const arenaDungeon = dungeons.get(cid);
-          const arenaHasTraps = arenaDungeon?.entities.some(e => e.type === 'trap');
-          if (microDungeons.has(cid) && !arenaHasTraps) {
-            // Combat-arena dungeon served its purpose — discard it and return to the world map
-            microDungeons.delete(cid);
-            dungeons.delete(cid);
-            void clearDungeon(cid);
-            io.to(campaignRoom(cid)).emit('dungeon:cleared');
-          } else if (microDungeons.has(cid)) {
-            // A trap (Snare, ...) is still armed on this arena — keep the map loaded instead of
-            // discarding it, so the trap survives past this fight to be triggered later.
-            const killedIds = new Set(enemyStatBlocks.map(e => e.id));
-            arenaDungeon!.entities = arenaDungeon!.entities.filter(e => !(e.type === 'creature' && killedIds.has(e.id)));
-            void saveDungeon(cid, arenaDungeon!);
-            io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, arenaDungeon!)));
+        }
+        // Clear this fight's dead from the map it was fought on, whichever fight ended first.
+        if (fightMap) {
+          const killedIds = new Set(enemyStatBlocks.map(e => e.id));
+          const arenaHasTraps = fightMap.entities.some(e => e.type === 'trap');
+          if (fightMap.arena && !arenaHasTraps) {
+            // The combat arena served its purpose — discard it and return its players to the world map.
+            unregisterDungeon(cid, fightMap.id);
+            void clearDungeon(cid, fightMap.id);
+            fightAudience.emit('dungeon:cleared');
           } else {
-            const dungeon = dungeons.get(cid);
-            if (dungeon) {
-              const killedIds = new Set(enemyStatBlocks.map(e => e.id));
-              dungeon.entities = dungeon.entities.filter(e => !(e.type === 'creature' && killedIds.has(e.id)));
-              void saveDungeon(cid, dungeon);
-              io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
-            }
-          }
-        } else {
-          // A new encounter already replaced this one — still strip the dead entities from the
-          // dungeon (that part doesn't touch live combat state) so they don't linger forever.
-          const dungeon = dungeons.get(cid);
-          if (dungeon && !microDungeons.has(cid)) {
-            const killedIds = new Set(enemyStatBlocks.map(e => e.id));
-            dungeon.entities = dungeon.entities.filter(e => !(e.type === 'creature' && killedIds.has(e.id)));
-            void saveDungeon(cid, dungeon);
-            io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+            // A real dungeon, or an arena with a trap (Snare, ...) still armed on it — keep the map,
+            // just strip the corpses.
+            fightMap.entities = fightMap.entities.filter(e => !(e.type === 'creature' && killedIds.has(e.id)));
+            void saveDungeon(cid, fightMap);
+            broadcastDungeon(cid, fightMap, fightMap.arena ? fightAudience : undefined);
           }
         }
 

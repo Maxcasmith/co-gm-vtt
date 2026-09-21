@@ -4,11 +4,12 @@
 // setting the target's DC to an unbeatable extreme (-99 always passes, 100 never does) rather than
 // controlling the dice — same trick dungeon.findPath.selfcheck.ts-style fixtures use for other
 // randomized systems in this repo. Writes a real character.json under a throwaway campaign slug,
-// populates the in-memory dungeons/tokenPositions maps directly, deletes both whether checks pass
+// registers a fixture dungeon (positions and all) in the live dungeon registry, removes it whether checks pass
 // or throw.
 import type { Dungeon } from 'shared';
 import { deleteCampaign, writeCharacter } from '../storage.ts';
-import { dungeons, tokenPositions } from '../state.ts';
+import { registerDungeon, unregisterDungeon, dungeonsIn } from '../state.ts';
+import { setTrackLocations } from '../partyGroups.ts';
 import { resolveLockpickAttempt, resolveTrapDisarmAttempt } from './runtime.ts';
 
 const SLUG = '__selfcheck-itemuse__';
@@ -29,6 +30,17 @@ function freshDungeon(): Dungeon {
   };
 }
 
+// The party is standing in the fixture dungeon — dungeonOf resolves every lookup through that.
+function fixtureDungeon() {
+  return dungeonsIn(SLUG)[0]!;
+}
+
+async function placeFixtureDungeon(): Promise<void> {
+  for (const d of dungeonsIn(SLUG)) unregisterDungeon(SLUG, d.id);
+  registerDungeon(SLUG, freshDungeon());
+  await setTrackLocations(SLUG, null, fixtureDungeon().id);
+}
+
 async function main() {
   await writeCharacter(SLUG, CHAR_ID, {
     id: CHAR_ID, campaignId: SLUG, name: 'Fixture Rogue', species: 'Human', background: 'Criminal', class: 'Rogue',
@@ -37,46 +49,45 @@ async function main() {
   } as Parameters<typeof writeCharacter>[2]);
 
   // ── resolveLockpickAttempt: guaranteed-pass DC, in range — unlocks the door ─────────────────────
-  dungeons.set(SLUG, freshDungeon());
-  tokenPositions.set(SLUG, { 'Fixture Rogue': { gx: 0, gy: 1 } }); // 5ft
+  await placeFixtureDungeon();
+  fixtureDungeon().positions = { 'Fixture Rogue': { gx: 0, gy: 1 } }; // 5ft
   await resolveLockpickAttempt(SLUG, CHAR_ID, 'Fixture Rogue');
-  let door = dungeons.get(SLUG)!.entities.find(e => e.id === 'door-1')!;
+  let door = fixtureDungeon().entities.find(e => e.id === 'door-1')!;
   if (door.doorState !== 'open') throw new Error(`expected a guaranteed-pass DC to open the door, got ${door.doorState}`);
 
   // ── resolveLockpickAttempt: guaranteed-fail DC — door stays locked ──────────────────────────────
-  dungeons.set(SLUG, freshDungeon());
-  dungeons.get(SLUG)!.entities.find(e => e.id === 'door-1')!.lockpickDC = 100;
-  tokenPositions.set(SLUG, { 'Fixture Rogue': { gx: 0, gy: 1 } });
+  await placeFixtureDungeon();
+  fixtureDungeon().entities.find(e => e.id === 'door-1')!.lockpickDC = 100;
+  fixtureDungeon().positions = { 'Fixture Rogue': { gx: 0, gy: 1 } };
   await resolveLockpickAttempt(SLUG, CHAR_ID, 'Fixture Rogue');
-  door = dungeons.get(SLUG)!.entities.find(e => e.id === 'door-1')!;
+  door = fixtureDungeon().entities.find(e => e.id === 'door-1')!;
   if (door.doorState !== 'locked') throw new Error(`expected a guaranteed-fail DC to leave the door locked, got ${door.doorState}`);
 
   // ── resolveLockpickAttempt: no locked door in range — no-op, no throw ───────────────────────────
-  dungeons.set(SLUG, freshDungeon());
-  tokenPositions.set(SLUG, { 'Fixture Rogue': { gx: 9, gy: 9 } });
+  await placeFixtureDungeon();
+  fixtureDungeon().positions = { 'Fixture Rogue': { gx: 9, gy: 9 } };
   await resolveLockpickAttempt(SLUG, CHAR_ID, 'Fixture Rogue');
-  door = dungeons.get(SLUG)!.entities.find(e => e.id === 'door-1')!;
+  door = fixtureDungeon().entities.find(e => e.id === 'door-1')!;
   if (door.doorState !== 'locked') throw new Error(`expected no-op with nothing in range, got ${door.doorState}`);
 
   // ── resolveTrapDisarmAttempt: guaranteed-pass DC, discovered, in range — removes the trap ───────
-  dungeons.set(SLUG, freshDungeon());
-  tokenPositions.set(SLUG, { 'Fixture Rogue': { gx: 0, gy: 1 } });
+  await placeFixtureDungeon();
+  fixtureDungeon().positions = { 'Fixture Rogue': { gx: 0, gy: 1 } };
   await resolveTrapDisarmAttempt(SLUG, CHAR_ID, 'Fixture Rogue');
-  if (dungeons.get(SLUG)!.entities.some(e => e.id === 'trap-1')) throw new Error('expected a guaranteed-pass DC to remove the trap entirely');
+  if (fixtureDungeon().entities.some(e => e.id === 'trap-1')) throw new Error('expected a guaranteed-pass DC to remove the trap entirely');
 
   // ── resolveTrapDisarmAttempt: undiscovered trap — can't be targeted at all, no-op ───────────────
-  dungeons.set(SLUG, freshDungeon());
-  dungeons.get(SLUG)!.entities.find(e => e.id === 'trap-1')!.discovered = false;
-  tokenPositions.set(SLUG, { 'Fixture Rogue': { gx: 0, gy: 1 } });
+  await placeFixtureDungeon();
+  fixtureDungeon().entities.find(e => e.id === 'trap-1')!.discovered = false;
+  fixtureDungeon().positions = { 'Fixture Rogue': { gx: 0, gy: 1 } };
   await resolveTrapDisarmAttempt(SLUG, CHAR_ID, 'Fixture Rogue');
-  if (!dungeons.get(SLUG)!.entities.some(e => e.id === 'trap-1')) throw new Error('an undiscovered trap must never be a valid disarm target');
+  if (!fixtureDungeon().entities.some(e => e.id === 'trap-1')) throw new Error('an undiscovered trap must never be a valid disarm target');
 }
 
 main()
   .then(() => console.log('itemUse selfcheck: OK — lockpick/trap-disarm resolve against the nearest in-range target, respect the DC, no-op when nothing valid is in range.'))
   .catch(err => { console.error(err); process.exitCode = 1; })
   .finally(async () => {
-    dungeons.delete(SLUG);
-    tokenPositions.delete(SLUG);
+    for (const d of dungeonsIn(SLUG)) unregisterDungeon(SLUG, d.id);
     await deleteCampaign(SLUG);
   });

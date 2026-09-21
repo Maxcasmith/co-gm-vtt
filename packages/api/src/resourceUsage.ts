@@ -1,7 +1,7 @@
 import path from 'path';
 import type { Dungeon } from 'shared';
 import { slugifyTheme } from 'shared';
-import { CAMPAIGNS_DIR, TILESETS_DIR, CREATURES_DIR, PROPS_DIR, getWorldMeta, loadDungeon } from './storage.ts';
+import { CAMPAIGNS_DIR, TILESETS_DIR, CREATURES_DIR, PROPS_DIR, getWorldMeta, loadDungeons } from './storage.ts';
 import { getTextStore, getMediaStore } from './storage/index.ts';
 import { SAVED_ADVENTURES_DIR, listSavedAdventures } from './adventures/storage.ts';
 import { logError } from './logger.ts';
@@ -41,7 +41,7 @@ async function allDungeonRefs(): Promise<{ ref: ResourceUsageRef; slugs: Resourc
 
   const campaignSlugs = await getTextStore().list(CAMPAIGNS_DIR);
   await Promise.all(campaignSlugs.map(async slug => {
-    const [meta, dungeon] = await Promise.all([getWorldMeta(slug), loadDungeon(slug)]);
+    const [meta, dungeon] = await Promise.all([getWorldMeta(slug), loadDungeons(slug).then(ds => ds[0] ?? null)]);
     if (!meta || !dungeon) return;
     out.push({ ref: { kind: 'campaign', id: slug, name: meta.name }, slugs: collectResourceSlugs(dungeon) });
   }));

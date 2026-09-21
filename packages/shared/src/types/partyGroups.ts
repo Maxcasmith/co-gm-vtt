@@ -37,6 +37,10 @@ export interface PartyGroups {
    * scene changes (until then it's still standing in the manifest's). Folded back into the
    * manifest and cleared on reunion. */
   scenes?: Partial<Record<GroupColor, TrackScene>>;
+  /** Where each track is: a dungeon id, or absent for the open world. A track that enters a
+   * dungeon belongs to it; you can only switch between tracks in the same place, and a new track
+   * starts wherever its creator is. */
+  locations?: Partial<Record<GroupColor, string>>;
 }
 
 /** A character nobody has placed yet (new to the party, or groups.json predates them) sits on the first track. */
@@ -49,4 +53,9 @@ export function trackOf(groups: PartyGroups, name: string): GroupColor {
 export function activeSplit(groups: PartyGroups): PartySplit | undefined {
   const last = groups.splits.at(-1);
   return last && last.endedAt === undefined ? last : undefined;
+}
+
+/** The dungeon `track` is in, or undefined for the open world. */
+export function locationOfTrack(groups: PartyGroups, track: GroupColor): string | undefined {
+  return groups.locations?.[track];
 }

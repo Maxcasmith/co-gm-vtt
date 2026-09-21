@@ -11,16 +11,17 @@ import { dungeonEvents } from './events.ts';
 import { Encounter, Participant, PLAYERS_TEAM_ID } from '../domain/encounter.ts';
 import { Creature } from '../domain/creature.ts';
 import { logError } from '../logger.ts';
-import { io, campaignRoom, tokenPositions, dungeons, microDungeons, withLivePositions, PLAYER_SIGHT_RADIUS, ENEMY_AGGRO_RADIUS, COMBAT_CHAIN_RADIUS, campaignPlayers, connected, fightOf, registerFight, toFight } from '../state.ts';
+import { io, campaignRoom, positionsOf, dungeonOf, fightDungeon, registerDungeon, toDungeon, PLAYER_SIGHT_RADIUS, ENEMY_AGGRO_RADIUS, COMBAT_CHAIN_RADIUS, campaignPlayers, connected, fightOf, registerFight, toFight, toDungeonOf } from '../state.ts';
 import { addToTurnOrder, rollPlayerInitiatives, rollEnemyInitiatives, resolveFightChains, syncFight } from '../combat/runtime/lifecycle.ts';
 import { checkTrapAt } from '../combat/runtime/traps.ts';
 import { checkQuestChainTriggers } from './questChain.ts';
 import { postChat, readChatContext } from '../partyGroups.ts';
+import { broadcastDungeon } from '../dungeon/index.ts';
 
 // Live cell positions of every participant currently in the fight — players keyed by name,
-// everyone else (creatures, allies) keyed by id, matching tokenPositions' own convention.
+// everyone else (creatures, allies) keyed by id, matching Dungeon.positions' own convention.
 function combatantPositions(cid: string, encounter: Encounter): { gx: number; gy: number }[] {
-  const positions = tokenPositions.get(cid) ?? {};
+  const positions = fightDungeon(cid, encounter)?.positions ?? {};
   return encounter.turnOrder
     .map(p => positions[p.isPlayer ? p.name : p.id])
     .filter((pos): pos is { gx: number; gy: number } => !!pos);
@@ -34,7 +35,7 @@ function combatantPositions(cid: string, encounter: Encounter): { gx: number; gy
 // near an already-engaged ally or enemy still gets pulled in even though it's out of range of
 // whoever happened to trigger this check.
 export async function checkDungeonProximity(cid: string, gx: number, gy: number, characterName: string): Promise<void> {
-  const dungeon = dungeons.get(cid);
+  const dungeon = dungeonOf(cid, characterName);
   if (!dungeon) return;
   // Chain first: stepping within range of a fight joins it, rather than starting a second one beside it.
   await resolveFightChains(cid);
@@ -58,7 +59,7 @@ export async function checkDungeonProximity(cid: string, gx: number, gy: number,
     room.visited = true;
     changed = true;
     dungeonEvents.emit('room_entered', { cid, room, characterName });
-    void checkQuestChainTriggers(cid, { kind: 'enter_room', roomName: room.name });
+    void checkQuestChainTriggers(cid, { kind: 'enter_room', roomName: room.name }, dungeon);
   }
 
   await checkTrapAt(cid, gx, gy, characterName, characterName, true);
@@ -72,7 +73,7 @@ export async function checkDungeonProximity(cid: string, gx: number, gy: number,
     if (!entity.discovered && seen) {
       entity.discovered = true;
       changed = true;
-      void checkQuestChainTriggers(cid, { kind: 'discover_entity', entityName: entity.name });
+      void checkQuestChainTriggers(cid, { kind: 'discover_entity', entityName: entity.name }, dungeon);
     }
 
     const aggroed = aggroSources.some(pos =>
@@ -83,7 +84,7 @@ export async function checkDungeonProximity(cid: string, gx: number, gy: number,
 
   if (changed) {
     void saveDungeon(cid, dungeon);
-    io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+    broadcastDungeon(cid, dungeon);
   }
   if (!aggro.length) return;
   if (encounter) joinReinforcements(cid, encounter, aggro);
@@ -119,8 +120,8 @@ async function assignSides(cid: string, fight: Encounter, joining: EnemyStatBloc
 // dungeon-related was in range to resolve against at all — that last case means this roll wasn't a
 // dungeon search, so the caller should fall through to the narrator instead of templating.
 export async function checkDungeonHiddenReveal(cid: string, characterName: string, total: number): Promise<SearchFind[] | null> {
-  const dungeon = dungeons.get(cid);
-  const pos = tokenPositions.get(cid)?.[characterName];
+  const dungeon = dungeonOf(cid, characterName);
+  const pos = dungeon?.positions?.[characterName];
   if (!dungeon || !pos) return null;
 
   let changed = false;
@@ -142,7 +143,7 @@ export async function checkDungeonHiddenReveal(cid: string, characterName: strin
     changed = true;
     found.push(entity);
     console.log(`[dungeon] ${characterName} notices ${entity.name}`);
-    void checkQuestChainTriggers(cid, { kind: 'discover_entity', entityName: entity.name });
+    void checkQuestChainTriggers(cid, { kind: 'discover_entity', entityName: entity.name }, dungeon);
   }
 
   // Hidden dressing is text-only — no coordinates, no sprite — so it resolves against the room the
@@ -158,7 +159,7 @@ export async function checkDungeonHiddenReveal(cid: string, characterName: strin
 
   if (changed) {
     void saveDungeon(cid, dungeon);
-    io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+    broadcastDungeon(cid, dungeon);
   }
   if (!found.length && !nearbyUncleared) return null;
   return found;
@@ -182,11 +183,11 @@ function feetToEntity(pos: { gx: number; gy: number }, door: { x: number; y: num
 // [[DOOR_UNLOCK]], see effects.ts). Authority lives here, not on the client: the click only sends
 // intent, this decides whether it actually happens.
 export async function toggleDoor(cid: string, doorId: string, characterName: string): Promise<void> {
-  const dungeon = dungeons.get(cid);
+  const dungeon = dungeonOf(cid, characterName);
   const door = dungeon?.entities.find(e => e.id === doorId && e.type === 'door');
   if (!dungeon || !door) return;
 
-  const pos = tokenPositions.get(cid)?.[characterName];
+  const pos = dungeon.positions?.[characterName];
   if (!pos || feetToEntity(pos, door) > 5) return;
 
   if (door.doorState === 'locked') {
@@ -199,7 +200,7 @@ export async function toggleDoor(cid: string, doorId: string, characterName: str
     console.log(`[dungeon] ${characterName} ${door.doorState === 'open' ? 'opens' : 'closes'} a door`);
   }
   await saveDungeon(cid, dungeon);
-  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  broadcastDungeon(cid, dungeon);
   // Opening a door can put a creature on the other side within sight/aggro range for the first
   // time — without this, it stayed hidden until the opener's next token:move re-ran this scan,
   // reading as the creature "spawning" a beat late rather than being revealed the instant the
@@ -209,22 +210,21 @@ export async function toggleDoor(cid: string, doorId: string, characterName: str
 
 // Player-clicked stairs — warps the clicker straight to the paired stairs entity's coordinates.
 // No lock/key concept (unlike toggleDoor), no state to persist on the dungeon itself (unlike a
-// door's open/closed) — this only moves tokenPositions, same shape as a normal token:move, not a
+// door's open/closed) — this only moves the dungeon's own positions, same shape as a normal token:move, not a
 // dungeon mutation. Works regardless of turn/combat state, same precedent as toggleDoor (an
 // environment interaction, not an action-economy one) — not gated by canMove.
 export async function useStairs(cid: string, stairsId: string, characterName: string): Promise<void> {
-  const dungeon = dungeons.get(cid);
+  const dungeon = dungeonOf(cid, characterName);
   const stairs = dungeon?.entities.find(e => e.id === stairsId && e.type === 'stairs');
   const target = stairs?.linkTo ? dungeon?.entities.find(e => e.id === stairs.linkTo && e.type === 'stairs') : undefined;
   if (!dungeon || !stairs || !target) return;
 
-  const pos = tokenPositions.get(cid)?.[characterName];
+  const pos = dungeon.positions?.[characterName];
   if (!pos || feetToEntity(pos, stairs) > 5) return;
 
-  const positions = tokenPositions.get(cid) ?? {};
+  const positions = dungeon.positions ??= {};
   positions[characterName] = { gx: target.x, gy: target.y };
-  tokenPositions.set(cid, positions);
-  io.to(campaignRoom(cid)).emit('token:moved', { tokenId: characterName, gx: target.x, gy: target.y });
+  toDungeonOf(cid, characterName).emit('token:moved', { tokenId: characterName, gx: target.x, gy: target.y });
   console.log(`[dungeon] ${characterName} takes the stairs`);
   // Handles room-visited/quest-trigger/trap-check/aggro on landing — same post-move checks a
   // normal token:move gets (see socketHandlers/combat.ts), just triggered by a teleport instead.
@@ -238,8 +238,8 @@ export async function useStairs(cid: string, stairsId: string, characterName: st
 // already used for a seal trap's escapeDC (resolved by the DM's own judgment, never re-verified in
 // code) — proximity is the only thing enforced server-side. No-op if nothing locked is in range.
 export async function unlockDoorNear(cid: string, characterName: string): Promise<void> {
-  const dungeon = dungeons.get(cid);
-  const pos = tokenPositions.get(cid)?.[characterName];
+  const dungeon = dungeonOf(cid, characterName);
+  const pos = dungeon?.positions?.[characterName];
   if (!dungeon || !pos) return;
 
   const door = dungeon.entities.find(e => e.type === 'door' && e.doorState === 'locked' && feetToEntity(pos, e) <= 5);
@@ -248,7 +248,7 @@ export async function unlockDoorNear(cid: string, characterName: string): Promis
   door.doorState = 'open';
   console.log(`[dungeon] ${characterName} narrates a door unlocked`);
   await saveDungeon(cid, dungeon);
-  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  broadcastDungeon(cid, dungeon);
   await checkDungeonProximity(cid, pos.gx, pos.gy, characterName);
 }
 
@@ -260,8 +260,8 @@ export async function unlockDoorNear(cid: string, characterName: string): Promis
 // item itself is consumed by the caller either way, this only resolves what the roll does.
 export async function resolveLockpickAttempt(cid: string, characterId: string, characterName: string): Promise<void> {
   const char = await getCharacter(cid, characterId);
-  const dungeon = dungeons.get(cid);
-  const pos = tokenPositions.get(cid)?.[characterName];
+  const dungeon = dungeonOf(cid, characterName);
+  const pos = dungeon?.positions?.[characterName];
   if (!char || !dungeon || !pos) return;
 
   const d20 = new D20Roll().roll();
@@ -279,7 +279,7 @@ export async function resolveLockpickAttempt(cid: string, characterId: string, c
   }
   door.doorState = 'open';
   await saveDungeon(cid, dungeon);
-  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  broadcastDungeon(cid, dungeon);
   await checkDungeonProximity(cid, pos.gx, pos.gy, characterName);
   await appendChatLogAndBroadcast(cid, characterName, `${characterName} picks the lock — the door swings open.`);
 }
@@ -290,8 +290,8 @@ export async function resolveLockpickAttempt(cid: string, characterId: string, c
 // it triggering, just without the consequence. Shared by the click and narrated paths.
 export async function resolveTrapDisarmAttempt(cid: string, characterId: string, characterName: string): Promise<void> {
   const char = await getCharacter(cid, characterId);
-  const dungeon = dungeons.get(cid);
-  const pos = tokenPositions.get(cid)?.[characterName];
+  const dungeon = dungeonOf(cid, characterName);
+  const pos = dungeon?.positions?.[characterName];
   if (!char || !dungeon || !pos) return;
 
   const d20 = new D20Roll().roll();
@@ -309,7 +309,7 @@ export async function resolveTrapDisarmAttempt(cid: string, characterId: string,
   }
   dungeon.entities = dungeon.entities.filter(e => e.id !== trap.id);
   await saveDungeon(cid, dungeon);
-  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  broadcastDungeon(cid, dungeon);
   await appendChatLogAndBroadcast(cid, characterName, `${characterName} disarms the trap safely.`);
 }
 
@@ -370,20 +370,21 @@ export async function generateAndBroadcastEnemies(campaignId: string, encounter:
     // all now that combat_init is hard-blocked while a real dungeon exists): spawn a bare
     // combat-arena dungeon instead of an AI backdrop image — same rendering/fog/movement path as
     // any other dungeon, discarded on victory.
-    if (!dungeons.has(campaignId)) {
+    if (!fightDungeon(campaignId, encounter)) {
       const dungeon = generateEncounterDungeon(uniqueStatBlocks);
       dungeon.arena = true;
-      dungeons.set(campaignId, dungeon);
-      microDungeons.add(campaignId);
+      // The fight owns its arena — its players stand in it (locationOf) until it's discarded on
+      // victory, so two groups can each have their own open-world fight at once.
+      encounter.arenaId = dungeon.id;
+      registerDungeon(campaignId, dungeon);
       await saveDungeon(campaignId, dungeon);
-      io.to(campaignRoom(campaignId)).emit('dungeon:loaded', toClientDungeon(withLivePositions(campaignId, dungeon)));
+      broadcastDungeon(campaignId, dungeon);
 
-      const positions = tokenPositions.get(campaignId) ?? {};
+      const positions = dungeon.positions ??= {};
       for (const entity of dungeon.entities) {
         positions[entity.id] = { gx: entity.x, gy: entity.y };
-        io.to(campaignRoom(campaignId)).emit('token:moved', { tokenId: entity.id, gx: entity.x, gy: entity.y });
+        toDungeonOf(campaignId, entity.id).emit('token:moved', { tokenId: entity.id, gx: entity.x, gy: entity.y });
       }
-      tokenPositions.set(campaignId, positions);
     }
 
     if (!encounter.ended) rollEnemyInitiatives(campaignId, encounter);
@@ -423,8 +424,8 @@ export async function startDungeonCombat(cid: string, triggerEntities: DungeonEn
   // Not everyone online — whoever triggered it, plus anyone not already fighting who's chained to
   // them or to the creatures they aggroed (COMBAT_CHAIN_RADIUS + sight). Everyone else joins later
   // if they close the chain.
-  const livePositions = tokenPositions.get(cid) ?? {};
-  const dungeon = dungeons.get(cid);
+  const dungeon = dungeonOf(cid, triggeredBy);
+  const livePositions = dungeon?.positions ?? {};
   const seeds = [livePositions[triggeredBy], ...triggered.map(e => ({ gx: e.x, gy: e.y }))].filter((p): p is { gx: number; gy: number } => !!p);
   const candidates = Object.fromEntries((campaignPlayers.get(cid) ?? []).flatMap(name => {
     const pos = livePositions[name];
@@ -435,9 +436,8 @@ export async function startDungeonCombat(cid: string, triggerEntities: DungeonEn
 
   for (const e of triggered) {
     livePositions[e.id] = { gx: e.x, gy: e.y };
-    io.to(campaignRoom(cid)).emit('token:moved', { tokenId: e.id, gx: e.x, gy: e.y });
+    toDungeonOf(cid, e.id).emit('token:moved', { tokenId: e.id, gx: e.x, gy: e.y });
   }
-  tokenPositions.set(cid, livePositions);
   console.log('[dungeon] combat triggered:', uniqueStatBlocks.map(e => `${e.name} (CR ${e.cr})`).join(', '), '— fighters:', fighters.join(', '));
 
   const [chars] = await Promise.all([listCharacters(cid), assignSides(cid, fight, uniqueStatBlocks, fighters)]);
@@ -462,12 +462,11 @@ export function joinReinforcements(cid: string, encounter: Encounter, triggerEnt
 
   toFight(encounter).emit('encounter:ready', encounter.enemies.filter(p => p.creature).map(p => p.creature!.toStatBlock()));
 
-  const positions = tokenPositions.get(cid) ?? {};
+  const positions = fightDungeon(cid, encounter)?.positions ?? {};
   for (const e of joined) {
     positions[e.id] = { gx: e.x, gy: e.y };
-    io.to(campaignRoom(cid)).emit('token:moved', { tokenId: e.id, gx: e.x, gy: e.y });
+    toDungeonOf(cid, e.id).emit('token:moved', { tokenId: e.id, gx: e.x, gy: e.y });
   }
-  tokenPositions.set(cid, positions);
 
   for (const e of joined) {
     void postChat(cid, { text: `${e.name} joins the fight!`, senderName: 'Combat', timestamp: Date.now() }, [e.id]);
@@ -482,7 +481,7 @@ export function joinReinforcements(cid: string, encounter: Encounter, triggerEnt
 // once per room. senderName is 'Virtual DM' so the line lands as an assistant turn in the LLM's
 // chat history rather than being replayed back to it as if a player had said it.
 dungeonEvents.on('room_entered', ({ cid, room, characterName }) => {
-  const dungeon = dungeons.get(cid);
+  const dungeon = dungeonOf(cid, characterName);
   if (!dungeon) return;
   const text = templateRoomEntry(dungeon, room);
   if (!text) return;

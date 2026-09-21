@@ -1,9 +1,9 @@
 import type { CreatureType, SpellSaveResult, TrapEffect } from 'shared';
 import { saveDungeon, listCharacters } from '../../storage.ts';
-import { toClientDungeon } from '../../dungeon/index.ts';
+import { toClientDungeon, broadcastDungeon } from '../../dungeon/index.ts';
 import { Participant } from '../../domain/encounter.ts';
 import { logDebug } from '../../logger.ts';
-import { io, campaignRoom, fightOf, toFightOf, playerSocketIds, dungeons, withLivePositions } from '../../state.ts';
+import { fightOf, toFightOf, playerSocketIds, dungeonOf, io } from '../../state.ts';
 import { calcMaxHp, rollApplicableDamage } from '../dice.ts';
 import { applyDamageToCreature, applyDamageToPlayer } from './damage.ts';
 import { advanceTurn } from './lifecycle.ts';
@@ -23,7 +23,7 @@ const DEFAULT_TRAP_EFFECT: TrapEffect = { effects: [] };
  * removed from the dungeon the instant it springs, matching Snare and the "trap springs" trope.
  */
 export async function checkTrapAt(cid: string, gx: number, gy: number, triggerId: string, triggerName: string, isPlayer: boolean): Promise<void> {
-  const dungeon = dungeons.get(cid);
+  const dungeon = dungeonOf(cid, isPlayer ? triggerName : triggerId);
   const entity = dungeon?.entities.find(e => {
     if (e.type !== 'trap') return false;
     const radius = e.trap?.radiusFt ?? 0;
@@ -40,7 +40,7 @@ export async function checkTrapAt(cid: string, gx: number, gy: number, triggerId
   if (trapDef.kind === 'seal') {
     entity.discovered = true;
     void saveDungeon(cid, dungeon);
-    io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+    broadcastDungeon(cid, dungeon);
     const msg = { text: `${triggerName} triggers ${entity.name}!`, senderName: 'System', timestamp: Date.now() };
     void postChat(cid, msg, [isPlayer ? triggerName : triggerId]);
     logDebug(`[trap] ${entity.name} (seal) triggered by ${triggerName} at (${gx},${gy})`);
@@ -49,7 +49,7 @@ export async function checkTrapAt(cid: string, gx: number, gy: number, triggerId
 
   dungeon.entities = dungeon.entities.filter(e => e.id !== entity.id);
   void saveDungeon(cid, dungeon);
-  io.to(campaignRoom(cid)).emit('dungeon:loaded', toClientDungeon(withLivePositions(cid, dungeon)));
+  broadcastDungeon(cid, dungeon);
 
   // Alert-only trap (Alarm) — no save, no effects, nothing to resolve. Notify just the caster
   // who set it rather than broadcasting a "triggers!" line to the whole table.

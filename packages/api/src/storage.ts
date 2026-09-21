@@ -432,8 +432,9 @@ export async function savePartyAllies(slug: string, allies: EnemyStatBlock[]): P
   await getTextStore().put(path.join(CAMPAIGNS_DIR, slug, 'party-allies.json'), JSON.stringify(allies, null, 2));
 }
 
+// One file per dungeon (dungeons/<id>.json) — a campaign can have several loaded at once.
 export async function saveDungeon(slug: string, dungeon: Dungeon): Promise<void> {
-  await writeCampaignFile(slug, 'dungeon.json', JSON.stringify(dungeon, null, 2));
+  await writeCampaignFile(slug, `dungeons/${dungeon.id}.json`, JSON.stringify(dungeon, null, 2));
 }
 
 // Written once per generation (not on every entity-discover save) — a snapshot of the freshly
@@ -442,15 +443,30 @@ export async function saveDungeonAscii(slug: string, dungeon: Dungeon): Promise<
   await writeCampaignFile(slug, 'dungeon.ascii.txt', renderDungeonAscii(dungeon));
 }
 
-export async function loadDungeon(slug: string): Promise<Dungeon | null> {
+/** Every dungeon saved for the campaign, plus a legacy single dungeon.json (pre-step-15 saves). */
+export async function loadDungeons(slug: string): Promise<Dungeon[]> {
+  const out: Dungeon[] = [];
   try {
-    const raw = await getTextStore().get(path.join(campaignDir(slug), 'dungeon.json'));
-    return raw === null ? null : (JSON.parse(raw) as Dungeon);
-  } catch (err) { logError('storage:loadDungeon', err); return null; }
+    const dir = path.join(campaignDir(slug), 'dungeons');
+    for (const name of await getTextStore().list(dir)) {
+      const raw = await getTextStore().get(path.join(dir, name));
+      if (raw !== null) out.push(JSON.parse(raw) as Dungeon);
+    }
+    const legacy = await getTextStore().get(path.join(campaignDir(slug), 'dungeon.json'));
+    if (legacy !== null) {
+      const d = JSON.parse(legacy) as Dungeon;
+      if (!out.some(o => o.id === d.id)) out.push(d);
+    }
+  } catch (err) { logError('storage:loadDungeons', err); }
+  return out;
 }
 
-export async function clearDungeon(slug: string): Promise<void> {
-  await getTextStore().delete(path.join(campaignDir(slug), 'dungeon.json'));
+/** Deletes one dungeon — and a legacy dungeon.json, which only ever held the campaign's one dungeon. */
+export async function clearDungeon(slug: string, dungeonId: string): Promise<void> {
+  const key = path.join(campaignDir(slug), 'dungeons', `${dungeonId}.json`);
+  if (await getTextStore().exists(key)) await getTextStore().delete(key);
+  const legacy = path.join(campaignDir(slug), 'dungeon.json');
+  if (await getTextStore().exists(legacy)) await getTextStore().delete(legacy);
 }
 
 export async function readManifest(slug: string): Promise<SessionManifest | null> {

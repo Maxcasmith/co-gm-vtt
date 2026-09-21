@@ -2,7 +2,7 @@ import type { Character, ActiveCondition } from 'shared';
 import { statMod, calcAC, effectiveWeaponProfs, findPath, isWeapon, isMonkWeapon, closedDoorCells, unarmedStrikeFor, monkMartialArtsActive, monkLevel, martialArtsDie } from 'shared';
 import { getCharacter, listCharacters, getHouseRules } from '../../storage.ts';
 import { Participant } from '../../domain/encounter.ts';
-import { io, campaignRoom, fightOf, toFightOf, tokenPositions, dungeons, getStateEngine } from '../../state.ts';
+import { io, campaignRoom, fightOf, toFightOf, positionsOf, dungeonOf, toDungeonOf, getStateEngine } from '../../state.ts';
 import { D20Roll, rollDice, fmtMod, resolveHit, maxDiceValue } from '../dice.ts';
 import { rollModeFor, attackModeAgainstTarget, combineModes } from '../conditions/rollModeFor.ts';
 import { offerReaction } from '../stateEngine/reactionPrompt.ts';
@@ -24,7 +24,7 @@ function isOccupied(positions: Record<string, { gx: number; gy: number }>, gx: n
  * cell at a time — wall-aware pathing when a dungeon grid is loaded, greedy step-toward otherwise.
  * 'approach' stops early once within `stopAtRangeFt`. Shared by runEnemyAI and the player tactics
  * engine (combat/tactics/), so keyed by `tokenKey(actor)` rather than `actor.id` — creatures and
- * players use different tokenPositions keys (see tokenKey's own doc). Returns wherever the walk
+ * players use different position keys (see tokenKey's own doc). Returns wherever the walk
  * actually ended, which may be short of `maxFt`/`targetPos` (blocked path, a trap sprung
  * Restrained mid-walk, or combat ending mid-stride).
  */
@@ -41,10 +41,10 @@ export async function walkParticipant(
     ? { gx: gx + Math.sign(gx - targetPos.gx) * maxSteps, gy: gy + Math.sign(gy - targetPos.gy) * maxSteps }
     : targetPos;
 
-  const dungeon = dungeons.get(cid);
+  const dungeon = dungeonOf(cid, key);
   const cells = dungeon?.cells;
   const doorBlocked = dungeon ? closedDoorCells(dungeon, { forMovement: true }) : undefined;
-  const startPositions = tokenPositions.get(cid) ?? {};
+  const startPositions = positionsOf(cid, key);
   const occupied = new Set(
     Object.entries(startPositions).filter(([k]) => k !== key).map(([, p]) => `${p.gx},${p.gy}`),
   );
@@ -63,7 +63,7 @@ export async function walkParticipant(
       if (distFt <= stopAtRangeFt) break;
     }
 
-    const pos = tokenPositions.get(cid) ?? {};
+    const pos = positionsOf(cid, key);
     let next: { gx: number; gy: number } | undefined;
     if (cells) {
       next = path?.[step];
@@ -86,10 +86,9 @@ export async function walkParticipant(
     await delay(220);
     if (!fightOf(cid, actor.id)) break;
 
-    const updatedPos = tokenPositions.get(cid) ?? {};
+    const updatedPos = positionsOf(cid, key);
     updatedPos[key] = { gx, gy };
-    tokenPositions.set(cid, updatedPos);
-    io.to(campaignRoom(cid)).emit('token:moved', { tokenId: key, gx, gy });
+    toDungeonOf(cid, key).emit('token:moved', { tokenId: key, gx, gy });
     await checkTrapAt(cid, gx, gy, key, actor.name, actor.isPlayer);
     if (!fightOf(cid, actor.id)) break;
     // maxSteps was fixed before this loop started off the pre-move speed — a trap sprung
@@ -181,7 +180,7 @@ async function checkOpportunityAttacks(
   if (!encounter) return;
   // Anyone on another team — with several creature factions in one fight, they swing at each other too.
   const reactors = encounter.hostilesOf(mover);
-  const positions = tokenPositions.get(cid) ?? {};
+  const positions = positionsOf(cid, mover.id);
 
   for (const reactor of reactors) {
     if (reactor.isDead() || !reactor.hasResource('reaction')) continue;

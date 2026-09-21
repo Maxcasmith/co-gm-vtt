@@ -101,6 +101,10 @@ reunion summary / session recap visibly missing what one group did.
 
 **Progress log:**
 - 2026-09-19 — entry created alongside Party Groups phases 1–3.
+- 2026-09-19 — Max confirmed: ending the session ends it for everyone, split or not — that part is
+  intended, not a bug. What stays deferred is only the side-effects above (archived branch lines
+  missing from a still-open split's reunion summary, stale manifest scene for session-end quest
+  generation). Not in Party Groups step 15's scope.
 
 ---
 
@@ -122,5 +126,12 @@ a dungeon or a fight and another group needs to fight or explore elsewhere at th
 **The plan:** fully written up in `docs/PARTY-GROUPS.md` → "Step 15" (design, file list, order,
 open questions, done-looks-like).
 
+**RESOLVED — 2026-09-20.** Step 15 was built: a dungeon registry keyed by dungeon id, positions
+moved onto each `Dungeon`, per-track locations in `groups.json`, map events sent only to a
+dungeon's occupants, and a combat arena per open-world fight. A group in town can now fight while
+another is in a dungeon, and each dungeon is discarded once its last group leaves. See
+`docs/PARTY-GROUPS.md` → "Where everyone is". Kept here for the history.
+
 **Progress log:**
 - 2026-09-19 — deferred at the end of the Party Groups build (steps 1–14 done).
+- 2026-09-20 — built; entry closed.
