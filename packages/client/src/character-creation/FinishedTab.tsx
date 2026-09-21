@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Spell } from 'shared';
 import { useCharacter } from './CharacterContext.tsx';
-import { FEAT_SPELL_GRANTS, BACKGROUND_FEAT, STAT_NAMES } from './srd.ts';
+import { CLASS_FEATURES, FEAT_SPELL_GRANTS, BACKGROUND_FEAT, STAT_NAMES, BACKGROUND_ASI, CLASS_SKILLS, CLASS_SPELL_ALLOWANCE, SPECIES_SUBSPECIES } from './srd.ts';
 import CharacterSheet from './CharacterSheet.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
@@ -31,6 +31,39 @@ export default function FinishedTab({ error }: Props) {
       .catch(() => setSpellDetails([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [c.characterClass, featSourceNames.join(','), learnedNames.join(',')]);
+
+  type Tab = typeof c.activeTab;
+  const missing: { text: string; tab: Tab }[] = [];
+  if (!c.name.trim()) missing.push({ text: 'Character name', tab: 'info' });
+  if (!c.password.trim()) missing.push({ text: 'Join password', tab: 'info' });
+  if (!c.rolled) missing.push({ text: 'Ability scores not rolled', tab: 'info' });
+  else if (c.pool.length > 0) missing.push({ text: `${c.pool.length} rolled score(s) not assigned`, tab: 'info' });
+  if (!c.species) missing.push({ text: 'Species', tab: 'info' });
+  else if ((SPECIES_SUBSPECIES[c.species] ?? []).length > 0 && !c.subspecies) missing.push({ text: 'Lineage', tab: 'info' });
+  if (c.species === 'Human' && !c.speciesOriginFeat) missing.push({ text: 'Versatile origin feat', tab: 'info' });
+  if (!c.background) missing.push({ text: 'Background', tab: 'info' });
+  else {
+    const asiLeft = 3 - (BACKGROUND_ASI[c.background] ?? []).reduce((n, st) => n + (c.backgroundAsi[st] ?? 0), 0);
+    if (asiLeft > 0) missing.push({ text: `${asiLeft} background ability point(s) unspent`, tab: 'info' });
+  }
+  if (!c.characterClass) missing.push({ text: 'Class', tab: 'info' });
+  else {
+    const classSkills = CLASS_SKILLS[c.characterClass];
+    const picked = Object.values(c.skillProficiencies).filter(src => src === c.characterClass).length;
+    if (classSkills && picked < classSkills.count) missing.push({ text: `${classSkills.count - picked} class skill(s) not chosen`, tab: 'info' });
+    const features = CLASS_FEATURES[c.characterClass] ?? [];
+    if (features.some(f => f.name === 'Fighting Style') && !c.fightingStyle) missing.push({ text: 'Fighting style', tab: 'fightingStyle' });
+    if (features.some(f => f.name === 'Divine Order' || f.name === 'Primal Order') && !c.classOrder) missing.push({ text: 'Class order', tab: 'classOrder' });
+    if (features.some(f => f.name === 'Eldritch Invocations') && c.invocations.length < 2) missing.push({ text: `${2 - c.invocations.length} invocation(s) not chosen`, tab: 'invocations' });
+    const allowance = CLASS_SPELL_ALLOWANCE[c.characterClass];
+    if (allowance && spellDetails.length === learnedNames.length) {
+      const own = spellDetails.filter(sp => c.learnedSpells[sp.name] === c.characterClass);
+      const cantrips = own.filter(sp => sp.level === 0).length;
+      const leveled = own.length - cantrips;
+      if (cantrips < allowance.cantrips) missing.push({ text: `${allowance.cantrips - cantrips} cantrip(s) not learned`, tab: 'spells' });
+      if (leveled < allowance.spells) missing.push({ text: `${allowance.spells - leveled} spell(s) not learned`, tab: 'spells' });
+    }
+  }
 
   return (
     <div className="player-info-layout">
@@ -90,6 +123,19 @@ export default function FinishedTab({ error }: Props) {
             </div>
           )}
         </section>
+
+        {missing.length > 0 && (
+          <div className="finished-missing">
+            <h3 className="finished-missing-title">Still missing</h3>
+            <ul className="finished-missing-list">
+              {missing.map(m => (
+                <li key={m.text}>
+                  <button type="button" className="finished-missing-item" onClick={() => c.set('activeTab', m.tab)}>{m.text}</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {error && <p className="modal-error create-error">{error}</p>}
       </div>

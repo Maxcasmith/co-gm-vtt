@@ -77,6 +77,12 @@ export class Participant {
   // (GamePage refills it on vtt:combat:turn and decrements on vtt:movement:used), and
   // mirroring it here without also moving distance validation into the token:move handler
   // would leave two sources of truth. Move it server-side when movement needs enforcing.
+  /** Client-reported mirror of remaining movement this turn (client owns the math, see note above) — only so a mid-turn refresh can restore it. Undefined until reported; cleared on refill. */
+  movementRemainingFt: number | undefined = undefined;
+
+  /** Standard-action badges (Dodging/Disengaging/Hiding) for the HUD — mirrored so a refresh can restore them; cleared on refill. */
+  activeEffects: string[] = [];
+
   actionsRemaining = 1;
   bonusActionsRemaining = 1;
   reactionsRemaining = 1;
@@ -158,6 +164,8 @@ export class Participant {
   }
 
   refillResources(): void {
+    this.movementRemainingFt = undefined;
+    this.activeEffects = [];
     this.actionsRemaining = 1;
     this.bonusActionsRemaining = 1;
     this.reactionsRemaining = 1;

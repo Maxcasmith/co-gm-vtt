@@ -84,15 +84,64 @@ export function toFightOf(cid: string, key: string) {
 /** The fight's own players (by live socket) — the audience for every combat event. Computed at emit
  * time from the fight itself rather than kept as room membership, so joins, merges, reconnects and
  * lane changes can never leave it stale. */
-export function toFight(fight: Encounter) {
-  return toSockets(fight.turnOrder.concat(fight.players)
+export function toFight(fight: Encounter, cid?: string) {
+  const participantSockets = fight.turnOrder.concat(fight.players)
     .filter(p => p.isPlayer)
-    .map(p => playerSocketIds.get(p.id))
-    .filter((sid): sid is string => !!sid));
+    .map(p => playerSocketIds.get(p.id));
+  // pendingPlayerNames are players already in this fight who have no participant yet — initiative
+  // hasn't rolled. Anything emitted in that window (encounter:generating above all, the event a
+  // client's loading screen waits on) reaches nobody without them. Resolving names needs the
+  // campaign's name→charId map, hence the optional `cid`: pass it whenever emitting before
+  // initiative, omit it once participants exist. Same inclusion audienceTracks already makes for
+  // chat (see partyGroups.ts), kept consistent here.
+  const names = cid ? playerCharIds.get(cid) : undefined;
+  const pendingSockets = names
+    ? fight.pendingPlayerNames.map(n => { const charId = names.get(n); return charId ? playerSocketIds.get(charId) : undefined; })
+    : [];
+  return toSockets([...participantSockets, ...pendingSockets].filter((sid): sid is string => !!sid));
 }
 // Combat hook registry, lifecycle-matched to `encounters` — created on demand at combat start,
 // deleted by endCombat so a finished fight's hooks can never leak into the next one.
 export const stateEngines = new Map<string, StateEngine>();
+
+// ── In-flight generations ────────────────────────────────────────────────────
+// Purely so a player who reloads mid-generation gets their loading screen back instead of landing
+// on a live, fully interactive map for the rest of the wait (see socketHandlers/connection.ts).
+// In-memory only and deliberately not persisted: a server restart means nothing is generating any
+// more, which is exactly what an empty registry says. Every path that starts a generation must
+// clear it on EVERY exit — success, failure and early return — or reconnecting players get a
+// loading screen that never comes down.
+
+/** cid → the tracks currently generating a dungeon. GENERATING_ALL_TRACKS covers an unsplit party. */
+export const GENERATING_ALL_TRACKS = 'all';
+const generatingDungeons = new Map<string, Set<string>>();
+
+export function markDungeonGenerating(cid: string, tracks: string[] | null, generating: boolean): void {
+  const keys = tracks?.length ? tracks : [GENERATING_ALL_TRACKS];
+  const forCampaign = generatingDungeons.get(cid) ?? new Set<string>();
+  for (const key of keys) generating ? forCampaign.add(key) : forCampaign.delete(key);
+  if (forCampaign.size) generatingDungeons.set(cid, forCampaign);
+  else generatingDungeons.delete(cid);
+}
+
+/** Whether the dungeon this player would be walking into is still being generated. */
+export function isDungeonGeneratingFor(cid: string, track: string | undefined): boolean {
+  const forCampaign = generatingDungeons.get(cid);
+  if (!forCampaign) return false;
+  return forCampaign.has(GENERATING_ALL_TRACKS) || (!!track && forCampaign.has(track));
+}
+
+/** Encounter ids whose enemies are still being generated. */
+const generatingFights = new Set<string>();
+
+export function markFightGenerating(encounterId: string, generating: boolean): void {
+  if (generating) generatingFights.add(encounterId);
+  else generatingFights.delete(encounterId);
+}
+
+export function isFightGenerating(encounterId: string): boolean {
+  return generatingFights.has(encounterId);
+}
 
 export function getStateEngine(cid: string): StateEngine {
   let engine = stateEngines.get(cid);

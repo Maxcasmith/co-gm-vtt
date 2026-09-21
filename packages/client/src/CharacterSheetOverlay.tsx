@@ -78,7 +78,7 @@ export default function CharacterSheetOverlay({
   }, [character.campaignId]);
   const hasBackstory = !!character.backstory?.trim();
   const showInfoTab = worldType === "campaign" && hasBackstory;
-  const TABS = TAB_ORDER.filter((t) => (t.id !== "spells" || hasSpells) && (t.id !== "info" || showInfoTab));
+  const TABS = TAB_ORDER.filter((t) => (t.id !== "spells" || hasSpells) && (t.id !== "info" || showInfoTab) && (t.id !== "goals" || worldType !== "dungeon-crawl"));
   const [combatActive, setCombatActive] = useState(false);
   const [isMyTurn, setIsMyTurn] = useState(false);
   const [actionAvailable, setActionAvailable] = useState(true);

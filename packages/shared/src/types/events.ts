@@ -112,11 +112,16 @@ export interface ServerToClientEvents {
   "dm:thinking": (active: boolean) => void;
   "storyboard:queue": (payload: StoryboardQueuePayload) => void;
   "combat:state": (active: boolean) => void;
+  "combat:downed:sync": (data: { downNames: string[]; deadNames: string[]; deadCreatureIds: string[]; players: { id: string; name: string; currentHp: number; maxHp: number; tempHp: number }[] }) => void;
   "encounter:generating": () => void;
   "encounter:ready": (enemies: EnemyStatBlock[]) => void;
+  /** Enemy generation threw — the counterpart to encounter:generating that releases a client
+   * waiting on encounter:ready. Without it a failed generation leaves the loading overlay (and the
+   * input lockout behind it) up forever. */
+  "encounter:failed": () => void;
   "token:moved": (pos: TokenPosition) => void;
   /** speedMultiplier is only present when reduced below 1 (Wardaway) — omitted means full/normal speed. */
-  "combat:turn": (data: { actorId: string; actorName: string; speedMultiplier?: number; speedBonusFt?: number; buffs?: string[] }) => void;
+  "combat:turn": (data: { actorId: string; actorName: string; speedMultiplier?: number; speedBonusFt?: number; buffs?: string[]; resync?: boolean; movementRemainingFt?: number }) => void;
   "combat:initiative": (entry: TurnOrderEntry) => void;
   "combat:turn:order": (entries: TurnOrderEntry[]) => void;
   "combat:attack:result": (result: AttackResult) => void;
@@ -188,6 +193,7 @@ export interface ServerToClientEvents {
     actionsRemaining: number;
     bonusActionsRemaining: number;
     reactionsRemaining: number;
+    activeEffects?: string[];
   }) => void;
   "combat:player:slots": (data: {
     characterId: string;
@@ -274,6 +280,10 @@ export interface ServerToClientEvents {
   "character:aiControlled:update": (data: { characterId: string; aiControlled: boolean }) => void;
   "character:currency:update": (data: { characterId: string }) => void;
   "dungeon:generating": () => void;
+  /** Dungeon generation threw — the counterpart to dungeon:generating that releases a client
+   * waiting on dungeon:loaded, which otherwise never arrives and leaves the party staring at a
+   * loading screen with their inputs disabled. */
+  "dungeon:failed": () => void;
   "dungeon:loaded": (dungeon: Dungeon) => void;
   "dungeon:cleared": () => void;
   /** `final`: true only when this update closed out a dungeon's questChain's last stage — the whole questline is done, not just one stage of it. Unset/false for every intermediate stage and for non-chain quest updates. */
@@ -411,6 +421,8 @@ export interface ClientToServerEvents {
   "combat:illusion:investigate": (payload: { targetId: string; investigatorId: string }) => void;
   /** Marks actorId's movement as not provoking Opportunity Attacks for the rest of this turn (Participant.disengaging, cleared on their next refillResources). */
   "combat:disengage": (payload: { actorId: string }) => void;
+  "combat:movement:sync": (ft: number) => void;
+  "combat:standardAction:used": (payload: { actorId: string; key: string; effect?: string }) => void;
   "rest:open": () => void;
   "rest:choice": (payload: {
     campaignId: string;

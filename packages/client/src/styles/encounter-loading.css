@@ -3,7 +3,11 @@
 .encounter-overlay {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  /* Above every interactive surface — chat (850), character sheet/journal (800), command palette
+     (900), reaction prompt (9500) — so the loading screen genuinely blocks input rather than just
+     dimming the canvas behind them. Stays below toast notifications (99999). At the old 200 it
+     was painted over by the chat widget, which is rendered after it in GamePage's JSX. */
+  z-index: 9600;
   background: rgba(8, 8, 18, 0.88);
   display: flex;
   align-items: center;

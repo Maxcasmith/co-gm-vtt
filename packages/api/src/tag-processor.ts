@@ -12,7 +12,7 @@ export type TagEffect =
   | { type: 'combat_init'; combatants: string[] }
   | { type: 'scene_build'; locationName: string; detail: string }
   | { type: 'npc_build'; npcName: string; detail: string }
-  | { type: 'dungeon_gen'; name: string; dungeonType: string }
+  | { type: 'dungeon_gen'; name: string; dungeonType: string; reopen?: boolean }
   | { type: 'dungeon_exit' }
   | { type: 'door_unlock'; characterName: string }
   | { type: 'item_used'; characterName: string; itemName: string }
@@ -197,14 +197,18 @@ export async function processVdmResponse(
   for (const s of saveMatches) console.log(`[tag] REQUEST_SAVE: ${s.player} — ${s.skill}`);
   const checkRequests: CheckRequest[] = [...checkMatches, ...saveMatches];
 
-  const DUNGEON_GEN_RE = /\[\[DUNGEON_GEN:([^:[\]]+):([^\]]+)\]\]/g;
+  // Third segment is optional and only ever "reopen": the model saying this location is one the
+  // party has already visited, so its stored map should be re-opened rather than a new one built.
+  // Anything else (including the older two-segment form every existing save used) means "new".
+  const DUNGEON_GEN_RE = /\[\[DUNGEON_GEN:([^:[\]]+):([^:[\]]+)(?::([^\]]+))?\]\]/g;
   const dungeonGenMatches = [...text.matchAll(DUNGEON_GEN_RE)];
   for (const match of dungeonGenMatches) {
     const name = match[1]?.trim();
     const dungeonType = match[2]?.trim();
+    const reopen = match[3]?.trim().toLowerCase() === 'reopen';
     if (name && dungeonType) {
-      console.log(`[tag] DUNGEON_GEN: ${name} (${dungeonType})`);
-      effects.push({ type: 'dungeon_gen', name, dungeonType });
+      console.log(`[tag] DUNGEON_GEN: ${name} (${dungeonType})${reopen ? ' [reopen]' : ''}`);
+      effects.push({ type: 'dungeon_gen', name, dungeonType, ...(reopen ? { reopen } : {}) });
     }
   }
 

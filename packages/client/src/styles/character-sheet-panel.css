@@ -140,12 +140,11 @@ button.feature-toggle {
 /* ── portrait + name row ── */
 .portrait-name-row {
   display: flex;
-  gap: 14px;
+  gap: 16px;
   align-items: flex-start;
 }
 
 .portrait-name-fields {
-  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -164,8 +163,20 @@ button.feature-toggle {
 }
 
 .inline-portrait-drop--compact {
-  width: 110px;
-  height: 110px;
+  width: 180px;
+  height: 180px;
+}
+
+.inline-token-box {
+  width: 180px;
+  height: 180px;
+  border: 2px dashed var(--border);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
 }
 
 .inline-portrait-drop:hover { border-color: var(--gold); }
@@ -186,16 +197,9 @@ button.feature-toggle {
 
 .portrait-file-input { display: none; }
 
-.inline-token-badge {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .inline-token-img {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
 }
 

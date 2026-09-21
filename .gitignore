@@ -11,5 +11,6 @@ packages/api/storage/props/
 packages/api/storage/icons/
 packages/api/storage/creatures/
 packages/api/storage/tilesets/
+packages/api/storage/genre-tile-map.json
 packages/api/storage/saved-adventures/
 packages/api/storage/storyboard-test/

@@ -4,11 +4,12 @@ import type { Socket } from 'socket.io';
 import { toDungeon, occupantsOf, type Audience } from '../state.ts';
 import { slugifyTheme, hasLineOfSight, closedDoorCells } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
+import type { ArenaTerrain } from '../session-processor/imagePrompts.ts';
 import { fetchManifest } from './manifest.ts';
 import { generateGrid, type DoorRect } from './generator.ts';
 import { generateBuildingLayout } from './buildingLayout.ts';
 import { placeEntities, placeEncounterEntities } from './placer.ts';
-import { ensureTilesetSupport } from './tilesets.ts';
+import { ensureTilesetSupport, type TilesetResolution } from './tilesets.ts';
 import { assignPortraitSrcs, generateCreaturePortraits } from './creaturePortraits.ts';
 import { assignPropSpriteSrcs, generatePropSprites } from './props.ts';
 
@@ -77,8 +78,8 @@ export async function generateDungeon(
   // synchronously — no background-fill/retry pattern like creature portraits get), so the dungeon
   // is paused behind these two. Fired together via Promise.all rather than sequentially, so their
   // atlas requests overlap instead of queueing one behind the other.
-  const [tilesetSlug] = await Promise.all([
-    config ? ensureTilesetSupport(manifest.theme, manifest.materials, config, opts?.genre) : Promise.resolve(slugifyTheme(manifest.theme)),
+  const [tileset] = await Promise.all([
+    config ? ensureTilesetSupport(manifest.theme, manifest.materials, config, opts?.genre) : Promise.resolve<TilesetResolution>({ tilesetSlug: slugifyTheme(manifest.theme) }),
     config ? generatePropSprites(manifest.props, config) : Promise.resolve(),
   ]);
 
@@ -94,7 +95,8 @@ export async function generateDungeon(
     entities,
     questChain: manifest.questChain,
     theme: manifest.theme,
-    tilesetSlug,
+    tilesetSlug: tileset.tilesetSlug,
+    ...(tileset.materialSources ? { materialSources: tileset.materialSources } : {}),
     structureType: manifest.structureType,
     illumination: manifest.illumination,
     baseIllumination: manifest.illumination,
@@ -192,6 +194,22 @@ export function broadcastDungeon(cid: string, dungeon: Dungeon, audience: Audien
 export function toClientDungeon(dungeon: Dungeon): Dungeon {
   // Party-placed traps skip the discovered gate — you always know where your own trap is.
   return { ...dungeon, entities: dungeon.entities.filter(e => e.discovered || e.placedBy) };
+}
+
+/**
+ * Applies the ground the encounter model authored for an open-world fight (see ArenaTerrain), so
+ * an arena renders real floor art instead of the flat fallback colour a materialless room paints.
+ * Runs after the arena is already on screen, not before — the map ships first by design (see
+ * openArena), so this is a fill-in followed by a rebroadcast. Reuses existing genre art rather than
+ * drawing new whenever the model said to, exactly like a dungeon's rooms.
+ */
+export async function applyArenaTerrain(arena: Dungeon, terrain: ArenaTerrain, config: AppConfig, genre?: CampaignGenre): Promise<void> {
+  arena.theme = terrain.theme;
+  // One bare room, but written as a loop so it stays correct if arenas ever get more than one.
+  for (const room of arena.rooms) room.material = terrain.material.key;
+  const { tilesetSlug, materialSources } = await ensureTilesetSupport(terrain.theme, [terrain.material], config, genre);
+  arena.tilesetSlug = tilesetSlug;
+  if (materialSources) arena.materialSources = materialSources;
 }
 
 /** Drops freshly generated enemies into an existing arena, returning the entities placed. */

@@ -12,5 +12,6 @@ export function emitResources(cid: string, participant: Participant): void {
     actionsRemaining: participant.actionsRemaining,
     bonusActionsRemaining: participant.bonusActionsRemaining,
     reactionsRemaining: participant.reactionsRemaining,
+    activeEffects: participant.activeEffects,
   });
 }

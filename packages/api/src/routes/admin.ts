@@ -55,8 +55,10 @@ adminRouter.delete('/campaigns/:id', async (req, res) => {
     const { resources } = req.body as { resources?: ResourceCleanupRequest };
     let messages: string[] = [];
     if (resources && (resources.tiles || resources.creatures || resources.props)) {
-      const dungeon = (await loadDungeons(campaignId))[0] ?? null;
-      if (dungeon) messages = await deleteUnusedResources(dungeon, resources, { excludeId: campaignId, excludeKind: 'campaign' });
+      // Every dungeon the campaign kept — see the same loop in routes/campaigns.ts.
+      for (const dungeon of await loadDungeons(campaignId)) {
+        messages = messages.concat(await deleteUnusedResources(dungeon, resources, { excludeId: campaignId, excludeKind: 'campaign' }));
+      }
     }
     await deleteCampaign(campaignId);
     clearCampaignRuntimeState(campaignId);

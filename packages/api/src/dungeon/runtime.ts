@@ -1,17 +1,18 @@
 import type { Dungeon, DungeonEntity, EnemyStatBlock } from 'shared';
 import { hasLineOfSight, closedDoorCells, statMod } from 'shared';
 import { randomUUID } from 'crypto';
-import { saveDungeon, saveEncounter, getConfig, listCharacters, getCharacter, readNemeses, readManifest } from '../storage.ts';
+import { saveDungeon, saveEncounter, getConfig, listCharacters, getCharacter, readNemeses, readManifest, getWorldMeta } from '../storage.ts';
 import { D20Roll } from '../combat/dice.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateEncounterEnemies, assignCombatTeams, DEFAULT_ENEMY_SIDE, type CombatSide } from '../session-processor/imagePrompts.ts';
-import { generateEncounterDungeon, placeArenaEnemies, roomAt, chainClosure } from './index.ts';
+import { generateEncounterDungeon, placeArenaEnemies, applyArenaTerrain, roomAt, chainClosure } from './index.ts';
+import { assignPortraitSrcs, generateCreaturePortraits } from './creaturePortraits.ts';
 import { templateRoomEntry, type SearchFind } from './narrateEvents.ts';
 import { dungeonEvents } from './events.ts';
 import { Encounter, Participant, PLAYERS_TEAM_ID } from '../domain/encounter.ts';
 import { Creature } from '../domain/creature.ts';
 import { logError } from '../logger.ts';
-import { io, campaignRoom, positionsOf, dungeonOf, fightDungeon, registerDungeon, toDungeon, PLAYER_SIGHT_RADIUS, ENEMY_AGGRO_RADIUS, COMBAT_CHAIN_RADIUS, campaignPlayers, connected, fightOf, registerFight, toFight, toDungeonOf } from '../state.ts';
+import { io, campaignRoom, positionsOf, dungeonOf, fightDungeon, registerDungeon, toDungeon, PLAYER_SIGHT_RADIUS, ENEMY_AGGRO_RADIUS, COMBAT_CHAIN_RADIUS, campaignPlayers, connected, fightOf, registerFight, toFight, toDungeonOf, markFightGenerating } from '../state.ts';
 import { addToTurnOrder, rollPlayerInitiatives, rollEnemyInitiatives, resolveFightChains, syncFight } from '../combat/runtime/lifecycle.ts';
 import { checkTrapAt } from '../combat/runtime/traps.ts';
 import { checkQuestChainTriggers } from './questChain.ts';
@@ -335,7 +336,10 @@ async function appendChatLogAndBroadcast(cid: string, characterName: string, tex
 /** World-map combat (DM's COMBAT_INIT): generates the enemies for `encounter`, whose players are already in it. */
 export async function generateAndBroadcastEnemies(campaignId: string, encounter: Encounter, combatants: string[] = []): Promise<void> {
   try {
-    toFight(encounter).emit('encounter:generating');
+    // cid passed deliberately: at this point players are still pending (initiative hasn't rolled),
+    // and without it this event — the one the loading screen waits on — reaches nobody.
+    toFight(encounter, campaignId).emit('encounter:generating');
+    markFightGenerating(encounter.id, true);
     const config = await getConfig();
     if (!hasFeatureProvider(config, 'encounterGeneration')) console.warn('[encounter] no combat models configured, using fallback');
     const adapter = getFeatureProvider(config, 'encounterGeneration');
@@ -355,9 +359,13 @@ export async function generateAndBroadcastEnemies(campaignId: string, encounter:
       (n.boundTo === 'party' || characterNames.includes(n.boundTo))
     );
 
-    const statBlocks = await generateEncounterEnemies(messages, characters, adapter, availableNemeses, combatants);
+    const worldMeta = await getWorldMeta(campaignId);
+    const { enemies: statBlocks, terrain } = await generateEncounterEnemies(messages, characters, adapter, availableNemeses, combatants, worldMeta?.genre);
 
-    if (encounter.ended) return;
+    // The fight was resolved while the model was still thinking. endCombat's own combat:state:false
+    // normally brings the loading screen down, but emit the explicit release too rather than
+    // depending on that ordering — this is the one path where nobody is left to send anything else.
+    if (encounter.ended) { toFight(encounter, campaignId).emit('encounter:failed'); return; }
 
     // Assign a fresh UUID per combat slot so duplicate-name enemies have unique IDs
     const uniqueStatBlocks = statBlocks.map(sb => ({ ...sb, id: randomUUID() }));
@@ -389,6 +397,13 @@ export async function generateAndBroadcastEnemies(campaignId: string, encounter:
       for (const entity of placeArenaEnemies(arena, uniqueStatBlocks)) {
         toDungeonOf(campaignId, entity.id).emit('token:moved', { tokenId: entity.id, gx: entity.x, gy: entity.y });
       }
+      // Everything a generated dungeon's rooms and creatures get, the arena gets too — it just
+      // gets it here rather than up front, because the map deliberately ships before this model
+      // call returns (see openArena). Portraits are assigned synchronously and filled in in the
+      // background, same contract as generateDungeon's.
+      assignPortraitSrcs(arena.entities);
+      void generateCreaturePortraits(arena.entities, config);
+      if (terrain) await applyArenaTerrain(arena, terrain, config, worldMeta?.genre);
       await saveDungeon(campaignId, arena);
       broadcastDungeon(campaignId, arena);
     }
@@ -396,6 +411,14 @@ export async function generateAndBroadcastEnemies(campaignId: string, encounter:
     if (!encounter.ended) rollEnemyInitiatives(campaignId, encounter);
   } catch (err) {
     logError('index:generateAndBroadcastEnemies', err);
+    // Releases the loading screen and the input lockout behind it — encounter:ready is never
+    // coming. The fight itself stays open (players are already in it); it just has no generated
+    // enemies, which the DM can still resolve narratively.
+    toFight(encounter, campaignId).emit('encounter:failed');
+  } finally {
+    // finally, not per-branch: covers the success path, the throw, and the ended-early return, so a
+    // reconnecting player is never shown a loading screen for a generation that is already over.
+    markFightGenerating(encounter.id, false);
   }
 }
 

@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto';
-import { calcAC, CREATURE_TYPES, ENEMY_ROLES } from 'shared';
-import type { ChatPayload, Character, EnemyStatBlock, CreatureType, EnemyRole, AttackResult, SpellAttackResult, SpellSaveResult, WorldState, WorldActor, Goal, NemesisRecord, DungeonMaterialSpec, AbilityKey } from 'shared';
+import { calcAC, CREATURE_TYPES, ENEMY_ROLES, MATERIAL_CATEGORIES, slugifyTheme } from 'shared';
+import type { ChatPayload, Character, EnemyStatBlock, CreatureType, EnemyRole, AttackResult, SpellAttackResult, SpellSaveResult, WorldState, WorldActor, Goal, NemesisRecord, DungeonMaterialSpec, MaterialCategory, CampaignGenre, AbilityKey } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
+import { buildGenreTileBlock } from '../dungeon/genreTiles.ts';
 import { logError } from '../logger.ts';
 import { writeGoals } from '../storage.ts';
 import { renderRoleTemplatesForPrompt } from '../combat/ai/roleTemplates.ts';
@@ -24,13 +25,23 @@ const FALLBACK_ENEMY: EnemyStatBlock = {
   role: 'Infantry',
 };
 
+/** The arena floor an open-world fight is played on, authored by the same call that picks the
+ * enemies — it's the only model call on that path and it already has the transcript describing
+ * where the party actually is. `material.reuse` follows the genre tile map's reuse contract, same
+ * as a dungeon room's (see dungeon/genreTiles.ts). */
+export interface ArenaTerrain {
+  theme: string;
+  material: DungeonMaterialSpec;
+}
+
 export async function generateEncounterEnemies(
   messages: ChatPayload[],
   characters: Character[],
   adapter: StoryProviderAdapter,
   availableNemeses: NemesisRecord[] = [],
   combatants: string[] = [],
-): Promise<EnemyStatBlock[]> {
+  genre?: CampaignGenre,
+): Promise<{ enemies: EnemyStatBlock[]; terrain?: ArenaTerrain }> {
   const partyLines = characters.length
     ? characters.map(c => `- ${c.name}, level ${c.level ?? 1} ${c.class} (${c.species}), AC ${calcAC(c)}, HP ${c.currentHp ?? c.maxHp ?? '?'}/${c.maxHp ?? '?'}, equipped: ${(c.inventory ?? []).map(i => i.name).join(', ') || 'basic gear'}`).join('\n')
     : '- Unknown adventurers (assume level 1–2)';
@@ -44,6 +55,8 @@ export async function generateEncounterEnemies(
   const combatantBlock = combatants.length
     ? `\nThe narrative DM has already established these exact combatants in the scene: ${combatants.join(', ')}.\nGenerate one stat block per entry listed, matching what it describes (species, role, apparent equipment) — do not invent additional or different creatures, and do not drop any entry.\nException: if an entry is a named creature that matches one of the returning nemeses listed below, use that exact stat block instead of generating a new one — do not alter its numbers to fit the party.\n`
     : '';
+
+  const genreBlock = await buildGenreTileBlock(genre);
 
   const systemPrompt = `You are a D&D 5e DM generating a combat encounter. Return ONLY valid JSON:
 {
@@ -61,9 +74,17 @@ export async function generateEncounterEnemies(
       "role": "one of: ${ENEMY_ROLES.join('|')}",
       "actions": "optional — only for roles whose kit needs more than attacks[], see role reference below"
     }
-  ]
+  ],
+  "terrain": {
+    "theme": "string — a short lowercase keyword for the art style/setting of the ground the party is fighting on, e.g. gothic_horror. Match the place the recent transcript says they actually are.",
+    "material": "string — short lowercase key (1-2 words, e.g. wood, cracked-asphalt, wet-stone) naming the floor/ground underfoot at this exact spot.",
+    "materialDescription": "string — vivid visual description of that ground's appearance (colour, wear, pattern) for an image generator.",
+    "materialCategory": "one of: ${MATERIAL_CATEGORIES.join('|')} — the coarse real-world material family that ground belongs to.",
+    "materialReuse": "boolean — see the already-available list below, if one is given."
+  }
 }
-${nemesisBlock}${combatantBlock}
+${nemesisBlock}${combatantBlock}${genreBlock}
+"terrain" describes where this fight is physically happening — read the recent transcript and use the actual location (a tavern floor, a forest track, a rain-slick street), not a generic dungeon. Always return it.
 Rules: 1-3 enemies, MEDIUM difficulty scaled to the party's ACTUAL current state below — real level, AC, and current HP, not an assumed standard 4-person party. A party of one gets a correspondingly lighter encounter than a party of four; a party already down HP from a prior fight gets a lighter encounter than a party at full HP. Use official 5e monster stat blocks as reference for the base numbers, then adjust to fit the party size and state given.${combatants.length ? '' : ' Base the enemies on whoever/whatever is described as hostile in the recent transcript below — do not introduce a creature type unconnected to what has already been narrated.'}
 
 Every enemy needs a role — pick whichever fits what's actually being narrated, and vary roles across a multi-enemy group rather than giving them all the same one:
@@ -74,19 +95,35 @@ Return ONLY valid JSON, no markdown fences, no explanation.`;
   try {
     const raw = await adapter.complete(`${systemPrompt}\n\nParty:\n${partyLines}\n\nRecent events:\n${transcript}`);
     const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
-    const parsed = JSON.parse(cleaned) as { enemies?: EnemyStatBlock[] };
+    const parsed = JSON.parse(cleaned) as { enemies?: EnemyStatBlock[]; terrain?: Record<string, unknown> };
     const enemies = parsed.enemies ?? [];
-    return enemies.length
+    const normalized = enemies.length
       ? enemies.map((e, i) => {
         const { role: rawRole, ...rest } = e;
         const role = normalizeRole(rawRole);
         return { ...rest, id: e.id || `enemy-${i + 1}`, creatureType: normalizeCreatureType(e.creatureType), ...(role !== undefined ? { role } : {}) };
       })
       : [FALLBACK_ENEMY];
+    const terrain = normalizeArenaTerrain(parsed.terrain);
+    return { enemies: normalized, ...(terrain ? { terrain } : {}) };
   } catch (err) {
     logError('session-processor/imagePrompts:generateEncounterEnemies', err);
-    return [FALLBACK_ENEMY];
+    return { enemies: [FALLBACK_ENEMY] };
   }
+}
+
+// Same conservative parsing the dungeon manifest uses: a terrain block missing the two fields that
+// actually drive art (theme + material key) is dropped entirely rather than half-applied, leaving
+// the arena exactly as it renders today. An unrecognised category falls back to 'stone'.
+function normalizeArenaTerrain(raw: unknown): ArenaTerrain | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const t = raw as Record<string, unknown>;
+  const theme = typeof t.theme === 'string' ? t.theme.trim().toLowerCase() : '';
+  const key = typeof t.material === 'string' ? slugifyTheme(t.material) : '';
+  if (!theme || !key) return undefined;
+  const description = typeof t.materialDescription === 'string' && t.materialDescription.trim() ? t.materialDescription.trim() : key;
+  const category = MATERIAL_CATEGORIES.includes(t.materialCategory as MaterialCategory) ? (t.materialCategory as MaterialCategory) : 'stone';
+  return { theme, material: { key, description, category, ...(t.materialReuse === true ? { reuse: true } : {}) } };
 }
 
 function flattenMessages(messages: { role: string; content: string }[]): string {

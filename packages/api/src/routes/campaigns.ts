@@ -81,8 +81,11 @@ campaignsRouter.delete('/:id', async (req, res) => {
     const { resources } = req.body as { resources?: ResourceCleanupRequest };
     let messages: string[] = [];
     if (resources && (resources.tiles || resources.creatures || resources.props)) {
-      const dungeon = (await loadDungeons(campaignId))[0] ?? null;
-      if (dungeon) messages = await deleteUnusedResources(dungeon, resources, { excludeId: campaignId, excludeKind: 'campaign' });
+      // Every dungeon the campaign kept, not just the first — they accumulate now that leaving one
+      // preserves it for re-entry, and cleaning only ds[0] would orphan the rest of the art.
+      for (const dungeon of await loadDungeons(campaignId)) {
+        messages = messages.concat(await deleteUnusedResources(dungeon, resources, { excludeId: campaignId, excludeKind: 'campaign' }));
+      }
     }
     await deleteCampaign(campaignId);
     clearCampaignRuntimeState(campaignId);

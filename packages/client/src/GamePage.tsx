@@ -78,6 +78,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [encounter, setEncounter] = useState<EnemyStatBlock[] | null>(null);
   const [tokenPositions, setTokenPositions] = useState<Record<string, { gx: number; gy: number }>>({});
   const [movementRemaining, setMovementRemaining] = useState(0);
+  const movementRef = useRef(0);
   const [dmThinking, setDmThinking] = useState(false);
   const [isMyTurn, setIsMyTurn] = useState(false);
   const [victory, setVictory] = useState<import('./VictoryScreen.tsx').VictoryData | null>(null);
@@ -131,7 +132,12 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const dungeonRef = useRef<Dungeon | null>(null);
   useEffect(() => { dungeonRef.current = dungeon; }, [dungeon]);
   const [dungeonGenerating, setDungeonGenerating] = useState(false);
+  const [encounterGenerating, setEncounterGenerating] = useState(false);
   const dungeonReady = useDungeonReady(dungeon ?? undefined, dungeonGenerating);
+  // Either generation in flight blocks this player's input entirely — see the loading overlays.
+  // The overlay itself covers every pointer surface (z-index), but a focused text input still
+  // takes keystrokes through it, so chat is disabled explicitly rather than merely covered.
+  const generationLocked = dungeonGenerating || encounterGenerating;
   const [questLogOpen, setQuestLogOpen] = useState(false);
   const [quests, setQuests] = useState<Quest[]>([]);
   // Set once the dungeon's whole questChain resolves (quest:update's `final` flag) — the full
@@ -145,6 +151,13 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const lastSpaceRef = useRef<number>(0);
   const socketRef = useRef<ReturnType<typeof io> | null>(null);
+  // Every movement change also reports the new total so the server can restore it after a refresh.
+  const applyMovement = (fn: (n: number) => number) => {
+    const next = fn(movementRef.current);
+    movementRef.current = next;
+    setMovementRemaining(next);
+    socketRef.current?.emit('combat:movement:sync', next);
+  };
   const onCharacterUpdateRef = useRef(onCharacterUpdate);
   useEffect(() => { onCharacterUpdateRef.current = onCharacterUpdate; });
 
@@ -309,7 +322,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         ? Object.fromEntries(Object.entries(prev).filter(([id]) => id !== targetId))
         : { ...prev, [targetId]: elevationFt }));
     });
-    socket.on('movement:granted', ({ ft }) => setMovementRemaining(prev => prev + ft));
+    socket.on('movement:granted', ({ ft }) => applyMovement(n => n + ft));
     socket.on('combat:attack:blocked', ({ reason }) => {
       const id = crypto.randomUUID();
       setErrorNotifications(prev => [...prev, { id, reason }]);
@@ -400,6 +413,15 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       dispatch('vtt:combat:player:slots', data);
       if (data.characterId === character.id) setPlayerSlotsState({ current: data.currentSpellSlots1, max: data.maxSpellSlots1 });
     });
+    socket.on('combat:downed:sync', ({ downNames, deadNames, deadCreatureIds: ids, players }) => {
+      for (const p of players) {
+        setPartyHp(prev => ({ ...prev, [p.name]: { current: p.currentHp, max: p.maxHp } }));
+        if (p.id === character.id) setPlayerHpState({ current: p.currentHp, max: p.maxHp, temp: p.tempHp });
+      }
+      setDownPlayerNames(new Set(downNames));
+      setDeadPlayerNames(new Set(deadNames));
+      setDeadCreatureIds(new Set(ids));
+    });
     socket.on('combat:death:save', data => dispatch('vtt:combat:death:save', data));
     socket.on('combat:defeat', () => { dispatch('vtt:combat:defeat', {}); setDefeated(true); });
     socket.on('combat:player:dead', data => {
@@ -446,8 +468,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('token:moved', (pos: TokenPosition) => {
       setTokenPositions(prev => ({ ...prev, [pos.tokenId]: { gx: pos.gx, gy: pos.gy } }));
     });
-    socket.on('encounter:generating', () => dispatch('vtt:encounter:generating', {}));
-    socket.on('encounter:ready', enemies => { setEncounter(enemies); dispatch('vtt:encounter:ready', { enemies }); });
+    socket.on('encounter:generating', () => { setEncounterGenerating(true); dispatch('vtt:encounter:generating', {}); });
+    socket.on('encounter:ready', enemies => { setEncounterGenerating(false); setEncounter(enemies); dispatch('vtt:encounter:ready', { enemies }); });
+    socket.on('encounter:failed', () => { setEncounterGenerating(false); dispatch('vtt:encounter:failed', {}); });
     socket.on('session:recap', ({ text, senderName, checkRequests, splitId, trackIds }) => {
       dispatch('vtt:chat:message-received', { text, senderName, timestamp: Date.now(), variant: 'recap', checkRequests, splitId, trackIds });
     });
@@ -458,6 +481,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('combat:reaction:close', data => dispatch('vtt:combat:reaction:close', data));
     socket.on('combat:log', data => dispatch('vtt:combat:log', { kind: 'text', ...data }));
     socket.on('dungeon:generating', () => setDungeonGenerating(true));
+    // Generation threw server-side — dungeon:loaded is never coming, so drop the loading screen
+    // (and the input lockout with it) instead of leaving the party stuck behind it.
+    socket.on('dungeon:failed', () => setDungeonGenerating(false));
     socket.on('dungeon:loaded', dungeon => {
       setDungeonGenerating(false);
       // A different map entirely (this group walked into a dungeon or a combat arena, or out of
@@ -589,14 +615,20 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socketRef.current?.emit('goals:fetch', { characterId: character.id });
   }), [character.id]);
   // Movement resets to full only at the START of this player's turn, not on combat start
-  useEffect(() => { if (!combatActive) setMovementRemaining(0); }, [combatActive]);
-  useEffect(() => on('vtt:combat:turn', ({ actorName, speedMultiplier, speedBonusFt, buffs }) => {
+  useEffect(() => { if (!combatActive) { movementRef.current = 0; setMovementRemaining(0); } }, [combatActive]);
+  useEffect(() => on('vtt:combat:turn', ({ actorName, speedMultiplier, speedBonusFt, buffs, resync, movementRemainingFt }) => {
     if (actorName !== character.name) return;
-    setMovementRemaining(Math.floor(((character.speed ?? 30) + (speedBonusFt ?? 0)) * (speedMultiplier ?? 1)));
     setActiveBuffs(buffs ?? []);
+    // A rejoin replay of the current turn must not refill movement already spent before the refresh.
+    if (resync && movementRemainingFt !== undefined) {
+      movementRef.current = movementRemainingFt;
+      setMovementRemaining(movementRemainingFt);
+      return;
+    }
+    applyMovement(() => Math.floor(((character.speed ?? 30) + (speedBonusFt ?? 0)) * (speedMultiplier ?? 1)));
   }), [character.name, character.speed]);
-  useEffect(() => on('vtt:movement:used',   ({ ft }) => setMovementRemaining(prev => Math.max(0, prev - ft))), []);
-  useEffect(() => on('vtt:movement:gained', ({ ft }) => setMovementRemaining(prev => prev + ft)), []);
+  useEffect(() => on('vtt:movement:used',   ({ ft }) => applyMovement(n => Math.max(0, n - ft))), []);
+  useEffect(() => on('vtt:movement:gained', ({ ft }) => applyMovement(n => n + ft)), []);
 
   useEffect(() => {
     if (!dungeon) return;
@@ -663,6 +695,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       if (e.repeat) return;
       if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) return;
       if (storyboardQueue) return; // cold-open cutscene playing — no shortcuts while it holds the screen
+      if (generationLocked) return; // dungeon/encounter generating — same rule, the loading screen holds it
       const now = Date.now();
       if (e.code === 'Space') {
         if (now - lastSpaceRef.current < DOUBLE_TAP_MS) {
@@ -694,7 +727,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [journalOpen, storyboardQueue, sessionActive]);
+  }, [journalOpen, storyboardQueue, sessionActive, generationLocked]);
 
   const paletteItems = [
     {
@@ -831,7 +864,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       )}
       <CombatDock character={liveCharacter} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} activeBuffs={activeBuffs} elevationFt={elevations[character.id] ?? 0} connectedAllies={connected} allyCharacterIds={partyCharacterIds} />
       <EncounterLoadingOverlay />
-      <DungeonLoadingOverlay visible={!!dungeon && !dungeonReady} generating={dungeonGenerating} />
+      {/* dungeonGenerating on its own matters: the party is in the open world when the DM announces
+          a dungeon, so `dungeon` is still null for the whole generation. Gating on `!!dungeon`
+          alone meant the screen only ever appeared for an already-delivered map's textures. */}
+      <DungeonLoadingOverlay visible={dungeonGenerating || (!!dungeon && !dungeonReady)} generating={dungeonGenerating} />
       {storyboardQueue && <StoryboardOverlay queue={storyboardQueue} onDone={() => setStoryboardQueue(null)} skippable={false} />}
       <PartyMemberOverlay characterId={viewingMemberId} campaignId={character.campaignId} onClose={() => setViewingMemberId(null)} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} header={<span className="palette-clock">{formatWorldTime(worldTimeSecs)}</span>} />
@@ -848,7 +884,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       <NotesOverlay open={notesOpen} onClose={() => setNotesOpen(false)} character={character} />
       <DevModal open={devModalOpen} onClose={() => setDevModalOpen(false)} />
       {!journalOpen && <ChatWidget />}
-      <QuickChat open={quickChatOpen} onClose={() => setQuickChatOpen(false)} senderName={character.name} sessionActive={sessionActive} disabled={combatActive && !isMyTurn} />
+      <QuickChat open={quickChatOpen} onClose={() => setQuickChatOpen(false)} senderName={character.name} sessionActive={sessionActive} disabled={(combatActive && !isMyTurn) || generationLocked} />
       {victory && <VictoryScreen data={victory} onDismiss={() => setVictory(null)} />}
       {defeated && <DefeatScreen onDismiss={() => setDefeated(false)} />}
       {congrats && (

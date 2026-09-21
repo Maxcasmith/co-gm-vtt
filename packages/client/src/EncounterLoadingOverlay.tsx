@@ -37,7 +37,10 @@ export default function EncounterLoadingOverlay() {
     });
     const unsubGen     = on('vtt:encounter:generating', () => setGenerating(true));
     const unsubEnemies = on('vtt:encounter:ready',      () => { setEnemiesReady(true); scheduleDismiss(); });
-    return () => { unsubCombat(); unsubGen(); unsubEnemies(); };
+    // Generation threw — encounter:ready is never coming, so come down now rather than holding the
+    // screen (and the party's inputs) for a fight that will have to be resolved narratively.
+    const unsubFailed  = on('vtt:encounter:failed',     () => { if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current); setDismissing(true); setTimeout(() => setVisible(false), 500); });
+    return () => { unsubCombat(); unsubGen(); unsubEnemies(); unsubFailed(); };
   }, []);
 
   if (!visible) return null;

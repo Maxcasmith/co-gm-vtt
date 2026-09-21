@@ -210,33 +210,83 @@ async function recordGenreTileset(genre: CampaignGenre, materials: DungeonMateri
   }
 }
 
-// Called from generateDungeon() once a manifest's theme and materials are known. Never throws —
-// a failed or skipped generation just means the dungeon renders with the client's existing
-// default-pack fallback (dungeonThemes.ts), same as today's behaviour for an unrecognised theme.
-// Returns the folder key the caller should stamp onto Dungeon.tilesetSlug — a bare theme slug for
-// curated packs or a skip/failure, or theme-slug--<materials-hash> once a matching (possibly
-// freshly generated) dynamic tileset exists on disk. `genre` is optional (undefined on campaigns
-// predating the field) — when present, every material this dungeon actually used gets recorded
-// against it in the app-wide genre tile map (see recordGenreTileset).
-export async function ensureTilesetSupport(theme: string, materials: DungeonMaterialSpec[], config: AppConfig, genre?: CampaignGenre): Promise<string> {
-  const slug = slugifyTheme(theme);
-  if (hasTilesetSupport(theme)) return slug;
-  if (!materials.length) return slug;
+// A genre tile map value is always "<TILESETS_DIR>/<slug>/<materialKey>" (see recordGenreTileset),
+// and the client addresses art by slug + material key rather than by path (see dungeonThemes.ts),
+// so this pulls the slug back out. Anything not in that exact shape is treated as unusable rather
+// than guessed at — a bad entry costs one redundant generation, never a missing texture.
+function slugFromGenreMapPath(mapPath: string): string | undefined {
+  const parts = mapPath.split('/');
+  return parts.length === 3 && parts[0] === TILESETS_DIR ? parts[1] : undefined;
+}
 
-  const tilesetSlug = `${slug}--${hashMaterials(materials)}`;
-  if ((await getMediaStore().list(path.join(TILESETS_DIR, tilesetSlug))).length > 0) {
-    if (genre) await recordGenreTileset(genre, materials, tilesetSlug);
-    return tilesetSlug;
+export interface TilesetResolution {
+  /** Goes on Dungeon.tilesetSlug — where this dungeon's own freshly generated art lives. */
+  tilesetSlug: string;
+  /** Goes on Dungeon.materialSources — only the materials taken from some OTHER tileset. */
+  materialSources?: Record<string, string>;
+}
+
+/**
+ * Splits a map's materials into the ones whose art already exists for this genre (returned as
+ * materialSources, pointing at the tileset they live in) and the ones that still have to be drawn.
+ * Exported and pure so this one branch — the whole point of the genre tile map, and the one that
+ * silently costs money or silently loses a texture when it's wrong — is checkable without a real
+ * image generation (see tilesets.reuse.selfcheck.ts).
+ *
+ * The model's `reuse` flag is a request, not an instruction: a key that doesn't actually resolve in
+ * the map falls through to `fresh`, so a hallucinated flag costs one normal generation instead of
+ * pointing a room at art that was never drawn.
+ */
+export function splitReusableMaterials(
+  materials: DungeonMaterialSpec[],
+  genreMap: Partial<Record<MaterialCategory, Record<string, string>>>,
+): { fresh: DungeonMaterialSpec[]; materialSources: Record<string, string> } {
+  const materialSources: Record<string, string> = {};
+  const fresh: DungeonMaterialSpec[] = [];
+  for (const m of materials) {
+    const existing = m.reuse ? genreMap[m.category]?.[m.key] : undefined;
+    const sourceSlug = existing ? slugFromGenreMapPath(existing) : undefined;
+    if (sourceSlug) materialSources[m.key] = sourceSlug;
+    else fresh.push(m);
   }
-  if (!config.image.generateTilesets) return slug;
+  return { fresh, materialSources };
+}
+
+// Called once a manifest's theme and materials are known. Never throws — a failed or skipped
+// generation just means the dungeon renders with the client's existing default-pack fallback
+// (dungeonThemes.ts), same as today's behaviour for an unrecognised theme.
+//
+// Materials the manifest LLM marked `reuse` AND that actually resolve in this genre's tile map are
+// not drawn again: they're returned as materialSources entries pointing at the tileset they already
+// live in, and only the remainder is sent to the image model. A dungeon whose materials are all
+// reused costs zero image generations. `genre` is optional (undefined on campaigns predating the
+// field), and without it nothing is reused or recorded — identical behaviour to before the map
+// existed.
+export async function ensureTilesetSupport(theme: string, materials: DungeonMaterialSpec[], config: AppConfig, genre?: CampaignGenre): Promise<TilesetResolution> {
+  const slug = slugifyTheme(theme);
+  if (hasTilesetSupport(theme)) return { tilesetSlug: slug };
+  if (!materials.length) return { tilesetSlug: slug };
+
+  const genreMap = genre ? (await readGenreTileMap())[genre] ?? {} : {};
+  const { fresh, materialSources } = splitReusableMaterials(materials, genreMap);
+  const sources = Object.keys(materialSources).length ? { materialSources } : {};
+  // Everything this dungeon needs already exists somewhere — nothing to draw, nothing to record.
+  if (!fresh.length) return { tilesetSlug: slug, ...sources };
+
+  const tilesetSlug = `${slug}--${hashMaterials(fresh)}`;
+  if ((await getMediaStore().list(path.join(TILESETS_DIR, tilesetSlug))).length > 0) {
+    if (genre) await recordGenreTileset(genre, fresh, tilesetSlug);
+    return { tilesetSlug, ...sources };
+  }
+  if (!config.image.generateTilesets) return { tilesetSlug: slug, ...sources };
   const apiKey = config.apiKeys.openai;
-  if (!apiKey) return slug;
+  if (!apiKey) return { tilesetSlug: slug, ...sources };
   try {
-    await generateExtendedTileset(tilesetSlug, theme, materials, apiKey, config.image.model);
-    if (genre) await recordGenreTileset(genre, materials, tilesetSlug);
-    return tilesetSlug;
+    await generateExtendedTileset(tilesetSlug, theme, fresh, apiKey, config.image.model);
+    if (genre) await recordGenreTileset(genre, fresh, tilesetSlug);
+    return { tilesetSlug, ...sources };
   } catch (err) {
     logError('dungeon/tilesets:ensureTilesetSupport', err);
-    return slug;
+    return { tilesetSlug: slug, ...sources };
   }
 }

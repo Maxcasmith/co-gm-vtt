@@ -126,7 +126,9 @@ export async function runRecap(campaignId: string): Promise<{ text: string; isFi
   // the hallucinated rope-ladder/gills prose. Route through the dungeon's own seeded goals/quests
   // and floor plan instead, same as every other narration path into a dungeon.
   if (meta?.type === 'dungeon-crawl') {
-    const dungeon = dungeonsIn(campaignId)[0] ?? (await loadDungeons(campaignId))[0];
+    // Skip arenas: they live in the same dungeons/ store, and a transient combat map is never what
+    // a dungeon-crawl recap is about.
+    const dungeon = dungeonsIn(campaignId).find(d => !d.arena) ?? (await loadDungeons(campaignId)).find(d => !d.arena);
     const dungeonQuests = dungeon ? (await readQuests(campaignId)).filter(q => q.sourceDungeonId === dungeon.id) : [];
     const groundTruth = dungeon ? describeDungeonGroundTruth(dungeon, {}) : '(no dungeon generated yet)';
     const text = await provider.complete(buildDungeonRecapPrompt({

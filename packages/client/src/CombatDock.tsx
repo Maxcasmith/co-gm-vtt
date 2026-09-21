@@ -124,10 +124,11 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   }, [combatActive, character.id]);
 
   // Reset resources + effects at the START of your turn; update turn flag for all turns
-  useEffect(() => on('vtt:combat:turn', ({ actorName }) => {
+  useEffect(() => on('vtt:combat:turn', ({ actorName, resync }) => {
     const mine = actorName === character.name;
     setIsMyTurn(mine);
-    if (mine) {
+    // A rejoin replay isn't a new turn — the server's resources payload already restored the real state.
+    if (mine && !resync) {
       setResources(ALL_AVAILABLE);
       saveResources(character.id, ALL_AVAILABLE);
       setActiveEffects([]);
@@ -180,6 +181,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     };
     setResources(next);
     saveResources(character.id, next);
+    if (payload.activeEffects) setActiveEffects(payload.activeEffects);
   }), [character.id]);
 
   useEffect(() => on('vtt:targeting:start', payload => { targetingRef.current = payload; setTargeting(payload); }), []);
@@ -297,10 +299,9 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     // (e.g. a bonus-action offhand attack) would report the action as still available and stomp
     // the local spend, making it look like the action "came back". One shared notification for
     // all four instead of a one-off per action, since they all spend the same resource.
-    dispatch('vtt:combat:standardAction:used', { actorId: character.id });
-    if (action.key === 'dash') {
-      dispatch('vtt:movement:gained', { ft: baseSpeed });
-    } else if ('effect' in action && action.effect) {
+    dispatch('vtt:combat:standardAction:used', { actorId: character.id, key: action.key, ...('effect' in action ? { effect: action.effect } : {}) });
+    // Dash movement is granted by the server once it accepts the action spend (movement:granted).
+    if ('effect' in action && action.effect) {
       setActiveEffects(prev => prev.includes(action.effect) ? prev : [...prev, action.effect]);
     }
     if (action.key === 'disengage') dispatch('vtt:combat:disengage', { actorId: character.id });

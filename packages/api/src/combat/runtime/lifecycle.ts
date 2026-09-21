@@ -81,17 +81,8 @@ export function tryBeginCombat(cid: string, encounter: Encounter): void {
   })();
 }
 
-export function emitTurn(cid: string, encounter: Encounter) {
-  if (encounter.ended) return;
-
-  if (encounter.allPlayersDown()) {
-    endCombatDefeated(cid, encounter);
-    return;
-  }
-
-  const actor = encounter.currentActor;
-  if (!actor) return;
-  console.log(`[turn] emitTurn: actor=${actor.name} idx=${encounter.turnOrder.indexOf(actor)} order=[${encounter.turnOrder.map(p => p.name).join(',')}]`);
+/** The combat:turn payload for `actor` — shared by the live turn broadcast and the rejoin replay. */
+export function turnPayload(cid: string, actor: Participant) {
   // Wardaway's halved speed (multiplier) / Longstrider's +10ft (bonusFt) — the client applies
   // both to its own known base speed rather than the server tracking base speed itself
   // (players/creatures store it differently): bonuses sum first, then the multiplier applies to
@@ -104,13 +95,27 @@ export function emitTurn(cid: string, encounter: Encounter) {
   // CombatDock's ACTION_UNLOCKS table turns each string into a button. Generic on purpose: a
   // future feat adds an `action` string and a table entry, nothing here changes.
   const buffs = (getStateEngine(cid).getHooksOwnedBy(actor.id, 'actionUnlock') as ActionUnlockHook[]).map(h => h.action);
-  toFight(encounter).emit('combat:turn', {
+  return {
     actorId: actor.id,
     actorName: actor.name,
     ...(speedMultiplier !== 1 ? { speedMultiplier } : {}),
     ...(speedBonusFt !== 0 ? { speedBonusFt } : {}),
     ...(buffs.length ? { buffs } : {}),
-  });
+  };
+}
+
+export function emitTurn(cid: string, encounter: Encounter) {
+  if (encounter.ended) return;
+
+  if (encounter.allPlayersDown()) {
+    endCombatDefeated(cid, encounter);
+    return;
+  }
+
+  const actor = encounter.currentActor;
+  if (!actor) return;
+  console.log(`[turn] emitTurn: actor=${actor.name} idx=${encounter.turnOrder.indexOf(actor)} order=[${encounter.turnOrder.map(p => p.name).join(',')}]`);
+  toFight(encounter).emit('combat:turn', turnPayload(cid, actor));
 
   if (!actor.isPlayer) {
     setTimeout(() => void runEnemyAI(cid, actor), 800);

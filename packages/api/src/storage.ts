@@ -1,7 +1,7 @@
 import path from 'path';
 import { randomUUID } from 'crypto';
 import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, NotePayload, BattleMap, WorldState, WorldActor, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord, CharacterStoryboard, ScenarioStoryboard, StoryboardTestRecord, HouseRules, PlotHook, ActivePlotArc, Goal, GenreTileMap, PartyGroups } from 'shared';
-import { DEFAULT_HOUSE_RULES } from 'shared';
+import { DEFAULT_HOUSE_RULES, slugifyTheme } from 'shared';
 import { Encounter } from './domain/encounter.ts';
 import { renderDungeonAscii } from './dungeon/index.ts';
 import { logError } from './logger.ts';
@@ -459,6 +459,28 @@ export async function loadDungeons(slug: string): Promise<Dungeon[]> {
     }
   } catch (err) { logError('storage:loadDungeons', err); }
   return out;
+}
+
+/**
+ * Real (non-arena) dungeons the campaign has stored, newest-visited last. These survive the party
+ * leaving (see effects.ts's dungeon_exit) so a return visit re-opens the same place — this is what
+ * the DM prompt lists as "already visited" and what a reopen tag resolves against.
+ */
+export async function listVisitedDungeons(slug: string): Promise<Dungeon[]> {
+  return (await loadDungeons(slug)).filter(d => !d.arena);
+}
+
+/**
+ * The stored dungeon a reopen tag is naming, or null. Matched on slugified name because the only
+ * handle the model has is the location name it wrote — it will not reproduce casing or punctuation
+ * reliably. A miss is safe: the caller generates a new dungeon, which is what happened every time
+ * before any of this existed.
+ */
+export async function findVisitedDungeonByName(slug: string, name: string): Promise<Dungeon | null> {
+  const wanted = slugifyTheme(name);
+  if (!wanted) return null;
+  const matches = (await listVisitedDungeons(slug)).filter(d => slugifyTheme(d.name) === wanted);
+  return matches[matches.length - 1] ?? null;
 }
 
 /** Deletes one dungeon — and a legacy dungeon.json, which only ever held the campaign's one dungeon. */

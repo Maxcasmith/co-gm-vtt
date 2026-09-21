@@ -32,6 +32,11 @@ export interface DungeonMaterialSpec {
   key: string;
   description: string;
   category: MaterialCategory;
+  /** Generation-time only, never persisted on a Dungeon — the manifest LLM's own decision that
+   * this material should reuse already-generated art from the genre tile map rather than be drawn
+   * fresh. Honoured only if the key actually resolves in the map (see ensureTilesetSupport), so a
+   * hallucinated flag degrades to a normal fresh generation rather than a missing texture. */
+  reuse?: boolean;
 }
 
 // A dungeon-wide deduped prop (furniture/decor) type — up to 32 per dungeon, mirrors
@@ -249,6 +254,15 @@ export interface Dungeon {
   theme?: DungeonStylePack;
   /** Resolved folder key the client should fetch floor textures from — theme-slug, or theme-slug--<materials-hash> once a dynamic tileset has been generated for this dungeon's actual material set. Falls back to `theme` for dungeons predating this field. */
   tilesetSlug?: string;
+  /**
+   * Per-material override of `tilesetSlug` — material key -> the tileset slug that material's art
+   * actually lives in. Written when a dungeon reuses already-generated art for some of its
+   * materials (see the genre tile map) instead of drawing every one fresh: those keys point at the
+   * older tileset they were taken from, while everything absent here resolves from this dungeon's
+   * own `tilesetSlug` as before. Resource GC counts these as usage too (resourceUsage.ts), so a
+   * tileset another dungeon borrows from is never collected out from under it.
+   */
+  materialSources?: Record<string, string>;
   structureType?: DungeonStructureType;
   /**
    * Live ambient light level, 0-1. 1 (default when omitted) = fully lit, no darkness overlay.

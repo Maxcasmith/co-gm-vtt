@@ -16,6 +16,9 @@ const dungeon: Dungeon = {
   cells: Array.from({ length: 4 }, () => new Array(4).fill(1)),
   rooms: [],
   tilesetSlug: 'gothic-horror',
+  // One material's art was reused from an older tileset rather than redrawn — this dungeon borrows
+  // 'cosmic-horror-borrowed' without owning it (see Dungeon.materialSources).
+  materialSources: { 'wet-stone': 'cosmic-horror-borrowed' },
   entities: [
     { id: 'e1', type: 'creature', x: 0, y: 0, name: 'Giant Fire Beetle', discovered: true, statBlock: { name: 'Giant Fire Beetle' } as never },
     { id: 'e2', type: 'object', x: 1, y: 0, name: 'Rusty Cauldron', discovered: true, spriteSrc: '/api/props/rusty-cauldron/sprite_01.png' },
@@ -41,6 +44,13 @@ async function main() {
 
   const tilesetUsage = await findTilesetUsage('gothic-horror', { excludeId: SLUG, excludeKind: 'campaign' });
   if (tilesetUsage.some(u => u.id === SLUG)) throw new Error('tileset usage should also respect exclude');
+
+  // A borrowed tileset is owned by some other dungeon — it must still count as in use here, or
+  // deleting that other dungeon would collect the art this one is rendering from.
+  if (!slugs.borrowedTilesetSlugs.includes('cosmic-horror-borrowed')) throw new Error('materialSources slug not collected as borrowed');
+  if (slugs.borrowedTilesetSlugs.includes('gothic-horror')) throw new Error("a dungeon's own tileset must never be double-counted as borrowed");
+  const borrowedUsage = await findTilesetUsage('cosmic-horror-borrowed');
+  if (!borrowedUsage.some(u => u.id === SLUG)) throw new Error('borrowing a tileset must register as usage, otherwise GC deletes it out from under this dungeon');
 
   const propUsage = await findPropUsage('rusty-cauldron');
   if (!propUsage.some(u => u.id === SLUG)) throw new Error('fixture campaign should show up as a prop user');

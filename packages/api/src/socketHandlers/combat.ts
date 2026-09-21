@@ -836,6 +836,7 @@ export async function resolvePlayerSpellAttack(
 
       const char = await getCharacter(cid, casterId);
       if (!char) return;
+      if (targetIds.every(id => encounter.findCreature(id)?.isDead())) return;
 
       // Redirecting an already-sustained spell (Witch Bolt) is free — no slot, and costs a Bonus
       // Action per RAW rather than the spell's normal casting-time cost (which paid for the
@@ -1193,6 +1194,12 @@ export function registerCombatHandlers(ctx: JoinContext): void {
     void applyElevationChange(campaignId, targetId, elevationFt);
   });
 
+  // Client owns movement math; this mirror exists only so a refresh mid-turn can restore it.
+  socket.on('combat:movement:sync', ft => {
+    const me = fightOf(campaignId, charId)?.findParticipant(charId);
+    if (me && me.id === fightOf(campaignId, charId)?.currentActor?.id && Number.isFinite(ft)) me.movementRemainingFt = Math.max(0, ft);
+  });
+
   // Disengage — makes this actor's movement not provoke Opportunity Attacks for the rest of
   // their turn (checkOpportunityAttacks reads Participant.disengaging directly, no hook needed).
   socket.on('combat:disengage', ({ actorId }) => {
@@ -1208,8 +1215,17 @@ export function registerCombatHandlers(ctx: JoinContext): void {
   // like it "returned". Disengage/Dash additionally dispatch their own follow-up event for the
   // side effect that's actually theirs (disengaging flag / bonus movement) — this only owns the
   // shared action spend.
-  socket.on('combat:standardAction:used', ({ actorId }: { actorId: string }) => {
-    trySpendAction(campaignId, actorId, 'action');
+  socket.on('combat:standardAction:used', ({ actorId, key, effect }) => {
+    if (!trySpendAction(campaignId, actorId, 'action')) return;
+    if (key === 'dash') {
+      void getCharacter(campaignId, actorId).then(char => socket.emit('movement:granted', { ft: char?.speed ?? 30 }));
+      return;
+    }
+    if (!effect) return;
+    const participant = fightOf(campaignId, actorId)?.findParticipant(actorId);
+    if (!participant || participant.activeEffects.includes(effect)) return;
+    participant.activeEffects.push(effect);
+    emitResources(campaignId, participant);
   });
 
   // Illusion detection (Disguise Self) — works with or without active combat, same as casting

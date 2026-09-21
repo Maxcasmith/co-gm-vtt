@@ -31,24 +31,52 @@
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 4px;
+  margin: 0 -24px;
 }
 
 .create-rail-step {
   font-size: 13px;
   color: var(--text-muted);
-  padding-left: 16px;
-  border-left: 2px solid var(--border);
+  position: relative;
+}
+
+.create-rail-step::before {
+  content: '';
+  position: absolute;
+  left: 24px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border);
+}
+
+.create-rail-step-btn {
+  all: unset;
+  cursor: pointer;
+  display: block;
+  width: 100%;
+  padding: 10px 24px 10px 42px;
+  box-sizing: border-box;
+}
+
+.create-rail-step-btn:hover,
+.create-rail-step-btn:focus-visible {
+  color: var(--gold);
+  background: rgba(201, 168, 76, 0.1);
 }
 
 .create-rail-step--done {
   color: var(--text);
-  border-left-color: var(--gold);
+}
+
+.create-rail-step--done::before,
+.create-rail-step--current::before {
+  background: var(--gold);
 }
 
 .create-rail-step--current {
   color: var(--gold);
-  border-left-color: var(--gold);
   font-weight: 600;
 }
 

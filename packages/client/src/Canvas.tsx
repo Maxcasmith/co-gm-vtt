@@ -455,6 +455,7 @@ export default function Canvas({ player, characterId, character, connected, show
           const maxRangeCells = extendedRange ? Math.floor(extendedRange / 5) : Math.floor(range / 5);
           // Abilities (Bardic Inspiration) target allies only — skip the enemy loop entirely.
           if (targetingNow.kind !== 'ability') for (const enemy of encounter!) {
+            if (deadCreatureIds?.has(enemy.id)) continue;
             const epos = tokenPositions[enemy.id];
             if (!epos) continue;
             if (Math.max(Math.abs(epos.gx - playerPos.gx), Math.abs(epos.gy - playerPos.gy)) > maxRangeCells) continue;

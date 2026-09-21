@@ -48,6 +48,8 @@ export type RestCancelPayload         = Record<string, never>;
 export interface RestProgressPayload { allCommitted: boolean }
 export type EncounterGeneratingPayload = Record<string, never>;
 export interface EncounterReadyPayload { enemies: EnemyStatBlock[] }
+/** Enemy generation failed server-side — releases anything waiting on encounter:ready. */
+export type EncounterFailedPayload = Record<string, never>;
 
 export interface CombatStatePayload { active: boolean }
 export type TargetingStartPayload =
@@ -89,14 +91,14 @@ export interface TacticsUpdatePayload { characterId: string; tactics: Manoeuvre[
 export interface GoalSavePayload { characterId: string; id?: string; tier: GoalTier; description: string }
 export interface GoalDeletePayload { characterId: string; id: string }
 export interface GoalsFetchPayload { characterId: string }
-export interface CombatTurnPayload { actorId: string; actorName: string; speedMultiplier?: number; speedBonusFt?: number; buffs?: string[] }
+export interface CombatTurnPayload { actorId: string; actorName: string; speedMultiplier?: number; speedBonusFt?: number; buffs?: string[]; resync?: boolean; movementRemainingFt?: number }
 export type CombatTurnEndPayload = Record<string, never>
 export interface ConditionEscapeAttemptPayload { targetId: string; name: Condition }
 export interface AlertSwapRequestPayload { characterId: string; targetId: string }
 export interface HealerKitUsePayload { casterId: string; casterName: string; targetId: string }
 export interface ElevationSetPayload { targetId: string; elevationFt: number }
 export interface DisengagePayload { actorId: string }
-export interface StandardActionUsedPayload { actorId: string }
+export interface StandardActionUsedPayload { actorId: string; key: string; effect?: string }
 export interface CombatInitiativePayload { entry: TurnOrderEntry }
 export interface CombatInitiativeRollPayload { entry: TurnOrderEntry }
 export interface CombatTurnOrderPayload { entries: TurnOrderEntry[] }
@@ -110,6 +112,7 @@ export interface PlayerResourcesPayload {
   actionsRemaining: number;
   bonusActionsRemaining: number;
   reactionsRemaining: number;
+  activeEffects?: string[];
 }
 export interface MovementGainedPayload { ft: number }
 export interface ViewportChangedPayload { x: number; y: number; zoom: number }
@@ -229,6 +232,7 @@ export interface VTTEventMap {
   'vtt:combat:state':           CombatStatePayload;
   'vtt:encounter:generating':   EncounterGeneratingPayload;
   'vtt:encounter:ready':        EncounterReadyPayload;
+  'vtt:encounter:failed':       EncounterFailedPayload;
   'vtt:token:move':             TokenPosition;
   'vtt:token:moved':            TokenPosition;
   'vtt:door:toggle':            { doorId: string };

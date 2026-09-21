@@ -4,7 +4,7 @@ import {
   readChatLog, listEntitySlugs, readEntity, writeEntity, archiveChatLog,
   getCharacter, getWorldMeta, writeWorldMeta, CAMPAIGNS_DIR, readManifest, writeManifest,
   readQuests, writeQuests, readCampaignFile, readGoals, writeGoals,
-  readPlotHooks, readPlotArcs, writePlotArcs, markPlotHookUsed,
+  readPlotHooks, readPlotArcs, writePlotArcs, markPlotHookUsed, listVisitedDungeons,
 } from '../storage.ts';
 import { getTextStore } from '../storage/index.ts';
 import { getConfig } from '../storage.ts';
@@ -545,12 +545,16 @@ export async function getDMResponse(campaignSlug: string, audience: ChatAudience
   if (messages.length === 0) return '';
 
   const worldType = (meta?.type === 'module' ? 'campaign' : meta?.type) ?? 'campaign';
+  // Maps the party explored and left behind. Listing them is what lets the model mark a return
+  // visit as a reopen instead of silently asking for a fresh dungeon at the same address.
+  const visitedLocations = (await listVisitedDungeons(campaignSlug)).map(d => d.name);
   const system = buildDMSystemPrompt(
     meta?.name ?? 'Unknown World',
     worldType,
     entitySummaries,
     characterSummaries,
     meta?.tags ?? [],
+    visitedLocations,
   );
 
   const provider = getFeatureProvider(config, 'dmChatResponse');

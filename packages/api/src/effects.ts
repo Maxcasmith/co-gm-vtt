@@ -1,17 +1,17 @@
-import type { Character, EnemyStatBlock, GroupColor } from 'shared';
+import type { AppConfig, Character, EnemyStatBlock, GroupColor } from 'shared';
 import { statMod, addCurrency, removeCurrency, trackOf } from 'shared';
 import { randomUUID } from 'crypto';
-import { updateCharacter, listCharacters, readEntity, writeEntity, readManifest, writeManifest, emptyManifest, parseEntityLinks, clearDungeon, getConfig, saveDungeon, saveDungeonAscii, readQuests, writeQuests, loadPartyAllies, savePartyAllies, readNemeses, writeNemeses, getWorldMeta } from './storage.ts';
+import { updateCharacter, listCharacters, readEntity, writeEntity, readManifest, writeManifest, emptyManifest, parseEntityLinks, clearDungeon, getConfig, saveDungeon, saveDungeonAscii, readQuests, writeQuests, loadPartyAllies, savePartyAllies, readNemeses, writeNemeses, getWorldMeta, findVisitedDungeonByName } from './storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
 import { generateDungeon, toClientDungeon, broadcastDungeon } from './dungeon/index.ts';
 import { generateDungeonQuests } from './session-processor/index.ts';
 import { Encounter, Participant, PLAYERS_TEAM_ID } from './domain/encounter.ts';
 import { Creature } from './domain/creature.ts';
 import type { TagEffect, AcquiredItem } from './tag-processor.ts';
-import { logDebug } from './logger.ts';
+import { logDebug, logError } from './logger.ts';
 import {
   io, campaignRoom, dungeonById, registerDungeon, unregisterDungeon, occupantsOf, locationOf, playerSocketIds, campaignPlayers, connected, fightOf, fightsIn, registerFight,
-  NEMESIS_COOLDOWN_SESSIONS, NEMESIS_CAP_PER_TARGET, NEMESIS_MAX_DEATHS, ALLY_XP_PER_LEVEL,
+  NEMESIS_COOLDOWN_SESSIONS, NEMESIS_CAP_PER_TARGET, NEMESIS_MAX_DEATHS, ALLY_XP_PER_LEVEL, markDungeonGenerating,
 } from './state.ts';
 import { D20Roll, toSlug, escalateCr } from './combat/dice.ts';
 import { rollPlayerInitiatives, addToTurnOrder, syncFight } from './combat/runtime/lifecycle.ts';
@@ -41,6 +41,86 @@ const TRAP_DISARM_KIT_NAME = /trap disarm kit/i;
 type QuestEffect = Extract<TagEffect, { type: 'quest_add' | 'quest_update' | 'quest_resolve' }>;
 const isQuestEffect = (e: TagEffect): e is QuestEffect =>
   e.type === 'quest_add' || e.type === 'quest_update' || e.type === 'quest_resolve';
+
+/**
+ * Puts the party back into a dungeon they've already visited, restored exactly as they left it.
+ * Returns false when the name doesn't resolve to a stored map — the model claimed a return visit
+ * to somewhere it has never actually been, or to a place from before dungeons were kept — and the
+ * caller then generates a new one, which is the pre-existing behaviour.
+ */
+async function reopenStoredDungeon(cid: string, name: string, tracks: GroupColor[] | null): Promise<boolean> {
+  const stored = await findVisitedDungeonByName(cid, name);
+  if (!stored) {
+    console.log(`[dungeon] reopen requested for "${name}" but no stored map matches — generating instead`);
+    return false;
+  }
+  // Already loaded (another group is in there right now) — registerDungeon would replace the live
+  // object and discard whatever they've discovered since it was last written.
+  const live = dungeonById(cid, stored.id);
+  const dungeon = live ?? stored;
+  if (!live) registerDungeon(cid, dungeon);
+  await setTrackLocations(cid, tracks, dungeon.id);
+  broadcastDungeon(cid, dungeon);
+  console.log(`[dungeon] reopened ${dungeon.name} (${dungeon.rooms.length} rooms) — not regenerated`);
+  return true;
+}
+
+/**
+ * The whole dungeon_gen pipeline, detached from applyEffects so the DM's narration reaches the
+ * party while it runs (see the call site). Because it's detached, nothing upstream can catch its
+ * failures — so every exit path here has to tell the waiting clients something, or the loading
+ * screen they're sitting behind never comes down.
+ */
+async function generateDungeonForTracks(
+  cid: string,
+  effect: Extract<TagEffect, { type: 'dungeon_gen' }>,
+  tracks: GroupColor[] | null,
+  audience: ChatAudience,
+  config: AppConfig,
+): Promise<void> {
+  try {
+    const [recentChat, characters] = await Promise.all([readChatContext(cid, audience), listCharacters(cid)]);
+    const storyContext = recentChat.slice(-10).map(m => `[${m.senderName}]: ${m.text}`).join('\n');
+    const partySize = characters.length || 4;
+    const partyLevel = characters.length
+      ? Math.round(characters.reduce((sum, c) => sum + (c.level ?? 1), 0) / characters.length)
+      : 1;
+    // Generated first so the floor plan can be designed to actually serve the quest, not the
+    // other way around — dungeonId is decided up front so this is tagged and written before
+    // the dungeon itself exists, never the untagged/orphaned quest ensureSessionQuests avoids.
+    // At most one stage comes back (see buildDungeonQuestPrompt) — the manifest call below
+    // decides its trigger plus the entire rest of the chain, same as the campaign-creation path.
+    const dungeonId = randomUUID();
+    const predefinedQuests = await generateDungeonQuests(cid, dungeonId, effect.name, effect.dungeonType, storyContext, config);
+    if (predefinedQuests.length) {
+      await writeQuests(cid, [...(await readQuests(cid)), ...predefinedQuests]);
+      io.to(campaignRoom(cid)).emit('quest:update', { quests: await readQuests(cid), act: (await readManifest(cid))?.act ?? 1 });
+    }
+    const predefinedChain = predefinedQuests.map(q => ({ id: q.id, name: q.name, description: q.description }));
+
+    const worldMeta = await getWorldMeta(cid);
+    const dungeon = await generateDungeon(effect.name, effect.dungeonType, getFeatureProvider(config, 'dungeonGeneration'), storyContext, { partySize, partyLevel, id: dungeonId, predefinedChain, ...(worldMeta?.genre ? { genre: worldMeta.genre } : {}) }, undefined, config);
+    registerDungeon(cid, dungeon);
+    // The groups this narration was for are the ones who walked in; everyone else stays put.
+    await setTrackLocations(cid, tracks, dungeon.id);
+    await saveDungeon(cid, dungeon);
+    await saveDungeonAscii(cid, dungeon);
+    broadcastDungeon(cid, dungeon);
+    console.log(`[dungeon] generated and broadcast: ${dungeon.name} (${dungeon.rooms.length} rooms, ${dungeon.entities.length} entities)`);
+  } catch (err) {
+    logError('effects:generateDungeonForTracks', err);
+    // Releases the loading screen and the input lockout behind it. The party stays where they
+    // were — setTrackLocations only runs on the success path above, so a failure leaves them in
+    // the world they were already standing in rather than stranded in a dungeon that doesn't exist.
+    const waiting = await toTracks(cid, tracks);
+    waiting.emit('dungeon:failed');
+    waiting.emit('chat:message', { text: `[The way ahead doesn't open — ${effect.name} could not be generated.]`, senderName: 'System', timestamp: Date.now() });
+  } finally {
+    // finally, not per-branch: a reconnecting player must never be handed a loading screen for a
+    // generation that already finished or died.
+    markDungeonGenerating(cid, tracks, false);
+  }
+}
 
 /** `audience` — whose DM turn produced these effects (see ChatAudience): while the party is split,
  * scene changes land on that group's own scene instead of everyone's. 'all' for campaign-wide sources. */
@@ -140,36 +220,19 @@ export async function applyEffects(cid: string, effects: TagEffect[], audience: 
     } else if (effect.type === 'dungeon_gen') {
       const config = await getConfig();
       if (!hasFeatureProvider(config, 'dungeonGeneration')) { console.warn('[dungeon] no models configured — skipping dungeon generation'); return; }
+      // A place they've been before: its map is still on disk with everything they explored,
+      // killed and looted intact, so re-open it instead of building a different dungeon behind the
+      // same name. No generation, no loading screen — it's already there.
+      if (effect.reopen && await reopenStoredDungeon(cid, effect.name, tracks)) return;
       console.log(`[dungeon] generating: ${effect.name}`);
       (await toTracks(cid, tracks)).emit('dungeon:generating');
-      const [recentChat, characters] = await Promise.all([readChatContext(cid, audience), listCharacters(cid)]);
-      const storyContext = recentChat.slice(-10).map(m => `[${m.senderName}]: ${m.text}`).join('\n');
-      const partySize = characters.length || 4;
-      const partyLevel = characters.length
-        ? Math.round(characters.reduce((sum, c) => sum + (c.level ?? 1), 0) / characters.length)
-        : 1;
-      // Generated first so the floor plan can be designed to actually serve the quest, not the
-      // other way around — dungeonId is decided up front so this is tagged and written before
-      // the dungeon itself exists, never the untagged/orphaned quest ensureSessionQuests avoids.
-      // At most one stage comes back (see buildDungeonQuestPrompt) — the manifest call below
-      // decides its trigger plus the entire rest of the chain, same as the campaign-creation path.
-      const dungeonId = randomUUID();
-      const predefinedQuests = await generateDungeonQuests(cid, dungeonId, effect.name, effect.dungeonType, storyContext, config);
-      if (predefinedQuests.length) {
-        await writeQuests(cid, [...(await readQuests(cid)), ...predefinedQuests]);
-        io.to(campaignRoom(cid)).emit('quest:update', { quests: await readQuests(cid), act: (await readManifest(cid))?.act ?? 1 });
-      }
-      const predefinedChain = predefinedQuests.map(q => ({ id: q.id, name: q.name, description: q.description }));
-
-      const worldMeta = await getWorldMeta(cid);
-      const dungeon = await generateDungeon(effect.name, effect.dungeonType, getFeatureProvider(config, 'dungeonGeneration'), storyContext, { partySize, partyLevel, id: dungeonId, predefinedChain, genre: worldMeta?.genre }, undefined, config);
-      registerDungeon(cid, dungeon);
-      // The groups this narration was for are the ones who walked in; everyone else stays put.
-      await setTrackLocations(cid, tracks, dungeon.id);
-      await saveDungeon(cid, dungeon);
-      await saveDungeonAscii(cid, dungeon);
-      broadcastDungeon(cid, dungeon);
-      console.log(`[dungeon] generated and broadcast: ${dungeon.name} (${dungeon.rooms.length} rooms, ${dungeon.entities.length} entities)`);
+      markDungeonGenerating(cid, tracks, true);
+      // Deliberately NOT awaited. applyEffects runs before the DM's narration is emitted
+      // (session.ts), so awaiting a full dungeon generation here held the narration back until the
+      // map was already built — the party saw nothing at all for the whole generation, then the
+      // announcement and the finished dungeon at once. Detaching it lets the announcement land
+      // immediately after the tag fires, which is what the loading screen is shown over.
+      void generateDungeonForTracks(cid, effect, tracks, audience, config);
     } else if (effect.type === 'dungeon_exit') {
       // Only the group this narration was for leaves. Never mid-fight.
       const leaving = await toTracks(cid, tracks);
@@ -180,11 +243,16 @@ export async function applyEffects(cid: string, effects: TagEffect[], audience: 
         await checkQuestChainTriggers(cid, { kind: 'exit_dungeon' }, dungeon);
         await setTrackLocations(cid, tracks, undefined);
         leaving.emit('dungeon:cleared');
-        // Kept loaded while another group is still inside it; discarded once the last one leaves.
+        // Kept loaded while another group is still inside it; unloaded once the last one leaves.
         if (occupantsOf(cid, dungeonId).length) { console.log(`[dungeon] a group left ${dungeon.name} — others still inside`); continue; }
         unregisterDungeon(cid, dungeonId);
-        await clearDungeon(cid, dungeonId);
-        console.log(`[dungeon] last group left ${dungeon.name} — cleared`);
+        // Dropped from memory but deliberately NOT from disk. dungeons/<id>.json is written
+        // continuously during play, so it's already a complete record of what the party explored,
+        // killed and looted — deleting it was throwing that away and forcing a brand new dungeon
+        // on the next visit. Kept so returning re-opens the same place (see reopenStoredDungeon).
+        // Arenas are exempt: they're transient, and are deleted by the victory path instead.
+        if (dungeon.arena) await clearDungeon(cid, dungeonId);
+        console.log(`[dungeon] last group left ${dungeon.name} — unloaded${dungeon.arena ? ' and cleared' : ', kept for re-entry'}`);
       }
     } else if (effect.type === 'door_unlock') {
       await unlockDoorNear(cid, effect.characterName);

@@ -560,3 +560,9 @@ button.btn-roll {
 
 .btn-copy:hover { border-color: var(--gold); color: var(--gold); }
 
+
+.finished-missing { border: 1px solid #c0524a; background: #c0524a1a; border-radius: 6px; padding: 12px 16px; }
+.finished-missing-title { font-family: 'Cinzel', serif; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #e0716a; margin: 0 0 8px; }
+.finished-missing-list { margin: 0; padding-left: 18px; color: var(--text); font-size: 13px; line-height: 1.6; }
+.finished-missing-item { all: unset; cursor: pointer; }
+.finished-missing-item:hover { text-decoration: underline; }

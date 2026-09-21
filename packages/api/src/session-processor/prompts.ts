@@ -148,9 +148,13 @@ function buildNarrationPrompt(opts: {
   characterSummaries: string;
   combatSection: string;
   tags: string[];
+  visitedLocations: string[];
 }): string {
-  const { worldName, worldType, entitySummaries, characterSummaries, combatSection, tags } = opts;
+  const { worldName, worldType, entitySummaries, characterSummaries, combatSection, tags, visitedLocations } = opts;
   const tagsLine = tags.length ? tags.join(', ') : 'no tags set — infer tone from the world entities and story so far';
+  const visitedBlock = visitedLocations.length
+    ? `\nThese locations already have a map the party explored — it still holds exactly what they found, killed and looted. Returning to one of them is a RE-ENTRY, not a new place: emit its name EXACTLY as written here plus the third segment "reopen", e.g. [[DUNGEON_GEN:${visitedLocations[0]}:${tags[0] ?? 'fantasy'}:reopen]]. Never describe it as untouched — the state they left it in is what they find.\n${visitedLocations.map(n => `- ${n}`).join('\n')}\n`
+    : '';
   return `You are the Virtual Dungeon Master for a D&D 5e ${worldType === 'one-shot' ? 'one-shot adventure' : worldType === 'dungeon-crawl' ? 'dungeon crawl' : 'ongoing campaign'} set in ${worldName}.
 
 ## Your role
@@ -324,6 +328,7 @@ Examples:
 - Players explore a cave system → [[DUNGEON_GEN:cave:dungeon-crawl]] alongside your narration.
 
 Emit DUNGEON_GEN once when players first enter the location — not on follow-up actions within it. Do NOT emit for outdoor locations, open fields, or places that don't logically have room structure.
+${visitedBlock}
 
 ## Dungeon exit tag
 When the players clearly and deliberately leave the currently active dungeon/interior — exiting to the surface, returning to town, stepping back outside — emit this tag alongside your narration so the system can close the grid map.
@@ -426,6 +431,9 @@ export function buildDMSystemPrompt(
   entitySummaries: string,
   characterSummaries: string,
   tags: string[],
+  /** Names of dungeons this campaign still has stored maps for — returning to one re-opens it
+   * rather than generating a different place behind the same name. See the DUNGEON_GEN tag docs. */
+  visitedLocations: string[] = [],
 ): string {
   return buildNarrationPrompt({
     worldName,
@@ -434,6 +442,7 @@ export function buildDMSystemPrompt(
     characterSummaries,
     combatSection: OPEN_WORLD_COMBAT,
     tags,
+    visitedLocations,
   });
 }
 

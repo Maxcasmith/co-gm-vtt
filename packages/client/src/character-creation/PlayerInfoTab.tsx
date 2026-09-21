@@ -10,6 +10,7 @@ import {
 import CharacterSheet from './CharacterSheet.tsx';
 import SkillPicker from './SkillPicker.tsx';
 import ImageCropModal from './ImageCropModal.tsx';
+import InfoTooltip from '../create-campaign/InfoTooltip.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
 
@@ -155,23 +156,30 @@ export default function PlayerInfoTab({ campaignId }: { campaignId: string }) {
             />
           </div>
 
-          <div className="portrait-name-fields">
-            <label className="modal-label">
-              Character Name
-              <input className="modal-input" value={c.name} onChange={e => c.set('name', e.target.value)} placeholder="Enter character name…" />
-            </label>
-            <label className="modal-label">
-              Join Password
-              <input className="modal-input" type="password" value={c.password} onChange={e => c.set('password', e.target.value)} placeholder="Choose a password to join as this character" />
-            </label>
-            {uploadError && <p className="modal-error">{uploadError}</p>}
-            {c.tokenPath && (
-              <div className="inline-token-badge">
-                <img src={`${API}/api/campaigns/${campaignId}/party/${c.id}/token?v=${tokenVersion}`} className="inline-token-img" alt="Token" />
-                <span className="portrait-result-label">Token ready</span>
-              </div>
-            )}
+          <div className="inline-token-box">
+            {c.tokenPath
+              ? <img src={`${API}/api/campaigns/${campaignId}/party/${c.id}/token?v=${tokenVersion}`} className="inline-token-img" alt="Token" />
+              : <span className="portrait-upload-hint">Token</span>
+            }
           </div>
+        </div>
+
+        <div className="portrait-name-fields">
+          {uploadError && <p className="modal-error">{uploadError}</p>}
+          <label className="modal-label">
+            <span className="create-label-row">
+              Character Name
+              <InfoTooltip text="What your character is called in the campaign." />
+            </span>
+            <input className="modal-input" value={c.name} onChange={e => c.set('name', e.target.value)} placeholder="Enter character name…" />
+          </label>
+          <label className="modal-label">
+            <span className="create-label-row">
+              Join Password
+              <InfoTooltip text="Required to join the game as this character. Save it, you can't recover it later." />
+            </span>
+            <input className="modal-input" type="password" value={c.password} onChange={e => c.set('password', e.target.value)} placeholder="Choose a password to join as this character" />
+          </label>
         </div>
 
         {/* ── stat roller ── */}

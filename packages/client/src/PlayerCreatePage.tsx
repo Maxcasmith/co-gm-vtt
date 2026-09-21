@@ -61,10 +61,10 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
   const steps: Tab[] = [
     'info',
     ...(isCampaign ? ['backstory' as const] : []),
-    ...(hasSpellcasting ? ['spells' as const] : []),
     ...(hasFightingStyle ? ['fightingStyle' as const] : []),
     ...(hasClassOrder ? ['classOrder' as const] : []),
     ...(hasInvocations ? ['invocations' as const] : []),
+    ...(hasSpellcasting ? ['spells' as const] : []),
     'shop',
     'finished',
   ];
@@ -163,7 +163,9 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
               key={tab}
               className={`create-rail-step ${i === stepIndex ? 'create-rail-step--current' : ''} ${i < stepIndex ? 'create-rail-step--done' : ''}`}
             >
-              {titleFor(tab)}
+              <button type="button" className="create-rail-step-btn" onClick={() => c.set('activeTab', tab)}>
+                {titleFor(tab)}
+              </button>
             </li>
           ))}
         </ol>

@@ -53,6 +53,15 @@ export function texturesFor(
   return (materialKey && materials[materialKey]) || [];
 }
 
+// Which tileset a given room's material actually resolves from. Normally the dungeon's own
+// tilesetSlug, but a material whose art was reused from an earlier dungeon (rather than drawn
+// again) carries its own source slug in materialSources — see Dungeon.materialSources and the
+// api's ensureTilesetSupport. `theme` remains the last-resort fallback for dungeons generated
+// before tilesetSlug existed.
+export function packForMaterial(dungeon: Dungeon, material: string | undefined): string | undefined {
+  return (material ? dungeon.materialSources?.[material] : undefined) ?? dungeon.tilesetSlug ?? dungeon.theme;
+}
+
 // True once every floor texture this dungeon's rooms reference has finished decoding (or the
 // dungeon has none to load, e.g. no matching tileset — that room just paints
 // FLOOR_FALLBACK_COLOR). Also kicks off loading for anything not yet requested, same as
@@ -60,7 +69,7 @@ export function texturesFor(
 export function dungeonTexturesReady(dungeon: Dungeon): boolean {
   let ready = true;
   for (const room of dungeon.rooms) {
-    const variants = texturesFor(dungeon.tilesetSlug ?? dungeon.theme, room.material, dungeon.structureType);
+    const variants = texturesFor(packForMaterial(dungeon, room.material), room.material, dungeon.structureType);
     for (const url of variants) {
       if (!getImage(url).complete) ready = false;
     }

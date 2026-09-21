@@ -95,7 +95,7 @@ export default function RestModal({ character }: Props) {
             <p className="rest-result-gained">+{result.hpGained} HP recovered</p>
           )}
           {result.restType === 'long' && (
-            <p className="rest-result-gained">Fully restored</p>
+            <p className="rest-result-gained">All resources refreshed</p>
           )}
           {(result.maxSpellSlots1 ?? 0) > 0 && (
             <p className="rest-result-gained">

@@ -1,5 +1,5 @@
 import type { Dungeon, DungeonRoom } from 'shared';
-import { texturesFor, getImage, FLOOR_FALLBACK_COLOR } from '../dungeonThemes.ts';
+import { texturesFor, packForMaterial, getImage, FLOOR_FALLBACK_COLOR } from '../dungeonThemes.ts';
 import { CELL } from './constants.ts';
 
 export interface GroundCache {
@@ -89,7 +89,7 @@ export function buildGroundCache(dungeon: Dungeon, variantPicks: Map<string, num
   }
 
   function paintCell(row: number, col: number, material: string | undefined): void {
-    const variants = texturesFor(dungeon.tilesetSlug ?? dungeon.theme, material, dungeon.structureType);
+    const variants = texturesFor(packForMaterial(dungeon, material), material, dungeon.structureType);
     if (!variants.length) return;
     const key = `${row},${col}`;
     let variantIdx = variantPicks.get(key);
