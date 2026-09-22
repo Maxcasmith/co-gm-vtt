@@ -283,6 +283,11 @@ export class Encounter {
   /** Open-world fights only: the combat arena dungeon this fight is played on. Its players stand in
    * it (locationOf) until the fight ends and the arena is discarded. */
   arenaId: string | undefined = undefined;
+  /** Origin feat Alert's post-initiative swap pause — holds round 1 while it's 'active'. See beginAlertPause (lifecycle.ts). */
+  alertPauseState: 'none' | 'active' | 'done' = 'none';
+  /** Participant ids of Alert players still deciding. */
+  alertPauseIds = new Set<string>();
+  alertPauseTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(campaignId: string, id: string = randomUUID()) {
     this.campaignId = campaignId;

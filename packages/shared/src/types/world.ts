@@ -60,6 +60,10 @@ export interface HouseRules {
   reactionTimeoutSecs: number;
   /** Shows each reaction option's roll/AC detail panel by default, instead of just the prompt sentence. */
   reactionShowDetailsByDefault: boolean;
+  /** Origin feat Alert's post-initiative swap pause — whether it auto-cancels after alertSwapTimeoutSecs. Off: waits until every Alert player answers. */
+  alertSwapTimerEnabled: boolean;
+  /** How long (seconds) each Alert player has to swap before it counts as Cancel. Independent of reactionTimeoutSecs. */
+  alertSwapTimeoutSecs: number;
 }
 
 export const DEFAULT_HOUSE_RULES: HouseRules = {
@@ -68,6 +72,8 @@ export const DEFAULT_HOUSE_RULES: HouseRules = {
   levelUpHp: "roll",
   reactionTimeoutSecs: 15,
   reactionShowDetailsByDefault: false,
+  alertSwapTimerEnabled: true,
+  alertSwapTimeoutSecs: 30,
 };
 
 export interface Quest {

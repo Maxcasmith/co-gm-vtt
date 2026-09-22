@@ -1,6 +1,6 @@
 import type { Character } from 'shared';
 import { hasOriginFeat, trackOf } from 'shared';
-import { getCharacter, updateCharacter, readChatLog, saveEncounter, clearEncounter, saveDungeon, listCharacters, loadPartyAllies, readNemeses, getConfig } from '../../storage.ts';
+import { getCharacter, updateCharacter, readChatLog, saveEncounter, clearEncounter, saveDungeon, listCharacters, loadPartyAllies, readNemeses, getConfig, getHouseRules } from '../../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../../providers/index.ts';
 import { evaluateNemesisCandidates } from '../../session-processor/imagePrompts.ts';
 import { toClientDungeon, chainClosure, broadcastDungeon } from '../../dungeon/index.ts';
@@ -11,7 +11,6 @@ import { campaignRoom, io, positionsOf, dungeonOf, dungeonsIn, fightDungeon, occ
 import { rollInitiative, dexLine, calcMaxHp } from '../dice.ts';
 import { ReactionOfferHook } from '../stateEngine/hooks/ReactionOfferHook.ts';
 import { RetaliationOfferHook } from '../stateEngine/hooks/RetaliationOfferHook.ts';
-import { offerReaction } from '../stateEngine/reactionPrompt.ts';
 import { DamageResistanceHook } from '../stateEngine/hooks/DamageResistanceHook.ts';
 import { registerPassiveClassHooks, registerPassiveFightingStyleHooks } from '../stateEngine/passiveClassHooks.ts';
 import type { SpeedModifierHook } from '../stateEngine/hooks/SpeedModifierHook.ts';
@@ -70,6 +69,8 @@ export function fightScope(encounter: Encounter): Set<string> {
 export function tryBeginCombat(cid: string, encounter: Encounter): void {
   const expected = encounter.expectedParticipantCount;
   if (encounter.ended || expected <= 0 || encounter.turnOrder.length < expected || encounter.currentRound || !encounter.enemiesReady) return;
+  if (encounter.alertPauseState === 'none') { void beginAlertPause(cid, encounter); return; }
+  if (encounter.alertPauseState === 'active') return;
 
   encounter.beginCombat();
   void (async () => {
@@ -543,43 +544,97 @@ export function addToTurnOrder(cid: string, encounter: Encounter, entries: Parti
   });
 }
 
+/** Everyone on the players' side who rolled — connected players, AI-controlled party members, and party allies. The Alert swap's possible targets. */
+function alertRoster(encounter: Encounter): Participant[] {
+  return encounter.players.filter(p => encounter.turnOrder.includes(p));
+}
+
+/** Only a connected human can sit in the sidebar and decide — an AI-controlled Alert player never pauses the fight. */
+function isConnectedPlayer(p: Participant): boolean {
+  return p.isPlayer && connected.has(p.name);
+}
+
+function alertPendingNames(encounter: Encounter): string[] {
+  return [...encounter.alertPauseIds].map(id => encounter.findParticipant(id)?.name).filter((n): n is string => !!n);
+}
+
 /**
- * Origin feat Alert's swap clause: offers targetId (a willing ally) the chance to trade rolled
- * Initiative with characterId. Once per combat per requester (alertSwapUsed), not per-turn, so
- * it isn't cleared by refillResources. Only a real connected player can be offered — offerReaction
- * needs a live socket to prompt, which AI-controlled allies and summons don't have.
+ * Origin feat Alert's swap clause, run once when a fight's initiative is all in: holds round 1
+ * while every connected Alert player who hasn't swapped decides (client: AlertSwapSidebar). No
+ * consent step from the ally — the whole party watches the pause. Each Alert player gets the
+ * alertSwapTimeoutSecs house-rule window (unless alertSwapTimerEnabled is off); running out counts as Cancel. State goes 'active'
+ * synchronously so the staggered addToTurnOrder callbacks can't start it twice.
  */
-export async function requestAlertSwap(cid: string, characterId: string, targetId: string): Promise<void> {
-  const encounter = fightOf(cid, characterId);
-  if (!encounter) return;
+async function beginAlertPause(cid: string, encounter: Encounter): Promise<void> {
+  encounter.alertPauseState = 'active';
+  const roster = alertRoster(encounter);
+  const eligible: Participant[] = [];
+  // A lone player has nobody to swap with.
+  if (roster.length > 1) {
+    for (const p of roster) {
+      if (p.alertSwapUsed || !isConnectedPlayer(p)) continue;
+      const char = await getCharacter(cid, p.id);
+      if (char && hasOriginFeat(char, 'Alert')) eligible.push(p);
+    }
+  }
+  const rules = eligible.length ? await getHouseRules(cid) : undefined;
+  if (!rules || encounter.ended) {
+    encounter.alertPauseState = 'done';
+    tryBeginCombat(cid, encounter);
+    return;
+  }
+
+  // ponytail: timer off + an Alert player who disconnects mid-pause holds round 1 until they rejoin and answer; add a disconnect auto-cancel if that bites.
+  const timeoutMs = rules.alertSwapTimerEnabled ? rules.alertSwapTimeoutSecs * 1000 : undefined;
+  for (const p of eligible) {
+    encounter.alertPauseIds.add(p.id);
+    if (timeoutMs) encounter.alertPauseTimers.set(p.id, setTimeout(() => resolveAlertPause(cid, encounter, p.id, null), timeoutMs));
+  }
+  toFight(encounter).emit('combat:alert:pause', {
+    pendingNames: eligible.map(p => p.name),
+    roster: alertRoster(encounter).map(p => ({
+      id: p.id,
+      name: p.name,
+      initiative: p.initiative,
+      ai: !isConnectedPlayer(p),
+      ...(p.creature?.portraitSrc ? { portraitSrc: p.creature.portraitSrc } : {}),
+    })),
+    ...(timeoutMs ? { expiresInMs: timeoutMs } : {}),
+  });
+}
+
+/** Relays an Alert player's unconfirmed pick so every other Alert player sees it live. No game effect. */
+export function updateAlertSelection(encounter: Encounter, characterId: string, targetId: string | null): void {
+  if (encounter.alertPauseIds.has(characterId)) toFight(encounter).emit('combat:alert:preview', { characterId, targetId });
+}
+
+/** Confirm (targetId: swap) or Cancel / empty Confirm / timeout (null: no change). Last one out starts round 1. */
+export function resolveAlertPause(cid: string, encounter: Encounter, characterId: string, targetId: string | null): void {
+  if (!encounter.alertPauseIds.delete(characterId)) return;
+  clearTimeout(encounter.alertPauseTimers.get(characterId));
+  encounter.alertPauseTimers.delete(characterId);
 
   const requester = encounter.findParticipant(characterId);
-  const target = encounter.findParticipant(targetId);
-  if (!requester || !target || requester.id === target.id || !target.isPlayer) return;
-  if (requester.alertSwapUsed) return;
+  const target = targetId ? alertRoster(encounter).find(p => p.id === targetId) : undefined;
+  if (requester) requester.alertSwapUsed = true;
+  if (requester && target && target.id !== requester.id && !encounter.ended) {
+    const requesterInit = requester.initiative;
+    requester.initiative = target.initiative;
+    target.initiative = requesterInit;
+    // Neither number is the roller's own roll any more — drop the breakdowns rather than show a tooltip that doesn't add up.
+    requester.initiativeRoll = undefined;
+    target.initiativeRoll = undefined;
+    encounter.addToTurnOrder(requester);
+    encounter.addToTurnOrder(target);
+    toFight(encounter).emit('combat:initiative', requester.toTurnOrderEntry());
+    toFight(encounter).emit('combat:initiative', target.toTurnOrderEntry());
+    console.log(`[alert] ${requester.name} swaps Initiative with ${target.name}`);
+  }
 
-  const char = await getCharacter(cid, characterId);
-  if (!char || !hasOriginFeat(char, 'Alert')) return;
-
-  const picked = await offerReaction(cid, targetId, [{
-    spellName: 'Alert Swap', kind: 'swap', attackerName: requester.name, sourceName: 'Alert',
-  }]);
-  if (!picked) return;
-
-  // Re-check after the await — combat may have ended, or this got used elsewhere in the meantime.
-  if (encounter.ended || requester.alertSwapUsed) return;
-
-  const requesterInit = requester.initiative;
-  requester.initiative = target.initiative;
-  target.initiative = requesterInit;
-  // Neither number is the roller's own roll any more — drop the breakdowns rather than show a tooltip that doesn't add up.
-  requester.initiativeRoll = undefined;
-  target.initiativeRoll = undefined;
-  requester.alertSwapUsed = true;
-  encounter.addToTurnOrder(requester);
-  encounter.addToTurnOrder(target);
-  toFight(encounter).emit('combat:initiative', requester.toTurnOrderEntry());
-  toFight(encounter).emit('combat:initiative', target.toTurnOrderEntry());
-  console.log(`[alert] ${requester.name} swaps Initiative with ${target.name}`);
+  toFight(encounter).emit('combat:alert:resolved', { pendingNames: alertPendingNames(encounter) });
+  if (encounter.alertPauseIds.size) return;
+  encounter.alertPauseState = 'done';
+  toFight(encounter).emit('combat:alert:pause:end');
+  tryBeginCombat(cid, encounter);
 }
 

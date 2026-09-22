@@ -17,7 +17,7 @@ import { resolveReaction } from '../combat/stateEngine/reactionPrompt.ts';
 import { rollD20, adv, dis, keptDie, withModifiers, reconcile, sumModifiers, rollDice, rollDiceRerollLow, fmtMod, rollApplicableDamage, rollApplicableHeal, rollChainableDamage, resolveHit, maxDiceValue } from '../combat/dice.ts';
 import { conditionModeSources, targetModeSources } from '../combat/conditions/rollModeFor.ts';
 import { applyDamageToCreature, applyDamageToPlayer, applyHealingToPlayer, applyHealingToCreature, grantTempHpToPlayer, bladeWardPenalty } from '../combat/runtime/damage.ts';
-import { advanceTurn, tryBeginCombat, requestAlertSwap } from '../combat/runtime/lifecycle.ts';
+import { advanceTurn, tryBeginCombat, updateAlertSelection, resolveAlertPause } from '../combat/runtime/lifecycle.ts';
 import { trySpendSpellSlot, offerLuckAttackReroll, trySpendHeroicInspiration } from '../combat/runtime/resources.ts';
 import { emitResources } from '../combat/runtime/shared.ts';
 import { applyCondition, clearCondition, breakSanctuaryOn } from '../combat/runtime/statusEffects.ts';
@@ -1955,8 +1955,14 @@ export function registerCombatHandlers(ctx: JoinContext): void {
     resolveReaction(requestId, spellName);
   });
 
-  socket.on('combat:alert:swap', ({ characterId, targetId }) => {
-    void requestAlertSwap(campaignId, characterId, targetId);
+  socket.on('combat:alert:select', ({ characterId, targetId }) => {
+    const encounter = fightOf(campaignId, characterId);
+    if (encounter) updateAlertSelection(encounter, characterId, targetId);
+  });
+
+  socket.on('combat:alert:resolve', ({ characterId, targetId }) => {
+    const encounter = fightOf(campaignId, characterId);
+    if (encounter) resolveAlertPause(campaignId, encounter, characterId, targetId);
   });
 
   // Origin feat Healer: Utilize action, expend a Healer's Kit use to tend an ally within 5ft.

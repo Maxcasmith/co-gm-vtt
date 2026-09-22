@@ -30,6 +30,7 @@ import VictoryScreen from './VictoryScreen.tsx';
 import DefeatScreen from './DefeatScreen.tsx';
 import CongratsScreen from './CongratsScreen.tsx';
 import ReactionPrompt from './ReactionPrompt.tsx';
+import AlertSwapSidebar from './AlertSwapSidebar.tsx';
 import { dispatch, on } from './events.ts';
 import { initNarration, narrate } from './narration.ts';
 import { loadRuntimeTilesets } from './dungeonThemes.ts';
@@ -510,6 +511,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('rest:progress', data => dispatch('vtt:rest:progress', data));
     socket.on('combat:reaction:offer', data => dispatch('vtt:combat:reaction:offer', data));
     socket.on('combat:reaction:close', data => dispatch('vtt:combat:reaction:close', data));
+    socket.on('combat:alert:pause', data => dispatch('vtt:combat:alert:pause', data));
+    socket.on('combat:alert:preview', data => dispatch('vtt:combat:alert:preview', data));
+    socket.on('combat:alert:resolved', data => dispatch('vtt:combat:alert:resolved', data));
+    socket.on('combat:alert:pause:end', () => dispatch('vtt:combat:alert:pause:end', {}));
     socket.on('combat:log', data => dispatch('vtt:combat:log', { kind: 'text', ...data }));
     socket.on('combat:roll', data => dispatch('vtt:combat:log', { kind: 'roll', timestamp: Date.now(), ...data }));
     socket.on('dungeon:generating', () => setDungeonGenerating(true));
@@ -559,7 +564,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     const unsubElevation    = on('vtt:combat:elevation:set', payload => socket.emit('combat:elevation:set', payload));
     const unsubDisengage    = on('vtt:combat:disengage', payload => socket.emit('combat:disengage', payload));
     const unsubStdAction    = on('vtt:combat:standardAction:used', payload => socket.emit('combat:standardAction:used', payload));
-    const unsubAlertSwap    = on('vtt:combat:alert:swap', payload => socket.emit('combat:alert:swap', { ...payload, campaignId: character.campaignId }));
+    const unsubAlertSelect  = on('vtt:combat:alert:select', payload => socket.emit('combat:alert:select', { ...payload, campaignId: character.campaignId }));
+    const unsubAlertResolve = on('vtt:combat:alert:resolve', payload => socket.emit('combat:alert:resolve', { ...payload, campaignId: character.campaignId }));
     const unsubHealerKit    = on('vtt:combat:healerKit:use', payload => socket.emit('combat:healerKit:use', payload));
     const unsubDoorToggle   = on('vtt:door:toggle', ({ doorId }) => socket.emit('door:toggle', { campaignId: character.campaignId, doorId, characterName: character.name }));
     const unsubStairsUse    = on('vtt:stairs:use', ({ stairsId }) => socket.emit('stairs:use', { campaignId: character.campaignId, stairsId, characterName: character.name }));
@@ -584,7 +590,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       unsubElevation();
       unsubDisengage();
       unsubStdAction();
-      unsubAlertSwap();
+      unsubAlertSelect();
+      unsubAlertResolve();
       unsubHealerKit();
       unsubHeal();
       unsubLockpick();
@@ -929,6 +936,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
           onFinish={() => { socketRef.current?.disconnect(); window.location.href = `/${character.campaignId}/lobby`; }}
         />
       )}
+      <AlertSwapSidebar character={liveCharacter} portraitUrls={portraitUrls} />
       <ReactionPrompt
         onRespond={(requestId, spellName) => socketRef.current?.emit('combat:reaction:respond', { requestId, spellName })}
         showDetailsByDefault={houseRules.reactionShowDetailsByDefault}

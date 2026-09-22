@@ -156,6 +156,45 @@ export default function GameSettingsPage({ campaignId }: Props) {
               </Button>
             </div>
           </section>
+          <section className="settings-section">
+            <h3 className="settings-section-title">Alert Initiative Swap</h3>
+            <div className="settings-toggle-row">
+              <div className="settings-toggle-text">
+                <span className="settings-toggle-label">Swap Timer</span>
+                <span className="settings-toggle-desc">
+                  {rules.alertSwapTimerEnabled
+                    ? 'An Alert player who doesn’t answer in time keeps their Initiative, and combat starts.'
+                    : 'Off — combat waits until every Alert player confirms or cancels.'}
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                className={`settings-toggle ${rules.alertSwapTimerEnabled ? 'settings-toggle--on' : ''}`}
+                onClick={() => setRules(r => ({ ...r, alertSwapTimerEnabled: !r.alertSwapTimerEnabled }))}
+                aria-pressed={rules.alertSwapTimerEnabled}
+              >
+                <span className="settings-toggle-thumb" />
+              </Button>
+            </div>
+            {rules.alertSwapTimerEnabled && (
+              <div className="settings-toggle-row">
+                <div className="settings-toggle-text">
+                  <span className="settings-toggle-label">Swap Window</span>
+                  <span className="settings-toggle-desc">
+                    How long (seconds) each Alert player has to swap Initiative. Separate from the Reaction Window.
+                  </span>
+                </div>
+                <input
+                  className="modal-input settings-number-input"
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={rules.alertSwapTimeoutSecs}
+                  onChange={e => setRules(r => ({ ...r, alertSwapTimeoutSecs: Math.max(1, Number(e.target.value) || 1) }))}
+                />
+              </div>
+            )}
+          </section>
         </div>
 
         <div className="settings-footer">

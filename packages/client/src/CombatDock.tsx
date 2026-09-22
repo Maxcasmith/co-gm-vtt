@@ -21,7 +21,7 @@ interface Props {
   activeBuffs?: string[];
   /** Height off the ground (Feather Fall, falling damage) — see combat:elevation:set. */
   elevationFt?: number;
-  /** Origin feat Alert's swap clause — connected players' names, and name→characterId, for the ally picker. */
+  /** Connected players' names, and name→characterId, for the Healer's Kit ally picker. */
   connectedAllies?: string[];
   allyCharacterIds?: Record<string, string>;
 }
@@ -77,10 +77,6 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   // Params modal for a "spend up to what's left" ability (Lay on Hands) — open when set.
   const [amountModal, setAmountModal] = useState<{ key: string; amount: number; cure: boolean } | null>(null);
   const [inspirationArmed, setInspirationArmed] = useState(false);
-  // Origin feat Alert's swap clause — once per combat; the server is the real gate (Participant.alertSwapUsed),
-  // this is just an optimistic lockout so the picker doesn't stay offered after a request is sent.
-  const [alertSwapRequested, setAlertSwapRequested] = useState(false);
-  const [allyPicker, setAllyPicker] = useState(false);
   // Origin feat Healer — which ally (or self) to tend with a Healer's Kit charge.
   const [healerPicker, setHealerPicker] = useState(false);
   // Favored Enemy has no ABILITY_DEFS entry — it's spent inside the normal spell-cast flow when
@@ -116,8 +112,6 @@ export default function CombatDock({ character, combatActive, movementRemaining,
       setTargeting(null);
       setIsMyTurn(false);
       setInspirationArmed(false);
-      setAlertSwapRequested(false);
-      setAllyPicker(false);
       setHealerPicker(false);
       setHuntersMarkActive(false);
     }
@@ -337,14 +331,6 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     dispatch('vtt:combat:elevation:set', { targetId: character.id, elevationFt: Math.max(0, elevationFt + deltaFt) });
   }
 
-  function handleAlertSwap(allyName: string) {
-    const targetId = allyCharacterIds[allyName];
-    if (!targetId) return;
-    dispatch('vtt:combat:alert:swap', { characterId: character.id, targetId });
-    setAlertSwapRequested(true);
-    setAllyPicker(false);
-  }
-
   function handleHealerKit(targetId: string) {
     if (actionsDisabled || !resources.action) return;
     dispatch('vtt:combat:healerKit:use', { casterId: character.id, casterName: character.name, targetId });
@@ -382,8 +368,6 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   const amountModalCanCure = amountModalCureCost !== undefined && amountModalPool >= amountModalCureCost;
   const amountModalCanAccept = amountModal ? (amountModal.cure ? amountModalCanCure : amountModal.amount >= 1) : false;
 
-  const alertAllies = connectedAllies.filter(name => name !== character.name && allyCharacterIds[name]);
-  const canOfferAlertSwap = hasOriginFeat(character, 'Alert') && !alertSwapRequested && alertAllies.length > 0;
   const healersKit = character.inventory?.find(i => i.name === "Healer's Kit" && i.quantity > 0);
   const healerTargets = [
     { name: character.name, id: character.id },
@@ -395,27 +379,6 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   <>
   <div className="combat-dock-wrapper">
     <div className="combat-dock-column">
-      {canOfferAlertSwap && (
-        allyPicker ? (
-          <div className="combat-dock-alert-picker">
-            {alertAllies.map(name => (
-              <Button key={name} variant="ghost" className="combat-dock-luck-toggle" onClick={() => handleAlertSwap(name)}>
-                Swap with {name}
-              </Button>
-            ))}
-            <Button variant="ghost" className="combat-dock-luck-toggle" onClick={() => setAllyPicker(false)}>Cancel</Button>
-          </div>
-        ) : (
-          <Button
-            variant="ghost"
-            className="combat-dock-luck-toggle"
-            title="Swap your rolled Initiative with a willing ally's — once per combat"
-            onClick={() => setAllyPicker(true)}
-          >
-            Swap Initiative
-          </Button>
-        )
-      )}
       {canUseHealerKit && (
         healerPicker ? (
           <div className="combat-dock-alert-picker">

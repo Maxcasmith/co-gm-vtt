@@ -1,4 +1,4 @@
-import type { RollBreakdown, CombatRollEvent, EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon, ReactionOffer, Condition, Manoeuvre, GoalTier, GroupColor } from 'shared';
+import type { RollBreakdown, CombatRollEvent, EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon, ReactionOffer, Condition, Manoeuvre, GoalTier, GroupColor, AlertPause } from 'shared';
 
 // ── Payload types ─────────────────────────────────────────────────────────────
 //
@@ -94,7 +94,11 @@ export interface GoalsFetchPayload { characterId: string }
 export interface CombatTurnPayload { actorId: string; actorName: string; speedMultiplier?: number; speedBonusFt?: number; buffs?: string[]; resync?: boolean; movementRemainingFt?: number }
 export type CombatTurnEndPayload = Record<string, never>
 export interface ConditionEscapeAttemptPayload { targetId: string; name: Condition }
-export interface AlertSwapRequestPayload { characterId: string; targetId: string }
+/** Origin feat Alert pause — your live pick (select) or final answer (resolve); null = nobody / Cancel. */
+export interface AlertChoicePayload { characterId: string; targetId: string | null }
+export type AlertPausePayload = AlertPause;
+export interface AlertResolvedPayload { pendingNames: string[] }
+export type AlertPauseEndPayload = Record<string, never>;
 export interface HealerKitUsePayload { casterId: string; casterName: string; targetId: string }
 export interface ElevationSetPayload { targetId: string; elevationFt: number }
 export interface DisengagePayload { actorId: string }
@@ -279,7 +283,12 @@ export interface VTTEventMap {
   'vtt:combat:turn':            CombatTurnPayload;
   'vtt:combat:turn:end':        CombatTurnEndPayload;
   'vtt:condition:escape:attempt': ConditionEscapeAttemptPayload;
-  'vtt:combat:alert:swap':      AlertSwapRequestPayload;
+  'vtt:combat:alert:select':    AlertChoicePayload;
+  'vtt:combat:alert:resolve':   AlertChoicePayload;
+  'vtt:combat:alert:pause':     AlertPausePayload;
+  'vtt:combat:alert:preview':   AlertChoicePayload;
+  'vtt:combat:alert:resolved':  AlertResolvedPayload;
+  'vtt:combat:alert:pause:end': AlertPauseEndPayload;
   'vtt:combat:healerKit:use':   HealerKitUsePayload;
   'vtt:combat:elevation:set': ElevationSetPayload;
   'vtt:combat:disengage': DisengagePayload;

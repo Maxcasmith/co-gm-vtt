@@ -142,3 +142,24 @@ another is in a dungeon, and each dungeon is discarded once its last group leave
 **Progress log:**
 - 2026-09-19 — deferred at the end of the Party Groups build (steps 1–14 done).
 - 2026-09-20 — built; entry closed.
+
+---
+
+### Alert swap pause with its timer off can hold a fight open indefinitely
+
+**What we accepted:** the Alert initiative-swap pause (`lifecycle.ts` `beginAlertPause`) holds
+round 1 until every connected Alert player confirms or cancels. With the "Swap Timer" house rule
+off (`alertSwapTimerEnabled: false`), nothing ever auto-cancels — an Alert player who disconnects,
+or walks away, mid-pause keeps the whole fight frozen before round 1 until they come back and
+answer. A reconnecting player also doesn't get the sidebar re-sent (`syncFight` doesn't replay the
+pause), so they'd have to be offered it again some other way.
+
+**Why deferred:** turning the timer off is an explicit opt-in by the campaign owner, and the timer
+is on by default. An auto-cancel on disconnect (or replaying the pause in `syncFight`) is a small
+build but speculative until it's actually been hit in play.
+
+**Trigger to revisit:** any report of a fight stuck at "X is in Initiative Swap", or campaigns
+routinely running with the Swap Timer off.
+
+**Progress log:**
+- 2026-09-22 — deferred when the Alert swap pause and its timer toggle were built.

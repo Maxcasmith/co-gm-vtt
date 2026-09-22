@@ -93,10 +93,6 @@ export default function ReactionPrompt({ onRespond, showDetailsByDefault }: Prop
               <p className="reaction-detail">
                 Your {option.sourceName} attack against {option.targetName} missed AC {option.currentAc} with {option.attackTotal}. Spend a Luck Point to reroll?
               </p>
-            ) : option.kind === 'swap' ? (
-              <p className="reaction-detail">
-                {option.attackerName} wants to swap their rolled Initiative with yours. Accept?
-              </p>
             ) : (
               <p className="reaction-detail">
                 {option.attackerName}&apos;s {option.sourceName} just hit you. Strike back?
@@ -112,7 +108,7 @@ export default function ReactionPrompt({ onRespond, showDetailsByDefault }: Prop
               </dl>
             )}
             <Button variant="ghost" className="reaction-accept" onClick={() => respond(option.spellName)}>
-              {option.kind === 'opportunity' ? 'Attack' : option.kind === 'protect' ? 'Protect' : option.kind === 'luck' || option.kind === 'luckReroll' ? 'Spend Luck Point' : option.kind === 'swap' ? 'Swap' : `Cast ${option.spellName}`}
+              {option.kind === 'opportunity' ? 'Attack' : option.kind === 'protect' ? 'Protect' : option.kind === 'luck' || option.kind === 'luckReroll' ? 'Spend Luck Point' : `Cast ${option.spellName}`}
             </Button>
           </div>
         ))}

@@ -62,14 +62,12 @@ export interface ReactionOfferOption {
    * spellName is a synthetic label ("Protection") the same way 'opportunity' uses one. 'luck'
    * (origin feat Lucky): impose Disadvantage on an attack against yourself, same pre-roll timing
    * as 'protect' but self-targeted and spending a Luck Point instead of a reaction — spellName is
-   * a synthetic label ("Lucky"). 'swap' (origin feat Alert): the offer to swap rolled Initiative
-   * with the requester — attackerName repurposed as the requester's name, spellName a synthetic
-   * label ("Alert Swap"). 'luckReroll' (origin feat Lucky, offensive half): the player's own
+   * a synthetic label ("Lucky"). 'luckReroll' (origin feat Lucky, offensive half): the player's own
    * attack just missed — spend a Luck Point to reroll the d20, after the outcome is known.
    * attackerName repurposed as the player's own name, targetName the creature they attacked,
    * attackTotal/currentAc the missed roll and the AC it fell short of. Only 'defend' uses the AC
    * fields below. */
-  kind: "defend" | "retaliate" | "opportunity" | "protect" | "luck" | "swap" | "luckReroll";
+  kind: "defend" | "retaliate" | "opportunity" | "protect" | "luck" | "luckReroll";
   attackTotal?: number;
   /** AC as it stands right now, and what it would become if the reaction is taken. */
   currentAc?: number;
@@ -89,6 +87,22 @@ export interface ReactionOffer {
   options: ReactionOfferOption[];
   /** How long the client has to answer before the server auto-declines. */
   expiresInMs: number;
+}
+
+export interface AlertPause {
+  pendingNames: string[];
+  /** Everyone on the players' side who rolled — connected players, AI-controlled party members, and party allies. */
+  roster: {
+    id: string;
+    name: string;
+    initiative: number;
+    /** Not a connected human — an AI-controlled party member or an ally creature. */
+    ai: boolean;
+    /** Ally creatures only (API-relative, like EnemyStatBlock.portraitSrc) — players' portraits come from the party roster. */
+    portraitSrc?: string;
+  }[];
+  /** Each Alert player's window; absent when the Alert timer house rule is off. */
+  expiresInMs?: number;
 }
 
 export interface RestResultBroadcast {
@@ -288,6 +302,16 @@ export interface ServerToClientEvents {
   "combat:reaction:offer": (data: ReactionOffer) => void;
   /** Withdraws a pending offer — it timed out, or the window closed for another reason. */
   "combat:reaction:close": (data: { requestId: string }) => void;
+  /**
+   * Origin feat Alert — initiative is in, round 1 is held while every Alert player in pendingNames
+   * decides whether to swap. roster: the fight's connected players and their current Initiative.
+   */
+  "combat:alert:pause": (data: AlertPause) => void;
+  /** An Alert player's live, unconfirmed pick — so every Alert player sees what the others are eyeing. */
+  "combat:alert:preview": (data: { characterId: string; targetId: string | null }) => void;
+  /** One Alert player confirmed/cancelled/timed out — who is still deciding. Swapped numbers arrive via combat:initiative. */
+  "combat:alert:resolved": (data: { pendingNames: string[] }) => void;
+  "combat:alert:pause:end": () => void;
   "combat:log": (data: { text: string; timestamp: number }) => void;
   /** A d20 roll with no card of its own (concentration, Sanctuary, trap and end-of-effect saves, escape checks) — the Combat Log's generic roll entry. */
   "combat:roll": (data: CombatRollEvent) => void;
@@ -436,8 +460,10 @@ export interface ClientToServerEvents {
     /** Which option's spellName was picked, or null to decline/take the hit. */
     spellName: string | null;
   }) => void;
-  /** Origin feat Alert — request to swap your rolled Initiative with a willing ally's, once per combat. The ally is offered an accept/decline via combat:reaction:offer (kind 'swap'). */
-  "combat:alert:swap": (payload: { campaignId: string; characterId: string; targetId: string }) => void;
+  /** Origin feat Alert pause — live preview of the pick (no game effect), relayed to the fight as combat:alert:preview. */
+  "combat:alert:select": (payload: { campaignId: string; characterId: string; targetId: string | null }) => void;
+  /** Origin feat Alert pause — Confirm (targetId set: swap) or Cancel/empty Confirm (null: no change). */
+  "combat:alert:resolve": (payload: { campaignId: string; characterId: string; targetId: string | null }) => void;
   /** Origin feat Healer — Utilize action, expend a Healer's Kit use to tend an ally within 5ft. */
   "combat:healerKit:use": (payload: { casterId: string; casterName: string; targetId: string }) => void;
   "combat:condition:add": (payload: { targetId: string; name: Condition }) => void;

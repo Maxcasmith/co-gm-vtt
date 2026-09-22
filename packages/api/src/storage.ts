@@ -131,7 +131,8 @@ export async function writeWorldMeta(slug: string, meta: WorldMeta): Promise<voi
 
 export async function getHouseRules(slug: string): Promise<HouseRules> {
   const meta = await getWorldMeta(slug);
-  return meta?.houseRules ?? DEFAULT_HOUSE_RULES;
+  // Merged, not ??: a campaign saved before a rule existed has houseRules without that field.
+  return { ...DEFAULT_HOUSE_RULES, ...meta?.houseRules };
 }
 
 export async function listCampaigns(): Promise<Campaign[]> {
