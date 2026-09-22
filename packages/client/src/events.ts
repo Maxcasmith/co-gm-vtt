@@ -1,4 +1,4 @@
-import type { EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon, ReactionOffer, Condition, Manoeuvre, GoalTier, GroupColor } from 'shared';
+import type { RollBreakdown, CombatRollEvent, EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon, ReactionOffer, Condition, Manoeuvre, GoalTier, GroupColor } from 'shared';
 
 // ── Payload types ─────────────────────────────────────────────────────────────
 //
@@ -125,10 +125,8 @@ export interface CombatLogAttackPayload {
   timestamp: number;
   attackerName: string;
   weaponName: string;
-  d20: number;
-  statBonus: number;
+  breakdown: RollBreakdown;
   statName: string;
-  weaponBonus: number;
   total: number;
   ac: number;
   hit: boolean;
@@ -136,7 +134,7 @@ export interface CombatLogAttackPayload {
   damageRoll?: number;
   damageType?: string;
   damageFormula?: string;
-  /** The ability modifier actually added to damage — undefined for monster/creature attacks, whose damageFormula already bakes it in. See AttackResult's doc for why this isn't just `statBonus`. */
+  /** The ability modifier actually added to damage — undefined for monster/creature attacks, whose damageFormula already bakes it in. See AttackResult's doc for why this isn't the to-hit ability line. */
   damageStatBonus?: number;
   bonusSpellName?: string;
   bonusDamage?: number;
@@ -148,9 +146,8 @@ export interface CombatLogSpellAttackPayload {
   timestamp: number;
   attackerName: string;
   spellName: string;
-  d20: number;
-  statBonus: number;
-  statName: string;
+  /** Absent for a free redirect (Witch Bolt) — no attack roll was made. */
+  breakdown?: RollBreakdown | undefined;
   total: number;
   ac: number;
   hit: boolean;
@@ -171,7 +168,9 @@ export interface CombatLogSpellSavePayload {
   dc: number;
   outcomes: SpellSaveOutcome[];
 }
-export type CombatLogPayload = CombatLogTextPayload | CombatLogAttackPayload | CombatLogSpellAttackPayload | CombatLogSpellSavePayload;
+/** A d20 roll with no card of its own — concentration, Sanctuary, trap and end-of-effect saves, escape checks. */
+export type CombatLogRollPayload = { kind: 'roll'; timestamp: number } & CombatRollEvent;
+export type CombatLogPayload = CombatLogTextPayload | CombatLogAttackPayload | CombatLogSpellAttackPayload | CombatLogSpellSavePayload | CombatLogRollPayload;
 
 export interface RollRequestPayload {
   characterId: string;
@@ -198,6 +197,8 @@ export interface ChatMessageReceivedPayload {
   timestamp: number;
   variant?: 'recap';
   checkRequests?: CheckRequest[];
+  /** Set on a line announcing a d20 roll — hovering it shows the full breakdown. */
+  breakdown?: RollBreakdown | undefined;
   /** Party Groups split tagging, passed through from ChatPayload — see SplitBlock. */
   splitId?: string | undefined;
   trackIds?: GroupColor[] | undefined;
@@ -213,6 +214,8 @@ export type RollResultPayload = RollResult;
 export interface VTTEventMap {
   'vtt:chat:message-sent':      ChatMessageSentPayload;
   'vtt:chat:message-received':  ChatMessageReceivedPayload;
+  /** Local player's Adventure Log input activity — bridged to the chat:typing socket event. */
+  'vtt:chat:typing':            { typing: boolean };
   /** Full replacement of the Adventure Log — on join, and re-sent when a split closes or you switch tracks mid-split. */
   'vtt:chat:history':           ChatMessageReceivedPayload[];
   'vtt:note:add':                NoteAddPayload;

@@ -26,3 +26,9 @@ export function logDebug(message: string): void {
   const time = now.toTimeString().slice(0, 8);
   appendFileSync(path.join(LOGS_DIR, `${date}.log`), `[DEBUG ${time}] ${message}\n`, 'utf-8');
 }
+
+// Tag audit trail — persisted to storage/logs only when DEBUG_MODE=true, since every DM turn with
+// tags writes several lines.
+export function logTagDebug(message: string): void {
+  if (process.env.DEBUG_MODE === 'true') logDebug(`[tag] ${message}`);
+}

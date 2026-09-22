@@ -1,4 +1,4 @@
-import type { AbilityKey, Condition as ConditionName, ActiveCondition } from 'shared';
+import type { AbilityKey, Condition as ConditionName, ActiveCondition, RollModeSource } from 'shared';
 import { Condition, type RollType } from './Condition.ts';
 import { Poisoned } from './Poisoned.ts';
 import { Concentrating } from './Concentrating.ts';
@@ -17,32 +17,25 @@ interface HasConditions {
   conditions?: ActiveCondition[] | undefined;
 }
 
-function clampMode(sum: number): -1 | 0 | 1 {
-  return sum > 0 ? 1 : sum < 0 ? -1 : 0;
-}
-
-/** Net roll mode across every active condition: -1 disadvantage, 0 normal, 1 advantage. */
-export function rollModeFor(actor: HasConditions, rollType: RollType, ability?: AbilityKey): -1 | 0 | 1 {
-  const sum = (actor.conditions ?? [])
-    .map(c => CONDITION_CLASSES[c.name]?.effect(rollType, ability) ?? 0)
-    .reduce<number>((a, b) => a + b, 0);
-  return clampMode(sum);
+/**
+ * Every active condition that gives this roll Advantage or Disadvantage, named for the log —
+ * feed straight into rollD20 alongside any situational sources (Luck Point, long range, ...).
+ */
+export function conditionModeSources(actor: HasConditions, rollType: RollType, ability?: AbilityKey): RollModeSource[] {
+  return (actor.conditions ?? []).flatMap(c => {
+    const effect = CONDITION_CLASSES[c.name]?.effect(rollType, ability) ?? 0;
+    return effect ? [{ label: c.name, sign: effect }] : [];
+  });
 }
 
 /**
  * Conditions that grant the ATTACKER advantage, checked against the TARGET rather than the
- * roller — a second axis rollModeFor doesn't cover (it only ever looks at the actor making the
- * roll). Restrained today ("Attack rolls against you have Advantage" — 2024 PHB unifies this
- * across melee/ranged, no more melee-only split). Combine with the attacker's own
- * rollModeFor(attacker, 'attack') via combineModes before rolling.
+ * roller — a second axis conditionModeSources doesn't cover (it only ever looks at the actor
+ * making the roll). Restrained today ("Attack rolls against you have Advantage" — 2024 PHB
+ * unifies this across melee/ranged, no more melee-only split).
  */
-export function attackModeAgainstTarget(target: HasConditions): -1 | 0 | 1 {
-  return (target.conditions ?? []).some(c => c.name === 'Restrained') ? 1 : 0;
-}
-
-/** Folds multiple independent roll-mode sources into one — opposing sources cancel to normal, same as rollModeFor's own reduction. */
-export function combineModes(...modes: (-1 | 0 | 1)[]): -1 | 0 | 1 {
-  return clampMode(modes.reduce<number>((a, b) => a + b, 0));
+export function targetModeSources(target: HasConditions): RollModeSource[] {
+  return (target.conditions ?? []).some(c => c.name === 'Restrained') ? [{ label: 'Target Restrained', sign: 1 }] : [];
 }
 
 /** Adds a condition if not already present — a character can't have the same condition twice. */

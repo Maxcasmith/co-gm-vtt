@@ -2,24 +2,26 @@ import { useEffect, useRef, useState } from 'react';
 import type { CombatLogPayload } from './events.ts';
 import { on } from './events.ts';
 import { Button } from './components/Button/Button.tsx';
+import { RollRows, fmtBonus } from './RollBreakdown.tsx';
 
 interface Props {
   open: boolean;
   onClose: () => void;
+  /** Plain-text lines (kind: 'text') only land in the log while this is on — the structured attack/spell cards always do. */
+  showText: boolean;
 }
 
-function fmtBonus(n: number) { return n >= 0 ? `+${n}` : `${n}`; }
-
-export default function CombatLogOverlay({ open, onClose }: Props) {
+export default function CombatLogOverlay({ open, onClose, showText }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // ponytail: no persistence — logs reset on mount, intentionally session-only
   const [entries, setEntries] = useState<CombatLogPayload[]>([]);
 
   useEffect(() => {
     return on('vtt:combat:log', entry => {
+      if (entry.kind === 'text' && !showText) return;
       setEntries(prev => [...prev, entry]);
     });
-  }, []);
+  }, [showText]);
 
   useEffect(() => {
     return on('vtt:combat:attack:result', result => {
@@ -28,10 +30,8 @@ export default function CombatLogOverlay({ open, onClose }: Props) {
         timestamp: Date.now(),
         attackerName: result.attackerName,
         weaponName: result.weaponName,
-        d20: result.d20,
-        statBonus: result.statBonus,
+        breakdown: result.breakdown,
         statName: result.statName,
-        weaponBonus: result.weaponBonus,
         total: result.total,
         ac: result.ac,
         hit: result.hit,
@@ -55,9 +55,7 @@ export default function CombatLogOverlay({ open, onClose }: Props) {
         timestamp: Date.now(),
         attackerName: result.attackerName,
         spellName: result.spellName,
-        d20: result.d20,
-        statBonus: result.statBonus,
-        statName: result.statName,
+        breakdown: result.breakdown,
         total: result.total,
         ac: result.ac,
         hit: result.hit,
@@ -134,20 +132,7 @@ export default function CombatLogOverlay({ open, onClose }: Props) {
                       </div>
 
                       <div className="combat-log-attack-breakdown">
-                        <div className="combat-log-breakdown-row">
-                          <span>Dice roll (d20)</span>
-                          <span className="combat-log-breakdown-box">{entry.d20}</span>
-                        </div>
-                        <div className="combat-log-breakdown-row">
-                          <span>{entry.statName} bonus</span>
-                          <span className="combat-log-breakdown-box">{fmtBonus(entry.statBonus)}</span>
-                        </div>
-                        {entry.weaponBonus !== 0 && (
-                          <div className="combat-log-breakdown-row">
-                            <span>Weapon bonus</span>
-                            <span className="combat-log-breakdown-box">{fmtBonus(entry.weaponBonus)}</span>
-                          </div>
-                        )}
+                        <RollRows breakdown={entry.breakdown} />
 
                         <div className="combat-log-attack-vs">
                           <span>vs. {entry.targetName}</span>
@@ -201,14 +186,7 @@ export default function CombatLogOverlay({ open, onClose }: Props) {
                       </div>
 
                       <div className="combat-log-attack-breakdown">
-                        <div className="combat-log-breakdown-row">
-                          <span>Dice roll (d20)</span>
-                          <span className="combat-log-breakdown-box">{entry.d20}</span>
-                        </div>
-                        <div className="combat-log-breakdown-row">
-                          <span>{entry.statName} bonus</span>
-                          <span className="combat-log-breakdown-box">{fmtBonus(entry.statBonus)}</span>
-                        </div>
+                        {entry.breakdown ? <RollRows breakdown={entry.breakdown} /> : <span>Automatic hit — no attack roll</span>}
 
                         <div className="combat-log-attack-vs">
                           <span>vs. {entry.targetName}</span>
@@ -258,14 +236,7 @@ export default function CombatLogOverlay({ open, onClose }: Props) {
                             <span className="combat-log-spell-save-target">{o.targetName} — {o.saved ? 'Save' : 'Fail'}{o.conditionsApplied?.length ? ` (${o.conditionsApplied.join(', ')})` : ''}</span>
                           </div>
                           <div className="combat-log-attack-breakdown">
-                            <div className="combat-log-breakdown-row">
-                              <span>Dice roll (d20)</span>
-                              <span className="combat-log-breakdown-box">{o.roll}</span>
-                            </div>
-                            <div className="combat-log-breakdown-row">
-                              <span>Save bonus</span>
-                              <span className="combat-log-breakdown-box">{fmtBonus(o.saveBonus)}</span>
-                            </div>
+                            {o.breakdown && <RollRows breakdown={o.breakdown} />}
                             <div className="combat-log-attack-vs">
                               <span>Total</span>
                               <span>{o.total} vs DC {o.dc}</span>
@@ -278,6 +249,32 @@ export default function CombatLogOverlay({ open, onClose }: Props) {
                           )}
                         </div>
                       ))}
+                    </div>
+                  </div>
+                );
+              }
+              if (entry.kind === 'roll') {
+                return (
+                  <div key={i} className="combat-log-entry combat-log-entry--attack">
+                    <span className="combat-log-time">
+                      {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </span>
+                    <div className="combat-log-attack-card">
+                      <div className="combat-log-attack-header">
+                        <span className="combat-log-attack-action">{entry.actorName} — {entry.label}</span>
+                        <span className={`combat-log-attack-total ${entry.success === false ? 'combat-log-attack-total--miss' : 'combat-log-attack-total--hit'}`}>
+                          {entry.breakdown.total}
+                        </span>
+                      </div>
+                      <div className="combat-log-attack-breakdown">
+                        <RollRows breakdown={entry.breakdown} />
+                        {entry.dc !== undefined && (
+                          <div className="combat-log-attack-vs">
+                            <span>{entry.success ? 'Success' : 'Failure'}</span>
+                            <span>vs DC {entry.dc}</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );

@@ -1,12 +1,12 @@
-import type { Character, Weapon } from 'shared';
+import type { AttackResult, Character, Weapon } from 'shared';
 import { calcAC, hasOriginFeat, isWeapon, isArmor, trySpendResource, resourceCurrent, unarmedStrikeFor } from 'shared';
 import { getCharacter, updateCharacter, listCharacters, getConfig, getHouseRules } from '../../storage.ts';
 import { getFeatureProvider } from '../../providers/index.ts';
 import { generateCombatFlavour } from '../../session-processor/imagePrompts.ts';
 import { Participant } from '../../domain/encounter.ts';
 import { io, campaignRoom, fightOf, toFight, positionsOf, getStateEngine } from '../../state.ts';
-import { D20Roll, rollDice, fmtMod, resolveHit, maxDiceValue } from '../dice.ts';
-import { rollModeFor, attackModeAgainstTarget, combineModes } from '../conditions/rollModeFor.ts';
+import { rollD20, dis, keptDie, withModifiers, reconcile, sumModifiers, rollDice, fmtMod, resolveHit, maxDiceValue } from '../dice.ts';
+import { conditionModeSources, targetModeSources } from '../conditions/rollModeFor.ts';
 import { offerReaction } from '../stateEngine/reactionPrompt.ts';
 import type { AttackerDisadvantageHook } from '../stateEngine/hooks/AttackerDisadvantageHook.ts';
 import type { TacticalContext } from '../ai/types.ts';
@@ -175,9 +175,14 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
           cid, targetKeyId, targetParticipant.name, actor.name,
         );
         if (encounter.ended) return;
-        const mode = combineModes(rollModeFor(creature, 'attack'), attackModeAgainstTarget(targetHolder ?? {}), wardedAgainst || protectedAgainst || luckDisadvantage ? -1 : 0);
-        const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
-        const attackBonus = atk.bonus + bladeWardPenalty(cid, targetKeyId);
+        const toHitLines = [{ label: 'Attack bonus', value: atk.bonus }, ...bladeWardPenalty(cid, targetKeyId)];
+        const attackBonus = sumModifiers(toHitLines);
+        let breakdown = withModifiers(rollD20([
+          ...conditionModeSources(creature, 'attack'), ...targetModeSources(targetHolder ?? {}),
+          wardedAgainst && dis('Protection from Evil and Good'), protectedAgainst && dis('Protection Fighting Style'),
+          luckDisadvantage && dis('Luck Point'),
+        ]), toHitLines);
+        const roll = keptDie(breakdown);
 
         // Two-phase resolution: roll, let the afterAttackRoll chain run (which may suspend here for
         // several seconds while the defender decides whether to spend a reaction), then re-derive
@@ -200,6 +205,7 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
 
         atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
         atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
+        breakdown = reconcile(breakdown, atkCtx.d20, atkCtx.attackBonus);
         const isCrit = atkCtx.d20 === 20;
         const houseRules = await getHouseRules(cid);
 
@@ -258,22 +264,18 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
         }
 
         const targetId = targetParticipant.isPlayer ? (targetCharForAttack?.id ?? targetParticipant.name) : targetParticipant.id;
-        toFight(encounter).emit('combat:attack:result', {
+        const atkResult: AttackResult = {
           attackerName: actor.name, targetName: targetParticipant.name, targetId,
-          weaponName: atk.name, isMelee: true, d20: roll, attackBonus: atk.bonus, statBonus: atk.bonus, statName: 'Attack', weaponBonus: 0, total, ac: targetAc,
+          // Monster attacks aren't modeled with a range yet (see EnemyStatBlock.attacks) — the client
+          // only reads isMelee for player-sourced swing effects, so this is inert here regardless.
+          weaponName: atk.name, isMelee: true, d20: atkCtx.d20, breakdown, attackBonus: atkCtx.attackBonus, statName: 'Attack', total, ac: targetAc,
           hit, isCrit, damage, damageRoll, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
-        });
+        };
+        toFight(encounter).emit('combat:attack:result', atkResult);
 
         const cfg = await getConfig();
         const cfgAdapter = getFeatureProvider(cfg, 'combatNarration');
         {
-          const atkResult = {
-            attackerName: actor.name, targetName: targetParticipant.name, targetId,
-            // Monster attacks aren't modeled with a range yet (see EnemyStatBlock.attacks) — the client
-            // only reads isMelee for player-sourced swing effects, so this is inert here regardless.
-            weaponName: atk.name, isMelee: true, d20: roll, attackBonus: atk.bonus, statBonus: atk.bonus, statName: 'Attack', weaponBonus: 0, total, ac: targetAc,
-            hit, isCrit, damage, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
-          };
           const flavour = await generateCombatFlavour(atkResult, cfgAdapter);
           if (flavour) {
             const msg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };

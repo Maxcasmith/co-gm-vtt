@@ -7,9 +7,11 @@ import { Button } from './components/Button/Button.tsx';
 interface Props {
   open: boolean;
   onClose: () => void;
+  combatLogText: boolean;
+  onCombatLogTextChange: (on: boolean) => void;
 }
 
-export default function DevModal({ open, onClose }: Props) {
+export default function DevModal({ open, onClose, combatLogText, onCombatLogTextChange }: Props) {
   const [lighting, setLighting] = useState(isLightingEnabled());
   const [darkvision, setDarkvision] = useState(isDarkvisionEnabled());
   const [perfOverlay, setPerfOverlay] = useState(isPerfOverlayEnabled());
@@ -93,6 +95,24 @@ export default function DevModal({ open, onClose }: Props) {
             className={`settings-toggle ${perfOverlay ? 'settings-toggle--on' : ''}`}
             onClick={toggleDrawData}
             aria-pressed={perfOverlay}
+          >
+            <span className="settings-toggle-thumb" />
+          </Button>
+        </div>
+        <div className="settings-toggle-row">
+          <div className="settings-toggle-text">
+            <span className="settings-toggle-label">Combat log text</span>
+            <span className="settings-toggle-desc">
+              {combatLogText
+                ? 'Plain-text lines (the white text) are added to the combat log.'
+                : 'Plain-text lines are skipped — only the attack and spell cards are logged.'}
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            className={`settings-toggle ${combatLogText ? 'settings-toggle--on' : ''}`}
+            onClick={() => onCombatLogTextChange(!combatLogText)}
+            aria-pressed={combatLogText}
           >
             <span className="settings-toggle-thumb" />
           </Button>

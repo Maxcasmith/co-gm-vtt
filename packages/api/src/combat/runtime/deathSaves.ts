@@ -1,7 +1,7 @@
 import { updateCharacter } from '../../storage.ts';
 import { Participant } from '../../domain/encounter.ts';
 import { io, campaignRoom, fightOf, playerSocketIds, getStateEngine } from '../../state.ts';
-import { D20Roll } from '../dice.ts';
+import { rollD20, keptDie } from '../dice.ts';
 import { advanceTurn } from './lifecycle.ts';
 import { delay } from './shared.ts';
 import { postChat } from '../../partyGroups.ts';
@@ -16,7 +16,8 @@ export async function runDeathSave(cid: string, actor: Participant): Promise<voi
 
   if (saves.stable) { advanceTurn(cid, encounter); return; }
 
-  const roll = new D20Roll().roll();
+  const breakdown = rollD20();
+  const roll = keptDie(breakdown);
   const isNat20 = roll === 20;
   const isNat1 = roll === 1;
   let stable = false;
@@ -48,7 +49,7 @@ export async function runDeathSave(cid: string, actor: Participant): Promise<voi
   if (saves.failures >= 3) dead = true;
 
   const saveData = {
-    characterName: actor.name, roll, isNatural20: isNat20, isNatural1: isNat1,
+    characterName: actor.name, roll, breakdown, isNatural20: isNat20, isNatural1: isNat1,
     success: roll >= 10, successes: saves.successes, failures: saves.failures, stable, dead,
   };
   const socketId = playerSocketIds.get(actor.id);
@@ -60,7 +61,7 @@ export async function runDeathSave(cid: string, actor: Participant): Promise<voi
   if (!(isNat20 || (stable && !isNat20))) {
     const saveMsg = {
       text: `${actor.name} rolls a death save: ${roll}${isNat1 ? ' (natural 1, counts double)' : ''} — ${roll >= 10 ? 'SUCCESS' : 'FAILURE'} (${saves.successes}/3 successes, ${saves.failures}/3 failures).`,
-      senderName: 'System', timestamp: Date.now(),
+      senderName: 'System', timestamp: Date.now(), breakdown,
     };
     void postChat(cid, saveMsg, [actor.id]);
   }

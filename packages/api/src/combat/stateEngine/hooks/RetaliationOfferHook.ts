@@ -110,7 +110,7 @@ export class RetaliationOfferHook extends Hook<'afterDamage'> {
     const saveAbility: AbilityKey = combat?.save?.ability ?? spellAbility;
     const halfOnSave = combat?.save?.halfOnSave ?? false;
 
-    const { saved, roll, bonus, total } = await rollSavingThrow(cid, attacker.id, saveAbility, dc);
+    const { saved, roll, bonus, total, breakdown } = await rollSavingThrow(cid, attacker.id, saveAbility, dc);
     console.log(`[reaction] ${participant.name} retaliates with ${spell.name} — ${attacker.name} save vs DC${dc}: d20=${roll}+${bonus}=${total} — ${saved ? 'SAVE' : 'FAIL'}`);
 
     const targetType: CreatureType = attacker.isPlayer ? 'Humanoid' : (attacker.creature?.creatureType ?? 'Humanoid');
@@ -144,7 +144,7 @@ export class RetaliationOfferHook extends Hook<'afterDamage'> {
         targetName: attacker.name,
         isPC: attacker.isPlayer,
         roll,
-        saveBonus: bonus,
+        breakdown,
         total,
         dc,
         saved,

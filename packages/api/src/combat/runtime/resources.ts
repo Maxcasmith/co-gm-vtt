@@ -2,7 +2,7 @@ import type { Character } from 'shared';
 import { spellSlotsForCharacter, hasOriginFeat, trySpendResource, resourceCurrent, magicInitiateResourceKey } from 'shared';
 import { getCharacter, updateCharacter } from '../../storage.ts';
 import { io, campaignRoom, fightOf, playerSocketIds } from '../../state.ts';
-import { D20Roll } from '../dice.ts';
+import { rollD20, keptDie } from '../dice.ts';
 import { offerReaction } from '../stateEngine/reactionPrompt.ts';
 
 /**
@@ -45,7 +45,7 @@ export async function offerLuckAttackReroll(
   await updateCharacter(cid, attackerId, c => ({ ...c, resourceUses: nextResourceUses }));
   io.to(campaignRoom(cid)).emit('combat:player:featureResources', { characterId: attackerId, resourceUses: nextResourceUses });
   console.log(`[lucky] ${attackerName} spends a Luck Point to reroll a missed attack against ${targetName}`);
-  return new D20Roll().roll();
+  return keptDie(rollD20());
 }
 
 /**

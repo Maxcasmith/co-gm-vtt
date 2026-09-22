@@ -161,6 +161,17 @@ async function main(): Promise<void> {
     assert.ok(!reply.includes('Aria'), `blue's DM context leaked red — "${reply}"`);
   });
 
+  await check('typing indicator stays in its group and never echoes to the typer', async () => {
+    clear();
+    sockets.Bex.emit('chat:typing', true);
+    await waitFor('Cal sees Bex typing', () => got('Cal', 'chat:typing', a => (a[0] as { name: string }).name === 'Bex'));
+    await sleep(300);
+    assert.ok(got('Dax', 'chat:typing'), 'the rest of blue should see Bex typing');
+    assert.ok(!got('Aria', 'chat:typing'), 'Aria (red) saw blue typing');
+    assert.ok(!got('Bex', 'chat:typing'), 'Bex got their own typing echoed back');
+    sockets.Bex.emit('chat:typing', false);
+  });
+
   await check("each group's DM can see what the other groups have been doing", async () => {
     clear();
     say('Cal', 'We search the common room');

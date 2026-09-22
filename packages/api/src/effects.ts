@@ -1,5 +1,5 @@
 import type { AppConfig, Character, EnemyStatBlock, GroupColor } from 'shared';
-import { statMod, addCurrency, removeCurrency, trackOf } from 'shared';
+import { addCurrency, removeCurrency, trackOf } from 'shared';
 import { randomUUID } from 'crypto';
 import { updateCharacter, listCharacters, readEntity, writeEntity, readManifest, writeManifest, emptyManifest, parseEntityLinks, clearDungeon, getConfig, saveDungeon, saveDungeonAscii, readQuests, writeQuests, loadPartyAllies, savePartyAllies, readNemeses, writeNemeses, getWorldMeta, findVisitedDungeonByName } from './storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
@@ -8,12 +8,12 @@ import { generateDungeonQuests } from './session-processor/index.ts';
 import { Encounter, Participant, PLAYERS_TEAM_ID } from './domain/encounter.ts';
 import { Creature } from './domain/creature.ts';
 import type { TagEffect, AcquiredItem } from './tag-processor.ts';
-import { logDebug, logError } from './logger.ts';
+import { logDebug, logError, logTagDebug } from './logger.ts';
 import {
   io, campaignRoom, dungeonById, registerDungeon, unregisterDungeon, occupantsOf, locationOf, playerSocketIds, campaignPlayers, connected, fightOf, fightsIn, registerFight,
   NEMESIS_COOLDOWN_SESSIONS, NEMESIS_CAP_PER_TARGET, NEMESIS_MAX_DEATHS, ALLY_XP_PER_LEVEL, markDungeonGenerating,
 } from './state.ts';
-import { D20Roll, toSlug, escalateCr } from './combat/dice.ts';
+import { rollInitiative, dexLine, toSlug, escalateCr } from './combat/dice.ts';
 import { rollPlayerInitiatives, addToTurnOrder, syncFight } from './combat/runtime/lifecycle.ts';
 import { sweepGameTimeExpiries } from './combat/runtime/environment.ts';
 import { trySpendSpellSlot } from './combat/runtime/resources.ts';
@@ -126,6 +126,7 @@ async function generateDungeonForTracks(
  * scene changes land on that group's own scene instead of everyone's. 'all' for campaign-wide sources. */
 export async function applyEffects(cid: string, effects: TagEffect[], audience: ChatAudience): Promise<void> {
   const consolidated = consolidateEffects(effects);
+  for (const effect of consolidated) logTagDebug(`apply ${cid} audience=${audience === 'all' ? 'all' : audience.join(',')} ${JSON.stringify(effect)}`);
   const questEffects = consolidated.filter(isQuestEffect);
   const otherEffects = consolidated.filter(e => !isQuestEffect(e));
   const tracks = await audienceTracks(cid, audience);
@@ -170,14 +171,14 @@ export async function applyEffects(cid: string, effects: TagEffect[], audience: 
     } else if (effect.type === 'inventory_add') {
       const chars = await listCharacters(cid);
       const char = findCharByName(chars, effect.player);
-      if (!char) { console.warn(`[inventory_add] no character named "${effect.player}" — item(s) dropped`); return; }
+      if (!char) { console.warn(`[inventory_add] no character named "${effect.player}" — item(s) dropped`); logTagDebug(`DROPPED inventory_add — no character "${effect.player}"`); return; }
       await updateCharacter(cid, char.id, c => ({ ...c, inventory: [...(c.inventory ?? []), ...effect.items] }));
       const sid = playerSocketIds.get(char.id);
       if (sid) io.to(sid).emit('character:inventory:add', effect.items);
     } else if (effect.type === 'currency_add' || effect.type === 'currency_remove') {
       const chars = await listCharacters(cid);
       const char = findCharByName(chars, effect.player);
-      if (!char) { console.warn(`[${effect.type}] no character named "${effect.player}" — ${effect.amount} ${effect.denom} dropped`); return; }
+      if (!char) { console.warn(`[${effect.type}] no character named "${effect.player}" — ${effect.amount} ${effect.denom} dropped`); logTagDebug(`DROPPED ${effect.type} — no character "${effect.player}"`); return; }
       const next = effect.type === 'currency_add'
         ? addCurrency(char, effect.denom, effect.amount)
         : removeCurrency(char, effect.denom, effect.amount);
@@ -264,7 +265,7 @@ export async function applyEffects(cid: string, effects: TagEffect[], audience: 
       const chars = await listCharacters(cid);
       const char = findCharByName(chars, effect.characterName);
       const item = char?.inventory?.find(i => i.name.toLowerCase() === effect.itemName.toLowerCase());
-      if (!char || !item) { console.warn(`[item_used] no "${effect.itemName}" in ${effect.characterName}'s inventory`); return; }
+      if (!char || !item) { console.warn(`[item_used] no "${effect.itemName}" in ${effect.characterName}'s inventory`); logTagDebug(`DROPPED item_used — no "${effect.itemName}" in ${effect.characterName}'s inventory`); return; }
 
       const quantity = item.quantity - 1;
       await updateCharacter(cid, char.id, c => ({
@@ -292,7 +293,7 @@ export async function applyEffects(cid: string, effects: TagEffect[], audience: 
         const p = new Participant({
           id: creature.id,
           name: creature.name,
-          initiative: new D20Roll().roll() + statMod(creature.stats.dex),
+          initiativeRoll: rollInitiative(creature, [dexLine(creature.stats)]),
           isPlayer: false,
           teamId: PLAYERS_TEAM_ID,
           creature,

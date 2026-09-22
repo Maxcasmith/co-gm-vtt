@@ -1,0 +1,111 @@
+/* ── Roll breakdown (RollBreakdown.tsx) — Adventure Log tooltip, Combat Log cards, turn order ── */
+
+.roll-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.roll-row-label {
+  display: flex;
+  flex-direction: column;
+}
+
+.roll-note {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.roll-dice {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.roll-die {
+  min-width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.roll-die--discarded {
+  min-width: 18px;
+  height: 18px;
+  font-size: 0.85em;
+  font-weight: 400;
+  opacity: 0.4;
+}
+
+.roll-mod {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.roll-row--total {
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+  margin-top: 2px;
+}
+
+.roll-tooltip {
+  position: relative;
+  cursor: help;
+  text-decoration: underline dotted var(--text-muted);
+  text-underline-offset: 3px;
+}
+
+.roll-tooltip-panel {
+  position: absolute;
+  left: 0;
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 200px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  text-align: left;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  z-index: 30;
+  pointer-events: none;
+}
+
+.roll-tooltip--above .roll-tooltip-panel { bottom: calc(100% + 6px); }
+.roll-tooltip--below .roll-tooltip-panel { top: calc(100% + 6px); }
+
+.roll-tooltip:hover .roll-tooltip-panel,
+.roll-tooltip:focus-visible .roll-tooltip-panel {
+  display: flex;
+}
+
+/* Combat Log cards keep their 40px boxes (same as .combat-log-breakdown-box) for the die and every
+   modifier; the discarded die sits left of the kept one, smaller and grey. */
+.combat-log-attack-breakdown .roll-die,
+.combat-log-attack-breakdown .roll-mod {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-radius: 5px;
+}
+
+.combat-log-attack-breakdown .roll-die--discarded {
+  width: 30px;
+  height: 30px;
+  border-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.45);
+  opacity: 1;
+}

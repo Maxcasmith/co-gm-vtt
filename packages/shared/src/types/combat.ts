@@ -2,6 +2,36 @@ import type { GroupColor } from "./partyGroups.ts";
 import type { CharacterStats, AbilityKey } from "./character.ts";
 import type { ActiveCondition } from "./conditions.ts";
 
+/** One labeled term summed into a d20 roll — "Proficiency" +2, "Bless (d4)" +3, "Blade Ward (d4)" -2. */
+export interface RollModifier {
+  label: string;
+  value: number;
+}
+
+/** One reason a roll had Advantage (+1) or Disadvantage (-1) — "Luck Point", "Poisoned", "Target Restrained". */
+export interface RollModeSource {
+  label: string;
+  sign: 1 | -1;
+}
+
+/**
+ * Every number behind a d20 roll, itemised for display (Adventure Log tooltip, Combat Log cards).
+ * Invariant: dice[keptIndex] + sum(modifiers) === total — anything a hook changed after the roll
+ * lands as its own "Other effects" modifier rather than silently breaking the sum.
+ */
+export interface RollBreakdown {
+  mode: "normal" | "advantage" | "disadvantage";
+  /** Why advantage/disadvantage applied — both sides are listed when they cancelled to a normal roll. */
+  modeSources: RollModeSource[];
+  /** Every d20 rolled, in order — one for a flat roll, two for advantage/disadvantage. */
+  dice: number[];
+  keptIndex: number;
+  /** A Lucky reroll replaced this die — shown faded before the kept one. */
+  rerolledFrom?: number | undefined;
+  modifiers: RollModifier[];
+  total: number;
+}
+
 export interface RollResult {
   characterName: string;
   rollType: "check" | "save";
@@ -10,6 +40,7 @@ export interface RollResult {
   modifier: number;
   total: number;
   description: string;
+  breakdown: RollBreakdown;
   /** Same split tagging as ChatPayload — set only while the party is split. */
   splitId?: string;
   trackIds?: GroupColor[];
@@ -86,6 +117,7 @@ export interface TurnOrderEntry {
   id: string;
   name: string;
   initiative: number;
+  initiativeRoll?: RollBreakdown | undefined;
   isPlayer: boolean;
   teamId: string;
   /** See EnemyStatBlock.ownerId. */
@@ -105,10 +137,9 @@ export interface AttackResult {
   weaponName: string;
   isMelee: boolean;
   d20: number;
+  breakdown: RollBreakdown;
   attackBonus: number;
-  statBonus: number;
   statName: string;
-  weaponBonus: number;
   total: number;
   ac: number;
   hit: boolean;
@@ -122,11 +153,11 @@ export interface AttackResult {
   targetDead: boolean;
   /**
    * The ability modifier actually folded into `damage` on top of damageRoll — NOT the same
-   * thing as `statBonus` above, which is the attack roll's to-hit bonus (for a player weapon
-   * attack these happen to be the same ability mod, but a monster's flat to-hit bonus is
-   * unrelated to its damage, which is already fully baked into damageFormula/damageRoll — so
-   * this stays undefined for monster and creature-reactor opportunity attacks rather than
-   * reusing statBonus and fabricating a damage line that doesn't actually exist).
+   * thing as the ability line in `breakdown`, which is the attack roll's to-hit bonus (for a
+   * player weapon attack these happen to be the same ability mod, but a monster's flat to-hit
+   * bonus is unrelated to its damage, which is already fully baked into damageFormula/damageRoll —
+   * so this stays undefined for monster and creature-reactor opportunity attacks rather than
+   * reusing the to-hit bonus and fabricating a damage line that doesn't actually exist).
    */
   damageStatBonus?: number | undefined;
   // Present when a pending on-hit spell buff (e.g. Divine Smite) triggered on this attack.
@@ -147,8 +178,9 @@ export interface SpellAttackResult {
   targetId: string;
   spellName: string;
   d20: number;
+  /** Absent for a free redirect (Witch Bolt) — no attack roll was made. */
+  breakdown?: RollBreakdown | undefined;
   attackBonus: number;
-  statBonus: number;
   statName: string;
   total: number;
   ac: number;
@@ -172,7 +204,8 @@ export interface SpellSaveOutcome {
   targetName: string;
   isPC: boolean;
   roll: number;
-  saveBonus: number;
+  /** Absent only when the target had no stats to roll with (auto-success). */
+  breakdown?: RollBreakdown | undefined;
   total: number;
   dc: number;
   saved: boolean;

@@ -1,6 +1,7 @@
 # Server Configuration
 PORT=3000
 NODE_ENV=development
+DEBUG_MODE=true
 
 # Frontend URL (for CORS)
 FRONTEND_URL=http://localhost:5173

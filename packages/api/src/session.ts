@@ -1,5 +1,5 @@
 import path from 'path';
-import { SKILL_ABILITY, trackOf, type ChatPayload, type CheckRequest, type GroupColor } from 'shared';
+import { SKILL_ABILITY, trackOf, stripDmTags, type ChatPayload, type CheckRequest, type GroupColor } from 'shared';
 import { CAMPAIGNS_DIR, listEntitySlugs, readEntity, getWorldMeta, getConfig, saveDungeon, loadDungeons, readManifest, writeManifest, emptyManifest, readQuests, appendChatLog, appendNote } from './storage.ts';
 import { getTextStore } from './storage/index.ts';
 import { getFeatureProvider, hasFeatureProvider } from './providers/index.ts';
@@ -147,7 +147,7 @@ export async function runRecap(campaignId: string): Promise<{ text: string; isFi
 }
 
 function normalizeSentence(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+  return stripDmTags(s).toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
 }
 
 function jaccard(a: Set<string>, b: Set<string>): number {
@@ -256,13 +256,16 @@ function dispatchToTracks(cid: string, audience: ChatAudience, tracks: GroupColo
 
       const rawResponse = response.replace(/\[COMBAT END\]/g, '').trim();
       const config = await getConfig();
-      const { text: taggedCleanResponse, effects, speakingAs, checkRequests } = hasFeatureProvider(config, 'tagEffectProcessing')
+      const { effects, speakingAs, checkRequests } = hasFeatureProvider(config, 'tagEffectProcessing')
         ? await processVdmResponse(rawResponse, getFeatureProvider(config, 'tagEffectProcessing'))
-        : { text: rawResponse, effects: [], speakingAs: undefined, checkRequests: [] };
+        : { effects: [], speakingAs: undefined, checkRequests: [] };
 
       const recentLog = await readChatContext(cid, audience);
       const recentDmText = recentLog.slice(-12).filter(m => m.senderName === 'Virtual DM' || m.senderName.endsWith('(Virtual DM)')).map(m => m.text).join(' ');
-      const cleanResponse = stripRepeatedSentences(taggedCleanResponse, recentDmText);
+      // Stored and sent with its tags intact (the client strips them for display) — cleanResponse is
+      // only for the prose heuristics below.
+      const taggedResponse = stripRepeatedSentences(rawResponse, recentDmText);
+      const cleanResponse = stripDmTags(taggedResponse);
 
       await applyEffects(cid, effects, audience);
 
@@ -285,8 +288,8 @@ function dispatchToTracks(cid: string, audience: ChatAudience, tracks: GroupColo
 
       const senderName = speakingAs ? `${speakingAs} (Virtual DM)` : 'Virtual DM';
       const tags = await tagForSplit(cid, tracks);
-      await appendChatLog(cid, { text: cleanResponse, senderName, timestamp: Date.now(), ...tags });
-      to.emit('session:recap', { text: cleanResponse, senderName, checkRequests: finalCheckRequests, ...tags });
+      await appendChatLog(cid, { text: taggedResponse, senderName, timestamp: Date.now(), ...tags });
+      to.emit('session:recap', { text: taggedResponse, senderName, checkRequests: finalCheckRequests, ...tags });
     } catch (err) {
       logError('index:dmResponse', err);
       to.emit('chat:message', { text: `[DM error: ${(err as Error).message}]`, senderName: 'System', timestamp: Date.now() });

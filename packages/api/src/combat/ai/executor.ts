@@ -6,7 +6,7 @@ import { campaignRoom, fightOf, toFight, toDungeonOf, positionsOf, getStateEngin
 import { } from '../../storage.ts';
 import { rollDice } from '../dice.ts';
 import { applyDamageToCreature, applyDamageToPlayer, applyHealingToCreature, applyHealingToPlayer } from '../runtime/damage.ts';
-import { rollSavingThrow } from '../runtime/rolls.ts';
+import { rollSavingThrow, emitCombatRoll } from '../runtime/rolls.ts';
 import { addToTurnOrder } from '../runtime/lifecycle.ts';
 import { RollModifierHook } from '../stateEngine/hooks/RollModifierHook.ts';
 import { AcModifierHook } from '../stateEngine/hooks/AcModifierHook.ts';
@@ -61,7 +61,8 @@ async function executeAoe(cid: string, actor: Participant, action: Extract<Enemy
 
     let damage = rollDice(action.damage);
     if (action.saveAbility && action.saveDC !== undefined) {
-      const { saved } = await rollSavingThrow(cid, p.id, action.saveAbility, action.saveDC);
+      const { saved, breakdown } = await rollSavingThrow(cid, p.id, action.saveAbility, action.saveDC);
+      emitCombatRoll(cid, p.id, { actorName: p.name, label: `${action.saveAbility.toUpperCase()} save vs ${action.name}`, dc: action.saveDC, success: saved, breakdown });
       if (saved) damage = Math.floor(damage / 2);
     }
     await dealDamage(cid, actor.id, action.name, p, damage);
@@ -79,7 +80,8 @@ async function executeHeal(cid: string, actor: Participant, action: Extract<Enem
 /** Buff and debuff share one execution path — same hook primitives, opposite sign, debuff gated by a save. */
 async function executeModifier(cid: string, actor: Participant, action: Extract<EnemyAction, { kind: 'buff' | 'debuff' }>, target: Participant, round: number): Promise<void> {
   if (action.kind === 'debuff' && action.saveAbility && action.saveDC !== undefined) {
-    const { saved } = await rollSavingThrow(cid, target.id, action.saveAbility, action.saveDC);
+    const { saved, breakdown } = await rollSavingThrow(cid, target.id, action.saveAbility, action.saveDC);
+    emitCombatRoll(cid, target.id, { actorName: target.name, label: `${action.saveAbility.toUpperCase()} save vs ${action.name}`, dc: action.saveDC, success: saved, breakdown });
     if (saved) { announce(cid, actor, `${target.name} resists ${action.name}.`); return; }
   }
 

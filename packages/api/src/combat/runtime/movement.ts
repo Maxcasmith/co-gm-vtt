@@ -1,10 +1,10 @@
-import type { Character, ActiveCondition } from 'shared';
+import type { Character, ActiveCondition, RollModifier } from 'shared';
 import { statMod, calcAC, effectiveWeaponProfs, findPath, isWeapon, isMonkWeapon, closedDoorCells, unarmedStrikeFor, monkMartialArtsActive, monkLevel, martialArtsDie } from 'shared';
 import { getCharacter, listCharacters, getHouseRules } from '../../storage.ts';
 import { Participant } from '../../domain/encounter.ts';
 import { io, campaignRoom, fightOf, toFightOf, positionsOf, dungeonOf, toDungeonOf, getStateEngine } from '../../state.ts';
-import { D20Roll, rollDice, fmtMod, resolveHit, maxDiceValue } from '../dice.ts';
-import { rollModeFor, attackModeAgainstTarget, combineModes } from '../conditions/rollModeFor.ts';
+import { rollD20, dis, keptDie, withModifiers, reconcile, sumModifiers, rollDice, fmtMod, resolveHit, maxDiceValue } from '../dice.ts';
+import { conditionModeSources, targetModeSources } from '../conditions/rollModeFor.ts';
 import { offerReaction } from '../stateEngine/reactionPrompt.ts';
 import { tokenKey } from '../ai/planEvaluator.ts';
 import { offerLuckDisadvantage, runEnemyAI } from './ai.ts';
@@ -233,7 +233,7 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
   let weaponName = 'Unarmed Strike';
   let damageFormula = '1';
   let damageType: string | undefined = 'Bludgeoning';
-  let attackBonus = 0;
+  let toHitLines: RollModifier[] = [];
   let statBonus = 0;
   let statName = 'Strength';
   let reactorChar: Character | undefined;
@@ -256,8 +256,11 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
     const charProf = char.proficiencyBonus ?? 2;
     const classWeaponProfs = effectiveWeaponProfs(char);
     const isProficient = !weapon || weapon.properties?.some(p => classWeaponProfs.includes(p as 'simple' | 'martial'));
-    const weaponBonus = (weapon?.attackBonus ?? 0) + (isProficient ? charProf : 0);
-    attackBonus = statBonus + weaponBonus;
+    toHitLines = [
+      { label: statName, value: statBonus },
+      ...(isProficient ? [{ label: 'Proficiency', value: charProf }] : []),
+      ...(weapon?.attackBonus ? [{ label: weapon.name, value: weapon.attackBonus }] : []),
+    ];
     weaponName = effectiveWeapon.name;
     damageFormula = monkActive && isMonkWeapon(effectiveWeapon) ? martialArtsDie(monkLevel(char)) : effectiveWeapon.damage;
     damageType = effectiveWeapon.damageType;
@@ -267,8 +270,7 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
     weaponName = atk.name;
     damageFormula = atk.damage;
     damageType = undefined;
-    attackBonus = atk.bonus;
-    statBonus = atk.bonus;
+    toHitLines = [{ label: 'Attack bonus', value: atk.bonus }];
     statName = 'Attack';
   } else {
     return;
@@ -288,13 +290,14 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
   // separate resolution function so they need their own offer, not shared plumbing.
   const luckDisadvantage = target.isPlayer && await offerLuckDisadvantage(cid, targetKeyId, target.name, reactor.name);
   if (encounter.ended) return;
-  const mode = combineModes(
-    rollModeFor(reactorChar ?? reactor.creature ?? {}, 'attack'),
-    attackModeAgainstTarget(targetChar ?? target.creature ?? {}),
-    luckDisadvantage ? -1 : 0,
-  );
-  const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 }).roll();
-  attackBonus += bladeWardPenalty(cid, targetKeyId);
+  toHitLines.push(...bladeWardPenalty(cid, targetKeyId));
+  const attackBonus = sumModifiers(toHitLines);
+  let breakdown = withModifiers(rollD20([
+    ...conditionModeSources(reactorChar ?? reactor.creature ?? {}, 'attack'),
+    ...targetModeSources(targetChar ?? target.creature ?? {}),
+    luckDisadvantage && dis('Luck Point'),
+  ]), toHitLines);
+  const roll = keptDie(breakdown);
   const atkCtx = await engine.trigger('afterAttackRoll', await engine.trigger('beforeAttackRoll', {
     attackerId: reactor.id, attackerName: reactor.name,
     targetId: targetKeyId, targetName: target.name, targetIsPlayer: target.isPlayer,
@@ -304,6 +307,7 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
   if (encounter.ended) return;
   atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
   atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
+  breakdown = reconcile(breakdown, atkCtx.d20, atkCtx.attackBonus);
   const isCrit = atkCtx.d20 === 20;
   const houseRules = await getHouseRules(cid);
 
@@ -337,11 +341,11 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
   console.log(`[aoo] ${reactor.name} makes an Opportunity Attack on ${target.name}: ${roll}${fmtMod(attackBonus)}=${atkCtx.total} vs AC ${targetAc} — ${atkCtx.hit ? `HIT ${damage}` : 'MISS'}`);
   toFightOf(cid, reactor.id).emit('combat:attack:result', {
     attackerName: reactor.name, targetName: target.name, targetId: targetKeyId,
-    weaponName, isMelee: true, d20: roll, attackBonus, statBonus, statName, weaponBonus: attackBonus - statBonus,
+    weaponName, isMelee: true, d20: atkCtx.d20, breakdown, attackBonus: atkCtx.attackBonus, statName,
     total: atkCtx.total, ac: targetAc, hit: atkCtx.hit, isCrit, damage, damageRoll, damageFormula: atkCtx.hit ? damageFormula : undefined,
     damageStatBonus, remainingHp, targetDead,
   });
-  const msg = { text: `${reactor.name} makes an Opportunity Attack on ${target.name}${atkCtx.hit ? ` — hit for ${damage}!` : ' — misses.'}`, senderName: 'System', timestamp: Date.now() };
+  const msg = { text: `${reactor.name} makes an Opportunity Attack on ${target.name}${atkCtx.hit ? ` — hit for ${damage}!` : ' — misses.'}`, senderName: 'System', timestamp: Date.now(), breakdown };
   void postChat(cid, msg, [reactor.id]);
 }
 

@@ -7,7 +7,7 @@ import type { SanctuaryWardHook } from '../stateEngine/hooks/SanctuaryWardHook.t
 import type { ConditionImmunityHook } from '../stateEngine/hooks/ConditionImmunityHook.ts';
 import { breakConcentration } from './concentration.ts';
 import { canMove } from './movement.ts';
-import { rollSavingThrow } from './rolls.ts';
+import { rollSavingThrow, emitCombatRoll } from './rolls.ts';
 import { postChat } from '../../partyGroups.ts';
 
 /**
@@ -87,7 +87,9 @@ export async function checkSanctuary(cid: string, attackerId: string, targetId: 
   const engine = getStateEngine(cid);
   const ward = engine.getHooksOwnedBy(targetId, 'sanctuaryWard')[0] as SanctuaryWardHook | undefined;
   if (!ward) return true;
-  const { saved, roll, bonus, total } = await rollSavingThrow(cid, attackerId, 'wis', ward.dc);
+  const { saved, roll, bonus, total, breakdown } = await rollSavingThrow(cid, attackerId, 'wis', ward.dc);
+  const attackerName = fightOf(cid, attackerId)?.findParticipant(attackerId)?.name ?? attackerId;
+  emitCombatRoll(cid, attackerId, { actorName: attackerName, label: `WIS save to attack ${targetName} through Sanctuary`, dc: ward.dc, success: saved, breakdown });
   logDebug(`[sanctuary] attack on ${targetName} — attacker save vs DC${ward.dc}: d20=${roll}+${bonus}=${total} — ${saved ? 'SAVE, attack proceeds' : 'FAIL, attack blocked'}`);
   return saved;
 }

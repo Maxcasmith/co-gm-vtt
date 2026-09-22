@@ -1,25 +1,55 @@
-import type { EffectSpec, CreatureType, Character } from 'shared';
+import type { EffectSpec, CreatureType, Character, CharacterStats, ActiveCondition, RollBreakdown, RollModeSource, RollModifier } from 'shared';
 import { resolveSpellDamageDice, effectApplies, statMod, hpBonusPerLevel } from 'shared';
 import { HIT_DICE, CR_XP, CR_STEPS } from '../state.ts';
+import { conditionModeSources } from './conditions/rollModeFor.ts';
 
-export class D20Roll {
-  withAdvantage: boolean;
-  withDisadvantage: boolean;
+export const adv = (label: string): RollModeSource => ({ label, sign: 1 });
+export const dis = (label: string): RollModeSource => ({ label, sign: -1 });
 
-  constructor(opts?: { withAdvantage?: boolean; withDisadvantage?: boolean }) {
-    this.withAdvantage = opts?.withAdvantage ?? false;
-    this.withDisadvantage = opts?.withDisadvantage ?? false;
-  }
+/**
+ * Rolls a d20 under every advantage/disadvantage source that applies — pass `cond && adv('X')`
+ * inline, falsy entries are skipped. 2024 PHB: any Advantage plus any Disadvantage cancels to a
+ * flat roll, no matter how many of each; both sides stay listed so the log can show why.
+ */
+export function rollD20(sources: (RollModeSource | false | '' | null | undefined)[] = []): RollBreakdown {
+  const modeSources = sources.filter((s): s is RollModeSource => !!s);
+  const hasAdv = modeSources.some(s => s.sign > 0);
+  const hasDis = modeSources.some(s => s.sign < 0);
+  const mode = hasAdv === hasDis ? 'normal' : hasAdv ? 'advantage' : 'disadvantage';
+  const raw = () => Math.floor(Math.random() * 20) + 1;
+  const dice = mode === 'normal' ? [raw()] : [raw(), raw()];
+  const [a, b = a] = dice as [number, number?];
+  const keptIndex = mode === 'advantage' ? (b > a ? 1 : 0) : mode === 'disadvantage' ? (b < a ? 1 : 0) : 0;
+  return { mode, modeSources, dice, keptIndex, modifiers: [], total: dice[keptIndex]! };
+}
 
-  roll(): number {
-    const raw = () => Math.floor(Math.random() * 20) + 1;
-    const adv = this.withAdvantage && !this.withDisadvantage;
-    const dis = this.withDisadvantage && !this.withAdvantage;
-    const r1 = raw();
-    if (!adv && !dis) return r1;
-    const r2 = raw();
-    return adv ? Math.max(r1, r2) : Math.min(r1, r2);
-  }
+// keptIndex always points into dice — rollD20 and reconcile are the only writers and set both together.
+export function keptDie(b: RollBreakdown): number { return b.dice[b.keptIndex]!; }
+
+export function sumModifiers(mods: RollModifier[]): number { return mods.reduce((sum, m) => sum + m.value, 0); }
+
+/** Attaches the itemised modifiers to a rolled d20 and totals them. */
+export function withModifiers(b: RollBreakdown, modifiers: RollModifier[]): RollBreakdown {
+  return { ...b, modifiers, total: keptDie(b) + sumModifiers(modifiers) };
+}
+
+/**
+ * Re-syncs a breakdown with the d20/bonus a hook chain (beforeAttackRoll/afterAttackRoll,
+ * beforeSave) handed back. A changed d20 is a reroll (the old die shows faded); a changed bonus
+ * the modifiers can't account for lands as "Other effects", so the rows always sum to the total.
+ */
+export function reconcile(b: RollBreakdown, d20: number, bonus: number): RollBreakdown {
+  const rerolled = d20 === keptDie(b) ? b : { ...b, dice: [d20], keptIndex: 0, rerolledFrom: keptDie(b) };
+  const delta = bonus - sumModifiers(b.modifiers);
+  const modifiers = delta ? [...b.modifiers, { label: 'Other effects', value: delta }] : b.modifiers;
+  return { ...rerolled, modifiers, total: d20 + bonus };
+}
+
+export function dexLine(stats: CharacterStats): RollModifier { return { label: 'Dexterity', value: statMod(stats.dex) }; }
+
+/** Initiative is a Dexterity check (2024 PHB), so anything affecting checks (Poisoned) applies to it too. */
+export function rollInitiative(holder: { conditions?: ActiveCondition[] | undefined }, modifiers: RollModifier[]): RollBreakdown {
+  return withModifiers(rollD20(conditionModeSources(holder, 'check', 'dex')), modifiers);
 }
 
 export function fmtMod(n: number) { return n >= 0 ? `+${n}` : `${n}`; }

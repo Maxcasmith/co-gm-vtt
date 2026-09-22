@@ -1,7 +1,7 @@
 import type { Item, Weapon, Consumable, Ammunition, EnemyStatBlock, CheckRequest, CurrencyDenomination } from 'shared';
 import { randomUUID } from 'crypto';
 import type { StoryProviderAdapter } from './providers/index.ts';
-import { logError } from './logger.ts';
+import { logError, logTagDebug } from './logger.ts';
 import { toSlug } from './combat/dice.ts';
 
 export type AcquiredItem = Item | Weapon | Consumable | Ammunition;
@@ -29,7 +29,6 @@ export type TagEffect =
   | { type: 'spell_cast'; player: string; spellName: string };
 
 interface ProcessResult {
-  text: string;
   effects: TagEffect[];
   speakingAs?: string;
   checkRequests: CheckRequest[];
@@ -281,7 +280,6 @@ export async function processVdmResponse(
     effects.push({ type: 'combat_init', combatants });
   }
 
-  const DUNGEON_EXIT_RE = /\[\[DUNGEON_EXIT\]\]/g;
   if (text.includes('[[DUNGEON_EXIT]]')) {
     console.log('[tag] DUNGEON_EXIT detected');
     effects.push({ type: 'dungeon_exit' });
@@ -396,17 +394,15 @@ export async function processVdmResponse(
     }),
   ]);
 
-  // Full audit trail of exactly what the DM said, tags and all — logged once per turn here,
-  // before any tag gets stripped out of what the player actually sees below. Gated on there
-  // being anything to audit so a plain narration turn with zero tags doesn't spam this.
+  // Full audit trail of exactly what the DM said, tags and all — logged once per turn. Gated on
+  // there being anything to audit so a plain narration turn with zero tags doesn't spam this.
   if (effects.length || checkRequests.length) {
-    console.log(`[tag-processor] full response before stripping (${effects.length} effect(s), ${checkRequests.length} check request(s)):\n${text}`);
+    const summary = `full DM response (${effects.length} effect(s), ${checkRequests.length} check request(s)):\n${text}`;
+    console.log(`[tag-processor] ${summary}`);
+    logTagDebug(summary);
   }
 
-  let strippedText = text.replace(TAG_RE, '').replace(PARTY_JOIN_RE, '').replace(SCENE_BUILD_RE, '').replace(NPC_BUILD_RE, '').replace(COMBAT_INIT_RE, '').replace(DUNGEON_EXIT_RE, '').replace(DOOR_UNLOCK_RE, '').replace(ITEM_USED_RE, '').replace(SPEAKING_AS_RE, '').replace(CHECK_RE, '').replace(SAVE_RE, '').replace(DUNGEON_GEN_RE, '').replace(QUEST_ADD_RE, '').replace(QUEST_UPDATE_RE, '').replace(QUEST_RESOLVE_RE, '').replace(CLOCK_RE, '').replace(NEMESIS_RETIRE_RE, '').replace(ALLY_XP_RE, '').replace(ALLY_LEARN_RE, '').replace(CURRENCY_ADD_RE, '').replace(CURRENCY_REMOVE_RE, '').replace(CAST_SPELL_RE, '').replace(/\s{2,}/g, ' ').trim();
-  // A tag sitting at the end of a sentence (the common case — models emit it after the prose it
-  // corresponds to) gets eaten above along with the punctuation the model tucked inside it, e.g.
-  // "...picks up a med kit[[PICKED_UP_HEALING:...]]" leaves "...picks up a med kit" with no period.
-  if (strippedText && !/[.!?'"]$/.test(strippedText)) strippedText += '.';
-  return { text: strippedText, effects, checkRequests, ...(speakingAs !== undefined ? { speakingAs } : {}) };
+  // Tags aren't stripped here — the text is stored and sent as-is so later DM prompts see what they
+  // triggered; the client strips them for display (stripDmTags).
+  return { effects, checkRequests, ...(speakingAs !== undefined ? { speakingAs } : {}) };
 }

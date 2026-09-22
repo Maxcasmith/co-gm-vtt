@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { TurnOrderEntry, EnemyStatBlock } from 'shared';
 import { on } from './events.ts';
+import { RollTooltip } from './RollBreakdown.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
 
@@ -82,7 +83,11 @@ export default function TurnOrderBar({ campaignId, encounter, deadCreatureIds }:
               )}
             </div>
             <span className="turn-order-name">{entry.name.split(' ')[0]}</span>
-            <span className="turn-order-init">{entry.initiative}</span>
+            <span className="turn-order-init">
+              {entry.initiativeRoll
+                ? <RollTooltip breakdown={entry.initiativeRoll} placement="below">{entry.initiative}</RollTooltip>
+                : entry.initiative}
+            </span>
           </div>
         );
       })}

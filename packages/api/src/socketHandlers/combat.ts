@@ -1,4 +1,4 @@
-import type { TurnOrderEntry, Weapon, Spell, SpellAttackResult, SpellSaveOutcome, SpellSaveResult, CreatureType, Character, ActionResource, AttackContext, DungeonEntity, EffectSpec, AbilityKey, HookSpec } from 'shared';
+import type { TurnOrderEntry, Weapon, Spell, SpellAttackResult, RollBreakdown, RollModifier, SpellSaveOutcome, SpellSaveResult, CreatureType, Character, ActionResource, AttackContext, DungeonEntity, EffectSpec, AbilityKey, HookSpec } from 'shared';
 import { effectiveWeaponProfs, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, isAmmunition, isWeapon, isMonkWeapon, statMod, parseRangeFeet, resolveForcedMovement, findPath, effectApplies, actionCostFromCastingTime, requiresConcentration, resolveSpellDamageDice, hasOriginFeat, hasClassLevel, crossesObscuredArea, ABILITY_DEFS, trySpendResource, trySpendResourceAmount, resourceCurrent, getSenses, hasLineOfSight, closedDoorCells, monkMartialArtsActive, monkLevel, martialArtsDie } from 'shared';
 import { randomUUID } from 'crypto';
 import { getCharacter, updateCharacter, saveEncounter, listCharacters, getConfig, saveDungeon, getHouseRules } from '../storage.ts';
@@ -10,19 +10,19 @@ import { io, campaignRoom, fightOf, toFight, toFightOf, positionsOf, dungeonOf, 
 import { toClientDungeon, broadcastDungeon } from '../dungeon/index.ts';
 import { registerSpellHooks } from '../combat/stateEngine/registerSpellHooks.ts';
 import { RecurringDamageHook } from '../combat/stateEngine/hooks/RecurringDamageHook.ts';
-import { sumAndConsumeRollMods, type RollModifierHook } from '../combat/stateEngine/hooks/RollModifierHook.ts';
+import { rollAndConsumeRollMods, type RollModifierHook } from '../combat/stateEngine/hooks/RollModifierHook.ts';
 import { dcBonusFor } from '../combat/stateEngine/hooks/DcModifierHook.ts';
 import type { WeaponAttackOverrideHook } from '../combat/stateEngine/hooks/WeaponAttackOverrideHook.ts';
 import { resolveReaction } from '../combat/stateEngine/reactionPrompt.ts';
-import { D20Roll, rollDice, rollDiceRerollLow, fmtMod, rollApplicableDamage, rollApplicableHeal, rollChainableDamage, resolveHit, maxDiceValue } from '../combat/dice.ts';
-import { rollModeFor, attackModeAgainstTarget } from '../combat/conditions/rollModeFor.ts';
+import { rollD20, adv, dis, keptDie, withModifiers, reconcile, sumModifiers, rollDice, rollDiceRerollLow, fmtMod, rollApplicableDamage, rollApplicableHeal, rollChainableDamage, resolveHit, maxDiceValue } from '../combat/dice.ts';
+import { conditionModeSources, targetModeSources } from '../combat/conditions/rollModeFor.ts';
 import { applyDamageToCreature, applyDamageToPlayer, applyHealingToPlayer, applyHealingToCreature, grantTempHpToPlayer, bladeWardPenalty } from '../combat/runtime/damage.ts';
 import { advanceTurn, tryBeginCombat, requestAlertSwap } from '../combat/runtime/lifecycle.ts';
 import { trySpendSpellSlot, offerLuckAttackReroll, trySpendHeroicInspiration } from '../combat/runtime/resources.ts';
 import { emitResources } from '../combat/runtime/shared.ts';
 import { applyCondition, clearCondition, breakSanctuaryOn } from '../combat/runtime/statusEffects.ts';
 import { startConcentrating, isConcentratingOn, breakConcentration } from '../combat/runtime/concentration.ts';
-import { rollSavingThrow, investigateIllusion } from '../combat/runtime/rolls.ts';
+import { rollSavingThrow, rollSave, investigateIllusion, emitCombatRoll } from '../combat/runtime/rolls.ts';
 import { checkTrapAt } from '../combat/runtime/traps.ts';
 import { canMove, applyElevationChange, checkMovementTriggers } from '../combat/runtime/movement.ts';
 import { getWorldTimeSecs } from '../combat/runtime/environment.ts';
@@ -100,7 +100,7 @@ async function resolveSplashAoE(
     const participant = encounter.findParticipant(targetId);
     if (!participant || participant.isDead()) continue;
 
-    const { saved, roll, bonus, total } = await rollSavingThrow(cid, targetId, saveAbility, dc);
+    const { saved, roll, total, breakdown } = await rollSavingThrow(cid, targetId, saveAbility, dc);
     const targetType: CreatureType = participant.isPlayer ? 'Humanoid' : (participant.creature?.creatureType ?? 'Humanoid');
     const rolledDamage = rollApplicableDamage(effects, targetType, casterLevel, slotLevel);
 
@@ -119,7 +119,7 @@ async function resolveSplashAoE(
 
     outcomes.push({
       targetId, targetName: participant.name, isPC: participant.isPlayer,
-      roll, saveBonus: bonus, total, dc, saved, damage,
+      roll, breakdown, total, dc, saved, damage,
       remainingHp: participant.isPlayer ? participant.currentHp : participant.creature?.currentHp,
       targetDead: participant.isDead(),
     });
@@ -498,13 +498,19 @@ export async function resolvePlayerAttack(
       const charProf = char.proficiencyBonus ?? 2;
       const classWeaponProfs = effectiveWeaponProfs(char);
       const isProficient = weapon.properties?.some(p => classWeaponProfs.includes(p as 'simple' | 'martial'));
-      const weaponBonus = (weapon.attackBonus ?? 0) + (isProficient ? charProf : 0);
       // Bless/Bane — rerolled fresh against every attack, not fixed at cast time (see RollModifierHook).
       // Bardic Inspiration's single die is unregistered the moment it's summed in (consumeOnUse).
       const rollMods = getStateEngine(cid).getHooksOwnedBy(attackerId, 'rollModifier') as RollModifierHook[];
-      // Archery Fighting Style: +2 to attack rolls with ranged weapons.
-      const archeryBonus = char.fightingStyle === 'Archery' && !isMelee ? 2 : 0;
-      const attackBonus = statBonus + weaponBonus + archeryBonus + sumAndConsumeRollMods(getStateEngine(cid), rollMods) + bladeWardPenalty(cid, targetId);
+      const toHitLines: RollModifier[] = [
+        { label: weaponOverride ? `${statName} (${weaponOverride.source})` : statName, value: statBonus },
+        ...(isProficient ? [{ label: 'Proficiency', value: charProf }] : []),
+        ...(weapon.attackBonus ? [{ label: weapon.name, value: weapon.attackBonus }] : []),
+        // Archery Fighting Style: +2 to attack rolls with ranged weapons.
+        ...(char.fightingStyle === 'Archery' && !isMelee ? [{ label: 'Archery', value: 2 }] : []),
+        ...rollAndConsumeRollMods(getStateEngine(cid), rollMods),
+        ...bladeWardPenalty(cid, targetId),
+      ];
+      const attackBonus = sumModifiers(toHitLines);
 
       const positions = positionsOf(cid, attackerName);
       const attackerPos = positions[attackerName];
@@ -513,15 +519,13 @@ export async function resolvePlayerAttack(
         Math.max(Math.abs(targetPos.gx - attackerPos.gx), Math.abs(targetPos.gy - attackerPos.gy)) > Math.floor(weapon.range / 5));
 
       const engine = getStateEngine(cid);
-      const mode = rollModeFor(char, 'attack');
       // Faerie Fire's outline, Guiding Bolt's guiding light — advantage on attacks against this
       // target has to be decided before the die is rolled, too early for the hook trigger chain.
-      // D20Roll itself cancels advantage/disadvantage back to a flat roll if both end up true,
+      // rollD20 itself cancels advantage/disadvantage back to a flat roll if both end up present,
       // so this only needs to feed in the raw sources, not resolve them.
-      const targetHasAdvantageGrant = engine.hasHookOwnedBy(targetId, 'grantAdvantage');
-      const attackerHasSelfAdvantage = engine.hasHookOwnedBy(attackerId, 'grantAdvantageSelf');
-      const attackerHasSelfDisadvantage = engine.hasHookOwnedBy(attackerId, 'grantDisadvantageSelf');
-      const targetRestrained = attackModeAgainstTarget(creature) > 0;
+      const targetAdvantageGrant = engine.getHooksOwnedBy(targetId, 'grantAdvantage')[0]?.source;
+      const attackerSelfAdvantage = engine.getHooksOwnedBy(attackerId, 'grantAdvantageSelf')[0]?.source;
+      const attackerSelfDisadvantage = engine.getHooksOwnedBy(attackerId, 'grantDisadvantageSelf')[0]?.source;
       const obscured = !!(attackerPos && targetPos && isLineObscured(cid, attackerName, attackerPos.gx, attackerPos.gy, targetPos.gx, targetPos.gy));
       // Ranged weapon, hostile breathing down your neck — PHB Disadvantage rule, not a melee-only concern.
       const rangedThreatened = !isMelee && !!attackerPos && hasHostileWithinMeleeRange(cid, attackerId, attackerPos.gx, attackerPos.gy);
@@ -529,7 +533,14 @@ export async function resolvePlayerAttack(
       // darkness reaches that far. Monster attackers aren't checked here — EnemyStatBlock carries
       // no senses data, so there's nothing to gate on (see targetBeyondAttackerVisionInDarkness).
       const inDarkness = !!attackerPos && !!targetPos && targetBeyondAttackerVisionInDarkness(cid, char, attackerPos.gx, attackerPos.gy, targetPos.gx, targetPos.gy);
-      let roll = new D20Roll({ withDisadvantage: inExtendedRange || mode < 0 || obscured || attackerHasSelfDisadvantage || rangedThreatened || inDarkness, withAdvantage: mode > 0 || targetHasAdvantageGrant || attackerHasSelfAdvantage || targetRestrained || inspirationSpent }).roll();
+      let breakdown = withModifiers(rollD20([
+        ...conditionModeSources(char, 'attack'), ...targetModeSources(creature),
+        inExtendedRange && dis('Long range'), obscured && dis('Obscured'), rangedThreatened && dis('Hostile within 5 ft'),
+        inDarkness && dis("Can't see target"), attackerSelfDisadvantage && dis(attackerSelfDisadvantage),
+        targetAdvantageGrant && adv(targetAdvantageGrant), attackerSelfAdvantage && adv(attackerSelfAdvantage),
+        inspirationSpent && adv('Heroic Inspiration'),
+      ]), toHitLines);
+      let roll = keptDie(breakdown);
       const atkCtx = await engine.trigger('afterAttackRoll', await engine.trigger('beforeAttackRoll', {
         attackerId, attackerName,
         targetId, targetName: creature.name,
@@ -548,6 +559,7 @@ export async function resolvePlayerAttack(
       let total = atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
       let hit = atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
       let isCrit = atkCtx.d20 === 20;
+      breakdown = reconcile(breakdown, atkCtx.d20, atkCtx.attackBonus);
 
       // Origin feat Lucky, retroactive: the miss is known now — offer a Luck Point spend to
       // reroll before damage/narration commit to it (replaces the old pre-roll HUD toggle).
@@ -555,6 +567,7 @@ export async function resolvePlayerAttack(
         const rerolled = await offerLuckAttackReroll(cid, attackerId, attackerName, weapon.name, creature.name, atkCtx.total, atkCtx.ac);
         if (rerolled !== null && !encounter.ended) {
           roll = atkCtx.d20 = rerolled;
+          breakdown = reconcile(breakdown, rerolled, atkCtx.attackBonus);
           total = atkCtx.total = rerolled + atkCtx.attackBonus;
           hit = atkCtx.hit = resolveHit(rerolled, atkCtx.attackBonus, atkCtx.ac);
           isCrit = rerolled === 20;
@@ -629,10 +642,11 @@ export async function resolvePlayerAttack(
             if (pending.save) {
               const casterAbility = CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int';
               dc = 8 + charProf + statMod(char.stats[casterAbility]) + dcBonusFor(getStateEngine(cid), attackerId);
-              const { saved: s, roll: saveRoll, bonus: saveBonus, total: saveTotal } =
+              const { saved: s, roll: saveRoll, bonus: saveBonus, total: saveTotal, breakdown: saveBreakdown } =
                 await rollSavingThrow(cid, targetId, pending.save.ability, dc);
               saved = s;
               console.log(`[bundled-smite] ${creature.name} save vs ${pending.spellName} DC${dc}: d20=${saveRoll}${fmtMod(saveBonus)}=${saveTotal} — ${saved ? 'SAVE' : 'FAIL'}`);
+              emitCombatRoll(cid, targetId, { actorName: creature.name, label: `${pending.save.ability.toUpperCase()} save vs ${pending.spellName}`, dc, success: saved, breakdown: saveBreakdown });
             }
 
             const ungatedDamage = pending.effects.filter(e => e.type === 'damage' && !e.gatedBySave);
@@ -790,10 +804,9 @@ export async function resolvePlayerAttack(
         weaponName: weapon.name,
         isMelee,
         d20: roll,
-        attackBonus,
-        statBonus,
+        breakdown,
+        attackBonus: atkCtx.attackBonus,
         statName,
-        weaponBonus,
         total,
         ac: atkCtx.ac,
         hit,
@@ -859,7 +872,11 @@ export async function resolvePlayerSpellAttack(
       // Caster-side, so the same for every target in a chain (Chaos Bolt/Chromatic Orb); Blade
       // Ward is target-side instead and gets added per-target below, inside the loop.
       const rollMods = getStateEngine(cid).getHooksOwnedBy(casterId, 'rollModifier') as RollModifierHook[];
-      const baseAttackBonus = abilityMod + charProf + sumAndConsumeRollMods(getStateEngine(cid), rollMods);
+      const baseToHitLines: RollModifier[] = [
+        { label: STAT_FULL[spellAbility.toUpperCase()] ?? spellAbility, value: abilityMod },
+        { label: 'Proficiency', value: charProf },
+        ...rollAndConsumeRollMods(getStateEngine(cid), rollMods),
+      ];
       const dc = 8 + charProf + abilityMod + dcBonusFor(getStateEngine(cid), casterId);
 
       const engine = getStateEngine(cid);
@@ -889,11 +906,13 @@ export async function resolvePlayerSpellAttack(
         const creature = encounter.findCreature(targetId);
         if (!creature || creature.isDead()) continue;
         attackIndex++;
-        const attackBonus = baseAttackBonus + bladeWardPenalty(cid, targetId);
+        const toHitLines = [...baseToHitLines, ...bladeWardPenalty(cid, targetId)];
+        const attackBonus = sumModifiers(toHitLines);
 
         // Redirecting an already-sustained spell (Witch Bolt) auto-hits, no roll — only the
         // initial slotted cast is a real attack roll that can miss.
         let roll = 0;
+        let breakdown: RollBreakdown | undefined;
         let atkCtx: AttackContext;
         let total: number;
         let hit: boolean;
@@ -907,18 +926,20 @@ export async function resolvePlayerSpellAttack(
           total = attackBonus;
           hit = true;
         } else {
-          const spellMode = rollModeFor(char, 'attack');
-          const targetHasAdvantageGrant = engine.hasHookOwnedBy(targetId, 'grantAdvantage');
+          const targetAdvantageGrant = engine.getHooksOwnedBy(targetId, 'grantAdvantage')[0]?.source;
           // Innate Sorcery registers narrower ('grantAdvantageSelfSpellOnly') so it never also
           // grants advantage on this caster's weapon attacks — see combat:attack's own
           // grantAdvantageSelf-only check, which deliberately does NOT read this narrower kind.
-          const casterHasSelfAdvantage = engine.hasHookOwnedBy(casterId, 'grantAdvantageSelf') || engine.hasHookOwnedBy(casterId, 'grantAdvantageSelfSpellOnly');
-          const targetRestrained = attackModeAgainstTarget(creature) > 0;
+          const casterSelfAdvantage = [...engine.getHooksOwnedBy(casterId, 'grantAdvantageSelf'), ...engine.getHooksOwnedBy(casterId, 'grantAdvantageSelfSpellOnly')][0]?.source;
           const positions = positionsOf(cid, casterName);
           const casterPos = positions[casterName] ?? positions[casterId];
           const targetPos = positions[targetId];
           const obscured = !!(casterPos && targetPos && isLineObscured(cid, casterName, casterPos.gx, casterPos.gy, targetPos.gx, targetPos.gy));
-          roll = new D20Roll({ withDisadvantage: spellMode < 0 || obscured, withAdvantage: spellMode > 0 || targetHasAdvantageGrant || casterHasSelfAdvantage || targetRestrained }).roll();
+          breakdown = withModifiers(rollD20([
+            ...conditionModeSources(char, 'attack'), ...targetModeSources(creature), obscured && dis('Obscured'),
+            targetAdvantageGrant && adv(targetAdvantageGrant), casterSelfAdvantage && adv(casterSelfAdvantage),
+          ]), toHitLines);
+          roll = keptDie(breakdown);
           atkCtx = await engine.trigger('afterAttackRoll', await engine.trigger('beforeAttackRoll', {
             attackerId: casterId, attackerName: casterName,
             targetId, targetName: creature.name,
@@ -934,6 +955,7 @@ export async function resolvePlayerSpellAttack(
 
           total = atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
           hit = atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
+          breakdown = reconcile(breakdown, atkCtx.d20, atkCtx.attackBonus);
         }
 
         const isCrit = atkCtx.d20 === 20;
@@ -1030,8 +1052,8 @@ export async function resolvePlayerSpellAttack(
           targetId,
           spellName: spell.name,
           d20: roll,
+          breakdown,
           attackBonus,
-          statBonus: abilityMod,
           statName: 'Spellcasting',
           total,
           ac: atkCtx.ac,
@@ -1176,13 +1198,14 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       console.log(`[escape] ${targetName} attempts ${hook.escapeSkillCheck} vs DC${result.dc}: d20+${result.bonus}=${result.total} — ${result.succeeded ? 'FREE' : 'STUCK'}`);
       const msg = {
         text: `${targetName} attempts to escape (${hook.escapeSkillCheck} ${fmtMod(result.bonus)}, DC${result.dc}): ${result.total} — ${result.succeeded ? 'breaks free!' : 'still stuck.'}`,
-        senderName: 'System', timestamp: Date.now(),
+        senderName: 'System', timestamp: Date.now(), breakdown: result.breakdown,
       };
       void postChat(cid, msg, [targetId]);
       toFightOf(cid, targetId).emit('combat:condition:escape:result', {
         targetId, targetName, name, skill: hook.escapeSkillCheck,
-        roll: result.roll, bonus: result.bonus, total: result.total, dc: result.dc, succeeded: result.succeeded,
+        roll: result.roll, bonus: result.bonus, total: result.total, dc: result.dc, succeeded: result.succeeded, breakdown: result.breakdown,
       });
+      emitCombatRoll(cid, targetId, { actorName: targetName, label: `${hook.escapeSkillCheck} to escape ${name}`, dc: result.dc, success: result.succeeded, breakdown: result.breakdown });
     })();
   });
 
@@ -1627,21 +1650,17 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         const participant = encounter.findParticipant(targetId);
         if (!participant || participant.isDead()) continue;
 
-        let saveBonus: number;
         let targetChar: Character | undefined;
         if (participant.isPlayer) {
           targetChar = chars.find(c => c.id === targetId || c.name === participant.name);
           if (!targetChar) continue;
-          const mod = statMod(targetChar.stats[saveAbility]);
-          const classSaves: readonly string[] = CLASS_SAVING_THROWS[targetChar.class] ?? [];
-          const proficient = classSaves.includes(saveAbility);
-          saveBonus = mod + (proficient ? (targetChar.proficiencyBonus ?? 2) : 0);
-        } else {
-          saveBonus = participant.creature ? statMod(participant.creature.stats[saveAbility]) : 0;
         }
-
-        const saveMode = rollModeFor(targetChar ?? participant.creature ?? {}, 'save', saveAbility);
-        const d20 = new D20Roll({ withDisadvantage: saveMode < 0, withAdvantage: saveMode > 0 }).roll();
+        const saveStats = targetChar?.stats ?? participant.creature?.stats;
+        if (!saveStats) continue;
+        // Same modifier set every other save reads (rollSave) — Bless/Bane/Mind Sliver included.
+        let breakdown = rollSave(engine, targetId, saveStats, targetChar ?? participant.creature ?? {}, targetChar, saveAbility);
+        const d20 = keptDie(breakdown);
+        const saveBonus = breakdown.total - d20;
         const saveCtx = await engine.trigger('beforeSave', {
           casterId, targetId, targetName: participant.name,
           targetIsPlayer: participant.isPlayer,
@@ -1659,6 +1678,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         // before afterSave (and everything downstream) reads the outcome.
         saveCtx.total = saveCtx.d20 + saveCtx.saveBonus;
         saveCtx.saved = saveCtx.total >= saveCtx.dc;
+        breakdown = reconcile(breakdown, saveCtx.d20, saveCtx.saveBonus);
         await engine.trigger('afterSave', saveCtx);
 
         const roll = saveCtx.d20;
@@ -1790,7 +1810,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           targetName: participant.name,
           isPC: participant.isPlayer,
           roll,
-          saveBonus,
+          breakdown,
           total,
           dc,
           saved,

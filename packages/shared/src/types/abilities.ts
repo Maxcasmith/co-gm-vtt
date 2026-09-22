@@ -89,7 +89,7 @@ export const ABILITY_DEFS: Record<string, AbilityDef> = {
     ],
   },
   // 2024 PHB Bard: Bonus Action, grants an ally a d6 usable on their next failed d20 Test within
-  // the hour (consumeOnUse — spent the instant sumAndConsumeRollMods sums it into a roll).
+  // the hour (consumeOnUse — spent the instant rollAndConsumeRollMods rolls it into a d20 Test).
   bardicInspiration: {
     key: "bardicInspiration",
     label: "Bardic Inspiration",

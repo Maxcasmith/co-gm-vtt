@@ -2,7 +2,7 @@ import { } from '../../storage.ts';
 import { io, campaignRoom, fightOf, toFightOf, getStateEngine } from '../../state.ts';
 import { fmtMod } from '../dice.ts';
 import { removeCondition } from '../conditions/rollModeFor.ts';
-import { rollSavingThrow } from './rolls.ts';
+import { rollSavingThrow, emitCombatRoll } from './rolls.ts';
 import { applyCondition, conditionsHolder } from './statusEffects.ts';
 import { postChat } from '../../partyGroups.ts';
 
@@ -74,8 +74,9 @@ export async function checkConcentration(cid: string, targetId: string, damage: 
   if (!holder || !link) return;
 
   const dc = Math.max(CONCENTRATION_MIN_DC, Math.floor(damage / 2));
-  const { saved, roll, bonus, total } = await rollSavingThrow(cid, targetId, 'con', dc);
+  const { saved, roll, bonus, total, breakdown } = await rollSavingThrow(cid, targetId, 'con', dc);
   console.log(`[concentration] ${holder.label} save vs DC${dc}: d20=${roll}${fmtMod(bonus)}=${total} — ${saved ? 'MAINTAINED' : 'BROKEN'}`);
+  emitCombatRoll(cid, targetId, { actorName: holder.label, label: `CON save to keep concentrating on ${link.spellName}`, dc, success: saved, breakdown });
   if (!saved) await breakConcentration(cid, targetId);
 }
 

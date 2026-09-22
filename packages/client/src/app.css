@@ -10,6 +10,7 @@
 @import './styles/journal.css';
 @import './styles/notes.css';
 @import './styles/combat-log.css';
+@import './styles/roll-breakdown.css';
 @import './styles/chat.css';
 @import './styles/end-screens.css';
 @import './styles/rest-modal.css';

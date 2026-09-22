@@ -33,6 +33,8 @@ app.use('/api/creatures', creaturesRouter);
 app.use('/api/props', propsRouter);
 app.use('/api/icons', iconsRouter);
 app.use('/api/debug/perf-log', debugPerfRouter);
+// The client can't read api/.env — DEBUG_MODE gates its dev tools, so it asks here.
+app.get('/api/debug/mode', (_req, res) => { res.json({ debugMode: process.env.DEBUG_MODE === 'true' }); });
 app.use('/api/licenses', licensesRouter);
 app.use('/api/models', modelsRouter);
 app.use('/api', authRouter);

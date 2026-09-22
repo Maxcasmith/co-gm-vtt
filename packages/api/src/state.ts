@@ -253,13 +253,6 @@ export const BG_SKILLS: Record<string, string[]> = {
   Urchin:        ['Sleight of Hand', 'Stealth'],
 };
 
-export const SAVE_PROFS: Record<string, string[]> = {
-  Barbarian: ['STR', 'CON'], Bard:    ['DEX', 'CHA'], Cleric:   ['WIS', 'CHA'],
-  Druid:     ['INT', 'WIS'], Fighter: ['STR', 'CON'], Monk:     ['STR', 'DEX'],
-  Paladin:   ['WIS', 'CHA'], Ranger:  ['STR', 'DEX'], Rogue:    ['DEX', 'INT'],
-  Sorcerer:  ['CON', 'CHA'], Warlock: ['WIS', 'CHA'], Wizard:   ['INT', 'WIS'],
-};
-
 // ── Dungeons ────────────────────────────────────────────────────────────────────
 // cid → dungeonId → Dungeon (in-memory mirror of saveDungeon/loadDungeons, mutated on reveal).
 // Several can be loaded at once: split groups in different dungeons, and each open-world fight's

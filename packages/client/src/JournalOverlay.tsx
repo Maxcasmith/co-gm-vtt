@@ -6,6 +6,7 @@ import { on, dispatch } from './events.ts';
 import { SKILLS } from './character-creation/srd.ts';
 import { Button } from './components/Button/Button.tsx';
 import SplitBlock from './SplitBlock.tsx';
+import { RollTooltip } from './RollBreakdown.tsx';
 
 const SAVE_STAT: Record<string, string> = {
   strength: 'STR', str: 'STR',
@@ -51,6 +52,8 @@ interface Props {
   character: Character;
   sessionActive: boolean;
   dmThinking: boolean;
+  /** Other players in your audience currently typing — never includes you (the server skips the typer). */
+  typers: string[];
   /** The live Party Groups split, if any — its block renders expanded. */
   liveSplitId?: string | undefined;
 }
@@ -61,8 +64,19 @@ function formatSender(name: string): React.ReactNode {
   return <>{match[1]} <span className="vdm-tag">(Virtual DM)</span></>;
 }
 
-export default function JournalOverlay({ open, variant = 'full', onClose, character, sessionActive, dmThinking, liveSplitId }: Props) {
+function typingLabel(typers: string[]): string {
+  const [first, second] = typers;
+  if (typers.length === 1) return `${first} is typing`;
+  if (typers.length === 2) return `${first} and ${second} are typing`;
+  return `${first} + ${typers.length - 1} more people are typing`;
+}
+
+// Heartbeat interval while typing — receivers expire a typer after 4s without one (see GamePage).
+const TYPING_HEARTBEAT_MS = 2000;
+
+export default function JournalOverlay({ open, variant = 'full', onClose, character, sessionActive, dmThinking, typers, liveSplitId }: Props) {
   const [input, setInput] = useState('');
+  const lastTypingSent = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -127,7 +141,19 @@ export default function JournalOverlay({ open, variant = 'full', onClose, charac
     const text = input.trim();
     if (!text) return;
     dispatch('vtt:chat:message-sent', { text, senderName: character.name, timestamp: Date.now() });
-    setInput('');
+    changeInput('');
+  }
+
+  function changeInput(value: string) {
+    setInput(value);
+    const now = Date.now();
+    if (!value.trim()) {
+      if (lastTypingSent.current) dispatch('vtt:chat:typing', { typing: false });
+      lastTypingSent.current = 0;
+    } else if (now - lastTypingSent.current > TYPING_HEARTBEAT_MS) {
+      dispatch('vtt:chat:typing', { typing: true });
+      lastTypingSent.current = now;
+    }
   }
 
   function pinMessage(key: string, msg: ChatMessageReceivedPayload) {
@@ -169,7 +195,9 @@ export default function JournalOverlay({ open, variant = 'full', onClose, charac
             {pinnedKeys.has(`${msg.timestamp}:${i}`) ? 'Pinned' : 'Pin'}
           </Button>
         </div>
-        <div className="journal-msg-text">{msg.text}</div>
+        <div className="journal-msg-text">
+          {msg.breakdown ? <RollTooltip breakdown={msg.breakdown}>{msg.text}</RollTooltip> : msg.text}
+        </div>
         {myRequests.length > 0 && (
           <div className="journal-roll-requests">
             {myRequests.map(req => {
@@ -259,12 +287,23 @@ export default function JournalOverlay({ open, variant = 'full', onClose, charac
           </div>
         )}
 
+        {typers.length > 0 && (
+          <div className="journal-msg journal-thinking">
+            <div className="journal-msg-header">
+              <span className="journal-msg-sender">{typingLabel(typers)}</span>
+            </div>
+            <div className="journal-msg-text">
+              <span className="journal-thinking-dots"><span>.</span><span>.</span><span>.</span></span>
+            </div>
+          </div>
+        )}
+
         <div className="journal-input-row">
           <input
             ref={inputRef}
             className="journal-input"
             value={input}
-            onChange={e => setInput(e.target.value)}
+            onChange={e => changeInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') send(); }}
             placeholder={sessionActive ? 'Say something…' : 'Session hasn\'t started yet'}
             disabled={!sessionActive}

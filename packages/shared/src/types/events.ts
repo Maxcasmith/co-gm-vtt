@@ -1,4 +1,4 @@
-import type { CheckRequest, RollResult, EnemyStatBlock, TokenPosition, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, CombatVictory } from "./combat.ts";
+import type { CheckRequest, RollResult, RollBreakdown, EnemyStatBlock, TokenPosition, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, CombatVictory } from "./combat.ts";
 import type { Dungeon, DungeonEntity } from "./dungeon.ts";
 import type { Quest } from "./world.ts";
 import type { Weapon } from "./items.ts";
@@ -16,10 +16,22 @@ export interface ChatPayload {
   senderName: string;
   timestamp: number;
   checkRequests?: CheckRequest[];
+  /** Set on a line announcing a d20 roll — the Adventure Log's hover breakdown. Persisted with the message. */
+  breakdown?: RollBreakdown | undefined;
   /** Set only on messages sent while the party was split — the split they belong to. */
   splitId?: string;
   /** With splitId: every track that saw this message (more than one when e.g. a merged fight spans tracks). */
   trackIds?: GroupColor[];
+}
+
+/** DM chat text is stored and sent with its [[TAG:...]] effect tags intact, so the DM's next prompt
+ * sees what it already triggered — strip them only for display. */
+export function stripDmTags(text: string): string {
+  if (!text.includes('[[')) return text;
+  const stripped = text.replace(/\[\[[A-Z_]+[^\]]*\]\]/g, '').replace(/\s{2,}/g, ' ').trim();
+  // A tag at the end of a sentence usually carries its period inside it ("...a med kit[[PICKED_UP_HEALING:...]].")
+  // or after it — either way stripping can leave the sentence unterminated.
+  return stripped && !/[.!?'"]$/.test(stripped) ? `${stripped}.` : stripped;
 }
 
 export interface NotePayload {
@@ -93,11 +105,22 @@ export interface RestResultBroadcast {
   worldEvents?: string;
 }
 
+export interface CombatRollEvent {
+  actorName: string;
+  /** What was rolled and why — "CON save (Concentration: Bless)". */
+  label: string;
+  dc?: number | undefined;
+  success?: boolean | undefined;
+  breakdown: RollBreakdown;
+}
+
 export interface ServerToClientEvents {
   "players:update": (players: Player[]) => void;
   "roll:result": (result: RollResult) => void;
   "chat:message": (payload: ChatPayload) => void;
   "chat:history": (messages: ChatPayload[]) => void;
+  /** Relayed chat:typing, scoped to the typer's group audience and never echoed to the typer. */
+  "chat:typing": (payload: { name: string; typing: boolean }) => void;
   "note:added": (payload: NotePayload) => void;
   "note:history": (notes: NotePayload[]) => void;
   "session:state": (active: boolean) => void;
@@ -135,12 +158,12 @@ export interface ServerToClientEvents {
   "movement:granted": (data: { ft: number }) => void;
   "combat:condition:escape:result": (result: {
     targetId: string; targetName: string; name: Condition; skill: string;
-    roll: number; bonus: number; total: number; dc: number; succeeded: boolean;
+    roll: number; bonus: number; total: number; dc: number; succeeded: boolean; breakdown?: RollBreakdown | undefined;
   }) => void;
   /** Sent to the investigator's own socket only — RAW's "you see through it" is knowledge specific to them, not public. */
   "combat:illusion:investigate:result": (result: {
     targetId: string; targetName: string;
-    tags: { tagName: string; succeeded: boolean; roll: number; bonus: number; total: number; dc: number }[];
+    tags: { tagName: string; succeeded: boolean; roll: number; bonus: number; total: number; dc: number; breakdown?: RollBreakdown | undefined }[];
   }) => void;
   /** A self-buff (Searing/Thunderous Smite) is now armed on this token, waiting for its next weapon hit — starts its looping aura ring. */
   "combat:effect:aura:start": (data: { casterId: string; casterName: string; color: string; style?: 'fire' | undefined }) => void;
@@ -217,6 +240,8 @@ export interface ServerToClientEvents {
   "combat:death:save": (data: {
     characterName: string;
     roll: number;
+    /** Absent on a no-roll outcome (Spare the Dying, a hit while down). */
+    breakdown?: RollBreakdown | undefined;
     isNatural20: boolean;
     isNatural1: boolean;
     success: boolean;
@@ -264,6 +289,8 @@ export interface ServerToClientEvents {
   /** Withdraws a pending offer — it timed out, or the window closed for another reason. */
   "combat:reaction:close": (data: { requestId: string }) => void;
   "combat:log": (data: { text: string; timestamp: number }) => void;
+  /** A d20 roll with no card of its own (concentration, Sanctuary, trap and end-of-effect saves, escape checks) — the Combat Log's generic roll entry. */
+  "combat:roll": (data: CombatRollEvent) => void;
   "players:characters": (map: Record<string, string>) => void;
   "character:inventory:add": (items: unknown[]) => void;
   "character:inventory:remove": (data: {
@@ -328,6 +355,8 @@ export interface ClientToServerEvents {
     spellName: string;
   }) => void;
   "chat:message": (payload: { text: string; senderName: string }) => void;
+  /** Adventure Log input activity — re-sent as a heartbeat while typing, false on send/clear. */
+  "chat:typing": (typing: boolean) => void;
   "note:add": (payload: { text: string; authorName: string; pinnedBy?: string }) => void;
   "session:start": (payload: { campaignId: string }) => void;
   "session:end": (payload: { campaignId: string }) => void;

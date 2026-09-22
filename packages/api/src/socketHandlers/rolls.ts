@@ -1,17 +1,15 @@
 import type { CharacterStats } from 'shared';
-import { statMod } from 'shared';
 import { getCharacter } from '../storage.ts';
 import { postChat } from '../partyGroups.ts';
 import { trySpendLuckForAdvantage, trySpendHeroicInspiration } from '../combat/runtime/resources.ts';
-import { STAT_FULL, BG_SKILLS, SAVE_PROFS, getStateEngine, fightOf } from '../state.ts';
-import { D20Roll } from '../combat/dice.ts';
-import { rollModeFor } from '../combat/conditions/rollModeFor.ts';
+import { STAT_FULL, getStateEngine, fightOf } from '../state.ts';
+import { adv, keptDie } from '../combat/dice.ts';
+import { rollCheck, rollSave } from '../combat/runtime/rolls.ts';
 import { checkDungeonHiddenReveal } from '../dungeon/runtime.ts';
 import { templateSearchResult } from '../dungeon/narrateEvents.ts';
 import { dispatchDMResponse } from '../session.ts';
 import { resolveSpellCast } from '../effects.ts';
 import type { JoinContext } from './context.ts';
-import { sumAndConsumeRollMods, type RollModifierHook } from '../combat/stateEngine/hooks/RollModifierHook.ts';
 
 export function registerRollHandlers(ctx: JoinContext): void {
   const { socket } = ctx;
@@ -23,30 +21,14 @@ export function registerRollHandlers(ctx: JoinContext): void {
       const luckSpent = await trySpendLuckForAdvantage(campaignId, characterId, char, useLuckPoint);
       const inspirationSpent = await trySpendHeroicInspiration(campaignId, characterId, char, useInspiration);
       const statKey = stat as keyof CharacterStats;
-      const base = statMod(char.stats[statKey]);
-      const proficient = skill ? (
-        (char.skillProficiencies ?? []).includes(skill) ||
-        (BG_SKILLS[char.background] ?? []).includes(skill)
-      ) : false;
-      const expert = proficient && Boolean(skill) && (char.expertiseSkills ?? []).includes(skill!);
-      const engine = getStateEngine(campaignId);
-      // Guidance — rerolled fresh against every check, not fixed at cast time (see RollModifierHook),
-      // scoped to the one named skill it bonuses. Bardic Inspiration registers unscoped ('rollModifier',
-      // the same kind Bless/Bane use) since its die applies to ANY d20 Test — attack roll, save, or
-      // check, any skill — and is consumeOnUse, spent the moment it's summed into a roll here.
-      const skillMods = skill
-        ? (engine.getHooksOwnedBy(characterId, 'rollModifierCheck') as RollModifierHook[]).filter(h => h.skill === skill)
-        : [];
-      const unscopedMods = engine.getHooksOwnedBy(characterId, 'rollModifier') as RollModifierHook[];
-      const skillBonus = sumAndConsumeRollMods(engine, [...skillMods, ...unscopedMods]);
-      const modifier = base + (expert ? 4 : proficient ? 2 : 0) + skillBonus;
-      const mode = rollModeFor(char, 'check', statKey);
-      const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 || luckSpent || inspirationSpent }).roll();
-      const total = roll + modifier;
+      const breakdown = rollCheck(getStateEngine(campaignId), characterId, char.stats, char, char, statKey, skill,
+        [luckSpent && adv('Luck Point'), inspirationSpent && adv('Heroic Inspiration')]);
+      const roll = keptDie(breakdown);
+      const { total } = breakdown;
       const label = skill ?? (STAT_FULL[stat.toUpperCase()] ?? stat.toUpperCase());
-      console.log(`[roll] ${char.name} rolls ${label}: ${total} | proficient=${proficient}`);
-      const checkResult = { characterName: char.name, rollType: 'check' as const, stat: stat.toUpperCase(), d20: roll, modifier, total, description: `${char.name} rolls ${label}: ${total}` };
-      await postChat(campaignId, { text: checkResult.description, senderName: 'System', timestamp: Date.now() }, [char.name],
+      console.log(`[roll] ${char.name} rolls ${label}: ${total}`);
+      const checkResult = { characterName: char.name, rollType: 'check' as const, stat: stat.toUpperCase(), d20: roll, modifier: total - roll, total, description: `${char.name} rolls ${label}: ${total}`, breakdown };
+      await postChat(campaignId, { text: checkResult.description, senderName: 'System', timestamp: Date.now(), breakdown }, [char.name],
         (to, tags) => to.emit('roll:result', { ...checkResult, ...tags }));
       if (skill && /^(perception|investigation)$/i.test(skill)) {
         const finds = await checkDungeonHiddenReveal(campaignId, char.name, total);
@@ -74,16 +56,14 @@ export function registerRollHandlers(ctx: JoinContext): void {
       const inspirationSpent = await trySpendHeroicInspiration(campaignId, characterId, char, useInspiration);
       const statKey = stat as keyof CharacterStats;
       const statUpper = stat.toUpperCase();
-      const base = statMod(char.stats[statKey]);
-      const proficient = (SAVE_PROFS[char.class] ?? []).includes(statUpper);
-      const modifier = base + (proficient ? 2 : 0);
-      const mode = rollModeFor(char, 'save', statKey);
-      const roll = new D20Roll({ withDisadvantage: mode < 0, withAdvantage: mode > 0 || luckSpent || inspirationSpent }).roll();
-      const total = roll + modifier;
+      const breakdown = rollSave(getStateEngine(campaignId), characterId, char.stats, char, char, statKey,
+        [luckSpent && adv('Luck Point'), inspirationSpent && adv('Heroic Inspiration')]);
+      const roll = keptDie(breakdown);
+      const { total } = breakdown;
       const statLabel = STAT_FULL[statUpper] ?? statUpper;
       console.log(`[roll] ${char.name} rolls ${statLabel} Save: ${total}`);
-      const saveResult = { characterName: char.name, rollType: 'save' as const, stat: statUpper, d20: roll, modifier, total, description: `${char.name} rolls ${statLabel} Save: ${total}` };
-      await postChat(campaignId, { text: saveResult.description, senderName: 'System', timestamp: Date.now() }, [char.name],
+      const saveResult = { characterName: char.name, rollType: 'save' as const, stat: statUpper, d20: roll, modifier: total - roll, total, description: `${char.name} rolls ${statLabel} Save: ${total}`, breakdown };
+      await postChat(campaignId, { text: saveResult.description, senderName: 'System', timestamp: Date.now(), breakdown }, [char.name],
         (to, tags) => to.emit('roll:result', { ...saveResult, ...tags }));
       dispatchDMResponse(campaignId, [char.name]);
     })();

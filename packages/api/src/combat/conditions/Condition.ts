@@ -3,7 +3,7 @@ import type { AbilityKey, Condition as ConditionName } from 'shared';
 export type RollType = 'attack' | 'check' | 'save';
 
 /**
- * One D&D condition's mechanical effect. Resolved *before* a d20 is rolled (see rollModeFor) —
+ * One D&D condition's mechanical effect. Resolved *before* a d20 is rolled (see conditionModeSources) —
  * unlike the combat StateEngine's Hooks, which mutate context after a roll already happened.
  */
 export abstract class Condition {

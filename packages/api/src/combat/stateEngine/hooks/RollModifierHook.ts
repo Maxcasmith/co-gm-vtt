@@ -1,4 +1,4 @@
-import type { TurnContext } from 'shared';
+import type { TurnContext, RollModifier } from 'shared';
 import { Hook, type HookProps } from '../Hook.ts';
 import type { StateEngine } from '../StateEngine.ts';
 import { rollDice } from '../../dice.ts';
@@ -28,7 +28,7 @@ import { rollDice } from '../../dice.ts';
  *
  * `consumeOnUse` (Bardic Inspiration's single die, spent on whichever d20 Test it first gets
  * summed into — attack roll, save, or skill check) unregisters the hook the moment
- * sumAndConsumeRollMods below adds it to a roll, same one-shot idiom GrantAdvantageHook/
+ * rollAndConsumeRollMods below adds it to a roll, same one-shot idiom GrantAdvantageHook/
  * OnHitBonusDamageHook already use. Bless/Bane leave it unset and just keep rerolling every time.
  */
 export class RollModifierHook extends Hook<'beforeTurn'> {
@@ -53,16 +53,21 @@ export class RollModifierHook extends Hook<'beforeTurn'> {
   apply(): void {}
 }
 
+/** One hook's die, rolled fresh and labeled for a roll breakdown — "Bless (d4)" +3, "Bane (d4)" -2. */
+export function rollModLine(h: RollModifierHook): RollModifier {
+  return { label: `${h.source} (d${h.dieSize})`, value: h.sign * rollDice(`1d${h.dieSize}`) };
+}
+
 /**
- * Sums every hook's die into one bonus and unregisters any that are consumeOnUse — the one
- * routine every query site (combat:attack, combat:spell:attack, rollSavingThrow, roll:check)
- * calls instead of each reimplementing the reduce+unregister pairing.
+ * Rolls every hook's die as its own breakdown line and unregisters any that are consumeOnUse —
+ * the one routine every query site (combat:attack, combat:spell:attack, rollSavingThrow,
+ * rollSkillCheck, roll:check, roll:save) calls instead of each reimplementing the
+ * roll+unregister pairing.
  */
-export function sumAndConsumeRollMods(engine: StateEngine, hooks: RollModifierHook[]): number {
-  let total = 0;
-  for (const h of hooks) {
-    total += h.sign * rollDice(`1d${h.dieSize}`);
+export function rollAndConsumeRollMods(engine: StateEngine, hooks: RollModifierHook[]): RollModifier[] {
+  return hooks.map(h => {
+    const line = rollModLine(h);
     if (h.consumeOnUse) engine.unregister(h.id);
-  }
-  return total;
+    return line;
+  });
 }

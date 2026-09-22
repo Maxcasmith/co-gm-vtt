@@ -1,12 +1,13 @@
-import type { CharacterStats } from 'shared';
+import type { AttackResult, CharacterStats } from 'shared';
 import { Weapon as WeaponClass, statMod } from 'shared';
 import { listCharacters, getConfig } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { resolveImprovisedAction, generateCombatFlavour } from '../session-processor/imagePrompts.ts';
 import { handleAdminCommand } from '../effects.ts';
 import { logError } from '../logger.ts';
-import { fightOf, dungeonOf } from '../state.ts';
-import { D20Roll, rollDice, fmtMod, resolveHit } from '../combat/dice.ts';
+import { fightOf, dungeonOf, STAT_FULL } from '../state.ts';
+import { rollD20, keptDie, withModifiers, rollDice, fmtMod, resolveHit } from '../combat/dice.ts';
+import { conditionModeSources } from '../combat/conditions/rollModeFor.ts';
 import { applyDamageToCreature, applyDamageToPlayer } from '../combat/runtime/damage.ts';
 import { rollSavingThrow } from '../combat/runtime/rolls.ts';
 import { resolvePlayerItemUse } from './inventory.ts';
@@ -18,6 +19,13 @@ import type { JoinContext } from './context.ts';
 
 export function registerChatHandlers(ctx: JoinContext): void {
   const { socket, player, charId, campaignId } = ctx;
+
+  socket.on('chat:typing', typing => {
+    void (async () => {
+      const to = await toTracks(campaignId, await audienceTracks(campaignId, [player]));
+      to.except(socket.id).emit('chat:typing', { name: player, typing: !!typing });
+    })();
+  });
 
   socket.on('chat:message', ({ text, senderName }) => {
     if (text.startsWith('/admin ')) {
@@ -76,14 +84,15 @@ export function registerChatHandlers(ctx: JoinContext): void {
 
               if (result.type === 'attack' && result.dc && result.damageFormula && result.targetId && char) {
                 const statKey = (result.stat ?? 'str') as keyof CharacterStats;
-                const roll = new D20Roll().roll();
                 const mod = statMod(char.stats[statKey]);
-                const total = roll + mod;
+                const breakdown = withModifiers(rollD20(conditionModeSources(char, 'attack')), [{ label: STAT_FULL[statKey.toUpperCase()] ?? statKey.toUpperCase(), value: mod }]);
+                const roll = keptDie(breakdown);
+                const { total } = breakdown;
                 const hit = resolveHit(roll, mod, result.dc);
                 const isCrit = roll === 20;
                 const dmgRoll = hit ? (isCrit ? rollDice(result.damageFormula) + rollDice(result.damageFormula) : rollDice(result.damageFormula)) : undefined;
 
-                const rollMsg = { text: `${senderName} rolls ${result.stat?.toUpperCase() ?? 'STR'}: ${roll}${fmtMod(mod)} = ${total} vs DC ${result.dc} — ${hit ? `HIT! ${dmgRoll} ${result.damageType ?? ''} damage` : 'MISS'}.`, senderName: 'System', timestamp: Date.now() };
+                const rollMsg = { text: `${senderName} rolls ${result.stat?.toUpperCase() ?? 'STR'}: ${roll}${fmtMod(mod)} = ${total} vs DC ${result.dc} — ${hit ? `HIT! ${dmgRoll} ${result.damageType ?? ''} damage` : 'MISS'}.`, senderName: 'System', timestamp: Date.now(), breakdown };
                 await postChat(campaignId, rollMsg, [player]);
 
                 if (hit && dmgRoll) {
@@ -101,17 +110,16 @@ export function registerChatHandlers(ctx: JoinContext): void {
                   range: 5,
                   properties: [],
                 });
-                const atkResult = {
+                const atkResult: AttackResult = {
                   attackerName: senderName,
                   targetName: enemies.find(e => e.id === result.targetId)?.name ?? 'target',
                   targetId: result.targetId,
                   weaponName: weapon.name,
                   isMelee: weapon.range <= 10,
                   d20: roll,
+                  breakdown,
                   attackBonus: mod,
-                  statBonus: mod,
                   statName: 'Attack',
-                  weaponBonus: 0,
                   total,
                   ac: result.dc,
                   hit,
@@ -157,7 +165,7 @@ export function registerChatHandlers(ctx: JoinContext): void {
                     const participant = encounter.findParticipant(targetId);
                     if (!participant) continue;
 
-                    const { saved, total } = await rollSavingThrow(campaignId, targetId, saveAbility, dc);
+                    const { saved, total, breakdown } = await rollSavingThrow(campaignId, targetId, saveAbility, dc);
                     const dmgRoll = rollDice(result.damageFormula);
                     const damage = saved ? Math.floor(dmgRoll / 2) : dmgRoll;
 
@@ -166,7 +174,7 @@ export function registerChatHandlers(ctx: JoinContext): void {
 
                     const saveMsg = {
                       text: `${participant.name} rolls ${saveAbility.toUpperCase()} save: ${total} vs DC ${dc} — ${saved ? 'SAVED' : 'FAILS'}, takes ${damage} ${result.damageType ?? ''} damage.`,
-                      senderName: 'System', timestamp: Date.now(),
+                      senderName: 'System', timestamp: Date.now(), breakdown,
                     };
                     await postChat(campaignId, saveMsg, [player]);
                   }

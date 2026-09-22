@@ -1,3 +1,4 @@
+import type { RollModifier } from 'shared';
 import { updateCharacter, saveEncounter, clearDungeon, saveDungeon, listCharacters, getConfig } from '../../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../../providers/index.ts';
 import { generateCombatAftermath } from '../../session-processor/imagePrompts.ts';
@@ -5,9 +6,9 @@ import { toClientDungeon, broadcastDungeon } from '../../dungeon/index.ts';
 import { checkQuestChainTriggers } from '../../dungeon/questChain.ts';
 import { Participant, type Encounter } from '../../domain/encounter.ts';
 import { io, campaignRoom, positionsOf, dungeonOf, fightDungeon, unregisterDungeon, playerSocketIds, getStateEngine, fightOf, toFight, toFightOf, isRegisteredFight } from '../../state.ts';
-import { rollDice, crToXp } from '../dice.ts';
+import { crToXp } from '../dice.ts';
 import { RecurringDamageHook } from '../stateEngine/hooks/RecurringDamageHook.ts';
-import type { RollModifierHook } from '../stateEngine/hooks/RollModifierHook.ts';
+import { rollModLine, type RollModifierHook } from '../stateEngine/hooks/RollModifierHook.ts';
 import { dispatchDMResponse } from '../../session.ts';
 import { breakConcentration, checkConcentration } from './concentration.ts';
 import { markPlayerDead, runDeathSave } from './deathSaves.ts';
@@ -21,9 +22,12 @@ import { postChat } from '../../partyGroups.ts';
  * attack-roll site (weapon, spell, enemy AI, Opportunity Attack) so Blade Ward applies no matter
  * who or what is attacking its owner.
  */
-export function bladeWardPenalty(cid: string, targetId: string): number {
+export function bladeWardPenalty(cid: string, targetId: string): RollModifier[] {
   const mods = getStateEngine(cid).getHooksOwnedBy(targetId, 'rollModifierVsAttacker') as RollModifierHook[];
-  return mods.reduce((sum, h) => sum + h.sign * rollDice(`1d${h.dieSize}`), 0);
+  return mods.map(h => {
+    const line = rollModLine(h);
+    return { ...line, label: `Target's ${line.label}` };
+  });
 }
 
 /**

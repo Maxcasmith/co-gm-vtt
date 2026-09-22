@@ -1,8 +1,9 @@
-import type { Dungeon, DungeonEntity, EnemyStatBlock } from 'shared';
-import { hasLineOfSight, closedDoorCells, statMod } from 'shared';
+import type { Dungeon, DungeonEntity, EnemyStatBlock, RollBreakdown } from 'shared';
+import { hasLineOfSight, closedDoorCells } from 'shared';
 import { randomUUID } from 'crypto';
 import { saveDungeon, saveEncounter, getConfig, listCharacters, getCharacter, readNemeses, readManifest, getWorldMeta } from '../storage.ts';
-import { D20Roll } from '../combat/dice.ts';
+import { rollD20, withModifiers, dexLine } from '../combat/dice.ts';
+import { conditionModeSources } from '../combat/conditions/rollModeFor.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateEncounterEnemies, assignCombatTeams, DEFAULT_ENEMY_SIDE, type CombatSide } from '../session-processor/imagePrompts.ts';
 import { generateEncounterDungeon, placeArenaEnemies, applyArenaTerrain, roomAt, chainClosure } from './index.ts';
@@ -280,9 +281,10 @@ export async function resolveLockpickAttempt(cid: string, characterId: string, c
   const pos = dungeon?.positions?.[characterName];
   if (!char || !dungeon || !pos) return;
 
-  const d20 = new D20Roll().roll();
-  const total = d20 + statMod(char.stats.dex);
-  await appendChatLogAndBroadcast(cid, characterName, `${characterName} rolls Thieves' Tools (DEX) to pick a lock: ${total}.`);
+  // Thieves' Tools is a DEX check — conditions affecting checks (Poisoned) apply; no tool proficiency is modeled.
+  const breakdown = withModifiers(rollD20(conditionModeSources(char, 'check', 'dex')), [dexLine(char.stats)]);
+  const { total } = breakdown;
+  await appendChatLogAndBroadcast(cid, characterName, `${characterName} rolls Thieves' Tools (DEX) to pick a lock: ${total}.`, breakdown);
 
   const door = dungeon.entities.find(e => e.type === 'door' && e.doorState === 'locked' && feetToEntity(pos, e) <= 5);
   if (!door) {
@@ -310,9 +312,9 @@ export async function resolveTrapDisarmAttempt(cid: string, characterId: string,
   const pos = dungeon?.positions?.[characterName];
   if (!char || !dungeon || !pos) return;
 
-  const d20 = new D20Roll().roll();
-  const total = d20 + statMod(char.stats.dex);
-  await appendChatLogAndBroadcast(cid, characterName, `${characterName} rolls Thieves' Tools (DEX) to disarm a trap: ${total}.`);
+  const breakdown = withModifiers(rollD20(conditionModeSources(char, 'check', 'dex')), [dexLine(char.stats)]);
+  const { total } = breakdown;
+  await appendChatLogAndBroadcast(cid, characterName, `${characterName} rolls Thieves' Tools (DEX) to disarm a trap: ${total}.`, breakdown);
 
   const trap = dungeon.entities.find(e => e.type === 'trap' && e.discovered && feetToEntity(pos, e) <= 5);
   if (!trap) {
@@ -329,8 +331,8 @@ export async function resolveTrapDisarmAttempt(cid: string, characterId: string,
   await appendChatLogAndBroadcast(cid, characterName, `${characterName} disarms the trap safely.`);
 }
 
-async function appendChatLogAndBroadcast(cid: string, characterName: string, text: string): Promise<void> {
-  await postChat(cid, { text, senderName: 'System', timestamp: Date.now() }, [characterName]);
+async function appendChatLogAndBroadcast(cid: string, characterName: string, text: string, breakdown?: RollBreakdown): Promise<void> {
+  await postChat(cid, { text, senderName: 'System', timestamp: Date.now(), breakdown }, [characterName]);
 }
 
 /** World-map combat (DM's COMBAT_INIT): generates the enemies for `encounter`, whose players are already in it. */

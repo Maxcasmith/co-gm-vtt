@@ -79,6 +79,13 @@ of KB before archiving.
   `readChatContext`/`chatHistoryFor`). Growth per message is small; read frequency is the new cost.
   Per-message items keyed on `(campaignId, timestamp)` with `splitId`/`trackIds` attributes would
   make these per-track queries instead of full-array filters when the migration happens.
+- 2026-09-22 — Roll breakdowns: every System line announcing a d20 roll (checks, saves, death
+  saves, opportunity attacks, escapes, traps, lockpicks, improvised actions) now persists a
+  `breakdown` object (dice, advantage sources, labeled modifiers) — roughly 150–300 bytes per roll
+  line, several times a plain text line. Growth, not a trigger: a roll-heavy session might add tens
+  of KB. The DM prompts only ever read `m.text`, so it costs storage/transfer, not tokens. If size
+  ever bites, the breakdown is display-only and could move to its own per-message attribute or be
+  dropped from the archived copy.
 
 ---
 

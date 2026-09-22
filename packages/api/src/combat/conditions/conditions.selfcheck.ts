@@ -5,7 +5,7 @@ import type { Character, CharacterStats, Spell } from 'shared';
 import { requiresConcentration } from 'shared';
 import { Poisoned } from './Poisoned.ts';
 import { Concentrating } from './Concentrating.ts';
-import { rollModeFor, addCondition, removeCondition } from './rollModeFor.ts';
+import { conditionModeSources, addCondition, removeCondition } from './rollModeFor.ts';
 
 const stats: CharacterStats = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
 function char(conditions: Character['conditions']): Character {
@@ -21,10 +21,10 @@ assert.strictEqual(new Poisoned().effect('attack'), -1);
 assert.strictEqual(new Poisoned().effect('check'), -1);
 assert.strictEqual(new Poisoned().effect('save'), 0);
 
-// rollModeFor reads it off the character.
-assert.strictEqual(rollModeFor(char([{ name: 'Poisoned' }]), 'attack'), -1);
-assert.strictEqual(rollModeFor(char([{ name: 'Poisoned' }]), 'save'), 0);
-assert.strictEqual(rollModeFor(char(undefined), 'attack'), 0);
+// conditionModeSources reads it off the character, named for the log.
+assert.deepStrictEqual(conditionModeSources(char([{ name: 'Poisoned' }]), 'attack'), [{ label: 'Poisoned', sign: -1 }]);
+assert.deepStrictEqual(conditionModeSources(char([{ name: 'Poisoned' }]), 'save'), []);
+assert.deepStrictEqual(conditionModeSources(char(undefined), 'attack'), []);
 
 // addCondition dedupes — a character can't have the same condition twice.
 const once = addCondition(undefined, 'Poisoned');
@@ -39,7 +39,7 @@ assert.strictEqual(removeCondition(cleared, 'Poisoned'), cleared);
 
 // Concentrating: pure bookkeeping, no roll effect of its own.
 assert.strictEqual(new Concentrating().effect('attack'), 0);
-assert.strictEqual(rollModeFor(char([{ name: 'Concentrating', concentration: { spellName: 'Tasha\'s Caustic Brew', targetIds: ['t1'] } }]), 'attack'), 0);
+assert.deepStrictEqual(conditionModeSources(char([{ name: 'Concentrating', concentration: { spellName: 'Tasha\'s Caustic Brew', targetIds: ['t1'] } }]), 'attack'), []);
 
 // requiresConcentration parses the free-text `duration` field the CSV carries.
 function spell(duration: string): Spell {

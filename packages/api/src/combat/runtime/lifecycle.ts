@@ -1,5 +1,5 @@
 import type { Character } from 'shared';
-import { statMod, hasOriginFeat, trackOf } from 'shared';
+import { hasOriginFeat, trackOf } from 'shared';
 import { getCharacter, updateCharacter, readChatLog, saveEncounter, clearEncounter, saveDungeon, listCharacters, loadPartyAllies, readNemeses, getConfig } from '../../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../../providers/index.ts';
 import { evaluateNemesisCandidates } from '../../session-processor/imagePrompts.ts';
@@ -8,7 +8,7 @@ import { Participant, PLAYERS_TEAM_ID, type Encounter } from '../../domain/encou
 import { Creature } from '../../domain/creature.ts';
 import { logError } from '../../logger.ts';
 import { campaignRoom, io, positionsOf, dungeonOf, dungeonsIn, fightDungeon, occupantsOf, campaignPlayers, pendingWeaponBonuses, connected, getStateEngine, COMBAT_CHAIN_RADIUS, fightsIn, fightOf, unregisterFight, toFight, toSockets, playerSocketIds, toDungeonOf } from '../../state.ts';
-import { D20Roll, calcMaxHp } from '../dice.ts';
+import { rollInitiative, dexLine, calcMaxHp } from '../dice.ts';
 import { ReactionOfferHook } from '../stateEngine/hooks/ReactionOfferHook.ts';
 import { RetaliationOfferHook } from '../stateEngine/hooks/RetaliationOfferHook.ts';
 import { offerReaction } from '../stateEngine/reactionPrompt.ts';
@@ -352,13 +352,16 @@ function registerReactionOffers(cid: string, char: Character): void {
 }
 
 function buildPlayerParticipant(cid: string, name: string, char: Character | undefined): Participant {
-  const alertBonus = char && hasOriginFeat(char, 'Alert') ? (char.proficiencyBonus ?? 2) : 0;
-  const mod = (char ? statMod(char.stats.dex) : 0) + (char?.initiativeBonus ?? 0) + alertBonus;
+  const initiativeLines = char ? [
+    dexLine(char.stats),
+    ...(char.initiativeBonus ? [{ label: 'Initiative bonus', value: char.initiativeBonus }] : []),
+    ...(hasOriginFeat(char, 'Alert') ? [{ label: 'Alert', value: char.proficiencyBonus ?? 2 }] : []),
+  ] : [];
   const maxHp = char ? calcMaxHp(char) : 0;
   const participant = new Participant({
     id: char?.id ?? name,
     name,
-    initiative: new D20Roll().roll() + mod,
+    initiativeRoll: rollInitiative(char ?? {}, initiativeLines),
     isPlayer: true,
     teamId: 'players',
     currentHp: char?.currentHp ?? maxHp,
@@ -404,7 +407,7 @@ export async function rollPlayerInitiatives(cid: string, encounter: Encounter, c
       const p = new Participant({
         id: creature.id,
         name: creature.name,
-        initiative: new D20Roll().roll() + statMod(creature.stats.dex),
+        initiativeRoll: rollInitiative(creature, [dexLine(creature.stats)]),
         isPlayer: false,
         teamId: PLAYERS_TEAM_ID,
         creature,
@@ -520,7 +523,8 @@ export function rollEnemyInitiatives(cid: string, encounter: Encounter): void {
   encounter.enemiesReady = true;
   const existing = encounter.turnOrder.length;
   const entries = encounter.enemies.map(p => {
-    p.initiative = new D20Roll().roll() + statMod(p.creature?.stats.dex ?? 10);
+    p.initiativeRoll = rollInitiative(p.creature ?? {}, p.creature ? [dexLine(p.creature.stats)] : []);
+    p.initiative = p.initiativeRoll.total;
     if (p.creature) registerStaticDamageModifiers(cid, p.id, p.creature);
     return p;
   });
@@ -568,6 +572,9 @@ export async function requestAlertSwap(cid: string, characterId: string, targetI
   const requesterInit = requester.initiative;
   requester.initiative = target.initiative;
   target.initiative = requesterInit;
+  // Neither number is the roller's own roll any more — drop the breakdowns rather than show a tooltip that doesn't add up.
+  requester.initiativeRoll = undefined;
+  target.initiativeRoll = undefined;
   requester.alertSwapUsed = true;
   encounter.addToTurnOrder(requester);
   encounter.addToTurnOrder(target);

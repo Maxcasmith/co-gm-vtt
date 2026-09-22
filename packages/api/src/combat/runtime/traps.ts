@@ -81,7 +81,7 @@ export async function checkTrapAt(cid: string, gx: number, gy: number, triggerId
 
   logDebug(`[trap] ${triggerName} (isPlayer=${isPlayer}) steps on ${entity.name} at (${gx},${gy})`);
   let saved = false;
-  let saveRoll: { roll: number; bonus: number; total: number } | undefined;
+  let saveRoll: Awaited<ReturnType<typeof rollSavingThrow>> | undefined;
   if (trapDef.save) {
     const result = await rollSavingThrow(cid, targetId, trapDef.save.ability, trapDef.save.dc);
     saved = result.saved;
@@ -109,7 +109,7 @@ export async function checkTrapAt(cid: string, gx: number, gy: number, triggerId
     }
   }
 
-  const msg = { text: `${triggerName} triggers ${entity.name}!`, senderName: 'System', timestamp: Date.now() };
+  const msg = { text: `${triggerName} triggers ${entity.name}!`, senderName: 'System', timestamp: Date.now(), breakdown: saveRoll?.breakdown };
   void postChat(cid, msg, [isPlayer ? triggerName : triggerId]);
 
   // Reuses the same SpellSaveResult broadcast every other save-based spell renders through the
@@ -123,7 +123,7 @@ export async function checkTrapAt(cid: string, gx: number, gy: number, triggerId
       slotLevel: 1,
       outcomes: [{
         targetId, targetName: triggerName, isPC: isPlayer,
-        roll: saveRoll.roll, saveBonus: saveRoll.bonus, total: saveRoll.total, dc: trapDef.save.dc,
+        roll: saveRoll.roll, breakdown: saveRoll.breakdown, total: saveRoll.total, dc: trapDef.save.dc,
         saved, damage,
         conditionsApplied: conditionsApplied.length ? conditionsApplied : undefined,
         remainingHp: isPlayer ? participant.currentHp : participant.creature?.currentHp,

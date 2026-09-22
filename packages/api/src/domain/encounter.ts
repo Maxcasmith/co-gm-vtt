@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto';
-import type { TurnOrderEntry, ActionResource, EnemyStatBlock } from 'shared';
-import { setTempHp, statMod } from 'shared';
+import type { TurnOrderEntry, ActionResource, EnemyStatBlock, RollBreakdown } from 'shared';
+import { setTempHp } from 'shared';
 import { Creature } from './creature.ts';
-import { D20Roll } from '../combat/dice.ts';
+import { rollInitiative, dexLine } from '../combat/dice.ts';
 
 // ── Turn ──────────────────────────────────────────────────────────────────────
 
@@ -52,6 +52,8 @@ export class Participant {
   id: string;
   name: string;
   initiative: number;
+  /** How `initiative` was rolled, for the turn-order tooltip — unset for a hand-set value (Alert swap, a synthetic participant). */
+  initiativeRoll: RollBreakdown | undefined;
   isPlayer: boolean;
   teamId: string;
   creature?: Creature;
@@ -108,7 +110,9 @@ export class Participant {
   constructor(props: {
     id: string;
     name: string;
-    initiative: number;
+    /** Omit when passing initiativeRoll — its total is the initiative. */
+    initiative?: number;
+    initiativeRoll?: RollBreakdown | undefined;
     isPlayer: boolean;
     teamId?: string;
     creature?: Creature;
@@ -119,7 +123,8 @@ export class Participant {
   }) {
     this.id = props.id;
     this.name = props.name;
-    this.initiative = props.initiative;
+    this.initiativeRoll = props.initiativeRoll;
+    this.initiative = props.initiativeRoll?.total ?? props.initiative ?? 0;
     this.isPlayer = props.isPlayer;
     this.teamId = props.teamId ?? (props.isPlayer ? 'players' : 'enemies');
     if (props.creature !== undefined) this.creature = props.creature;
@@ -204,6 +209,7 @@ export class Participant {
       id: this.id,
       name: this.name,
       initiative: this.initiative,
+      initiativeRoll: this.initiativeRoll,
       isPlayer: this.isPlayer,
       teamId: this.teamId,
       ...(this.ownerId !== undefined ? { ownerId: this.ownerId } : {}),
@@ -339,7 +345,7 @@ export class Encounter {
     const participant = new Participant({
       id: creature.id,
       name: creature.name,
-      initiative: new D20Roll().roll() + statMod(creature.stats.dex),
+      initiativeRoll: rollInitiative(creature, [dexLine(creature.stats)]),
       isPlayer: false,
       teamId: team.id,
       creature,

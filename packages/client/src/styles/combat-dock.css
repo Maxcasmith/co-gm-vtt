@@ -18,6 +18,11 @@
   pointer-events: none;
 }
 
+/* The bar is click-through (pointer-events: none) — only the initiative breakdown tooltip opts back in. */
+.turn-order-bar .roll-tooltip {
+  pointer-events: auto;
+}
+
 .turn-order-card {
   display: flex;
   flex-direction: column;

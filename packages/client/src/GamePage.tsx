@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
-import type { Character, Player, EnemyStatBlock, TokenPosition, Dungeon, Quest, TurnOrderEntry, StoryboardQueuePayload, HouseRules, Goal, PartyGroups } from 'shared';
-import { DEFAULT_HOUSE_RULES, trackOf, activeSplit } from 'shared';
+import type { ChatPayload, Character, Player, EnemyStatBlock, TokenPosition, Dungeon, Quest, TurnOrderEntry, StoryboardQueuePayload, HouseRules, Goal, PartyGroups } from 'shared';
+import { DEFAULT_HOUSE_RULES, trackOf, activeSplit, stripDmTags } from 'shared';
 import { HIT_DICE } from './character-creation/srd.ts';
 import { Button } from './components/Button/Button.tsx';
 import Canvas from './Canvas.tsx';
@@ -72,6 +72,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [quickChatOpen, setQuickChatOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [devModalOpen, setDevModalOpen] = useState(false);
+  // DEBUG_MODE (server env) gates the dev tools; it's also the default for the combat log's plain-text lines.
+  const [debugMode, setDebugMode] = useState(false);
+  const [combatLogText, setCombatLogText] = useState(false);
   const [sessionActive, setSessionActive] = useState(false);
   const [storyboardQueue, setStoryboardQueue] = useState<StoryboardQueuePayload | null>(null);
   const [combatActive, setCombatActive] = useState(false);
@@ -80,6 +83,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [movementRemaining, setMovementRemaining] = useState(0);
   const movementRef = useRef(0);
   const [dmThinking, setDmThinking] = useState(false);
+  const [typers, setTypers] = useState<string[]>([]);
   const [isMyTurn, setIsMyTurn] = useState(false);
   const [victory, setVictory] = useState<import('./VictoryScreen.tsx').VictoryData | null>(null);
   const [defeated, setDefeated] = useState(false);
@@ -223,6 +227,13 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       .catch(() => {});
   }, [character.campaignId]);
 
+  useEffect(() => {
+    fetch(`${API}/api/debug/mode`)
+      .then(r => r.json())
+      .then((d: { debugMode?: boolean }) => { setDebugMode(!!d.debugMode); setCombatLogText(!!d.debugMode); })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => on('vtt:chat:message-received', ({ text, senderName }) => {
     if (senderName === 'Virtual DM') narrate(text);
   }), []);
@@ -334,8 +345,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     const unsubSave  = on('vtt:roll:save',  payload => socket.emit('roll:save',  payload));
     const unsubCastExploration = on('vtt:spell:cast:exploration', payload => socket.emit('spell:cast:exploration', payload));
 
+    // DM text arrives with its [[TAG:...]] effect tags intact (kept for the DM's own prompt context) —
+    // strip them here, the one place every chat display (log, quick chat, narration, pinned notes) reads from.
     // Persisted history, as one replacement — on join, and again whenever Party Groups changes what this player may see.
-    socket.on('chat:history', messages => dispatch('vtt:chat:history', messages));
+    socket.on('chat:history', messages => dispatch('vtt:chat:history', messages.map((m: ChatPayload) => ({ ...m, text: stripDmTags(m.text) }))));
 
     // Bridge roll results → chat + typed event
     socket.on('roll:result', result => {
@@ -343,6 +356,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         text: result.description,
         senderName: 'System',
         timestamp: Date.now(),
+        breakdown: result.breakdown,
         splitId: result.splitId,
         trackIds: result.trackIds,
       });
@@ -354,7 +368,24 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       socket.emit('chat:message', { text, senderName });
     });
     socket.on('chat:message', payload => {
-      dispatch('vtt:chat:message-received', payload);
+      dispatch('vtt:chat:message-received', { ...payload, text: stripDmTags(payload.text) });
+      stopTyping(payload.senderName);
+    });
+
+    // Typing indicator — the typer heartbeats while typing, so a name expires on its own if the
+    // "stopped" signal never arrives (disconnect, or a group move mid-sentence changed the audience).
+    const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    function stopTyping(name: string) {
+      clearTimeout(typingTimers.get(name));
+      typingTimers.delete(name);
+      setTypers(prev => prev.filter(n => n !== name));
+    }
+    const unsubTyping = on('vtt:chat:typing', ({ typing }) => socket.emit('chat:typing', typing));
+    socket.on('chat:typing', ({ name, typing }) => {
+      if (!typing) { stopTyping(name); return; }
+      clearTimeout(typingTimers.get(name));
+      typingTimers.set(name, setTimeout(() => stopTyping(name), 4000));
+      setTypers(prev => prev.includes(name) ? prev : [...prev, name]);
     });
 
     // Replay persisted notes on join, bridge outgoing/incoming like chat
@@ -472,7 +503,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('encounter:ready', enemies => { setEncounterGenerating(false); setEncounter(enemies); dispatch('vtt:encounter:ready', { enemies }); });
     socket.on('encounter:failed', () => { setEncounterGenerating(false); dispatch('vtt:encounter:failed', {}); });
     socket.on('session:recap', ({ text, senderName, checkRequests, splitId, trackIds }) => {
-      dispatch('vtt:chat:message-received', { text, senderName, timestamp: Date.now(), variant: 'recap', checkRequests, splitId, trackIds });
+      dispatch('vtt:chat:message-received', { text: stripDmTags(text), senderName, timestamp: Date.now(), variant: 'recap', checkRequests, splitId, trackIds });
     });
     socket.on('combat:player:resources', data => dispatch('vtt:combat:player:resources', data));
     socket.on('rest:open', () => dispatch('vtt:rest:open', {}));
@@ -480,6 +511,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('combat:reaction:offer', data => dispatch('vtt:combat:reaction:offer', data));
     socket.on('combat:reaction:close', data => dispatch('vtt:combat:reaction:close', data));
     socket.on('combat:log', data => dispatch('vtt:combat:log', { kind: 'text', ...data }));
+    socket.on('combat:roll', data => dispatch('vtt:combat:log', { kind: 'roll', timestamp: Date.now(), ...data }));
     socket.on('dungeon:generating', () => setDungeonGenerating(true));
     // Generation threw server-side — dungeon:loaded is never coming, so drop the loading screen
     // (and the input lockout with it) instead of leaving the party stuck behind it.
@@ -539,6 +571,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       unsubSave();
       unsubCastExploration();
       unsubChat();
+      unsubTyping();
+      typingTimers.forEach(clearTimeout);
       unsubNoteAdd();
       unsubTokenMove();
       unsubTurnEnd();
@@ -721,13 +755,13 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         lastSpaceRef.current = 0;
         // Same gate as the HUD button — splitting and rejoining only happens in play.
         if (sessionActive) setGroupsOpen(o => !o);
-      } else if (e.key === 'D' && e.shiftKey) {
+      } else if (e.key === 'D' && e.shiftKey && debugMode) {
         setDevModalOpen(o => !o);
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [journalOpen, storyboardQueue, sessionActive, generationLocked]);
+  }, [journalOpen, storyboardQueue, sessionActive, generationLocked, debugMode]);
 
   const paletteItems = [
     {
@@ -878,11 +912,11 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         sessionActive={sessionActive}
         goals={goals}
       />
-      <JournalOverlay open={journalOpen} variant={journalVariant} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} liveSplitId={partyGroups ? activeSplit(partyGroups)?.id : undefined} />
+      <JournalOverlay open={journalOpen} variant={journalVariant} onClose={() => setJournalOpen(false)} character={character} sessionActive={sessionActive} dmThinking={dmThinking} typers={typers} liveSplitId={partyGroups ? activeSplit(partyGroups)?.id : undefined} />
       <QuestLog open={questLogOpen} onClose={() => setQuestLogOpen(false)} quests={quests} act={act} />
-      <CombatLogOverlay open={combatLogOpen} onClose={() => setCombatLogOpen(false)} />
+      <CombatLogOverlay open={combatLogOpen} onClose={() => setCombatLogOpen(false)} showText={combatLogText} />
       <NotesOverlay open={notesOpen} onClose={() => setNotesOpen(false)} character={character} />
-      <DevModal open={devModalOpen} onClose={() => setDevModalOpen(false)} />
+      <DevModal open={devModalOpen && debugMode} onClose={() => setDevModalOpen(false)} combatLogText={combatLogText} onCombatLogTextChange={setCombatLogText} />
       {!journalOpen && <ChatWidget />}
       <QuickChat open={quickChatOpen} onClose={() => setQuickChatOpen(false)} senderName={character.name} sessionActive={sessionActive} disabled={(combatActive && !isMyTurn) || generationLocked} />
       {victory && <VictoryScreen data={victory} onDismiss={() => setVictory(null)} />}

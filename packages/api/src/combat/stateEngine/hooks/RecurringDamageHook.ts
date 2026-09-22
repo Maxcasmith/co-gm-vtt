@@ -1,4 +1,4 @@
-import type { TurnContext, Scaling, Condition, AbilityKey } from 'shared';
+import type { TurnContext, Scaling, Condition, AbilityKey, RollBreakdown } from 'shared';
 import { resolveSpellDamageDice } from 'shared';
 import { Hook, type HookProps } from '../Hook.ts';
 import type { StateEngine } from '../StateEngine.ts';
@@ -6,7 +6,7 @@ import { fightOf } from '../../../state.ts';
 import { rollDice, fmtMod } from '../../dice.ts';
 import { applyDamageToCreature, applyDamageToPlayer, grantTempHpToPlayer } from '../../runtime/damage.ts';
 import { clearCondition } from '../../runtime/statusEffects.ts';
-import { rollSavingThrow, rollSkillCheck } from '../../runtime/rolls.ts';
+import { rollSavingThrow, rollSkillCheck, emitCombatRoll } from '../../runtime/rolls.ts';
 
 /**
  * Damages its owner at the start of each of their turns — Tasha's Caustic Brew's 2d4 acid while
@@ -101,7 +101,7 @@ export class RecurringDamageHook extends Hook<'beforeTurn' | 'afterTurn'> {
    * saveToEnd does (unregister + clear the condition(s)). Returns null if this hook isn't
    * escape-capable at all, so the caller can tell "no such check" apart from "failed the check".
    */
-  async attemptEscape(engine: StateEngine): Promise<{ succeeded: boolean; roll: number; bonus: number; total: number; dc: number } | null> {
+  async attemptEscape(engine: StateEngine): Promise<{ succeeded: boolean; roll: number; bonus: number; total: number; dc: number; breakdown: RollBreakdown | undefined } | null> {
     if (!this.escapeSkillCheck || this.dc === undefined) return null;
     const cid = engine.campaignId;
     const result = await rollSkillCheck(cid, this.ownerId, this.escapeSkillCheck, this.dc);
@@ -157,8 +157,9 @@ export class RecurringDamageHook extends Hook<'beforeTurn' | 'afterTurn'> {
     }
 
     if (!this.saveToEnd || this.dc === undefined) return;
-    const { saved, roll, bonus, total } = await rollSavingThrow(cid, this.ownerId, this.saveToEnd.ability, this.dc);
+    const { saved, roll, bonus, total, breakdown } = await rollSavingThrow(cid, this.ownerId, this.saveToEnd.ability, this.dc);
     console.log(`[hook] ${participant.name} save vs ${this.source} DC${this.dc}: d20=${roll}${fmtMod(bonus)}=${total} — ${saved ? 'ENDS' : 'CONTINUES'}`);
+    emitCombatRoll(cid, this.ownerId, { actorName: participant.name, label: `${this.saveToEnd.ability.toUpperCase()} save to end ${this.source}`, dc: this.dc, success: saved, breakdown });
     if (saved) {
       engine.unregister(this.id);
       await this.clearConditions(cid);
