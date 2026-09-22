@@ -102,10 +102,17 @@ async function main() {
   assert((await loadDungeons(SLUG)).length === 0, 'clearDungeon should remove the dungeon file');
 
   // --- quests ---
-  const quests: Quest[] = [{ id: 'q1', title: 'Fixture Quest', status: 'open', log: [] } as unknown as Quest];
+  const quests: Quest[] = [
+    { id: 'q1', title: 'Fixture Quest', status: 'open', log: [] } as unknown as Quest,
+    // Templates saved before e2e16b3 hold these; readQuests must un-hide them or the log stays empty.
+    { id: 'q2', title: 'Hidden Dungeon Quest', status: 'undiscovered', sourceDungeonId: 'd1', log: [] } as unknown as Quest,
+    { id: 'q3', title: 'Hidden Story Quest', status: 'undiscovered', log: [] } as unknown as Quest,
+  ];
   await writeQuests(SLUG, quests);
   const readQuestsResult = await readQuests(SLUG);
-  assert(readQuestsResult.length === 1 && readQuestsResult[0]!.id === 'q1', 'quests round-trip failed');
+  assert(readQuestsResult.length === 3 && readQuestsResult[0]!.id === 'q1', 'quests round-trip failed');
+  assert(readQuestsResult[1]!.status === 'open', 'undiscovered dungeon quest must read back as open');
+  assert(readQuestsResult[2]!.status === 'undiscovered', 'campaign quest without a dungeon stays undiscovered');
 
   // --- entities (storage.ts's own, campaign-scoped) ---
   await writeEntity(SLUG, 'npc', 'fixture-npc', '# Fixture NPC\nA test entity.');
@@ -131,15 +138,31 @@ async function main() {
   assert(clonedMeta?.adventureSlug === ADV_SLUG, 'copyCompendiumToCampaign should stamp the source adventure slug');
 
   // --- adventures/storage.ts: save campaign as reusable template, then clone it back ---
+  // A played-through dungeon in the current dungeons/<id>.json shape (not legacy dungeon.json):
+  // its hidden loot must reset on save, its decorative prop must not.
+  await saveDungeon(SLUG, {
+    id: 'd2', name: 'Played Dungeon', width: 2, height: 2,
+    cells: [[1, 1], [1, 1]], rooms: [], tilesetSlug: 'none',
+    entities: [
+      { id: 'e1', type: 'loot', hideDC: 15, discovered: true },
+      { id: 'e2', type: 'object', discovered: true },
+    ],
+  } as unknown as Dungeon);
+
   await saveCampaignAsAdventure(SLUG, 'fixture-saved-adventure', 'Fixture Saved Adventure');
   const savedMeta = await loadSavedAdventureMeta('fixture-saved-adventure');
   assert(savedMeta?.name === 'Fixture Saved Adventure', 'saveCampaignAsAdventure/loadSavedAdventureMeta round-trip failed');
+  assert(savedMeta?.hasDungeon === true, 'hasDungeon must see a dungeons/<id>.json dungeon, not just legacy dungeon.json');
 
   await copyAdventureToCampaign('fixture-saved-adventure', SLUG3, 'Cloned From Adventure');
   const clonedFromAdv = await getWorldMeta(SLUG3);
   assert(clonedFromAdv?.name === 'Cloned From Adventure', 'copyAdventureToCampaign should produce a working campaign clone');
   const clonedChars = await listCharacters(SLUG3);
   assert(clonedChars.length === 0, 'a saved-adventure template should strip the party — clone should start empty');
+
+  const clonedEntities = (await loadDungeons(SLUG3)).find(d => d.id === 'd2')?.entities ?? [];
+  assert(clonedEntities.find(e => e.id === 'e1')?.discovered === false, 'hidden loot must reset to undiscovered in a saved template');
+  assert(clonedEntities.find(e => e.id === 'e2')?.discovered === true, 'a decorative prop must stay discovered — resetting it hides the furniture');
 
   await deleteSavedAdventure('fixture-saved-adventure');
   assert((await loadSavedAdventureMeta('fixture-saved-adventure')) === null, 'deleteSavedAdventure should remove the template');

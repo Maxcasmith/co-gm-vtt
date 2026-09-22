@@ -84,6 +84,10 @@ const AI_FEATURES: { id: AiFeature; label: string; description: string; group: s
     description: 'Generates dungeon layouts, both at dungeon-crawl campaign creation and mid-session when a dungeon effect triggers.',
   },
   {
+    id: 'genreClassification', label: 'Tile Genre Classification', group: 'World',
+    description: 'Picks a campaign\'s setting and tone from its tags at creation, so dungeons reuse matching floor art. One tiny call per campaign — a cheap, fast model is ideal. Falls back to the Dungeon Generation model if unassigned.',
+  },
+  {
     id: 'worldStateAdvance', label: 'World State Advance', group: 'World',
     description: 'Advances world state and narrative events when the party takes a long rest. Runs in the background, not time-critical.',
   },

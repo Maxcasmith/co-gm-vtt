@@ -13,7 +13,7 @@ export interface ModelTier {
 export type AiFeature =
   | "campaignConcepts" | "dungeonPremise" | "dungeonScenarioSynopsis" | "backstoryGeneration" | "backstoryCheck" | "worldLoreSync" | "storyboardCaptions"
   | "nemesisGeneration" | "dmBrief" | "questGeneration" | "dmChatResponse" | "sessionTriage" | "sessionRecap" | "tagEffectProcessing" | "plotHookNormalize"
-  | "worldGeneration" | "dungeonGeneration" | "worldStateAdvance"
+  | "worldGeneration" | "dungeonGeneration" | "worldStateAdvance" | "genreClassification"
   | "combatNarration" | "encounterGeneration" | "improvisedResolution"
   | "compendium";
 

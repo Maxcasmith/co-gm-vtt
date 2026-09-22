@@ -50,7 +50,7 @@ export interface ManifestRoom {
   material?: string; // floor material key for this room — free-text, slugified on parse
   materialDescription?: string; // visual description of this room's texture — server-only, feeds the tileset prompt, never forwarded to DungeonRoom
   materialCategory?: MaterialCategory; // coarse fixed-enum bucket for this room's material — always set (defaulted on parse) whenever `material` is, feeds the genre tile map, never forwarded to DungeonRoom
-  materialReuse?: boolean; // the model's own "this is one of the existing genre tiles, don't draw it again" decision — validated against the real map in ensureTilesetSupport, never forwarded to DungeonRoom
+  materialReuse?: boolean; // explicit opt-OUT only (false = draw fresh art even though this key already exists); reuse of a listed key is automatic, see ensureTilesetSupport. Never forwarded to DungeonRoom
   isHallway?: boolean; // building layouts only — a passage/circulation room, not a destination
   floor?: number; // building layouts only — omitted/0 = ground floor, negative = basement, positive = upper. Every room on the same floor is laid out together; a multi-floor building is generateBuildingLayout stitching one per-floor layout per distinct value used here.
   isStairwell?: boolean; // building layouts only — this room IS the vertical connection to another floor. Always exactly 2x2 (footprint() forces this regardless of "size"). Comes out of the same room-count budget as every other room, not on top of it.
@@ -85,16 +85,17 @@ export interface DungeonManifest {
 // cap is primarily enforced by the manifest prompt itself (rooms are told to reuse keys); this
 // slice is just a defensive backstop against a model that ignores the instruction.
 function collectDungeonMaterials(rooms: ManifestRoom[]): DungeonMaterialSpec[] {
-  const seen = new Map<string, { description: string; category: MaterialCategory; reuse: boolean }>();
+  const seen = new Map<string, { description: string; category: MaterialCategory; reuse: boolean | undefined }>();
   for (const room of rooms) {
     if (!room.material || seen.has(room.material)) continue;
     seen.set(room.material, {
       description: room.materialDescription?.trim() || room.material,
       category: room.materialCategory ?? 'stone',
-      reuse: room.materialReuse === true,
+      // Only an explicit opt-out is carried — an omitted flag means "reuse if it exists".
+      reuse: room.materialReuse === false ? false : undefined,
     });
   }
-  return [...seen.entries()].slice(0, 16).map(([key, { description, category, reuse }]) => ({ key, description, category, ...(reuse ? { reuse } : {}) }));
+  return [...seen.entries()].slice(0, 16).map(([key, { description, category, reuse }]) => ({ key, description, category, ...(reuse === false ? { reuse } : {}) }));
 }
 
 // Same shape as collectDungeonMaterials — dedupes by normalized name (first-seen description
@@ -221,7 +222,7 @@ export async function fetchManifest(
     ? `\nThis dungeon's opening quest stage is already decided — do not invent a different one, and design rooms, creatures, and loot to actually serve it (a "rescue" stage needs a captive placed somewhere; a "retrieve X" stage needs X seeded as loot). Its id/name/description are fixed; YOU decide its "trigger" (below) plus every stage that follows it:\n${predefinedChain.map(q => `- ${q.id} — ${q.name}: ${q.description}`).join('\n')}\n`
     : '';
   const genreBlock = await buildGenreTileBlock(genre);
-  const themeFallback = genre ? `a theme fitting the "${genre}" genre` : 'high_fantasy';
+  const themeFallback = genre ? `a theme fitting a ${genre.tone} ${genre.setting} world` : 'high_fantasy';
 
   const [minRooms, maxRooms] = roomRange;
   const prompt = `You are a location architect. First decide whether "${name}" is a BUILDING (a man-made structure with an intentional floor plan — house, school, church, office, ship, station, mansion, prison, police precinct, etc.) or ORGANIC (a natural or crudely-dug space with no designed floor plan — cave, natural crypt, tomb carved into rock, sewer, ruins). This decision changes how you produce rooms below.
@@ -245,7 +246,7 @@ Return ONLY valid JSON, no markdown fences, no explanation:
       "material": "string — short lowercase key (1-2 words, e.g. wood, cracked-stone, wet-sand) naming this room's floor material, fitting its actual purpose (grass for an outdoor/dirt-floored space, wood for an indoor wood-floored room, stone for an indoor stone-floored room like a dungeon or crypt).",
       "materialDescription": "string — vivid visual description of this exact floor texture's appearance (color, wear, pattern) for an image generator. Reuse the EXACT SAME material key AND description verbatim across every room that should share the same texture (e.g. two plain-stone rooms both use key 'stone' with identical wording) rather than inventing near-duplicate keys for the same material — this dungeon may use AT MOST 16 distinct material keys in total across all rooms.",
       "materialCategory": "one of: ${MATERIAL_CATEGORIES.join('|')} — the coarse real-world material family this room's floor belongs to. Pick whichever actually matches; this is separate from \"material\" above (that's a specific short label, this is always one of this fixed list).",
-      "materialReuse": "boolean — true ONLY when \"material\" is copied verbatim from the already-available list below, meaning its art exists and must not be drawn again. false (or omitted) means this is a new texture to generate. Never set true for a key that isn't in that list.",
+      "materialReuse": "boolean — omit this. Copying a \"material\" key verbatim from the already-available list below reuses its art automatically. Set false ONLY when you want different art under a key that is already on that list.",
       "description": "string — 1-2 sentence read-aloud description for the moment a party first steps into this room. Evocative, sensory, scene-setting. Never mention who is present or what they do — this text is shown verbatim regardless of which characters enter or when.",
       "creatures": [{
         "id": "string, unique per creature",
@@ -333,7 +334,7 @@ Genre: ${dungeonType}`;
     const rooms: ManifestRoom[] = (parsed.rooms?.length ? parsed.rooms : GENERIC_ROOMS).map((r, i) => {
       const { material, materialDescription, materialCategory, materialReuse, creatures, props, dressing, hiddenDressing, ...rest } = r;
       const materialed = typeof material === 'string' && material.trim()
-        ? { ...rest, material: slugifyTheme(material), materialCategory: normalizeMaterialCategory(materialCategory), ...(materialReuse === true ? { materialReuse: true } : {}), ...(typeof materialDescription === 'string' && materialDescription.trim() ? { materialDescription: materialDescription.trim() } : {}) }
+        ? { ...rest, material: slugifyTheme(material), materialCategory: normalizeMaterialCategory(materialCategory), ...(materialReuse === false ? { materialReuse: false } : {}), ...(typeof materialDescription === 'string' && materialDescription.trim() ? { materialDescription: materialDescription.trim() } : {}) }
         : rest;
       const normalizedProps = normalizeProps(props);
       const propped = normalizedProps ? { ...materialed, props: normalizedProps } : materialed;

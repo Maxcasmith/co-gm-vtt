@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
-import type { CompendiumMeta, SavedAdventureMeta, WorldConcept, CampaignGenre } from 'shared';
+import type { CompendiumMeta, SavedAdventureMeta, WorldConcept } from 'shared';
 import { Button } from '../components/Button/Button.tsx';
+import { CreateRail } from '../components/CreateRail/CreateRail.tsx';
 import ChooseSourceStep, { type Choice } from './ChooseSourceStep.tsx';
 import PromptsStep from './PromptsStep.tsx';
 import ConceptsStep from './ConceptsStep.tsx';
@@ -48,7 +49,6 @@ export default function CreateCampaignPage() {
   const [campaignType, setCampaignType] = useState<'campaign' | 'dungeon-crawl'>('campaign');
   const [partySize, setPartySize] = useState(4);
   const [tags, setTags] = useState<string[]>(initialTags);
-  const [genre, setGenre] = useState<CampaignGenre | null>(null);
   const [loadingConcepts, setLoadingConcepts] = useState(false);
   const [concepts, setConcepts] = useState<WorldConcept[]>([]);
   const [selectedConcept, setSelectedConcept] = useState<WorldConcept | null>(null);
@@ -126,7 +126,7 @@ export default function CreateCampaignPage() {
       const res = await fetch(`${API}/api/campaigns/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tags, concept, name: campaignName, type: campaignType, partySize, genre }),
+        body: JSON.stringify({ tags, concept, name: campaignName, type: campaignType, partySize }),
       });
 
       const reader = res.body!.getReader();
@@ -289,7 +289,7 @@ export default function CreateCampaignPage() {
 
   const nextDisabled = {
     choose: choice === null,
-    prompts: tags.length === 0 || genre === null || loadingConcepts,
+    prompts: tags.length === 0 || loadingConcepts,
     concepts: selectedConcept === null || loadingConcepts,
     title: campaignName.trim() === '' || passwordsMismatch(password, confirmPassword),
     name: campaignName.trim() === '' || passwordsMismatch(password, confirmPassword),
@@ -320,19 +320,11 @@ export default function CreateCampaignPage() {
 
   return (
     <div className="create-page">
-      <aside className="create-rail">
-        <span className="create-rail-wordmark">Untitled AI VTT</span>
-        <ol className="create-rail-steps">
-          {visibleRailSteps.map((s, i) => (
-            <li
-              key={s}
-              className={`create-rail-step ${i === railIndex ? 'create-rail-step--current' : ''} ${i < railIndex ? 'create-rail-step--done' : ''}`}
-            >
-              {titleFor(s)}
-            </li>
-          ))}
-        </ol>
-      </aside>
+      <CreateRail
+        wordmark="Untitled AI VTT"
+        steps={visibleRailSteps.map(s => ({ key: s, label: titleFor(s) }))}
+        currentIndex={railIndex}
+      />
 
       <div className="create-page-main">
         <div className="create-page-atmosphere" aria-hidden="true" />
@@ -353,8 +345,6 @@ export default function CreateCampaignPage() {
             onTagsChange={setTags}
             partySize={partySize}
             onPartySizeChange={setPartySize}
-            genre={genre}
-            onGenreChange={setGenre}
           />
         )}
 

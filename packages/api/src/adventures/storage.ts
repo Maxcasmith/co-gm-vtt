@@ -80,18 +80,26 @@ export async function saveCampaignAsAdventure(campaignSlug: string, adventureSlu
     }
   } catch (err) { logError('adventures/storage:saveCampaignAsAdventure:quests', err); }
 
-  const dungeonKey = path.join(dstDir, 'dungeon.json');
+  // Every dungeon, both storage shapes: dungeons/<id>.json plus a legacy single dungeon.json
+  // (pre-step-15 saves) — same pair loadDungeons reads. Handling only the legacy file left every
+  // multi-dungeon campaign saving a template with its loot and traps still revealed.
   let hasDungeon = false;
   try {
-    const raw = await textStore.get(dungeonKey);
-    if (raw !== null) {
+    const dungeonsDir = path.join(dstDir, 'dungeons');
+    const keys = [
+      ...(await textStore.list(dungeonsDir)).filter(n => n.endsWith('.json')).map(n => path.join(dungeonsDir, n)),
+      path.join(dstDir, 'dungeon.json'),
+    ];
+    for (const key of keys) {
+      const raw = await textStore.get(key);
+      if (raw === null) continue;
       const dungeon = JSON.parse(raw) as Dungeon;
       // Only entities that are actually hidden behind a Perception check reset — decorative props
       // (type 'object') are placed with discovered: true and stay that way (see placer.ts), since
       // furniture isn't something a search reveals. Resetting them too left every prop invisible in
       // any campaign cloned from a template.
       dungeon.entities = dungeon.entities.map(e => e.hideDC === undefined ? e : { ...e, discovered: false });
-      await textStore.put(dungeonKey, JSON.stringify(dungeon, null, 2));
+      await textStore.put(key, JSON.stringify(dungeon, null, 2));
       hasDungeon = true;
     }
   } catch (err) { logError('adventures/storage:saveCampaignAsAdventure:dungeon', err); }

@@ -80,7 +80,7 @@ export async function generateEncounterEnemies(
     "material": "string — short lowercase key (1-2 words, e.g. wood, cracked-asphalt, wet-stone) naming the floor/ground underfoot at this exact spot.",
     "materialDescription": "string — vivid visual description of that ground's appearance (colour, wear, pattern) for an image generator.",
     "materialCategory": "one of: ${MATERIAL_CATEGORIES.join('|')} — the coarse real-world material family that ground belongs to.",
-    "materialReuse": "boolean — see the already-available list below, if one is given."
+    "materialReuse": "boolean — omit this. A \"material\" key copied from the already-available list below reuses its art automatically; set false only to force different art under a key on that list."
   }
 }
 ${nemesisBlock}${combatantBlock}${genreBlock}
@@ -123,7 +123,7 @@ function normalizeArenaTerrain(raw: unknown): ArenaTerrain | undefined {
   if (!theme || !key) return undefined;
   const description = typeof t.materialDescription === 'string' && t.materialDescription.trim() ? t.materialDescription.trim() : key;
   const category = MATERIAL_CATEGORIES.includes(t.materialCategory as MaterialCategory) ? (t.materialCategory as MaterialCategory) : 'stone';
-  return { theme, material: { key, description, category, ...(t.materialReuse === true ? { reuse: true } : {}) } };
+  return { theme, material: { key, description, category, ...(t.materialReuse === false ? { reuse: false } : {}) } };
 }
 
 function flattenMessages(messages: { role: string; content: string }[]): string {
@@ -385,7 +385,7 @@ export async function evaluateNemesisCandidates(
   if (!roster.length || !transcript.length) return { candidates: [] };
 
   const transcriptText = transcript.map(m => `[${m.senderName}]: ${m.text}`).join('\n');
-  const rosterText = roster.map(e => `${e.name} (CR ${e.cr}, HP ${e.hp}, AC ${e.ac}, attacks: ${e.attacks.map(a => a.name).join(', ') || 'none'})`).join('\n');
+  const rosterText = roster.map(e => `${e.name} (CR ${e.cr}, HP ${e.hp}, AC ${e.ac}, attacks: ${(e.attacks ?? []).map(a => a.name).join(', ') || 'none'})`).join('\n');
   const statusText = statusLines.join('\n') || 'unknown';
   const activeNemeses = existingNemeses.filter(n => n.status === 'active');
   const existingText = activeNemeses.length

@@ -163,3 +163,44 @@ routinely running with the Swap Timer off.
 
 **Progress log:**
 - 2026-09-22 — deferred when the Alert swap pause and its timer toggle were built.
+
+---
+
+### Player-facing backstory tools read the full GM-only `world.md`
+
+**What we accepted:** backstory check / generate / rewrite (`routes/campaigns.ts` `backstory-*`)
+send the whole `world.md` — secrets, countdown, hooks included — to the LLM, and their output
+goes straight to the player. The only thing stopping spoilers is the prompt instruction in
+`prompts.ts` (`buildBackstoryCheckPrompt`, `BACKSTORY_CONTENT_RULES`) to use the lore for tone
+only and never name or allude to its contents. An LLM that ignores that leaks GM secrets.
+
+**Why deferred:** `world.md` has no player-safe section (even the Overview names the big
+secrets), so the full fix — a generated player-safe tone/pitch summary per world, fed to these
+prompts instead — is a worldgen change. Prompt rules are enough until a leak is seen.
+
+**Trigger to revisit:** any backstory check/generate/rewrite output naming a world faction, NPC,
+place, or secret; or a player-safe world summary being built for another feature.
+
+**Progress log:**
+- 2026-09-22 — deferred when the backstory prompts were reworked to tone-fit + no-spoiler.
+
+---
+
+### Tile genre is only two levels deep (setting → tone), no era/place level
+
+**What we accepted:** the genre tile map (`genre-tile-map.json`, see `dungeon/genreTiles.ts`) is
+keyed setting (`fantasy|modern|scifi`) → tone (`standard|grim|horror|whimsical`) → material
+category → material. Every material in a setting/tone bucket is listed (key + description) in
+the manifest and arena-terrain prompts. A western and a present-day city share `modern/standard`;
+the picking LLM tells them apart by the materials' descriptions, not by a bucket.
+
+**Why deferred:** a third level (era or place type, e.g. modern: frontier/industrial/contemporary)
+only shortens the list sent to the LLM. At ~15 tokens per material, even 50 in one bucket is
+~750 input tokens — cheap next to one tileset generation — and every extra level splits reuse.
+
+**Trigger to revisit:** any single setting/tone bucket passing ~50 materials, or the
+`genre classification poor fit` debug log repeatedly naming the same gap.
+
+**Progress log:**
+- 2026-09-22 — deferred when genre moved from a manual 3-option picker to LLM classification
+  from tags. Largest bucket at the time: `modern/horror`, 16 materials.

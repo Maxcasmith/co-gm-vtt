@@ -1,103 +1,287 @@
 {
   "fantasy": {
-    "ash": {
-      "ash": "tilesets/ancient-egypt-three/ash"
+    "standard": {
+      "ash": {
+        "ash": {
+          "path": "tilesets/ancient-egypt-three/ash"
+        }
+      },
+      "brick": {
+        "brick": {
+          "path": "tilesets/ancient-egypt-three/brick"
+        }
+      },
+      "dirt": {
+        "dirt": {
+          "path": "tilesets/ancient-egypt-three/dirt"
+        }
+      },
+      "grass": {
+        "grass": {
+          "path": "tilesets/ancient-egypt-three/grass"
+        }
+      },
+      "rubble": {
+        "gravel": {
+          "path": "tilesets/ancient-egypt-three/gravel"
+        }
+      },
+      "ice": {
+        "ice": {
+          "path": "tilesets/ancient-egypt-three/ice"
+        }
+      },
+      "metal": {
+        "iron": {
+          "path": "tilesets/ancient-egypt-three/iron"
+        }
+      },
+      "lava": {
+        "lava": {
+          "path": "tilesets/ancient-egypt-three/lava"
+        }
+      },
+      "stone": {
+        "marble": {
+          "path": "tilesets/ancient-egypt-three/marble"
+        },
+        "stone": {
+          "path": "tilesets/ancient-egypt-three/stone"
+        }
+      },
+      "moss": {
+        "moss": {
+          "path": "tilesets/ancient-egypt-three/moss"
+        }
+      },
+      "mud": {
+        "mud": {
+          "path": "tilesets/ancient-egypt-three/mud"
+        }
+      },
+      "sand": {
+        "sand": {
+          "path": "tilesets/ancient-egypt-three/sand"
+        }
+      },
+      "snow": {
+        "snow": {
+          "path": "tilesets/ancient-egypt-three/snow"
+        }
+      },
+      "water": {
+        "water": {
+          "path": "tilesets/ancient-egypt-three/water"
+        }
+      },
+      "wood": {
+        "wood": {
+          "path": "tilesets/ancient-egypt-three/wood"
+        }
+      }
     },
-    "brick": {
-      "brick": "tilesets/ancient-egypt-three/brick"
-    },
-    "dirt": {
-      "dirt": "tilesets/ancient-egypt-three/dirt"
-    },
-    "grass": {
-      "grass": "tilesets/ancient-egypt-three/grass"
-    },
-    "rubble": {
-      "gravel": "tilesets/ancient-egypt-three/gravel"
-    },
-    "ice": {
-      "ice": "tilesets/ancient-egypt-three/ice"
-    },
-    "metal": {
-      "iron": "tilesets/ancient-egypt-three/iron"
-    },
-    "lava": {
-      "lava": "tilesets/ancient-egypt-three/lava"
-    },
-    "stone": {
-      "marble": "tilesets/ancient-egypt-three/marble",
-      "stone": "tilesets/ancient-egypt-three/stone"
-    },
-    "moss": {
-      "moss": "tilesets/ancient-egypt-three/moss"
-    },
-    "mud": {
-      "mud": "tilesets/ancient-egypt-three/mud"
-    },
-    "sand": {
-      "sand": "tilesets/ancient-egypt-three/sand"
-    },
-    "snow": {
-      "snow": "tilesets/ancient-egypt-three/snow"
-    },
-    "water": {
-      "water": "tilesets/ancient-egypt-three/water"
-    },
-    "wood": {
-      "wood": "tilesets/ancient-egypt-three/wood"
+    "horror": {
+      "stone": {
+        "wet-stone": {
+          "path": "tilesets/sunken-temple-3a03ccc96f/wet-stone",
+          "description": "dark stone slabs slick with damp, water beading in the grout lines, patches of pale lichen in the corners"
+        },
+        "marble": {
+          "path": "tilesets/sunken-temple-3a03ccc96f/marble"
+        }
+      },
+      "tile": {
+        "mosaic": {
+          "path": "tilesets/sunken-temple-3a03ccc96f/mosaic"
+        }
+      },
+      "wood": {
+        "rotted-wood": {
+          "path": "tilesets/sunken-temple-3a03ccc96f/rotted-wood",
+          "description": "warped planks of grey-black wood, swollen and soft with rot, gaps between boards revealing dark roots shifting underneath"
+        }
+      },
+      "mud": {
+        "silt": {
+          "path": "tilesets/sunken-temple-3a03ccc96f/silt",
+          "description": "grey-brown silt mud, soft and sucking underfoot, veined with pale roots that glisten with moisture"
+        }
+      },
+      "sand": {
+        "sand": {
+          "path": "tilesets/sunken-temple-3a03ccc96f/sand"
+        }
+      },
+      "bone": {
+        "bone-litter": {
+          "path": "tilesets/dark-fey-2c111b7341/bone-litter",
+          "description": "a floor carpeted in cracked and splintered bones of every size, yellowed and gnawed, crunching underfoot with every step"
+        }
+      },
+      "dirt": {
+        "packed-earth": {
+          "path": "tilesets/dark-fey-2c111b7341/packed-earth",
+          "description": "hard-packed dark earth threaded through with pale living roots that twitch at the edges of lamplight"
+        },
+        "grave-dirt": {
+          "path": "tilesets/dark-fey-2c111b7341/grave-dirt",
+          "description": "loose grey-black grave dirt mixed with bone chips and dead leaves, pale roots knifing through it in every direction"
+        }
+      },
+      "moss": {
+        "soft-moss": {
+          "path": "tilesets/dark-fey-2c111b7341/soft-moss",
+          "description": "a deep spongy bed of dark green moss swallowing each footstep, dotted with pale night-blooming fungi"
+        }
+      }
     }
   },
-  "horror": {
-    "stone": {
-      "algae-stone": "tilesets/cosmic-horror-2d20b8bc08/algae-stone",
-      "barnacled-stone": "tilesets/cosmic-horror-2d20b8bc08/barnacled-stone",
-      "wet-stone": "tilesets/victorian-horror--032b06694b/wet-stone",
-      "cracked-tile": "tilesets/cosmic-horror-89f12707c2/cracked-tile",
-      "stone": "tilesets/victorian-horror--032b06694b/stone",
-      "warded-stone": "tilesets/dark-academia-760c618ef9/warded-stone",
-      "marble": "tilesets/gothic-horror-d42fd63791/marble",
-      "tile": "tilesets/gothic-horror-d42fd63791/tile",
-      "cracked-stone": "tilesets/gothic-horror-f0fc6ae428/cracked-stone",
-      "mosaic": "tilesets/sunken-temple-3a03ccc96f/mosaic",
-      "checkerboard-tile": "tilesets/survival-horror-2c2e19dc95/checkerboard-tile",
-      "stained-tile": "tilesets/post-apocalyptic-americana-4d4d36e344/stained-tile"
+  "modern": {
+    "horror": {
+      "stone": {
+        "algae-stone": {
+          "path": "tilesets/cosmic-horror-2d20b8bc08/algae-stone"
+        },
+        "barnacled-stone": {
+          "path": "tilesets/cosmic-horror-2d20b8bc08/barnacled-stone"
+        },
+        "wet-stone": {
+          "path": "tilesets/victorian-horror-032b06694b/wet-stone"
+        },
+        "stone": {
+          "path": "tilesets/victorian-horror-032b06694b/stone"
+        },
+        "warded-stone": {
+          "path": "tilesets/dark-academia-760c618ef9/warded-stone"
+        },
+        "marble": {
+          "path": "tilesets/gothic-horror-d42fd63791/marble"
+        },
+        "cracked-stone": {
+          "path": "tilesets/gothic-horror-f0fc6ae428/cracked-stone"
+        }
+      },
+      "tile": {
+        "cracked-tile": {
+          "path": "tilesets/cosmic-horror-89f12707c2/cracked-tile",
+          "description": "small white ceramic hex tiles, many cracked or missing, the grout gone grey-brown with mildew"
+        },
+        "checkerboard-tile": {
+          "path": "tilesets/survival-horror-2c2e19dc95/checkerboard-tile",
+          "description": "black-and-white checkerboard vinyl tile, scuffed to dull grey in the walking lanes, corners lifting"
+        },
+        "tile": {
+          "path": "tilesets/survival-horror-2c2e19dc95/tile"
+        }
+      },
+      "wood": {
+        "wet-wood": {
+          "path": "tilesets/cosmic-horror-89f12707c2/wet-wood"
+        },
+        "wood": {
+          "path": "tilesets/cosmic-horror-2d20b8bc08/wood",
+          "description": "Worn pine plank flooring, pale and splintered at the seams, darkened by boot traffic and a rime of tracked-in ice."
+        }
+      },
+      "metal": {
+        "rusted-steel": {
+          "path": "tilesets/cosmic-horror-89f12707c2/rusted-steel",
+          "description": "Rusted steel plating over concrete, orange-brown corrosion blooming at the seams, the walking lanes polished dull by years of paws and boots, streaked with frozen dark smears."
+        },
+        "metal": {
+          "path": "tilesets/dark-academia-760c618ef9/metal"
+        }
+      },
+      "carpet": {
+        "soaked-carpet": {
+          "path": "tilesets/cosmic-horror-89f12707c2/soaked-carpet"
+        },
+        "carpet": {
+          "path": "tilesets/survival-horror-2c2e19dc95/carpet",
+          "description": "low-pile institutional blue-grey carpet, water-stained in dark blooms and matted with grit and tracked mud"
+        }
+      },
+      "sand": {
+        "sand": {
+          "path": "tilesets/cosmic-horror-2d20b8bc08/sand"
+        }
+      },
+      "dirt": {
+        "dirt": {
+          "path": "tilesets/victorian-horror-032b06694b/dirt"
+        }
+      },
+      "concrete": {
+        "concrete": {
+          "path": "tilesets/survival-horror-2c2e19dc95/concrete",
+          "description": "pale grey poured concrete, dusted with grime and scuffed dark by years of boots, hairline cracks spidering near the walls"
+        }
+      },
+      "linoleum": {
+        "linoleum": {
+          "path": "tilesets/survival-horror-2c2e19dc95/linoleum",
+          "description": "aged beige linoleum tiles with a faint marbled pattern, edges curling at the corners, streaked with long dried dark stains"
+        }
+      },
+      "grass": {
+        "grass": {
+          "path": "tilesets/gothic-horror-f0fc6ae428/grass"
+        }
+      }
     },
-    "wood": {
-      "wood": "tilesets/gothic-horror-f0fc6ae428/wood",
-      "wet-wood": "tilesets/cosmic-horror-89f12707c2/wet-wood",
-      "rotted-wood": "tilesets/sunken-temple-3a03ccc96f/rotted-wood"
-    },
-    "metal": {
-      "rusted-steel": "tilesets/cosmic-horror-89f12707c2/rusted-steel",
-      "metal": "tilesets/dark-academia-760c618ef9/metal"
-    },
-    "fabric": {
-      "soaked-carpet": "tilesets/cosmic-horror-89f12707c2/soaked-carpet",
-      "carpet": "tilesets/survival-horror-2c2e19dc95/carpet",
-      "worn-carpet": "tilesets/post-apocalyptic-americana-4d4d36e344/worn-carpet"
-    },
-    "grass": {
-      "grass": "tilesets/gothic-horror-f0fc6ae428/grass"
-    },
-    "sand": {
-      "sand": "tilesets/cosmic-horror-2d20b8bc08/sand"
-    },
-    "mud": {
-      "silt": "tilesets/sunken-temple-3a03ccc96f/silt"
-    },
-    "dirt": {
-      "dirt": "tilesets/victorian-horror--032b06694b/dirt"
-    },
-    "rubble": {
-      "gravel": "tilesets/post-apocalyptic-rural-2f1247e1b1/gravel"
-    },
-    "concrete": {
-      "concrete": "tilesets/survival-horror-2c2e19dc95/concrete",
-      "linoleum": "tilesets/survival-horror-2c2e19dc95/linoleum",
-      "grease-concrete": "tilesets/post-apocalyptic-americana-4d4d36e344/grease-concrete",
-      "cracked-asphalt": "tilesets/post-apocalyptic-americana-4d4d36e344/cracked-asphalt",
-      "peeling-linoleum": "tilesets/post-apocalyptic-americana-4d4d36e344/peeling-linoleum"
+    "grim": {
+      "tile": {
+        "stained-tile": {
+          "path": "tilesets/post-apocalyptic-americana-4d4d36e344/stained-tile"
+        },
+        "tile": {
+          "path": "tilesets/post-apocalyptic-rural-2f1247e1b1/tile"
+        }
+      },
+      "carpet": {
+        "worn-carpet": {
+          "path": "tilesets/post-apocalyptic-americana-4d4d36e344/worn-carpet"
+        },
+        "carpet": {
+          "path": "tilesets/post-apocalyptic-rural-2f1247e1b1/carpet"
+        }
+      },
+      "rubble": {
+        "gravel": {
+          "path": "tilesets/post-apocalyptic-rural-2f1247e1b1/gravel"
+        }
+      },
+      "concrete": {
+        "grease-concrete": {
+          "path": "tilesets/post-apocalyptic-americana-4d4d36e344/grease-concrete"
+        },
+        "concrete": {
+          "path": "tilesets/post-apocalyptic-rural-2f1247e1b1/concrete"
+        }
+      },
+      "asphalt": {
+        "cracked-asphalt": {
+          "path": "tilesets/post-apocalyptic-americana-4d4d36e344/cracked-asphalt"
+        }
+      },
+      "linoleum": {
+        "peeling-linoleum": {
+          "path": "tilesets/post-apocalyptic-americana-4d4d36e344/peeling-linoleum"
+        },
+        "linoleum": {
+          "path": "tilesets/post-apocalyptic-rural-2f1247e1b1/linoleum"
+        }
+      },
+      "dirt": {
+        "dirt": {
+          "path": "tilesets/post-apocalyptic-rural-2f1247e1b1/dirt"
+        }
+      },
+      "wood": {
+        "wood": {
+          "path": "tilesets/post-apocalyptic-rural-2f1247e1b1/wood"
+        }
+      }
     }
-  },
-  "sci-fi": {}
+  }
 }

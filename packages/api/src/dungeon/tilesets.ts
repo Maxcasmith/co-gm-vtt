@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import path from 'path';
 import sharp from 'sharp';
-import type { AppConfig, DungeonMaterialSpec, CampaignGenre, MaterialCategory } from 'shared';
+import type { AppConfig, DungeonMaterialSpec, CampaignGenre, GenreCategoryMap } from 'shared';
 import { DUNGEON_STYLE_PACKS, slugifyTheme } from 'shared';
 import { TILESETS_DIR, readGenreTileMap, writeGenreTileMap } from '../storage.ts';
 import { getMediaStore } from '../storage/index.ts';
@@ -63,6 +63,15 @@ export function hasTilesetSupport(theme: string): boolean {
 function hashMaterials(materials: DungeonMaterialSpec[]): string {
   const input = materials.map(m => `${m.key}:${m.description}`).join('|');
   return createHash('sha1').update(input).digest('hex').slice(0, 10);
+}
+
+// The generated tileset's own folder name, and what Dungeon.tilesetSlug and the genre tile map
+// both address art by. MUST already be slugified: runTilesetPipeline slugifies again when writing
+// the folder, and /api/tilesets rejects any slug that isn't its own slugification — so a separator
+// that doesn't survive slugifyTheme (the old '--') wrote art to one folder, addressed another, and
+// 404'd every tile of it. Exported so that invariant is checkable (see tilesets.selfcheck.ts).
+export function tilesetSlugFor(themeSlug: string, materials: DungeonMaterialSpec[]): string {
+  return `${themeSlug}-${hashMaterials(materials)}`;
 }
 
 // "1 hour 2 minutes 5 seconds" / "34 seconds" — no fractional seconds, no zero-value units
@@ -193,18 +202,30 @@ export async function generateExtendedTileset(title: string, theme: string, mate
 }
 
 // Records each distinct material this tileset actually generated, under its category, keyed by
-// its own freeform key (e.g. horror.stone["cracked-stone"] = "tilesets/<slug>/cracked-stone") — so
-// a later dungeon of the same genre can be shown the SPECIFIC existing variants (see
-// dungeon/manifest.ts's genreBlock), not just which categories exist. Best-effort: called after
-// the tileset is already known good, never allowed to fail the caller.
-async function recordGenreTileset(genre: CampaignGenre, materials: DungeonMaterialSpec[], tilesetSlug: string): Promise<void> {
+// its own freeform key (e.g. modern.horror.tile["bloodstained-tile"] = { path, description }) — so
+// a later dungeon of the same setting/tone can be shown the SPECIFIC existing variants with what
+// they look like (see dungeon/genreTiles.ts), not just which categories exist. Reused materials
+// only backfill a missing description (legacy entries had none). Best-effort: called after the
+// tileset is already known good, never allowed to fail the caller.
+async function recordGenreTileset(genre: CampaignGenre, fresh: DungeonMaterialSpec[], tilesetSlug: string | undefined, reused: DungeonMaterialSpec[] = []): Promise<void> {
   try {
     const map = await readGenreTileMap();
-    const forGenre: Partial<Record<MaterialCategory, Record<string, string>>> = { ...(map[genre] ?? {}) };
-    for (const m of materials) {
-      forGenre[m.category] = { ...(forGenre[m.category] ?? {}), [m.key]: path.join(TILESETS_DIR, tilesetSlug, m.key) };
+    const bucket: GenreCategoryMap = { ...(map[genre.setting]?.[genre.tone] ?? {}) };
+    let changed = false;
+    if (tilesetSlug) {
+      for (const m of fresh) {
+        bucket[m.category] = { ...(bucket[m.category] ?? {}), [m.key]: { path: path.join(TILESETS_DIR, tilesetSlug, m.key), description: m.description } };
+        changed = true;
+      }
     }
-    await writeGenreTileMap({ ...map, [genre]: forGenre });
+    for (const m of reused) {
+      const entry = bucket[m.category]?.[m.key];
+      if (!entry || entry.description) continue;
+      bucket[m.category] = { ...bucket[m.category], [m.key]: { ...entry, description: m.description } };
+      changed = true;
+    }
+    if (!changed) return;
+    await writeGenreTileMap({ ...map, [genre.setting]: { ...(map[genre.setting] ?? {}), [genre.tone]: bucket } });
   } catch (err) {
     logError('dungeon/tilesets:recordGenreTileset', err);
   }
@@ -233,18 +254,19 @@ export interface TilesetResolution {
  * silently costs money or silently loses a texture when it's wrong — is checkable without a real
  * image generation (see tilesets.reuse.selfcheck.ts).
  *
- * The model's `reuse` flag is a request, not an instruction: a key that doesn't actually resolve in
- * the map falls through to `fresh`, so a hallucinated flag costs one normal generation instead of
- * pointing a room at art that was never drawn.
+ * Reuse is the DEFAULT, not something the model has to ask for: a material whose key AND category
+ * already exist in this campaign's bucket is that material, so it's reused unless the model
+ * explicitly sets `reuse: false` to force a different look under the same name. Relying on the
+ * model to opt in meant a forgotten flag silently paid for art that already existed.
  */
 export function splitReusableMaterials(
   materials: DungeonMaterialSpec[],
-  genreMap: Partial<Record<MaterialCategory, Record<string, string>>>,
+  genreMap: GenreCategoryMap,
 ): { fresh: DungeonMaterialSpec[]; materialSources: Record<string, string> } {
   const materialSources: Record<string, string> = {};
   const fresh: DungeonMaterialSpec[] = [];
   for (const m of materials) {
-    const existing = m.reuse ? genreMap[m.category]?.[m.key] : undefined;
+    const existing = m.reuse === false ? undefined : genreMap[m.category]?.[m.key]?.path;
     const sourceSlug = existing ? slugFromGenreMapPath(existing) : undefined;
     if (sourceSlug) materialSources[m.key] = sourceSlug;
     else fresh.push(m);
@@ -267,15 +289,19 @@ export async function ensureTilesetSupport(theme: string, materials: DungeonMate
   if (hasTilesetSupport(theme)) return { tilesetSlug: slug };
   if (!materials.length) return { tilesetSlug: slug };
 
-  const genreMap = genre ? (await readGenreTileMap())[genre] ?? {} : {};
+  const genreMap = genre ? (await readGenreTileMap())[genre.setting]?.[genre.tone] ?? {} : {};
   const { fresh, materialSources } = splitReusableMaterials(materials, genreMap);
   const sources = Object.keys(materialSources).length ? { materialSources } : {};
-  // Everything this dungeon needs already exists somewhere — nothing to draw, nothing to record.
-  if (!fresh.length) return { tilesetSlug: slug, ...sources };
+  const reused = materials.filter(m => m.key in materialSources);
+  // Everything this dungeon needs already exists somewhere — nothing to draw, only descriptions to backfill.
+  if (!fresh.length) {
+    if (genre) await recordGenreTileset(genre, [], undefined, reused);
+    return { tilesetSlug: slug, ...sources };
+  }
 
-  const tilesetSlug = `${slug}--${hashMaterials(fresh)}`;
+  const tilesetSlug = tilesetSlugFor(slug, fresh);
   if ((await getMediaStore().list(path.join(TILESETS_DIR, tilesetSlug))).length > 0) {
-    if (genre) await recordGenreTileset(genre, fresh, tilesetSlug);
+    if (genre) await recordGenreTileset(genre, fresh, tilesetSlug, reused);
     return { tilesetSlug, ...sources };
   }
   if (!config.image.generateTilesets) return { tilesetSlug: slug, ...sources };
@@ -283,7 +309,7 @@ export async function ensureTilesetSupport(theme: string, materials: DungeonMate
   if (!apiKey) return { tilesetSlug: slug, ...sources };
   try {
     await generateExtendedTileset(tilesetSlug, theme, fresh, apiKey, config.image.model);
-    if (genre) await recordGenreTileset(genre, fresh, tilesetSlug);
+    if (genre) await recordGenreTileset(genre, fresh, tilesetSlug, reused);
     return { tilesetSlug, ...sources };
   } catch (err) {
     logError('dungeon/tilesets:ensureTilesetSupport', err);

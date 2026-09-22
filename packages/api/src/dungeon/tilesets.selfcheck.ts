@@ -5,7 +5,8 @@
 // per-dungeon list (see dungeon/manifest.ts's collectDungeonMaterials), always padded to 16 before
 // reaching this crop math (see dungeon/tilesets.ts's padMaterials) — so a plain 16-entry dummy
 // array exercises the exact shape every real call site produces.
-import { computeGridRects } from './tilesets.ts';
+import { slugifyTheme } from 'shared';
+import { computeGridRects, tilesetSlugFor } from './tilesets.ts';
 
 const MATERIALS = Array.from({ length: 16 }, (_, i) => `material-${i + 1}`);
 
@@ -38,3 +39,10 @@ assertRects(1024, 1024, 'exact', false);
 assertRects(1024, 900, 'short atlas', true);
 
 console.log('tilesets selfcheck: computeGridRects OK — exact and off-ratio cases all crop in bounds.');
+
+// A generated tileset slug must be its own slugification: the pipeline slugifies it again when
+// writing the folder, and /api/tilesets 404s anything that isn't (isSafeSlug). The old '--'
+// separator failed both, so every generated tileset's art was unreachable.
+const themed = tilesetSlugFor(slugifyTheme('Victorian Horror'), [{ key: 'wet-stone', description: 'rain-slick cobbles', category: 'stone' }]);
+if (slugifyTheme(themed) !== themed) throw new Error(`tileset slug must survive slugifyTheme, got "${themed}" -> "${slugifyTheme(themed)}"`);
+console.log('tileset slug selfcheck: OK — generated slug round-trips through slugifyTheme.');

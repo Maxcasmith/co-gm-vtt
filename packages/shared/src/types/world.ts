@@ -6,13 +6,32 @@ export interface WorldConcept {
   description: string;
 }
 
-/** Fixed, pre-created set — chosen once at campaign creation, persisted, never fed into any
- * LLM tone/flavor prompt. Purely a deterministic key for looking up reusable dungeon tile
- * assets (see GenreTileMap in dungeon.ts) — unrelated to the freeform, LLM-invented `theme`
- * a dungeon gets per-generation, and unrelated to WorldMeta.tags/storyTags (both freeform,
- * both feed tone prompts). */
-export const CAMPAIGN_GENRES = ["fantasy", "horror", "sci-fi"] as const;
-export type CampaignGenre = (typeof CAMPAIGN_GENRES)[number];
+/** Fixed sets, classified once from the campaign's tags at creation (see api
+ * dungeon/genreTiles.ts's classifyCampaignGenre) and persisted. Purely a key for narrowing which
+ * reusable tile art is offered (see GenreTileMap in dungeon.ts) — setting decides the material
+ * palette, tone decides which variant of a material fits (clean vs bloodstained tile). */
+export const GENRE_SETTINGS = ["fantasy", "modern", "scifi"] as const;
+export type GenreSetting = (typeof GENRE_SETTINGS)[number];
+export const GENRE_TONES = ["standard", "grim", "horror", "whimsical"] as const;
+export type GenreTone = (typeof GENRE_TONES)[number];
+export interface CampaignGenre {
+  setting: GenreSetting;
+  tone: GenreTone;
+}
+export const DEFAULT_CAMPAIGN_GENRE: CampaignGenre = { setting: "fantasy", tone: "standard" };
+
+export const GENRE_SETTING_DESCRIPTIONS: Record<GenreSetting, string> = {
+  fantasy: "pre-industrial — swords, magic, stone, timber.",
+  modern: "industrial era to today, roughly 1800s onward — railways, gunpowder, iron, concrete. Includes westerns, Victorian, steampunk, dieselpunk, present day.",
+  scifi: "future technology — spacecraft, advanced machines, other worlds.",
+};
+
+export const GENRE_TONE_DESCRIPTIONS: Record<GenreTone, string> = {
+  standard: "the setting's natural look, no strong treatment — clean or lived-in, balanced colour. e.g. LOTR's Shire, Star Trek, a modern police station.",
+  grim: "human-caused hardship — war, poverty, neglect, brutality. Mud, scorch, wear, desaturated greys and browns. Dark but nothing unnatural. e.g. The Witcher, Game of Thrones, Band of Brothers, Mad Max.",
+  horror: "wrongness — supernatural, disease, the monstrous. Blood, rot, unnatural growth, sickly colour, deep shadow. e.g. Van Helsing, Resident Evil, Alien, Bloodborne.",
+  whimsical: "storybook, heightened — saturated colour, soft or magical surfaces, cosy or playful. e.g. Fable, Studio Ghibli, Alice in Wonderland, Pixar.",
+};
 
 export interface Campaign {
   id: string;
@@ -43,7 +62,7 @@ export interface WorldMeta {
    * play has actually proven to be about, used to filter the plot hook pool. Empty/undefined means
    * "not yet known", not "nothing fits" — pool eligibility treats that as no tag filter at all. */
   storyTags?: PlotHookTag[];
-  /** Set once at creation, never changed. Deterministic tile-lookup key only — see CAMPAIGN_GENRES.
+  /** Set once at creation, never changed. Tile-lookup key only — see GENRE_SETTINGS/GENRE_TONES.
    * Undefined on campaigns saved before this field existed; treated as "no genre map filtering". */
   genre?: CampaignGenre;
 }

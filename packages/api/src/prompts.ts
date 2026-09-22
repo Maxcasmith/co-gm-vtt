@@ -1,4 +1,4 @@
-import { PLOT_HOOK_TAGS } from 'shared';
+import { PLOT_HOOK_TAGS, GENRE_SETTINGS, GENRE_TONES, GENRE_SETTING_DESCRIPTIONS, GENRE_TONE_DESCRIPTIONS } from 'shared';
 
 type CampaignType = 'campaign' | 'one-shot' | 'dungeon-crawl';
 
@@ -11,9 +11,9 @@ export function buildBackstoryCheckPrompt(
   worldLore: string,
   concept: { name: string; species: string; background: string; characterClass: string; backstory: string },
 ): string {
-  return `You are a tabletop RPG lore consistency judge. Score how well a player's character concept fits the established world below.
+  return `You are a tabletop RPG session-zero advisor. Judge how well a player's character concept fits the TONE AND FEEL of the world below.
 
-WORLD LORE:
+GM-ONLY WORLD LORE (the player has not seen this and must not learn it from you):
 ${worldLore || '(no world lore has been established yet — score based on internal consistency and genre fit only)'}
 
 CHARACTER CONCEPT:
@@ -23,27 +23,53 @@ Background: ${concept.background || '(unspecified)'}
 Class: ${concept.characterClass || '(unspecified)'}
 Backstory: ${concept.backstory || '(none written yet)'}
 
-Judge fit on: does the backstory reference or contradict specific facts, factions, regions, history, or tone established in the lore; does the species/background/class combination make sense given the world's cultures and current conflicts; is the backstory's scale and stakes appropriate for a starting character (not already the world's savior or a named lore figure).
+Use the lore only to understand the world's genre, mood, register, technology/magic level, and cultures. Judge fit on:
+- Tone and feel: does the backstory read like it belongs in this kind of world (its mood, its register, the kind of horror/wonder/grit it trades in)?
+- Contradictions: does anything the player invented flatly contradict how the world works (e.g. a sunlit harbour city in a world with no sea)? Invented people, places, cults, gods, and history are GOOD — players adding lore is encouraged as long as it complements the world.
+- Scale: is this a starting character, not already a legend or the world's saviour?
+Do NOT penalise a backstory for not mentioning the world's factions, places, NPCs, or events. A backstory with no world references that matches the tone should score 70+.
+
+Hard rules for everything you write (verdict, issues, suggestions):
+- Never use a proper noun from the world lore.
+- Never mention, hint at, or allude to the world's factions, NPCs, locations, history, secrets, or current events.
+- Suggestions are about tone, framing, and hook strength (e.g. "lean the cult's language toward cold bureaucracy rather than fire-and-brimstone"), never about wiring the character into specific lore.
 
 Return ONLY a single valid JSON object — no markdown fences, no explanation:
 
 {
-  "score": number (0-100, integer, how well the concept fits the world),
+  "score": number (0-100, integer, how well the concept fits the world's tone and feel),
   "verdict": "string — one sentence summary of the fit",
-  "issues": ["string — a specific contradiction or mismatch with the lore, if any"],
-  "suggestions": ["string — a specific, concrete change to the backstory that would raise the score, referencing actual lore names/places/factions where possible"]
+  "issues": ["string — a tonal mismatch or contradiction, if any"],
+  "suggestions": ["string — a concrete tone/framing change that would raise the score"]
 }
 
-If the concept already fits well, return an empty issues array and 1-2 suggestions for small flavour improvements rather than forcing problems that aren't there.`;
+If the concept already fits well, return an empty issues array and 1-2 small flavour suggestions rather than forcing problems that aren't there.`;
 }
+
+export const BACKSTORY_HOOKS = ['tragedy', 'mystery', 'ambition', 'schooling or training'] as const;
+
+// Shared by generate + rewrite. The world lore is GM-only — backstories set the character's
+// starting point in the world's tone, and the VDM ties them into specifics later in play.
+const BACKSTORY_CONTENT_RULES = `Structure:
+- First: who the character was before the event that set them on their path — home, people, daily life, what they cared about.
+- Then: the event that is still unresolved, or the reason that called them to adventure.
+
+Rules:
+- The world lore is GM-only. Use it only to match the world's tone, mood, register, and technology/magic level. Never use its proper nouns, and never mention its factions, NPCs, locations, history, secrets, or current events.
+- Invent the character's own people, places, and history freely — these are open threads the GM will later tie into the world.
+- Anything about where they are headed next stays light and vague. This is where their story begins, not ends.
+- End on an open thread: an unanswered question, a person still out there, a promise not yet kept.
+- A starting adventurer, not a legend — no world-saving deeds, no famous names.
+- No headers, no bullet points, no markdown, no preamble — return only the backstory text itself.`;
 
 export function buildBackstoryGeneratePrompt(
   worldLore: string,
   concept: { name: string; species: string; background: string; characterClass: string },
+  hook: typeof BACKSTORY_HOOKS[number],
 ): string {
-  return `You are a tabletop RPG writer. Write a character backstory grounded in the world below.
+  return `You are a tabletop RPG writer. Write a short character backstory that fits the tone and feel of the world below.
 
-WORLD LORE:
+GM-ONLY WORLD LORE:
 ${worldLore || '(no world lore has been established yet — invent grounded, genre-appropriate details)'}
 
 CHARACTER CONCEPT:
@@ -52,9 +78,40 @@ Species: ${concept.species || '(unspecified — pick one that fits the world)'}
 Background: ${concept.background || '(unspecified — pick one that fits the world)'}
 Class: ${concept.characterClass || '(unspecified — pick one that fits the world)'}
 
-Reference specific named places, factions, NPCs, or events from the world lore above where it makes sense — ground the character in this world, not a generic fantasy setting. Explain how their species/background/class combination came to be, and give them a personal stake in something already happening in the world (a grudge, a debt, a missing person, a faction tie). Keep them a starting adventurer, not a legend — no world-saving deeds, no famous names.
+The event that sets them on their path is built on this hook: ${hook}.
 
-Write exactly 3 paragraphs of prose. No headers, no bullet points, no markdown, no preamble — return only the backstory text itself.`;
+${BACKSTORY_CONTENT_RULES}
+
+Write EXACTLY 2 paragraphs of prose — paragraph 1 is who they were before, paragraph 2 is the unresolved event or call to adventure.`;
+}
+
+export function buildBackstoryRewritePrompt(
+  worldLore: string,
+  concept: { name: string; species: string; background: string; characterClass: string; backstory: string },
+  suggestions: string[],
+): string {
+  return `You are a tabletop RPG editor. Rewrite a player's character backstory so it better fits the tone and feel of the world below, applying the suggestions given.
+
+GM-ONLY WORLD LORE:
+${worldLore || '(no world lore has been established yet — keep the tone genre-appropriate)'}
+
+CHARACTER CONCEPT:
+Name: ${concept.name || '(unnamed)'}
+Species: ${concept.species || '(unspecified)'}
+Background: ${concept.background || '(unspecified)'}
+Class: ${concept.characterClass || '(unspecified)'}
+
+PLAYER'S BACKSTORY:
+${concept.backstory}
+
+SUGGESTIONS TO APPLY:
+${suggestions.map(s => `- ${s}`).join('\n')}
+
+This is the player's story. Keep EVERY piece of player information and every plot point — all named people, places, events, relationships, and motivations they wrote. Do not drop, replace, or contradict any of them. Condense wording and adjust tone and framing only; where a suggestion would require removing player content, reframe that content instead. Names the player wrote themselves stay, even if they also appear in the lore — just don't add any new ones from it.
+
+${BACKSTORY_CONTENT_RULES}
+
+Write between 2 and 4 paragraphs of prose.`;
 }
 
 export function buildBackstoryExtractPrompt(
@@ -88,6 +145,35 @@ Return ONLY a single valid JSON object — no markdown fences, no explanation:
   "quests": [
     { "id": "kebab-slug", "name": "string — short, player-facing", "description": "string — 1-2 sentences, what the party knows or is being asked to do" }
   ]
+}`;
+}
+
+// Classifies a new campaign into the fixed setting/tone sets that key the reusable tile art (see
+// dungeon/genreTiles.ts). Only ever used for tile lookup — never shapes story or narration.
+export function buildGenreClassificationPrompt(tags: string[]): string {
+  const settings = GENRE_SETTINGS.map(s => `- ${s}: ${GENRE_SETTING_DESCRIPTIONS[s]}`).join('\n');
+  const tones = GENRE_TONES.map(t => `- ${t}: ${GENRE_TONE_DESCRIPTIONS[t]}`).join('\n');
+  return `Classify a tabletop RPG world by what its locations physically look like, so matching floor art can be reused. Campaign tags: ${tags.join(', ')}
+
+SETTING (the era and technology the floors and walls come from):
+${settings}
+
+TONE (how those surfaces are treated):
+${tones}
+
+Rules:
+- Judge by what the world described by the tags is actually like, never by matching words — a tag like "Brothers Grim" does not make a world grim.
+- grim vs horror: if the main threat is people or circumstance, grim. If it is something unnatural or monstrous, horror.
+- War or conflict alone is not grim — grim needs actual grit, bleakness, or hardship. A heroic war with knights and dragons is standard.
+- Named IPs, films, games, and historical eras count: place them where their real look belongs.
+- You must choose from the lists above. If nothing fits well, pick the closest and say so in fit/fitNote.
+
+Return ONLY a single valid JSON object — no markdown fences, no explanation:
+{
+  "setting": "one of: ${GENRE_SETTINGS.join('|')}",
+  "tone": "one of: ${GENRE_TONES.join('|')}",
+  "fit": "good or poor — poor if the closest options are a stretch",
+  "fitNote": "string — only when fit is poor: one line on what the world's look needs that no option covers"
 }`;
 }
 
@@ -240,14 +326,19 @@ Do NOT generate a plot or overarching story — the players will create that. Ge
 
 // Dungeon crawl: no world, no factions, no NPC roster — the dungeon itself is the content.
 // Just a title (not the raw tag list) and enough premise for the DM to open the scene.
-export function buildDungeonCrawlPremisePrompt(tags: string[]): string {
-  return `You are a tabletop RPG designer. Based on these tags: ${tags.join(', ')} — name this dungeon crawl and write the premise for why a party of adventurers is about to enter it.
+// The title is the user's own, fixed at the client's rename step before any of this runs — so it's
+// stated here rather than invented. Asking the model to name the adventure too was pure waste: the
+// route overwrote whatever it returned with the user's name immediately (see routes/campaigns.ts),
+// and the premise was composed to fit a title that then got swapped out from under it.
+export function buildDungeonCrawlPremisePrompt(tags: string[], title: string): string {
+  return `You are a tabletop RPG designer. Based on these tags: ${tags.join(', ')} — write the premise for why a party of adventurers is about to enter this dungeon crawl.
+
+The adventure is already titled "${title}" — do not rename it or suggest another title. Write the premise so it fits that title.
 
 ${LORE_INSTRUCTION}
 
 Return ONLY a single valid JSON object — no markdown fences, no explanation:
 {
-  "title": "string — a short, evocative title for this adventure. Not just the tags restated.",
   "premise": "string — a single paragraph (3-5 sentences) covering who sent them or why they're going, what they're after or expect to find, and the tone/atmosphere the tags imply. Do not describe the dungeon's layout or contents — that's generated separately. Do not invent named NPCs, factions, or a wider world — this is scene-setting for the trip in, nothing more."
 }`;
 }

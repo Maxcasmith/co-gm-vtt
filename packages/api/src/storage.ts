@@ -1,6 +1,6 @@
 import path from 'path';
 import { randomUUID } from 'crypto';
-import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, NotePayload, BattleMap, WorldState, WorldActor, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord, CharacterStoryboard, ScenarioStoryboard, StoryboardTestRecord, HouseRules, PlotHook, ActivePlotArc, Goal, GenreTileMap, PartyGroups } from 'shared';
+import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, NotePayload, BattleMap, WorldState, WorldActor, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord, CharacterStoryboard, ScenarioStoryboard, StoryboardTestRecord, HouseRules, PlotHook, ActivePlotArc, Goal, GenreTileMap, GenreCategoryMap, CampaignGenre, MaterialCategory, PartyGroups } from 'shared';
 import { DEFAULT_HOUSE_RULES, slugifyTheme } from 'shared';
 import { Encounter } from './domain/encounter.ts';
 import { renderDungeonAscii } from './dungeon/index.ts';
@@ -31,7 +31,7 @@ const NARRATIVE_FEATURES: AppConfig['workflows'][number]['features'] = [
   'nemesisGeneration', 'dmBrief', 'questGeneration', 'dmChatResponse', 'sessionTriage', 'sessionRecap', 'tagEffectProcessing', 'plotHookNormalize',
 ];
 const WORLD_AND_COMBAT_FEATURES: AppConfig['workflows'][number]['features'] = [
-  'worldGeneration', 'dungeonGeneration', 'worldStateAdvance',
+  'worldGeneration', 'dungeonGeneration', 'worldStateAdvance', 'genreClassification',
   'combatNarration', 'encounterGeneration', 'improvisedResolution',
   'compendium',
 ];
@@ -93,14 +93,61 @@ export async function writePlotHooks(hooks: PlotHook[]): Promise<void> {
   await getTextStore().put(PLOT_HOOKS_KEY, JSON.stringify(hooks, null, 2));
 }
 
-// App-wide (not per-campaign), same single-document shape as plot hooks above — genre -> material
-// category -> tilesetSlug of an already-generated tileset. See dungeon/tilesets.ts (write side,
-// on every successful generation) and dungeon/manifest.ts (read side, narrows what's offered to
+// Pre-setting/tone genres were a flat string. Old 'horror' campaigns were overwhelmingly modern-era
+// (gaslit towns, survival horror), so that's where they land.
+const LEGACY_GENRES: Record<string, CampaignGenre> = {
+  fantasy: { setting: 'fantasy', tone: 'standard' },
+  horror: { setting: 'modern', tone: 'horror' },
+  'sci-fi': { setting: 'scifi', tone: 'standard' },
+};
+
+export function migrateLegacyGenre(genre: unknown): CampaignGenre | undefined {
+  if (typeof genre === 'string') return LEGACY_GENRES[genre];
+  return genre && typeof genre === 'object' ? (genre as CampaignGenre) : undefined;
+}
+
+// Legacy materials filed under a generic category before tile/carpet/linoleum/asphalt existed.
+function legacyCategory(key: string, category: MaterialCategory): MaterialCategory {
+  if (/tile|mosaic/.test(key)) return 'tile';
+  if (/carpet/.test(key)) return 'carpet';
+  if (/linoleum/.test(key)) return 'linoleum';
+  if (/asphalt/.test(key)) return 'asphalt';
+  return category;
+}
+
+// Legacy shape was genre -> category -> key -> path string. Detected by leaf type, since
+// 'fantasy' is a valid top-level key in both shapes. Read-time only (S3 copies may still be
+// legacy); the next record writes the new shape back.
+export function migrateLegacyTileMap(raw: Record<string, unknown>): GenreTileMap {
+  const isLegacy = Object.values(raw).some(categories =>
+    Object.values((categories ?? {}) as Record<string, unknown>).some(keys =>
+      Object.values((keys ?? {}) as Record<string, unknown>).some(v => typeof v === 'string')));
+  if (!isLegacy) return raw as GenreTileMap;
+
+  const map: GenreTileMap = {};
+  for (const [legacyGenre, categories] of Object.entries(raw as Record<string, Record<string, Record<string, string>>>)) {
+    const genre = LEGACY_GENRES[legacyGenre];
+    if (!genre) continue;
+    const bucket: GenreCategoryMap = map[genre.setting]?.[genre.tone] ?? {};
+    for (const [category, keys] of Object.entries(categories ?? {})) {
+      for (const [key, tilePath] of Object.entries(keys ?? {})) {
+        const cat = legacyCategory(key, category as MaterialCategory);
+        bucket[cat] = { ...(bucket[cat] ?? {}), [key]: { path: tilePath } };
+      }
+    }
+    map[genre.setting] = { ...(map[genre.setting] ?? {}), [genre.tone]: bucket };
+  }
+  return map;
+}
+
+// App-wide (not per-campaign), same single-document shape as plot hooks above — setting -> tone ->
+// material category -> key -> tile folder + description. See dungeon/tilesets.ts (write side, on
+// every successful generation) and dungeon/genreTiles.ts (read side, narrows what's offered to
 // the room-material LLM call to what's already available for this campaign's genre).
 export async function readGenreTileMap(): Promise<GenreTileMap> {
   try {
     const raw = await getTextStore().get(GENRE_TILE_MAP_KEY);
-    return raw === null ? {} : (JSON.parse(raw) as GenreTileMap);
+    return raw === null ? {} : migrateLegacyTileMap(JSON.parse(raw) as Record<string, unknown>);
   } catch (err) {
     logError('storage:readGenreTileMap', err);
     return {};
@@ -118,7 +165,10 @@ export async function writeCampaignFile(slug: string, filename: string, content:
 export async function getWorldMeta(slug: string): Promise<WorldMeta | null> {
   try {
     const raw = await getTextStore().get(path.join(campaignDir(slug), 'world.json'));
-    return raw === null ? null : (JSON.parse(raw) as WorldMeta);
+    if (raw === null) return null;
+    const { genre, ...meta } = JSON.parse(raw) as WorldMeta;
+    const migrated = migrateLegacyGenre(genre);
+    return migrated ? { ...meta, genre: migrated } : meta;
   } catch (err) {
     logError('storage:getWorldMeta', err);
     return null;
@@ -529,10 +579,19 @@ export async function writePartyGroups(slug: string, groups: PartyGroups): Promi
   await writeCampaignFile(slug, 'groups.json', JSON.stringify(groups, null, 2));
 }
 
+/** A dungeon-sourced quest can never be 'undiscovered': dungeon narration is closed-world and
+ * never fires a QUEST_ADD, so nothing exists to un-hide it and the quest log stays empty forever.
+ * saveCampaignAsAdventure has reset these to 'open' since e2e16b3, but templates saved before that
+ * (and every campaign cloned from one) still carry the hidden state — and SaaS reads them from S3,
+ * where they can't be hand-edited. Same read-time repair as migrateLegacyGenre. */
+export function migrateHiddenDungeonQuests(quests: Quest[]): Quest[] {
+  return quests.map(q => q.sourceDungeonId && q.status === 'undiscovered' ? { ...q, status: 'open' as const } : q);
+}
+
 export async function readQuests(slug: string): Promise<Quest[]> {
   try {
     const raw = await getTextStore().get(path.join(campaignDir(slug), 'quests.json'));
-    return raw === null ? [] : (JSON.parse(raw) as Quest[]);
+    return raw === null ? [] : migrateHiddenDungeonQuests(JSON.parse(raw) as Quest[]);
   } catch (err) { logError('storage:readQuests', err); return []; }
 }
 

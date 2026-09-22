@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { WorldMeta } from 'shared';
 import { CharacterProvider, useCharacter } from './character-creation/CharacterContext.tsx';
 import { Button } from './components/Button/Button.tsx';
+import { CreateRail } from './components/CreateRail/CreateRail.tsx';
 import PlayerInfoTab from './character-creation/PlayerInfoTab.tsx';
 import BackstoryTab from './character-creation/BackstoryTab.tsx';
 import SpellsTab from './character-creation/SpellsTab.tsx';
@@ -155,21 +156,12 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
 
   return (
     <div className="create-page">
-      <aside className="create-rail">
-        <span className="create-rail-wordmark">{campaignName}</span>
-        <ol className="create-rail-steps">
-          {steps.map((tab, i) => (
-            <li
-              key={tab}
-              className={`create-rail-step ${i === stepIndex ? 'create-rail-step--current' : ''} ${i < stepIndex ? 'create-rail-step--done' : ''}`}
-            >
-              <button type="button" className="create-rail-step-btn" onClick={() => c.set('activeTab', tab)}>
-                {titleFor(tab)}
-              </button>
-            </li>
-          ))}
-        </ol>
-      </aside>
+      <CreateRail
+        wordmark={campaignName}
+        steps={steps.map(tab => ({ key: tab, label: titleFor(tab) }))}
+        currentIndex={stepIndex}
+        onStepClick={tab => c.set('activeTab', tab)}
+      />
 
       <div className="create-page-main">
         <div className="create-page-atmosphere" aria-hidden="true" />

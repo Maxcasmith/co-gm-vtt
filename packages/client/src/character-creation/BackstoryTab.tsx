@@ -14,6 +14,8 @@ export default function BackstoryTab({ campaignId }: { campaignId: string }) {
   const [result, setResult] = useState<CheckResult | null>(null);
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState('');
+  const [rewriting, setRewriting] = useState(false);
+  const [rewriteError, setRewriteError] = useState('');
 
   async function checkConcept() {
     setChecking(true);
@@ -62,6 +64,34 @@ export default function BackstoryTab({ campaignId }: { campaignId: string }) {
       setGenerateError(err instanceof Error ? err.message : 'Backstory generation failed');
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function rewriteBackstory() {
+    if (!result) return;
+    setRewriting(true);
+    setRewriteError('');
+    try {
+      const r = await fetch(`${API}/api/campaigns/${campaignId}/party/backstory-rewrite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: c.name,
+          species: c.species,
+          background: c.background,
+          characterClass: c.characterClass,
+          backstory: c.backstory,
+          suggestions: result.suggestions,
+        }),
+      });
+      const data = await r.json() as { backstory?: string; error?: string };
+      if (data.error) throw new Error(data.error);
+      c.set('backstory', data.backstory ?? c.backstory);
+      setResult(null);
+    } catch (err) {
+      setRewriteError(err instanceof Error ? err.message : 'Backstory rewrite failed');
+    } finally {
+      setRewriting(false);
     }
   }
 
@@ -114,6 +144,12 @@ export default function BackstoryTab({ campaignId }: { campaignId: string }) {
                 <ul className="lore-list">
                   {result.suggestions.map((s, i) => <li key={i}>{s}</li>)}
                 </ul>
+                <div className="finished-create-row">
+                  <Button variant="outline" color="secondary" onClick={rewriteBackstory} disabled={rewriting}>
+                    {rewriting ? 'Rewriting…' : 'Rewrite Using Suggestions'}
+                  </Button>
+                </div>
+                {rewriteError && <p className="modal-error">{rewriteError}</p>}
               </div>
             )}
           </section>

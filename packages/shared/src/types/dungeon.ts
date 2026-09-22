@@ -1,7 +1,7 @@
 import type { EnemyStatBlock } from "./combat.ts";
 import type { EffectSpec } from "./spells.ts";
 import type { AbilityKey } from "./character.ts";
-import type { CampaignGenre } from "./world.ts";
+import type { GenreSetting, GenreTone } from "./world.ts";
 
 // A coarse, fixed bucket sitting above the freeform `key` below — every room's material must be
 // classified into one of these by the manifest LLM (same call, no extra request), so genre-scoped
@@ -11,18 +11,25 @@ import type { CampaignGenre } from "./world.ts";
 export const MATERIAL_CATEGORIES = [
   "wood", "stone", "brick", "cobblestone", "concrete", "metal", "dirt", "mud", "sand", "grass",
   "moss", "water", "ice", "snow", "glass", "fabric", "rope", "bone", "rubble", "lava", "ash",
+  "tile", "carpet", "linoleum", "asphalt",
 ] as const;
 export type MaterialCategory = (typeof MATERIAL_CATEGORIES)[number];
 
-// genre -> material category -> (specific freeform material key -> storage-relative path to its
-// tile folder, e.g. "tilesets/gothic-horror-d42fd63791/cracked-stone"). App-wide (not per-campaign)
+// setting -> tone -> material category -> (specific freeform material key -> storage-relative path
+// to its tile folder, e.g. "tilesets/gothic-horror-d42fd63791/cracked-stone", plus the short visual
+// description the material was drawn from, so the picking LLM can tell variants apart). App-wide (not per-campaign)
 // — see api/storage.ts's readGenreTileMap/writeGenreTileMap and api/dungeon/tilesets.ts's
 // ensureTilesetSupport, which writes into it on every successful generation (one entry per
 // material actually used). Consulted by api/dungeon/manifest.ts to show the room-material LLM
 // call the SPECIFIC existing variants for its genre (not just the coarse category), so it can pick
 // whichever already-generated key is the closest fit — same "checks the horror map, finds only
 // wood/iron, generates cobblestone; finds grey-stone too, reuses that" logic the feature is for.
-export type GenreTileMap = Partial<Record<CampaignGenre, Partial<Record<MaterialCategory, Record<string, string>>>>>;
+export interface GenreTileEntry {
+  path: string;
+  description?: string;
+}
+export type GenreCategoryMap = Partial<Record<MaterialCategory, Record<string, GenreTileEntry>>>;
+export type GenreTileMap = Partial<Record<GenreSetting, Partial<Record<GenreTone, GenreCategoryMap>>>>;
 
 // A room's floor material is a free-text key + texture description the manifest LLM proposes per
 // room (see api/dungeon/manifest.ts's collectDungeonMaterials) — not a fixed enum. This is the
@@ -32,10 +39,10 @@ export interface DungeonMaterialSpec {
   key: string;
   description: string;
   category: MaterialCategory;
-  /** Generation-time only, never persisted on a Dungeon — the manifest LLM's own decision that
-   * this material should reuse already-generated art from the genre tile map rather than be drawn
-   * fresh. Honoured only if the key actually resolves in the map (see ensureTilesetSupport), so a
-   * hallucinated flag degrades to a normal fresh generation rather than a missing texture. */
+  /** Generation-time only, never persisted on a Dungeon. Reuse of an already-generated material
+   * (same key AND category in this campaign's genre bucket) is the default; this is the manifest
+   * LLM's explicit opt-OUT — `false` forces fresh art for a key that already exists, for when it
+   * wants a genuinely different look under the same name. See ensureTilesetSupport. */
   reuse?: boolean;
 }
 

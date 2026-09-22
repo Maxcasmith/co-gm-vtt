@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import type { WorldConcept, Character, Quest, HouseRules, CampaignGenre } from 'shared';
-import { spellSlotsForCharacter, DEFAULT_HOUSE_RULES, CAMPAIGN_GENRES } from 'shared';
+import type { WorldConcept, Character, Quest, HouseRules } from 'shared';
+import { spellSlotsForCharacter, DEFAULT_HOUSE_RULES } from 'shared';
 import {
   CAMPAIGNS_DIR,
   getConfig, writeCampaignFile, listCampaigns,
@@ -15,12 +15,13 @@ import {
 import { getTextStore, getMediaStore } from '../storage/index.ts';
 import { deleteUnusedResources, type ResourceCleanupRequest } from '../resourceUsage.ts';
 import { generateDungeon } from '../dungeon/index.ts';
+import { classifyCampaignGenre } from '../dungeon/genreTiles.ts';
 import { generateCharacterStoryboard, generateScenarioStoryboard, SLIDE_COUNT, SCENARIO_SLIDE_COUNT } from '../dungeon/storyboard.ts';
 import { calcMaxHp } from '../combat/dice.ts';
 import { getFeatureProvider } from '../providers/index.ts';
-import { copyCompendiumToCampaign } from '../compendium/storage.ts';
+import { copyCompendiumToCampaign, loadCompendiumMeta } from '../compendium/storage.ts';
 import { copyAdventureToCampaign, saveCampaignAsAdventure, slugifyAdventureName, uniqueAdventureSlug } from '../adventures/storage.ts';
-import { buildConceptsPrompt, buildWorldGenPrompt, buildDungeonCrawlPremisePrompt, buildDungeonScenarioSynopsisPrompt, buildDungeonScenarioGoalPrompt, buildBackstoryCheckPrompt, buildBackstoryGeneratePrompt, buildBackstoryExtractPrompt } from '../prompts.ts';
+import { buildConceptsPrompt, buildWorldGenPrompt, buildDungeonCrawlPremisePrompt, buildDungeonScenarioSynopsisPrompt, buildDungeonScenarioGoalPrompt, buildBackstoryCheckPrompt, buildBackstoryGeneratePrompt, buildBackstoryRewritePrompt, buildBackstoryExtractPrompt, BACKSTORY_HOOKS } from '../prompts.ts';
 import { processSession, generateDmBrief } from '../session-processor/index.ts';
 import { processPortrait } from '../utils/image.ts';
 import { buildWorldMapPrompt } from '../session-processor/imagePrompts.ts';
@@ -187,9 +188,8 @@ campaignsRouter.post('/concepts', licenseOrJwtMiddleware, async (req, res) => {
 // ── world generation (SSE) ────────────────────────────────────────────────────
 
 campaignsRouter.post('/generate', licenseOrJwtMiddleware, async (req, res) => {
-  const { tags, concept, name, type = 'campaign', partySize = 4, genre } = req.body as { tags: string[]; concept: WorldConcept; name: string; type?: 'campaign' | 'one-shot' | 'dungeon-crawl'; partySize?: number; genre?: CampaignGenre };
+  const { tags, concept, name, type = 'campaign', partySize = 4 } = req.body as { tags: string[]; concept: WorldConcept; name: string; type?: 'campaign' | 'one-shot' | 'dungeon-crawl'; partySize?: number };
   if (!concept || !tags?.length) { res.status(400).json({ error: 'tags and concept required' }); return; }
-  if (!genre || !(CAMPAIGN_GENRES as readonly string[]).includes(genre)) { res.status(400).json({ error: 'a valid genre is required' }); return; }
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -198,25 +198,28 @@ campaignsRouter.post('/generate', licenseOrJwtMiddleware, async (req, res) => {
 
   try {
     const config = await getConfig();
+    // Runs alongside the premise/world generation below; never throws.
+    const genrePromise = classifyCampaignGenre(tags, config);
 
     // Dungeon crawl: no world, no factions, no NPC roster — just a short premise and the dungeon
     // itself, generated straight from the tags rather than funnelled through a world concept.
     if (type === 'dungeon-crawl') {
+      // The client's rename step already gave the user final say over the title, so it's settled
+      // before any generation runs and is handed to the premise prompt rather than invented there.
+      // concept.name only covers a caller that omits `name` — the UI never does (it blocks Next on
+      // an empty name), so this is a defensive fallback, not a path the app takes.
+      const title = name || concept.name;
+
       send({ type: 'progress', message: 'Writing premise…' });
       const raw = await getFeatureProvider(config, 'dungeonPremise').stream(
-        buildDungeonCrawlPremisePrompt(tags),
+        buildDungeonCrawlPremisePrompt(tags, title),
         token => send({ type: 'token', text: token }),
       );
-      let title = concept.name, premise = concept.description;
+      let premise = concept.description;
       try {
-        const parsed = parseLlmJson<{ title?: string; premise?: string }>(raw);
-        if (parsed.title) title = parsed.title;
+        const parsed = parseLlmJson<{ premise?: string }>(raw);
         if (parsed.premise) premise = parsed.premise;
       } catch (err) { logError('routes/campaigns:generate:dungeonCrawlPremise', err); }
-
-      // The client's rename step gives the user final say over the title — that's the point of
-      // it — so an explicitly-provided name wins over whatever this stream invented.
-      if (name) title = name;
 
       const slug = await uniqueSlug(slugify(title));
       await writeCampaignFile(slug, 'world.md', `# ${title}\n\n${premise.trim()}`);
@@ -239,6 +242,7 @@ campaignsRouter.post('/generate', licenseOrJwtMiddleware, async (req, res) => {
       } catch (err) { logError('routes/campaigns:generate:dungeonScenarioSynopsis', err); }
 
       const campaignName = title;
+      const genre = await genrePromise;
       await writeWorldMeta(slug, {
         id: randomUUID(),
         name: campaignName,
@@ -319,6 +323,7 @@ campaignsRouter.post('/generate', licenseOrJwtMiddleware, async (req, res) => {
     // The client's rename step gives the user final say over the title — an explicitly-provided
     // name wins over whatever the world-generation step invented on its own.
     const campaignName = name || world.world?.name || concept.name;
+    const genre = await genrePromise;
     await writeWorldMeta(slug, {
       id: randomUUID(),
       name: campaignName,
@@ -391,6 +396,23 @@ campaignsRouter.post('/from-module', licenseOrJwtMiddleware, async (req, res) =>
     const locationSlugs = await listEntitySlugs(slug, 'location');
     const npcSlugs = await listEntitySlugs(slug, 'npc');
     const factionSlugs = await listEntitySlugs(slug, 'faction');
+
+    // Classified here rather than inside copyCompendiumToCampaign — that's a storage function and
+    // has no business making an LLM call. Without a genre, worldMeta.genre stays undefined and
+    // every dungeon and arena this campaign ever generates skips the tile map entirely: nothing is
+    // reused, AND nothing is recorded back for the next one (see ensureTilesetSupport's `if (genre)`),
+    // so a module campaign pays full price for art forever and contributes none of it.
+    // The module's own title carries most of the signal — named IPs are exactly what the
+    // classification prompt is told to place — with the location names covering homebrew modules
+    // whose title says nothing about how the place physically looks.
+    // Started before the brief and awaited after, so the two model calls overlap; never throws.
+    const compendiumMeta = await loadCompendiumMeta(adventureSlug);
+    const genrePromise = classifyCampaignGenre([
+      compendiumMeta?.name || campaignName,
+      ...(compendiumMeta?.source ? [compendiumMeta.source] : []),
+      ...locationSlugs.slice(0, 12).map(s => s.replace(/-/g, ' ')),
+    ], await getConfig());
+
     const brief = await generateDmBrief(campaignName, locationSlugs, npcSlugs, factionSlugs);
 
     send({ type: 'progress', message: 'Writing campaign files…' });
@@ -406,11 +428,17 @@ campaignsRouter.post('/from-module', licenseOrJwtMiddleware, async (req, res) =>
       manifest.updatedAt = new Date().toISOString();
     }
 
+    // copyCompendiumToCampaign already wrote world.json — this stamps the classified genre onto it
+    // rather than rebuilding the shape here, so the two writers can't drift.
+    const worldMeta = await getWorldMeta(slug);
+    const genre = await genrePromise;
+
     await Promise.all([
       writeCampaignFile(slug, 'dm-brief.md', brief.dmBrief),
       writeManifest(slug, manifest),
       writeQuests(slug, initialQuests),
       writeCampaignFile(slug, 'acts.json', JSON.stringify(brief.acts ?? [], null, 2)),
+      ...(worldMeta ? [writeWorldMeta(slug, { ...worldMeta, genre })] : []),
     ]);
 
     send({ type: 'complete', id: slug, name: campaignName });
@@ -571,13 +599,38 @@ campaignsRouter.post('/:id/party/backstory-generate', async (req, res) => {
   const config = await getConfig();
   try {
     const worldMd = await readCampaignFile(slug, 'world.md') ?? '';
+    // Picked server-side — left to the LLM it reaches for tragedy nearly every time.
+    const hook = BACKSTORY_HOOKS[Math.floor(Math.random() * BACKSTORY_HOOKS.length)]!;
     const backstory = await getFeatureProvider(config, 'backstoryGeneration').complete(
-      buildBackstoryGeneratePrompt(worldMd, { name, species, background, characterClass }),
+      buildBackstoryGeneratePrompt(worldMd, { name, species, background, characterClass }, hook),
     );
     res.json({ backstory: backstory.trim() });
   } catch (err) {
     logError('routes/campaigns:backstory-generate', err);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Backstory generation failed' });
+  }
+});
+
+campaignsRouter.post('/:id/party/backstory-rewrite', async (req, res) => {
+  const slug = req.params.id ?? '';
+  const { name, species, background, characterClass, backstory, suggestions } = req.body as
+    { name: string; species: string; background: string; characterClass: string; backstory: string; suggestions: string[] };
+  if (!backstory?.trim() || !Array.isArray(suggestions) || suggestions.length === 0) {
+    res.status(400).json({ error: 'A backstory and at least one suggestion are required' });
+    return;
+  }
+  const meta = await getWorldMeta(slug);
+  if (meta?.type !== 'campaign') { res.status(403).json({ error: 'Backstory tools are only available for campaign-type worlds' }); return; }
+  const config = await getConfig();
+  try {
+    const worldMd = await readCampaignFile(slug, 'world.md') ?? '';
+    const rewritten = await getFeatureProvider(config, 'backstoryGeneration').complete(
+      buildBackstoryRewritePrompt(worldMd, { name, species, background, characterClass, backstory }, suggestions),
+    );
+    res.json({ backstory: rewritten.trim() });
+  } catch (err) {
+    logError('routes/campaigns:backstory-rewrite', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Backstory rewrite failed' });
   }
 });
 

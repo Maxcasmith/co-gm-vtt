@@ -1,4 +1,15 @@
-import type { EnemyStatBlock, CharacterStats, CreatureType, ActiveCondition, EnemyRole, EnemyAction } from 'shared';
+import { statMod, type EnemyStatBlock, type CharacterStats, type CreatureType, type ActiveCondition, type EnemyRole, type EnemyAction } from 'shared';
+
+/**
+ * LLM-authored stat blocks (dungeon manifest, world entities) sometimes come back with attacks[]
+ * missing entirely — the creature then reached the tactical AI with undefined attacks and crashed
+ * the turn. Missing means "the model forgot", so give it a plain Strike scaled off STR rather than
+ * a mute creature; an explicit [] means "deliberately attackless" (see the selfchecks) and stays.
+ */
+function defaultAttack(stats: CharacterStats): { name: string; bonus: number; damage: string } {
+  const m = statMod(stats.str);
+  return { name: 'Strike', bonus: m + 2, damage: `1d6${m >= 0 ? '+' : ''}${m}` };
+}
 
 export class Creature {
   id: string;
@@ -35,7 +46,13 @@ export class Creature {
     this.ac = data.ac;
     this.speed = data.speed;
     this.stats = data.stats;
-    this.attacks = data.attacks;
+    if (!data.attacks) {
+      // Loud on purpose: a stat block reaching here without attacks[] means whatever generated it
+      // (manifest, world entity, nemesis) dropped a required key. Repaired below, but the source
+      // is a real generation bug — id/name are what you grep the stored dungeon JSON with.
+      console.warn(`[creature] ${data.name} (${data.id}) has no attacks[] — stat block generated without one, substituting a default Strike`);
+    }
+    this.attacks = data.attacks ?? [defaultAttack(data.stats)];
     this.effects = [];
     // Old saved encounters predate creatureType — fall back to Humanoid rather than backfilling.
     this.creatureType = data.creatureType ?? 'Humanoid';

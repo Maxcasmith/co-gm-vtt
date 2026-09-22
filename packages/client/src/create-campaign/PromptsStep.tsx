@@ -1,14 +1,6 @@
 import { useState } from 'react';
-import type { CampaignGenre } from 'shared';
-import { CAMPAIGN_GENRES } from 'shared';
 import { Button } from '../components/Button/Button.tsx';
 import InfoTooltip from './InfoTooltip.tsx';
-
-const GENRE_LABELS: Record<CampaignGenre, string> = {
-  fantasy: 'Fantasy',
-  horror: 'Horror',
-  'sci-fi': 'Sci-Fi',
-};
 
 interface Props {
   title: string;
@@ -17,12 +9,10 @@ interface Props {
   onTagsChange: (tags: string[]) => void;
   partySize: number;
   onPartySizeChange: (size: number) => void;
-  genre: CampaignGenre | null;
-  onGenreChange: (genre: CampaignGenre) => void;
 }
 
 export default function PromptsStep({
-  title, campaignType, tags, onTagsChange, partySize, onPartySizeChange, genre, onGenreChange,
+  title, campaignType, tags, onTagsChange, partySize, onPartySizeChange,
 }: Props) {
   const [tagInput, setTagInput] = useState('');
 
@@ -53,25 +43,6 @@ export default function PromptsStep({
         <p className="modal-hint">Add tags to describe your world. The more you add, the richer the generation.</p>
       </div>
 
-      <div className="modal-label">
-        <span className="create-label-row" id="world-genre-label">
-          Genre
-          <InfoTooltip text="Used only to pick matching dungeon tile art from what's already been generated — never shapes the story or tone." />
-        </span>
-        <div className="create-genre-options" role="group" aria-labelledby="world-genre-label">
-          {CAMPAIGN_GENRES.map(g => (
-            <Button
-              key={g}
-              variant="outline"
-              className={`create-genre-option ${genre === g ? 'create-genre-option--selected' : ''}`}
-              onClick={() => onGenreChange(g)}
-            >
-              {GENRE_LABELS[g]}
-            </Button>
-          ))}
-        </div>
-      </div>
-
       {campaignType === 'dungeon-crawl' && (
         <label className="modal-label">
           <span className="create-label-row">
@@ -92,7 +63,7 @@ export default function PromptsStep({
       <div className="tag-input-area">
         <span className="create-field-title create-label-row" id="world-tags-label">
           World Tags
-          <InfoTooltip text="Short descriptive tags — genre, tone, setting. The more you add, the richer the generated world." />
+          <InfoTooltip text="Short descriptive tags — genre, tone, setting. The more you add, the richer the generated world. They also decide which existing dungeon tile art gets reused." />
         </span>
         <div className="tag-chips" role="group" aria-labelledby="world-tags-label">
           {tags.map(tag => (
