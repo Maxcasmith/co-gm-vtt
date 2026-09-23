@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
-import type { DungeonRoom, DungeonEntity, EnemyStatBlock, TrapEffect } from 'shared';
+import type { DungeonRoom, DungeonEntity, EnemyStatBlock, PropSpec, PropZone, RoomProp, TrapEffect } from 'shared';
 import type { DungeonManifest, ManifestTrap } from './manifest.ts';
+import { EMPTY_PROP_PLAN, type PropPlan } from './propDressing.ts';
 
 // Every AI-authored dungeon trap not otherwise given one gets this Thieves' Tools disarm DC — a
 // hard guarantee, not something the model can skip by omission (same pattern as manifest.ts's
@@ -63,12 +64,126 @@ function findFreeCell(room: DungeonRoom, targetX: number, targetY: number, occup
   return null;
 }
 
-export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, cells: number[][]): DungeonEntity[] {
+/** Real-world feet to grid cells at the standard 5ft square, floored at 1 — a 2ft stool still
+ * occupies a cell, it just doesn't occupy two. */
+export function cellsForFeet(ft: number): number {
+  return Math.max(1, Math.round(ft / 5));
+}
+
+/** Every cell of an anchor's footprint is floor and unoccupied. Unlike the pre-density placer —
+ * which tracked only the single anchor cell and let footprints overlap — this checks the whole
+ * rect, because at 20-30 props per room overlapping furniture is the common case, not the edge. */
+function footprintFree(room: DungeonRoom, x: number, y: number, w: number, h: number, occupied: Set<string>, cells: number[][]): boolean {
+  if (x < room.x || y < room.y || x + w > room.x + room.width || y + h > room.y + room.height) return false;
+  for (let dy = 0; dy < h; dy++) {
+    for (let dx = 0; dx < w; dx++) {
+      if (cells[y + dy]?.[x + dx] !== 1 || occupied.has(key(x + dx, y + dy))) return false;
+    }
+  }
+  return true;
+}
+
+function occupyFootprint(x: number, y: number, w: number, h: number, occupied: Set<string>): void {
+  for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) occupied.add(key(x + dx, y + dy));
+}
+
+/** How many of a cell's four orthogonal neighbours are wall/void — 1+ means it's against a wall,
+ * 2+ (on perpendicular sides) means a corner. Cells outside the grid count as wall, so a room
+ * flush with the map edge still reads as walled. */
+function wallSides(x: number, y: number, cells: number[][]): number {
+  let n = 0;
+  if (cells[y]?.[x - 1] !== 1) n++;
+  if (cells[y]?.[x + 1] !== 1) n++;
+  if (cells[y - 1]?.[x] !== 1) n++;
+  if (cells[y + 1]?.[x] !== 1) n++;
+  return n;
+}
+
+/**
+ * Anchor cells for a zone, best first. This is the half of prop placement the model used to do
+ * badly with relX/relY: it has no idea where the walls are, and a bed floating mid-floor is what
+ * made rooms read as abstract. Here the geometry is decided against the real carved cells.
+ *
+ * 'floor' is deliberately scattered by a cheap deterministic hash rather than scanned in row order,
+ * which would stack every loose prop along the room's top edge. Deterministic so the same dungeon
+ * always lays out the same way.
+ */
+function zoneCandidates(room: DungeonRoom, cells: number[][], zone: PropZone): { x: number; y: number }[] {
+  const cx = room.x + (room.width - 1) / 2;
+  const cy = room.y + (room.height - 1) / 2;
+  const candidates: { x: number; y: number; score: number }[] = [];
+
+  for (let y = room.y; y < room.y + room.height; y++) {
+    for (let x = room.x; x < room.x + room.width; x++) {
+      if (cells[y]?.[x] !== 1) continue;
+      const sides = wallSides(x, y, cells);
+      const distance = Math.abs(x - cx) + Math.abs(y - cy);
+      let score: number;
+      switch (zone) {
+        // Against a wall but not wedged in a corner — a bed's headboard, a counter, a row of lockers.
+        case 'wall': score = sides >= 1 ? sides : 99; break;
+        case 'corner': score = sides >= 2 ? -sides : 99; break;
+        case 'centre': score = distance; break;
+        default: score = (x * 7919 + y * 104729) % 97; break;
+      }
+      candidates.push({ x, y, score });
+    }
+  }
+
+  // Distance is the tiebreak for wall/corner so props run along a wall outward from the middle of
+  // it rather than always piling into whichever corner the scan reached first.
+  return candidates
+    .sort((a, b) => a.score - b.score || (Math.abs(a.x - cx) + Math.abs(a.y - cy)) - (Math.abs(b.x - cx) + Math.abs(b.y - cy)) || a.y - b.y || a.x - b.x)
+    .map(({ x, y }) => ({ x, y }));
+}
+
+/**
+ * Places one room's prop requests. Exported and pure so the zone/footprint/collision behaviour —
+ * the part that decides whether a furnished room reads as a real place — is checkable without an
+ * LLM or an image call (see placer.zones.selfcheck.ts).
+ *
+ * A request whose footprint no longer fits anywhere is dropped rather than shrunk or overlapped: a
+ * room that ran out of floor is already full, which is the outcome we wanted.
+ */
+export function placeRoomProps(
+  room: DungeonRoom,
+  requests: RoomProp[],
+  specs: Map<string, PropSpec>,
+  occupied: Set<string>,
+  cells: number[][],
+): DungeonEntity[] {
+  const placed: DungeonEntity[] = [];
+  // Largest first: a 2x3 counter placed after thirty 1x1 stools would find no contiguous rect left.
+  const ordered = [...requests].sort((a, b) => {
+    const sa = specs.get(a.noun), sb = specs.get(b.noun);
+    return (sb ? sb.widthFt * sb.depthFt : 0) - (sa ? sa.widthFt * sa.depthFt : 0);
+  });
+
+  for (const request of ordered) {
+    const spec = specs.get(request.noun);
+    if (!spec) continue;
+    const w = cellsForFeet(spec.widthFt);
+    const h = cellsForFeet(spec.depthFt);
+    const candidates = zoneCandidates(room, cells, request.zone);
+    let remaining = request.count;
+    for (const { x, y } of candidates) {
+      if (remaining <= 0) break;
+      if (!footprintFree(room, x, y, w, h, occupied, cells)) continue;
+      occupyFootprint(x, y, w, h, occupied);
+      placed.push({ id: randomUUID(), type: 'object', x, y, width: w, height: h, name: spec.noun, discovered: true });
+      remaining--;
+    }
+  }
+  return placed;
+}
+
+export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, cells: number[][], propPlan: PropPlan = EMPTY_PROP_PLAN): DungeonEntity[] {
   if (rooms.length === 0) return [];
 
   const entities: DungeonEntity[] = [];
   const manifestRooms = manifest.rooms;
   const occupied = new Set<string>();
+  const propSpecs = new Map(propPlan.props.map(p => [p.noun, p]));
 
   // Smallest third = loot caches. Everything else is empty unless the manifest itself put
   // something there — no invented filler creature/boss for a room the manifest left alone.
@@ -130,24 +245,12 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
       }
     }
 
-    // Decorative props — unlike creatures/loot/traps above, every entry gets placed (not just [0]),
-    // and always visible (discovered: true) — furniture isn't something a Perception check reveals.
-    // Anchor comes from the manifest's relX/relY (clamped so the full footprint stays in-room), then
-    // findFreeCell nudges it off any wall/occupied cell the same way loot/traps get nudged.
-    // ponytail: footprint (width/height) is cosmetic only — collision tracking still uses just the
-    // single anchor cell, same as every other entity type here. Upgrade to real multi-cell occupancy
-    // if props ever need to mechanically block movement.
-    for (const prop of isStairwellRoom ? [] : hints?.props ?? []) {
-      const size = prop.size === 'large' ? 3 : prop.size === 'small' ? 1 : 2;
-      const rawX = room.x + Math.round(prop.relX * (room.width - 1));
-      const rawY = room.y + Math.round(prop.relY * (room.height - 1));
-      const anchorX = Math.max(room.x, Math.min(rawX, room.x + room.width - size));
-      const anchorY = Math.max(room.y, Math.min(rawY, room.y + room.height - size));
-      const cell = findFreeCell(room, anchorX, anchorY, occupied, cells);
-      if (cell) {
-        occupied.add(key(cell.x, cell.y));
-        entities.push({ id: randomUUID(), type: 'object', x: cell.x, y: cell.y, width: size, height: size, name: prop.name, discovered: true });
-      }
+    // Decorative props — always visible (discovered: true), since furniture isn't something a
+    // Perception check reveals. Placed last in the room so creatures, loot and traps have already
+    // claimed their cells: at real density props would otherwise fill the room and leave the
+    // content that actually matters nowhere to go.
+    if (!isStairwellRoom) {
+      entities.push(...placeRoomProps(room, propPlan.byRoom.get(room.name) ?? [], propSpecs, occupied, cells));
     }
   }
 

@@ -629,6 +629,26 @@ There must be:
 export interface PropSpriteEntry {
   name: string;
   description: string;
+  /** Real-world footprint in feet. Present on the real generation path (authored per prop type by
+   * the dressing call); absent on the admin prompt-test flow, which has only names. Drives the
+   * proportion each object is drawn at inside its square cell — without it the object is drawn
+   * square, which is the old behaviour. */
+  widthFt?: number;
+  depthFt?: number;
+}
+
+// The proportion clause for one entry: how the object should sit inside its square cell. An object
+// wider than it is deep fills the cell's full width and proportionally less of its height, and vice
+// versa. This is what makes the sprite's own transparent margin encode the footprint, so the client
+// can draw the square sprite across a non-square footprint without distorting it (see drawScene.ts).
+function proportionClause(entry: PropSpriteEntry): string {
+  const { widthFt, depthFt } = entry;
+  if (widthFt === undefined || depthFt === undefined) return '';
+  const longest = Math.max(widthFt, depthFt);
+  const wPct = Math.round((widthFt / longest) * 100);
+  const hPct = Math.round((depthFt / longest) * 100);
+  const shape = wPct === hPct ? 'as wide as it is deep' : wPct > hPct ? 'wider than it is deep' : 'deeper than it is wide';
+  return ` Real size ${widthFt}ft wide by ${depthFt}ft deep — ${shape}. Draw it spanning about ${wPct}% of its cell's width and ${hPct}% of its cell's height, centered, so its proportions are truthful.`;
 }
 
 // Always exactly 36 slots (6x6) — the grid the prop atlas pipeline uses (see dungeon/props.ts),
@@ -639,7 +659,7 @@ export interface PropSpriteEntry {
 // transparency option).
 export function buildPropSpritePrompt(entries: PropSpriteEntry[], transparent: boolean, atlasSize: number): string {
   const real = entries.slice(0, 36);
-  const lines = real.map((e, i) => `${i + 1}. **${e.name}** — ${e.description}`);
+  const lines = real.map((e, i) => `${i + 1}. **${e.name}** — ${e.description}${proportionClause(e)}`);
   if (real.length < 36) {
     const from = real.length + 1;
     const rangeLabel = from === 36 ? '36' : `${from}-36`;
@@ -686,31 +706,42 @@ ${lines.join('\n\n')}
 
 # SPRITE REQUIREMENTS
 
-Each sprite is the **complete object**, viewed from a three-quarter top-down angle matching a tabletop VTT token (the same angle a miniature would be viewed from on a table).
+Each sprite is the **complete object seen from DIRECTLY OVERHEAD** — a true orthographic top-down view, camera pointing straight down at the floor from the ceiling, exactly like a battle-map or dungeon-crawler asset. This is the single most important requirement in this prompt.
 
-Every object, regardless of its natural shape, must be scaled down as needed so its full extent — including any long, tall, or thin parts — fits entirely inside its own single square cell, centered, with a small margin on every side. An elongated object (a ladder, a spear, a table) is drawn smaller within its cell, never enlarged to the point of touching or crossing into a neighboring cell.
+That means:
 
-No environment, no other objects, no characters — just the one named object per cell.
+* You see the object's **top surface only**. The seat of a chair, the tabletop of a table, the mattress of a bed, the lid of a crate.
+* **No side or front faces are visible at all.** No table legs seen from the side, no chair back facing the viewer, no visible front of a cabinet. If a vertical face is visible, the angle is wrong.
+* **No perspective and no vanishing point** — parallel edges stay parallel. A rectangular table is drawn as a true rectangle, not a trapezoid.
+* This is NOT a three-quarter view, NOT an isometric view, and NOT the angle a miniature is seen from across a table. Those all show the object's front. This shows its top.
 
-Consistent lighting direction and art style across all 36 — same rendering technique, same level of detail, same color saturation — so they read as one cohesive set, not 36 unrelated images.
+Height is conveyed only by a soft shadow and by the shading of the top surface, never by tilting the object toward the viewer.
+
+Every object must fit entirely inside its own single square cell, centered, with a small margin on every side — and at the true proportions given with it, so relative sizes read correctly: a small object drawn in its cell stays visibly small, an elongated one stays visibly elongated. Never enlarge an object to fill its cell when its stated size is small.
+
+No environment, no floor texture, no other objects, no characters — just the one named object per cell.
+
+Consistent lighting direction and art style across all 36 — same rendering technique, same level of detail, same color saturation, light coming from the same direction in every cell — so they read as one cohesive set, not 36 unrelated images.
 
 There must be:
 
 * NO frame, border, or line of any kind around the outer edge of the atlas — the grid lines exist ONLY between cells, never along the top, bottom, left, or right edge of the whole image
 * NO text or labels
 * NO numbering
-* NO shadow of any kind${transparent ? ' beyond a small contact shadow directly under the object' : ' — not even a small contact shadow. A shadow fading into the magenta background stops being pure magenta, which breaks clean chroma-keying and leaves a visible ring around the object. The object must sit directly on the flat magenta with nothing under it'}
+* NO shadow of any kind${transparent ? ' beyond a soft contact shadow directly beneath the object, offset consistently in the same direction in all 36 cells — this is what reads as height in an overhead view' : ' — not even a small contact shadow. A shadow fading into the magenta background stops being pure magenta, which breaks clean chroma-keying and leaves a visible ring around the object. The object must sit directly on the flat magenta with nothing under it'}
 * NO part of any object extending past its own cell's grid line into a neighboring cell — shrink the object to fit instead
 
 # PRIORITIES
 
-1. Every cell is an exact 1:1 square, all 36 the same size, laid out on an even 6×6 grid
-2. The thin black grid line is present and unbroken on every cell boundary
-3. Instantly readable object silhouette/identity at small size
-4. Every object fits entirely within its own grid-lined cell with margin on all sides — no overflow into neighboring cells
-5. ${transparent ? 'Fully transparent background in every cell' : 'Exact same flat magenta background in every cell'}
-6. Consistent art style and lighting across all 36 sprites
-7. Correct left-to-right, top-to-bottom order as listed above`;
+1. True overhead view in every cell — top surfaces only, no visible side or front faces, no perspective
+2. Every cell is an exact 1:1 square, all 36 the same size, laid out on an even 6×6 grid
+3. The thin black grid line is present and unbroken on every cell boundary
+4. Each object drawn at the proportions stated with it, so relative sizes read truthfully
+5. Instantly readable object silhouette/identity at small size
+6. Every object fits entirely within its own grid-lined cell with margin on all sides — no overflow into neighboring cells
+7. ${transparent ? 'Fully transparent background in every cell' : 'Exact same flat magenta background in every cell'}
+8. Consistent art style and lighting across all 36 sprites
+9. Correct left-to-right, top-to-bottom order as listed above`;
 }
 
 // Icon atlas, modeled on buildDynamicTilesetPrompt's fixed-math grid (no chroma-key/grid-line

@@ -1,6 +1,6 @@
 import path from 'path';
 import { randomUUID } from 'crypto';
-import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, NotePayload, BattleMap, WorldState, WorldActor, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord, CharacterStoryboard, ScenarioStoryboard, StoryboardTestRecord, HouseRules, PlotHook, ActivePlotArc, Goal, GenreTileMap, GenreCategoryMap, CampaignGenre, MaterialCategory, PartyGroups } from 'shared';
+import type { AppConfig, Campaign, WorldMeta, Character, ChatPayload, NotePayload, BattleMap, WorldState, WorldActor, EnemyStatBlock, Dungeon, SessionManifest, Quest, NemesisRecord, CharacterStoryboard, ScenarioStoryboard, StoryboardTestRecord, HouseRules, PlotHook, ActivePlotArc, Goal, GenreTileMap, GenreCategoryMap, CampaignGenre, MaterialCategory, PartyGroups, PropCatalogue } from 'shared';
 import { DEFAULT_HOUSE_RULES, slugifyTheme } from 'shared';
 import { Encounter } from './domain/encounter.ts';
 import { renderDungeonAscii } from './dungeon/index.ts';
@@ -14,6 +14,7 @@ export const STORAGE_DIR = STORAGE_ROOT;
 const CONFIG_KEY = 'config.json';
 const PLOT_HOOKS_KEY = 'plot-hooks.json';
 const GENRE_TILE_MAP_KEY = 'genre-tile-map.json';
+const PROP_CATALOGUE_KEY = 'prop-catalogue.json';
 
 // Key prefixes for the TextStore/MediaStore abstraction below — same relative shape the old
 // flat on-disk layout always used, now backend-agnostic (local disk, S3, or RDS depending on
@@ -156,6 +157,29 @@ export async function readGenreTileMap(): Promise<GenreTileMap> {
 
 export async function writeGenreTileMap(map: GenreTileMap): Promise<void> {
   await getTextStore().put(GENRE_TILE_MAP_KEY, JSON.stringify(map, null, 2));
+}
+
+// Props' equivalent of the tile map above — setting -> tone -> prop category -> noun -> sprite
+// folder. Deliberately a separate document rather than another branch of the tile map: the two
+// have different axes (material category vs prop category) and different write cadences, and
+// merging them would mean every prop sprite rewriting the tile document.
+//
+// No legacy migration: the flat pre-catalogue sprites under PROPS_DIR/<slug>/ are NOT readable
+// through this, on purpose. They were drawn at a three-quarter angle the new pipeline has moved
+// off, so silently reusing them would mix two art styles inside one room. They stay on disk,
+// untouched and unreferenced, until deliberately cleared.
+export async function readPropCatalogue(): Promise<PropCatalogue> {
+  try {
+    const raw = await getTextStore().get(PROP_CATALOGUE_KEY);
+    return raw === null ? {} : (JSON.parse(raw) as PropCatalogue);
+  } catch (err) {
+    logError('storage:readPropCatalogue', err);
+    return {};
+  }
+}
+
+export async function writePropCatalogue(catalogue: PropCatalogue): Promise<void> {
+  await getTextStore().put(PROP_CATALOGUE_KEY, JSON.stringify(catalogue, null, 2));
 }
 
 export async function writeCampaignFile(slug: string, filename: string, content: string): Promise<void> {

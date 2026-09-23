@@ -1,0 +1,222 @@
+{
+  "modern": {
+    "horror": {
+      "plumbing": {
+        "pipe-run": {
+          "path": "props/modern/horror/pipe-run",
+          "description": "A long bundled run of steel pipes and conduit seen from above, lagged in fraying grey insulation, every joint beaded with cold condensation that has dripped dark streaks onto the metal, rust blooming orange at the couplings.",
+          "widthFt": 30,
+          "depthFt": 1.5
+        },
+        "gauge-dip-tube-bank": {
+          "path": "props/modern/horror/gauge-dip-tube-bank",
+          "description": "A bank of brass dip-tubes, gauge wheels and manual valves mounted in a row, viewed from above as a line of polished brass circles and wheel spokes, decades of hand-polish gleaming on the fittings, every needle pinned unnervingly high.",
+          "widthFt": 10,
+          "depthFt": 1
+        },
+        "toilet": {
+          "path": "props/modern/horror/toilet",
+          "description": "A white porcelain toilet viewed from above on cracked hex tile, seat down, water inside gone still and dark, rust streaks running from the tank bolts.",
+          "widthFt": 2,
+          "depthFt": 2.5
+        },
+        "stained-sink": {
+          "path": "props/modern/horror/stained-sink",
+          "description": "A stained sink basin seen from above, faucet dripping in a slow even count into a rust-brown pool, drain ringed black, a dark streak running from the basin across the floor toward a drain.",
+          "widthFt": 2,
+          "depthFt": 1.5
+        }
+      },
+      "storage": {
+        "fuel-drum": {
+          "path": "props/modern/horror/fuel-drum",
+          "description": "A 55-gallon steel drum seen from directly above, its circular lid rust-ringed and stenciled with a flaking flammable warning, one side weeping a black tacky residue down to a dark stain halo.",
+          "widthFt": 2,
+          "depthFt": 2
+        },
+        "metal-shelving": {
+          "path": "props/modern/horror/metal-shelving",
+          "description": "A tall metal shelving unit seen from above as a grid of shelf edges, loaded with dented cans, boxes and stock in leaning disarray, one shelf bowed in the middle, dust thick on everything except a single swept-clear gap.",
+          "widthFt": 4,
+          "depthFt": 1.5
+        },
+        "order-wheel": {
+          "path": "props/modern/horror/order-wheel",
+          "description": "A round order wheel seen from above, its metal clips still gripping three yellowed tickets, the wheel turned slightly as though someone began to spin it and stopped.",
+          "widthFt": 2,
+          "depthFt": 1
+        },
+        "wall-hook-board": {
+          "path": "props/modern/horror/wall-hook-board",
+          "description": "A wall-mounted hook board seen from above as a shallow rectangle of pegboard, most hooks empty, the few remaining tools and numbered keys hanging untouched, outlines of missing tools visible in the dust.",
+          "widthFt": 4,
+          "depthFt": 1
+        }
+      },
+      "signage": {
+        "safety-poster": {
+          "path": "props/modern/horror/safety-poster",
+          "description": "A faded laminated safety poster seen flat from above, its cheerful 1980s cartoon worker bleached to ghosts, corners curled, one edge darkened by a long water stain that looks almost deliberate.",
+          "widthFt": 3,
+          "depthFt": 1
+        },
+        "price-totem-sign": {
+          "path": "props/modern/horror/price-totem-sign",
+          "description": "A tall roadside price sign seen from above as a long narrow rectangle, its black number tiles slid loose and hanging crooked, plastic face yellowed and cracked, one digit dangling by a single clip.",
+          "widthFt": 4,
+          "depthFt": 1
+        },
+        "neon-sign": {
+          "path": "props/modern/horror/neon-sign",
+          "description": "A buzzing neon sign viewed from above, pink and red glass tubes bent into letters along a rusted steel frame, several tubes dead and dark, the live ones throwing a sickly buzzing glow over cracked mounting brackets.",
+          "widthFt": 8,
+          "depthFt": 2
+        },
+        "vacancy-sign": {
+          "path": "props/modern/horror/vacancy-sign",
+          "description": "A motel VACANCY sign seen from above, red neon letters stuttering in an irregular flicker, the V buzzing brighter than the rest, backing panel streaked with rust and old bird droppings.",
+          "widthFt": 6,
+          "depthFt": 1
+        },
+        "hanging-aisle-sign": {
+          "path": "props/modern/horror/hanging-aisle-sign",
+          "description": "A hanging aisle sign seen flat from above, a narrow rectangle of printed plastic on two wire tethers, lettering faded, tilted slightly as though still swaying though no air moves.",
+          "widthFt": 4,
+          "depthFt": 1
+        }
+      },
+      "machinery": {
+        "gas-pump": {
+          "path": "props/modern/horror/gas-pump",
+          "description": "A gasoline pump viewed from above, its rectangular steel housing chipped to bare metal, hose coiled around it like a sleeping snake, digital display frozen mid-sale, the concrete beneath stained in a rainbow-sheened pool of spilled fuel.",
+          "widthFt": 2.5,
+          "depthFt": 4
+        },
+        "dead-compressor": {
+          "path": "props/modern/horror/dead-compressor",
+          "description": "A bulky refrigeration compressor unit seen from above, rectangular housing rimed with melting frost, silent and sweating, a rusted service panel hanging open on one screw.",
+          "widthFt": 4,
+          "depthFt": 3
+        },
+        "vehicle-lift": {
+          "path": "props/modern/horror/vehicle-lift",
+          "description": "A two-post vehicle lift viewed from above, twin arms splayed beneath empty space, hydraulic posts streaked with old oil, safety catches worn bright, the concrete beneath blooming with black oil stains.",
+          "widthFt": 8,
+          "depthFt": 12
+        }
+      },
+      "vehicle": {
+        "abandoned-sedan": {
+          "path": "props/modern/horror/abandoned-sedan",
+          "description": "A dust-filmed four-door sedan seen from directly above, roof and hood grey with dust, one door hanging open, tires soft, a dried dark handprint smeared across the rear window.",
+          "widthFt": 6,
+          "depthFt": 15
+        },
+        "pickup-truck": {
+          "path": "props/modern/horror/pickup-truck",
+          "description": "An old pickup truck viewed from above, long bed streaked with rust and holding a tarpaulin lumped over something nobody has unpacked, paint chalked pale, mirrors folded like ears.",
+          "widthFt": 7,
+          "depthFt": 18
+        }
+      },
+      "surface": {
+        "service-counter": {
+          "path": "props/modern/horror/service-counter",
+          "description": "A long laminate-topped counter seen from above, its edge banded in chrome gone dull, surface cluttered with dried spills, a brown mug ring, scattered papers and a thin film of dust undisturbed except for one drag mark.",
+          "widthFt": 3,
+          "depthFt": 12
+        },
+        "office-desk": {
+          "path": "props/modern/horror/office-desk",
+          "description": "A cheap metal office desk seen from above, its top crowded with yellowed schedules, a dead mug dried to a brown ring, and a telephone off its hook with the cord pulled taut over the edge.",
+          "widthFt": 3,
+          "depthFt": 5
+        }
+      },
+      "container": {
+        "cardboard-case": {
+          "path": "props/modern/horror/cardboard-case",
+          "description": "A stacked cardboard case of motor oil and paper goods seen from above, top flaps sagging open, cardboard water-stained dark at one corner and collapsing inward, contents slumped to one side.",
+          "widthFt": 2,
+          "depthFt": 2
+        }
+      },
+      "appliance": {
+        "drinks-cooler": {
+          "path": "props/modern/horror/drinks-cooler",
+          "description": "A glass-front drinks cooler viewed from above, long humming cabinet with a strip of steady cold light along its top, glass smeared with something wiped in haste, bottles inside in undisturbed rows.",
+          "widthFt": 3,
+          "depthFt": 6
+        },
+        "jukebox": {
+          "path": "props/modern/horror/jukebox",
+          "description": "A vintage jukebox seen from above, arched cabinet of chrome and bubbled plastic glowing faintly, title card stuck on the same Everly Brothers single, its mechanism audibly catching and restarting every four bars.",
+          "widthFt": 3,
+          "depthFt": 2.5
+        },
+        "radio-rig": {
+          "path": "props/modern/horror/radio-rig",
+          "description": "A shortwave radio rig seen from above, a console of glowing dials, toggle switches and a slowly turning tape reel looping the same cracked voice, cables hardwired into the wall, static hissing from a grille speaker.",
+          "widthFt": 2,
+          "depthFt": 3
+        }
+      },
+      "decor": {
+        "wall-clock": {
+          "path": "props/modern/horror/wall-clock",
+          "description": "A round wall clock seen face-up, hands stopped at 3:12, the second hand trembling in place, glass face hazed and one numeral slipped sideways inside.",
+          "widthFt": 1,
+          "depthFt": 1
+        },
+        "mop-bucket": {
+          "path": "props/modern/horror/mop-bucket",
+          "description": "A plastic mop bucket seen from above, its wringer basket crusted, water long dried into a grey scum ring tidemarked around the inside, mop handle fallen across the rim.",
+          "widthFt": 1.5,
+          "depthFt": 1.5
+        },
+        "shattered-mirror": {
+          "path": "props/modern/horror/shattered-mirror",
+          "description": "A shattered mirror seen flat from above, most of its glass fallen in glittering shards, remaining fragments still on the backing reflecting the ceiling in fractured pieces.",
+          "widthFt": 3,
+          "depthFt": 1
+        }
+      },
+      "seating": {
+        "swivel-chair": {
+          "path": "props/modern/horror/swivel-chair",
+          "description": "A worn office swivel chair viewed from above, round vinyl seat split and leaking foam, five-star base with one caster missing, turned away from the desk as if pushed back in a hurry.",
+          "widthFt": 2.5,
+          "depthFt": 2.5
+        },
+        "diner-booth": {
+          "path": "props/modern/horror/diner-booth",
+          "description": "A red vinyl diner booth seen from above, twin bench seats facing across a formica table, chrome trim incongruously clean and gleaming, one seat cushion slit open, an untouched milkshake separated into grey curds on the tabletop.",
+          "widthFt": 5,
+          "depthFt": 5
+        },
+        "counter-stool": {
+          "path": "props/modern/horror/counter-stool",
+          "description": "A chrome counter stool viewed from above, a round red vinyl seat on a single pedestal, one stool spun to face the wrong direction, seat cracked and dust-dulled.",
+          "widthFt": 1.5,
+          "depthFt": 1.5
+        }
+      },
+      "cooking": {
+        "flat-top-griddle": {
+          "path": "props/modern/horror/flat-top-griddle",
+          "description": "A grease-yellowed flat-top griddle viewed from above, broad steel plate filmed in congealed grease, a single blue pilot bead glowing at its edge, scraper resting in a dried smear of something dark.",
+          "widthFt": 3,
+          "depthFt": 5
+        }
+      },
+      "remains": {
+        "slumped-body": {
+          "path": "props/modern/horror/slumped-body",
+          "description": "A seated figure seen from directly above, slumped forward over a desk, shoulders rounded and long still, hair fanned across the desktop, one arm dangling, clothing gone dusty with time.",
+          "widthFt": 2,
+          "depthFt": 3
+        }
+      }
+    }
+  }
+}

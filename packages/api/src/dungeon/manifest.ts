@@ -1,5 +1,5 @@
-import type { EnemyStatBlock, DungeonMaterialSpec, PropSpec, DungeonStylePack, DungeonStructureType, CreatureType, DungeonQuestStage, DungeonQuestTrigger, DungeonQuestTriggerKind, MaterialCategory, CampaignGenre } from 'shared';
-import { CREATURE_TYPES, MATERIAL_CATEGORIES, slugifyTheme } from 'shared';
+import type { EnemyStatBlock, DungeonMaterialSpec, DungeonStylePack, DungeonStructureType, CreatureType, DungeonQuestStage, DungeonQuestTrigger, DungeonQuestTriggerKind, MaterialCategory, PropCategory, CampaignGenre } from 'shared';
+import { CREATURE_TYPES, MATERIAL_CATEGORIES, PROP_CATEGORIES, slugifyTheme } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { buildGenreTileBlock } from './genreTiles.ts';
 import { logError } from '../logger.ts';
@@ -30,14 +30,6 @@ export interface ManifestTrap {
   disarmDC?: number;
 }
 
-export interface ManifestProp {
-  name: string;
-  description: string; // visual description for the sprite generator — feeds buildPropSpritePrompt, never forwarded to DungeonRoom
-  relX: number; // 0-1, position within the room's eventual bounding box (left-right) — clamped on parse
-  relY: number; // 0-1, position within the room's eventual bounding box (top-bottom) — clamped on parse
-  size: 'small' | 'medium' | 'large'; // footprint hint, mapped to grid cells by placer.ts
-}
-
 export interface ManifestRoom {
   name: string;
   size: 'small' | 'medium' | 'large';
@@ -45,7 +37,14 @@ export interface ManifestRoom {
   creatures?: EnemyStatBlock[];
   traps?: ManifestTrap[];
   loot?: ManifestHazard[];
-  props?: ManifestProp[];
+  /**
+   * Which prop categories this room's furnishing needs — the room's ORDER, not its contents. The
+   * actual props are authored by a second call (see propDressing.ts), and this field is the
+   * deterministic filter that decides which slice of the prop catalogue that call is shown: a
+   * walk-in freezer asking for `storage`+`machinery` never sees `bedding`. Keeping this cheap
+   * (a few enum strings) is what lets the manifest stay out of the prop business entirely.
+   */
+  propCategories?: PropCategory[];
   key?: string; // single-char id for the organic grid prompt — assigned here, never left to the LLM
   material?: string; // floor material key for this room — free-text, slugified on parse
   materialDescription?: string; // visual description of this room's texture — server-only, feeds the tileset prompt, never forwarded to DungeonRoom
@@ -78,7 +77,6 @@ export interface DungeonManifest {
   questChain: DungeonQuestStage[]; // ordered narrative quest chain for this dungeon — may be empty, never forced
   illumination: number; // 0-1 ambient light level for the whole location — clamped on parse
   materials: DungeonMaterialSpec[]; // deduped, first-seen-order floor materials this dungeon's rooms actually reference — up to 16, feeds the tileset generator
-  props: PropSpec[]; // deduped, first-seen-order prop types this dungeon's rooms actually reference — up to 32, feeds the prop sprite generator
 }
 
 // Dedupes by normalized key (first-seen description wins), preserves first-seen order. The 16-item
@@ -96,22 +94,6 @@ function collectDungeonMaterials(rooms: ManifestRoom[]): DungeonMaterialSpec[] {
     });
   }
   return [...seen.entries()].slice(0, 16).map(([key, { description, category, reuse }]) => ({ key, description, category, ...(reuse === false ? { reuse } : {}) }));
-}
-
-// Same shape as collectDungeonMaterials — dedupes by normalized name (first-seen description
-// wins), preserves first-seen order, caps at 32 (the prop sprite atlas's real-content limit; see
-// dungeon/props.ts). The cap here is a defensive backstop, not the primary enforcement — the
-// manifest prompt itself asks rooms to reuse names.
-function collectDungeonProps(rooms: ManifestRoom[]): PropSpec[] {
-  const seen = new Map<string, string>();
-  for (const room of rooms) {
-    for (const prop of room.props ?? []) {
-      const key = slugifyTheme(prop.name);
-      if (!key || seen.has(key)) continue;
-      seen.set(key, prop.description?.trim() || prop.name);
-    }
-  }
-  return [...seen.entries()].slice(0, 32).map(([key, description]) => ({ key, description }));
 }
 
 // Single generic words get no LLM call — falls back to a hand-authored generic layout
@@ -132,20 +114,19 @@ function normalizeMaterialCategory(c: unknown): MaterialCategory {
   return (MATERIAL_CATEGORIES as readonly string[]).includes(c as string) ? (c as MaterialCategory) : 'stone';
 }
 
-const PROP_SIZES = ['small', 'medium', 'large'] as const;
-
-function normalizeProps(props: unknown): ManifestProp[] | undefined {
-  if (!Array.isArray(props)) return undefined;
-  const normalized = props
-    .filter((p): p is ManifestProp => !!p && typeof p === 'object' && typeof (p as ManifestProp).name === 'string' && (p as ManifestProp).name.trim().length > 0)
-    .map(p => ({
-      name: p.name.trim(),
-      description: typeof p.description === 'string' && p.description.trim() ? p.description.trim() : p.name.trim(),
-      relX: typeof p.relX === 'number' && Number.isFinite(p.relX) ? Math.max(0, Math.min(1, p.relX)) : 0.5,
-      relY: typeof p.relY === 'number' && Number.isFinite(p.relY) ? Math.max(0, Math.min(1, p.relY)) : 0.5,
-      size: (PROP_SIZES as readonly string[]).includes(p.size) ? p.size : 'medium',
-    }));
-  return normalized.length ? normalized : undefined;
+// Unknown categories are dropped rather than mapped onto some fallback: this list only decides how
+// much of the catalogue the dressing call is shown, so a bad entry costs nothing, where quietly
+// folding it in would widen the filter it exists to narrow.
+//
+// The exception is a room that asked for categories and had ALL of them rejected. An omitted list
+// means "this room is deliberately bare" and the dressing call skips it entirely — so without this,
+// one hallucinated category name is the difference between a furnished room and an empty one. A
+// model that returned a list clearly wanted furniture; falling back to 'decor' keeps the room in
+// the dressing call, and the cost of guessing wrong is a slightly wider noun list, not a bare room.
+function normalizePropCategories(categories: unknown): PropCategory[] | undefined {
+  if (!Array.isArray(categories) || !categories.length) return undefined;
+  const normalized = [...new Set(categories.filter((c): c is PropCategory => (PROP_CATEGORIES as readonly unknown[]).includes(c)))];
+  return normalized.length ? normalized : ['decor'];
 }
 
 function normalizeDressing(dressing: unknown): string[] | undefined {
@@ -212,7 +193,7 @@ export async function fetchManifest(
     // references this dungeon's actual (fixed, generic) content meaningfully — exit_dungeon is the
     // one trigger guaranteed to eventually fire regardless of what the stage is nominally about.
     const questChain: DungeonQuestStage[] = predefinedChain.map(s => ({ ...s, trigger: { kind: 'exit_dungeon' } }));
-    return { rooms: assignKeys(GENERIC_ROOMS), structureType: 'organic', theme: 'high_fantasy', questChain, illumination: 1, materials: collectDungeonMaterials(GENERIC_ROOMS), props: collectDungeonProps(GENERIC_ROOMS) };
+    return { rooms: assignKeys(GENERIC_ROOMS), structureType: 'organic', theme: 'high_fantasy', questChain, illumination: 1, materials: collectDungeonMaterials(GENERIC_ROOMS) };
   }
 
   const contextBlock = storyContext
@@ -273,13 +254,7 @@ Return ONLY valid JSON, no markdown fences, no explanation:
         "disarmDC": "number 10-20 — either kind. The Thieves' Tools DC to neutralize this trap before it ever triggers (a Trap Disarm Kit rolls against this). Scale it to how well-hidden/dangerous the trap is. Never hinted at anywhere, same discipline as escapeDC."
       }],
       "loot": [{ "name": "string — the container or where it's found, e.g. 'Treasure Chest', 'Loose Floorboard'", "hideDC": 8, "contents": ["string — a specific item actually inside, e.g. '15 gold pieces', 'a silver locket'. 1-3 entries. This is the ONLY source of truth for what's in it — nothing else gets improvised when a player opens it."] }],
-      "props": [{
-        "name": "string — short name for a piece of furniture/decor in this room, e.g. 'Wooden Table', 'Iron Chest', 'Hay Bale'. Reuse the EXACT SAME name across every room that should share the same sprite (e.g. every plain wooden table in the dungeon uses the name 'Wooden Table') rather than inventing near-duplicate names for the same object — this dungeon may use AT MOST 32 distinct prop names in total across all rooms.",
-        "description": "string — vivid visual description of this exact object's appearance (materials, color, wear, shape) for an image generator, isolated on its own with no scene/background. Reuse the EXACT SAME description verbatim wherever the name is reused.",
-        "relX": "number 0-1 — this prop's position within the room, left(0) to right(1).",
-        "relY": "number 0-1 — this prop's position within the room, top(0) to bottom(1).",
-        "size": "small|medium|large — this object's rough footprint (small: a chest/barrel, medium: a table/bed, large: a bookshelf/altar/wagon)."
-      }],
+      "propCategories": "string[] — one of: ${PROP_CATEGORIES.join('|')}. Which KINDS of furniture/decor this room needs, not the objects themselves (those are decided separately). Pick every category a real room of this type would contain and no more: a diner is [\\"seating\\",\\"surface\\",\\"appliance\\",\\"signage\\"], a walk-in freezer is [\\"storage\\",\\"container\\",\\"machinery\\"], a barracks is [\\"bedding\\",\\"storage\\",\\"lighting\\"]. Omit entirely for a room that really is bare (a stripped corridor, a collapsed passage).",
       "dressing": ["string — a short ambient sensory or set-dressing detail, always visible the instant a party enters (no roll needed, no sprite generated). E.g. 'Cold draft from a cracked window', 'Faint smell of tallow smoke', 'Scorch marks streak the ceiling.'"],
       "hiddenDressing": [{
         "text": "string — a set-dressing detail that needs a hard search to notice (nothing worth a full loot/trap entry, but not ambient either — e.g. a faded symbol scratched under a shelf, a second set of footprints in the dust).",
@@ -295,7 +270,7 @@ Return ONLY valid JSON, no markdown fences, no explanation:
       "trigger": {
         "kind": "enter_room|discover_entity|defeat_boss|exit_dungeon — what mechanically resolves this stage and advances to the next one.",
         "roomName": "enter_room ONLY — must be the EXACT \"name\" of one of the rooms in \"rooms\" above.",
-        "entityName": "discover_entity ONLY — must be the EXACT \"name\" of a creature/loot/trap/prop nested inside one of the rooms above."
+        "entityName": "discover_entity ONLY — must be the EXACT \"name\" of a creature, loot, or trap nested inside one of the rooms above. Never a prop: props are always visible, so nothing ever 'discovers' one and a stage triggered on it can never resolve."
       }
     }
   ]
@@ -305,10 +280,10 @@ IF BUILDING: produce the ${minRooms}-${maxRooms} REAL rooms a location of this e
 
 IF ORGANIC: produce ${minRooms}-${maxRooms} rooms with location-authentic, atmospheric names fitting a natural/dug space (e.g. for a crypt: "Ossuary", "Collapsed Passage"). Omit "isHallway", "connectsTo", "floor", "isStairwell", and "stairsTo" entirely for organic rooms — layout is handled separately, and a natural/dug space never has a built stairwell.
 
-Omit "creatures"/"traps"/"loot"/"props" for rooms that don't have any — not every room needs them. Match creature types and stat blocks (use official 5e monster stat blocks as reference) to the genre. hideDC ranges 1-22 (higher = harder to spot); scale it to how well-concealed the trap/item narratively is. If the story context implies a non-hostile purpose (e.g. sneaking in to gather information), it's fine for rooms to have no creatures at all — don't force combat that doesn't fit.
+Omit "creatures"/"traps"/"loot" for rooms that don't have any — not every room needs them. Match creature types and stat blocks (use official 5e monster stat blocks as reference) to the genre. hideDC ranges 1-22 (higher = harder to spot); scale it to how well-concealed the trap/item narratively is. If the story context implies a non-hostile purpose (e.g. sneaking in to gather information), it's fine for rooms to have no creatures at all — don't force combat that doesn't fit.
 Most traps should be "seal" kind, not "damage" — an environmental obstacle (a door that slams shut, a passage that collapses, an alarm) makes for better play than a random damage roll on discovery. Reach for "damage" only when the trap's whole concept is physically hurting whoever sets it off (a dart trap, a pressure-plate blade). Never let "name" hint at the DC or the way past it — that's the players' problem to solve, not something you hand them.
 
-Give most rooms 1-4 props fitting their function (a bedroom gets a bed and a dresser, a kitchen gets a stove and shelves) — this is what makes a room feel real, not empty. Skip props only for rooms that are genuinely bare (hallways, a stripped cell, a collapsed passage). Never give an isStairwell room creatures, traps, loot, or props — it's a fixed 2x2 passage, not a destination, and anything placed there is dropped anyway.
+Give most rooms the "propCategories" a real room of that type would need — furnishing is what makes a room feel inhabited rather than empty. Leave it off only for rooms that are truly bare (hallways, a stripped cell, a collapsed passage). Never give an isStairwell room creatures, traps, loot, or propCategories — it's a fixed 2x2 passage, not a destination, and anything placed there is dropped anyway.
 
 Give most rooms 2-5 "dressing" entries and, where it fits, 0-2 "hiddenDressing" entries — mundane, concrete sensory texture (temperature, smell, sound, wear, small clutter) that makes the room feel inhabited without needing an image or a stat block. Dressing must never imply a named person, faction, event, or plot thread that isn't already established by the story context or "questChain" below — an unresolvable hint left dangling in a dungeon with no way to follow up on it misleads the players, it's not atmosphere. "Scorch marks on the ceiling" is fine anywhere; "scorch marks matching the Ashcult's ritual brand" is only fine if the Ashcult is actually part of this dungeon's story context.
 
@@ -332,12 +307,12 @@ Genre: ${dungeonType}`;
     const theme: DungeonStylePack = rawTheme || 'high_fantasy';
     let bossSeen = false;
     const rooms: ManifestRoom[] = (parsed.rooms?.length ? parsed.rooms : GENERIC_ROOMS).map((r, i) => {
-      const { material, materialDescription, materialCategory, materialReuse, creatures, props, dressing, hiddenDressing, ...rest } = r;
+      const { material, materialDescription, materialCategory, materialReuse, creatures, propCategories, dressing, hiddenDressing, ...rest } = r;
       const materialed = typeof material === 'string' && material.trim()
         ? { ...rest, material: slugifyTheme(material), materialCategory: normalizeMaterialCategory(materialCategory), ...(materialReuse === false ? { materialReuse: false } : {}), ...(typeof materialDescription === 'string' && materialDescription.trim() ? { materialDescription: materialDescription.trim() } : {}) }
         : rest;
-      const normalizedProps = normalizeProps(props);
-      const propped = normalizedProps ? { ...materialed, props: normalizedProps } : materialed;
+      const normalizedCategories = normalizePropCategories(propCategories);
+      const propped = normalizedCategories ? { ...materialed, propCategories: normalizedCategories } : materialed;
       const normalizedDressing = normalizeDressing(dressing);
       const dressed = normalizedDressing ? { ...propped, dressing: normalizedDressing } : propped;
       const normalizedHiddenDressing = normalizeHiddenDressing(i, hiddenDressing);
@@ -361,15 +336,14 @@ Genre: ${dungeonType}`;
       ...(r.creatures ?? []).map(c => c.name),
       ...(r.loot ?? []).map(l => l.name),
       ...(r.traps ?? []).map(t => t.name),
-      ...(r.props ?? []).map(p => p.name),
     ]));
     const questChain = parseQuestChain(parsed.questChain, predefinedChain, roomNames, entityNames, bossSeen);
     const illumination = typeof parsed.illumination === 'number' && Number.isFinite(parsed.illumination) ? Math.max(0, Math.min(1, parsed.illumination)) : 1;
-    return { rooms: assignKeys(lockedRooms), structureType, theme, questChain, illumination, materials: collectDungeonMaterials(lockedRooms), props: collectDungeonProps(lockedRooms) };
+    return { rooms: assignKeys(lockedRooms), structureType, theme, questChain, illumination, materials: collectDungeonMaterials(lockedRooms) };
   } catch (err) {
     logError('dungeon/manifest:fetchManifest', err);
     const questChain: DungeonQuestStage[] = predefinedChain.map(s => ({ ...s, trigger: { kind: 'exit_dungeon' } }));
-    return { rooms: assignKeys(GENERIC_ROOMS), structureType: 'organic', theme: 'high_fantasy', questChain, illumination: 1, materials: collectDungeonMaterials(GENERIC_ROOMS), props: collectDungeonProps(GENERIC_ROOMS) };
+    return { rooms: assignKeys(GENERIC_ROOMS), structureType: 'organic', theme: 'high_fantasy', questChain, illumination: 1, materials: collectDungeonMaterials(GENERIC_ROOMS) };
   }
 }
 

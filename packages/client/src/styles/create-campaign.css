@@ -216,6 +216,30 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ── generating step ──
+   Dungeon generation runs for tens of minutes across several streamed stages, so the token box
+   takes every pixel left over instead of the shared 340px cap. Height resolves because
+   .create-page-body is a flex item with a definite height; the header, the step list, and the
+   done/error line all stay auto-sized, so the success message keeps its room as it appears. */
+.create-step-generating {
+  height: 100%;
+  gap: 16px;
+}
+
+.create-step-generating .stream-output-steps {
+  flex: 0 0 auto;
+  min-height: 0;
+  max-height: none;
+  margin-bottom: 0;
+}
+
+.create-step-generating .stream-output-raw {
+  flex: 1 1 auto;
+  min-height: 120px;
+  max-height: none;
+  margin-bottom: 0;
+}
+
 /* ── choose-source step ── */
 .create-source-types {
   display: grid;

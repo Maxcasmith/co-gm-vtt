@@ -189,7 +189,8 @@
           "description": "Rusted steel plating over concrete, orange-brown corrosion blooming at the seams, the walking lanes polished dull by years of paws and boots, streaked with frozen dark smears."
         },
         "metal": {
-          "path": "tilesets/dark-academia-760c618ef9/metal"
+          "path": "tilesets/dark-academia-760c618ef9/metal",
+          "description": "scuffed stainless steel plate flooring, cold and sweating with condensation, dented around the shelving feet"
         }
       },
       "carpet": {
@@ -208,7 +209,8 @@
       },
       "dirt": {
         "dirt": {
-          "path": "tilesets/victorian-horror-032b06694b/dirt"
+          "path": "tilesets/victorian-horror-032b06694b/dirt",
+          "description": "packed bare earth stained black with old oil spills, scattered with straw, rusted washers and a drift of leaves by the door"
         }
       },
       "concrete": {
@@ -226,6 +228,12 @@
       "grass": {
         "grass": {
           "path": "tilesets/gothic-horror-f0fc6ae428/grass"
+        }
+      },
+      "asphalt": {
+        "cracked-asphalt": {
+          "path": "tilesets/modern-horror-5b339d7a08/cracked-asphalt",
+          "description": "weathered black asphalt spiderwebbed with cracks, faded yellow parking lines barely visible under dark dried smears and windblown trash"
         }
       }
     },

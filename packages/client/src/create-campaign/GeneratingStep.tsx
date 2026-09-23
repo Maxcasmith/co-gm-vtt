@@ -9,12 +9,12 @@ interface Props {
 
 export default function GeneratingStep({ title, done, error, progressLines, rawOutput, campaignId }: Props) {
   return (
-    <div className="create-step">
+    <div className="create-step create-step-generating">
       <div className="modal-header">
         <h1 className="modal-title">{title}</h1>
         {!done && !error && <p className="modal-hint">Building your campaign — this may take a moment.</p>}
       </div>
-      <pre className="stream-output">
+      <pre className="stream-output stream-output-steps">
         {progressLines.join('\n') || 'Generating world…'}
       </pre>
       {rawOutput && (

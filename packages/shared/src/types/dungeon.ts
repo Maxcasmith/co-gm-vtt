@@ -46,13 +46,76 @@ export interface DungeonMaterialSpec {
   reuse?: boolean;
 }
 
-// A dungeon-wide deduped prop (furniture/decor) type — up to 32 per dungeon, mirrors
-// DungeonMaterialSpec's role for floor textures. See api/dungeon/manifest.ts's
-// collectDungeonProps and api/dungeon/props.ts's sprite-atlas pipeline.
+// A coarse, fixed bucket for prop nouns, exactly MATERIAL_CATEGORIES' role one level up: the
+// closed set the prop-dressing LLM must classify every prop into, so the catalogue has a small
+// navigable axis instead of one flat pile of freeform nouns. Chosen so a room's request actually
+// narrows the catalogue — a walk-in freezer asks for `storage`+`machinery` and never sees
+// `bedding`. That means splits that look pedantic are deliberate:
+//   storage   = fixed furniture that holds things (shelf, cabinet, wardrobe, locker)
+//   container = loose vessels that hold things (crate, barrel, chest, bucket)
+//   appliance = shop/office/domestic boxes (vending machine, microwave, photocopier)
+//   machinery = plant and industrial equipment (boiler, engine, valve manifold)
+// `decor` is the deliberate catch-all and will drift largest — that's fine, it's the bucket a
+// room asks for when it wants texture rather than a specific function.
+export const PROP_CATEGORIES = [
+  "seating", "surface", "storage", "container", "bedding", "lighting", "cooking", "plumbing",
+  "appliance", "machinery", "vehicle", "signage", "decor", "structure", "remains", "vegetation",
+  "ritual",
+] as const;
+export type PropCategory = (typeof PROP_CATEGORIES)[number];
+
+// Where a prop belongs in its room, decided by the prop-dressing LLM and resolved into actual
+// coordinates by api/dungeon/placer.ts. Replaces the old per-instance relX/relY: the model is bad
+// at geometry and good at intent, so it states the intent and the placer — which can see the real
+// wall cells — does the arithmetic. This is what makes a bed sit against a wall instead of
+// floating mid-floor.
+export const PROP_ZONES = ["wall", "corner", "centre", "floor"] as const;
+export type PropZone = (typeof PROP_ZONES)[number];
+
+// A dungeon-wide deduped prop (furniture/decor) type, mirroring DungeonMaterialSpec's role for
+// floor textures. See api/dungeon/propDressing.ts (authoring), api/dungeon/propCatalogue.ts
+// (reuse lookup), and api/dungeon/props.ts (sprite-atlas pipeline).
 export interface PropSpec {
-  key: string;
+  /** The object concept, slugified — `crate`, `helm-console`, `wooden-pew`. Deliberately open
+   * (no enum): vernacular is how a submarine's `bunk` stays distinct from a cabin's `straw-bed`,
+   * and no fixed list survives contact with the long tail. Drift between near-identical spellings
+   * is controlled by showing the model the nouns that already exist, not by constraining it. */
+  noun: string;
+  category: PropCategory;
   description: string;
+  /** Real-world footprint in feet, authored once per prop TYPE (not per placement). The placer
+   * converts to grid cells at 5ft each; the sprite prompt draws the object at this aspect ratio.
+   * This is what stops a candle stub rendering the same size as a grand piano. */
+  widthFt: number;
+  depthFt: number;
 }
+
+// One room's request for a prop type it already named in PropSpec — how many, and where they go.
+// `count` is what makes clutter affordable: 8 booths is one sprite and one extra token, where the
+// old per-instance shape charged a full JSON object (description included) for every single one.
+export interface RoomProp {
+  noun: string;
+  count: number;
+  zone: PropZone;
+}
+
+// setting -> tone -> category -> noun -> the sprite drawn for that exact combination. App-wide,
+// same shape and lifecycle as GenreTileMap above (see api/storage.ts's readPropCatalogue/
+// writePropCatalogue and api/dungeon/propCatalogue.ts, which writes into it on every successful
+// sprite generation and reads it to tell the prop-dressing LLM which nouns already have art).
+//
+// Tone is part of the key, not decoration: the same `table` is plain oak in fantasy/standard and
+// splintered and blood-stained in modern/horror. The noun says WHAT the object is, the bucket says
+// HOW it is drawn — which is also why the noun axis carries the vernacular (`helm-console` and
+// `rocking-chair` are different objects, not two renderings of one).
+export interface PropCatalogueEntry {
+  path: string;
+  description?: string;
+  widthFt?: number;
+  depthFt?: number;
+}
+export type PropCategoryMap = Partial<Record<PropCategory, Record<string, PropCatalogueEntry>>>;
+export type PropCatalogue = Partial<Record<GenreSetting, Partial<Record<GenreTone, PropCategoryMap>>>>;
 
 // The 3 curated, built-in packs — not an exhaustive list. DungeonStylePack is a free-form
 // theme keyword (e.g. "gothic_horror"); anything outside this list is checked/generated

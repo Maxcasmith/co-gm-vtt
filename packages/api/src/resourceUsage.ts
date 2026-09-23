@@ -23,15 +23,24 @@ export interface ResourceSlugs {
   propSlugs: string[];
 }
 
-// Same slug math as dungeon/creaturePortraits.ts's portraitSlug and dungeon/props.ts's propSlug —
-// both are plain slugifyTheme(name) wrappers, so calling it directly here avoids exporting those
-// internal helpers just for this cross-cutting scan.
+// Same slug math as dungeon/creaturePortraits.ts's portraitSlug, a plain slugifyTheme(name) wrapper,
+// so calling it directly here avoids exporting that internal helper just for this cross-cutting scan.
+//
+// Props are the exception: their sprites live under a setting/tone bucket now (see
+// dungeon/propCatalogue.ts), so the name alone no longer identifies a file. The key is taken from
+// spriteSrc — which already encodes the full path the sprite was written to — rather than
+// reconstructed from the entity's genre, which the dungeon doesn't carry. Legacy entities from
+// before bucketing yield a bare slug, which is still exactly their folder name.
+export function propStorageKey(spriteSrc: string): string {
+  return spriteSrc.replace(/^\/api\/props\//, '').replace(/\/[^/]*$/, '');
+}
+
 export function collectResourceSlugs(dungeon: Dungeon): ResourceSlugs {
   const creatureSlugs = new Set<string>();
   const propSlugs = new Set<string>();
   for (const e of dungeon.entities) {
     if (e.type === 'creature' && e.statBlock) creatureSlugs.add(slugifyTheme(e.statBlock.name));
-    else if (e.type === 'object' && e.spriteSrc && !e.followsId) propSlugs.add(slugifyTheme(e.name));
+    else if (e.type === 'object' && e.spriteSrc && !e.followsId) propSlugs.add(propStorageKey(e.spriteSrc));
   }
   const tilesetSlug = dungeon.tilesetSlug ?? (dungeon.theme ? slugifyTheme(dungeon.theme) : undefined);
   const borrowed = new Set(Object.values(dungeon.materialSources ?? {}));

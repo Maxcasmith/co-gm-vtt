@@ -48,7 +48,10 @@ export async function openaiComplete(prompt: string, apiKey: string, model: stri
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model,
-      max_completion_tokens: 8000,
+      // Matches openaiStream's budget below. At 8000 a reasoning model spent the whole allowance
+      // thinking and returned empty content, which reached the caller as '' and blew up in
+      // JSON.parse — see the prop-dressing fallback that returned nothing in 85s.
+      max_completion_tokens: 16000,
       ...(reasoningEffort && { reasoning_effort: reasoningEffort }),
       messages: [{ role: 'user', content: prompt }],
     }),
@@ -58,7 +61,8 @@ export async function openaiComplete(prompt: string, apiKey: string, model: stri
     const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
     throw new Error(err.error?.message ?? res.statusText);
   }
-  const data = await res.json() as { choices: { message: { content: string } }[] };
+  const data = await res.json() as { choices: { message: { content: string }; finish_reason?: string }[] };
+  if (data.choices[0]?.finish_reason === 'length') logError('providers/openai:openaiComplete', new Error('response truncated at max_completion_tokens'));
   return data.choices[0]?.message.content ?? '';
 }
 
@@ -104,9 +108,13 @@ export async function openaiStream(
       const data = line.slice(6);
       if (data === '[DONE]') continue;
       try {
-        const evt = JSON.parse(data) as { choices: { delta?: { content?: string } }[] };
+        const evt = JSON.parse(data) as { choices: { delta?: { content?: string }; finish_reason?: string | null }[] };
         const token = evt.choices[0]?.delta?.content;
         if (token) { full += token; onToken(token); }
+        // Truncation is silent otherwise: the stream just stops mid-token and the caller gets a
+        // string that looks complete until JSON.parse rejects it. On a reasoning model the thinking
+        // is charged against the same budget, so this trips long before the visible output does.
+        if (evt.choices[0]?.finish_reason === 'length') logError('providers/openai:openaiStream', new Error(`response truncated at max_completion_tokens (${full.length} chars)`));
       } catch (err) { logError('providers/openai:openaiStream', err); }
     }
   }

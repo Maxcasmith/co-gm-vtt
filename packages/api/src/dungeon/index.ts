@@ -12,6 +12,9 @@ import { placeEntities, placeEncounterEntities } from './placer.ts';
 import { ensureTilesetSupport, type TilesetResolution } from './tilesets.ts';
 import { assignPortraitSrcs, generateCreaturePortraits } from './creaturePortraits.ts';
 import { assignPropSpriteSrcs, generatePropSprites } from './props.ts';
+import { readPropBucket } from './propCatalogue.ts';
+import { logDebug } from '../logger.ts';
+import { EMPTY_PROP_PLAN, generatePropDressing } from './propDressing.ts';
 
 export async function generateDungeon(
   name: string,
@@ -33,18 +36,53 @@ export async function generateDungeon(
      * predating the field. Threaded through to fetchManifest (narrows the room-material prompt to
      * what's already reusable) and ensureTilesetSupport (records new materials against it). */
     genre?: CampaignGenre;
+    /** Surfaced to whoever is watching the loading screen. Generation is several minutes of
+     * sequential model and image calls, and a single "Generating dungeon…" for all of them leaves
+     * both the player and us unable to tell a slow stage from a hung one. */
+    onProgress?: (message: string) => void;
   },
   onToken: (t: string) => void = () => {},
   config?: AppConfig,
 ): Promise<Dungeon> {
+  // Per-stage elapsed, logged to storage/logs (console.log only reaches the dev terminal). Paired
+  // with the progress messages so a slow run can be attributed to a specific call afterwards
+  // instead of inferred from file mtimes.
+  let mark = Date.now();
+  const since = (): string => {
+    const seconds = (Date.now() - mark) / 1000;
+    mark = Date.now();
+    return `${seconds.toFixed(1)}s`;
+  };
+  const progress = (message: string): void => opts?.onProgress?.(message);
+
+  progress('Designing the floor plan…');
   const manifest = await fetchManifest(name, dungeonType, adapter, storyContext, opts?.roomRange, opts?.partySize, opts?.partyLevel, onToken, opts?.predefinedChain, opts?.genre);
+  logDebug(`dungeon "${name}": manifest (${manifest.rooms.length} rooms) ${since()}`);
   // Man-made structures get a deterministic floor-plan layout driven by the manifest's adjacency
   // graph; natural/carved spaces (cave, crypt, tomb) go straight to the procedural row-packer —
   // no LLM geometry call, and no attempt to force building-shaped rooms onto a cave.
   const { cells, rooms, doors, stairs } = manifest.structureType === 'building'
     ? generateBuildingLayout(manifest, opts)
     : generateGrid(manifest, opts);
-  const entities = placeEntities(rooms, manifest, cells);
+  // Pass 2: what furnishes each room, and how much of it. Serial rather than overlapped with the
+  // manifest call because it needs both that call's per-room categories AND the carved layout above
+  // (density is derived from each room's real floor area, not its 'small|medium|large' label).
+  // Awaited, not backgrounded: the client draws props synchronously, so they must exist before the
+  // dungeon ships — same contract tilesets and prop sprites already have below.
+  logDebug(`dungeon "${name}": layout (${rooms.length} rooms, ${manifest.structureType}) ${since()}`);
+
+  progress('Furnishing the rooms…');
+  const propCatalogue = await readPropBucket(opts?.genre);
+  const propPlan = config
+    ? await generatePropDressing(rooms, manifest.rooms, cells, manifest.theme, adapter, propCatalogue, opts?.genre, onToken)
+    : EMPTY_PROP_PLAN;
+  logDebug(`dungeon "${name}": prop dressing (${propPlan.props.length} types) ${since()}`);
+
+  const entities = placeEntities(rooms, manifest, cells, propPlan);
+  // Third and last place props can silently vanish (after the manifest's categories and the
+  // dressing call's plan): a plan the placer couldn't fit anywhere. Logged so a propless dungeon
+  // names which stage dropped them instead of all three looking identical from disk.
+  logDebug(`dungeon "${name}": placed ${entities.filter(e => e.type === 'object').length} props from ${propPlan.props.length} types across ${rooms.length} rooms`);
   // Multi-floor building layouts only — already fully resolved (id + reciprocal linkTo) by
   // generateBuildingLayout's stitching step, nothing left to look up here (unlike doors' keyName,
   // stairs pairing never depends on placeEntities' output).
@@ -67,8 +105,10 @@ export async function generateDungeon(
   // Synchronous/deterministic — every creature entity gets a portraitSrc before this function
   // returns, regardless of whether the file exists yet (see creaturePortraits.ts).
   assignPortraitSrcs(entities);
-  // Same contract for decorative prop entities' spriteSrc — see props.ts.
-  assignPropSpriteSrcs(entities);
+  // Same contract for decorative prop entities' spriteSrc — see props.ts. Genre-scoped, because a
+  // sprite now lives under its setting/tone bucket: without a genre there is no bucket to point at,
+  // so props render as plain markers rather than at a URL that can never resolve.
+  assignPropSpriteSrcs(entities, opts?.genre);
 
   // Creatures never gate dungeon return — fired first, resolves in the background regardless of
   // how long tilesets/props take (errors caught/logged inside generateCreaturePortraits itself).
@@ -78,10 +118,12 @@ export async function generateDungeon(
   // synchronously — no background-fill/retry pattern like creature portraits get), so the dungeon
   // is paused behind these two. Fired together via Promise.all rather than sequentially, so their
   // atlas requests overlap instead of queueing one behind the other.
+  progress('Drawing floor textures and props…');
   const [tileset] = await Promise.all([
     config ? ensureTilesetSupport(manifest.theme, manifest.materials, config, opts?.genre) : Promise.resolve<TilesetResolution>({ tilesetSlug: slugifyTheme(manifest.theme) }),
-    config ? generatePropSprites(manifest.props, config) : Promise.resolve(),
+    config ? generatePropSprites(propPlan.props, config, opts?.genre) : Promise.resolve(),
   ]);
+  logDebug(`dungeon "${name}": tilesets + prop sprites ${since()}`);
 
   const dungeon: Dungeon = {
     id: opts?.id ?? randomUUID(),
@@ -133,7 +175,7 @@ export function resolveDoorState(
  * (so the map is on screen immediately, not after the enemy-generation model call), then filled in
  * by placeArenaEnemies once the stat blocks arrive. */
 export function generateEncounterDungeon(statBlocks: EnemyStatBlock[] = []): Dungeon {
-  const { cells, rooms } = generateGrid({ rooms: [{ name: 'Battle', size: 'large' }], structureType: 'organic', theme: 'high_fantasy', questChain: [], illumination: 1, materials: [], props: [] });
+  const { cells, rooms } = generateGrid({ rooms: [{ name: 'Battle', size: 'large' }], structureType: 'organic', theme: 'high_fantasy', questChain: [], illumination: 1, materials: [] });
   const room = rooms[0]!;
   const entities = placeEncounterEntities(room, statBlocks);
 

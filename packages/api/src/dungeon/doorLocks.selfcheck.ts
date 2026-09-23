@@ -56,7 +56,7 @@ import { resolveDoorState } from './index.ts';
     { name: 'Ambiguous', size: 'small', connectsTo: ['Entrance'], doors: [{ toRoom: 'Entrance', state: 'locked', keyName: 'Side Key' }], loot: [{ name: 'Side Key', hideDC: 20 }] },
     { name: 'Plain', size: 'small', connectsTo: ['Entrance'] },
   ]);
-  const manifest: DungeonManifest = { rooms, structureType: 'building', theme: 'medieval', questChain: [], illumination: 1, materials: [], props: [] };
+  const manifest: DungeonManifest = { rooms, structureType: 'building', theme: 'medieval', questChain: [], illumination: 1, materials: [] };
   const { doors } = generateBuildingLayout(manifest, { width: 40, height: 40 });
 
   // Entrance<->Ambiguous: Entrance said 'open', Ambiguous said 'locked' — the more restrictive

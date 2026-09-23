@@ -273,11 +273,13 @@ campaignsRouter.post('/generate', licenseOrJwtMiddleware, async (req, res) => {
         if (goal.name && goal.description) predefinedChain = [{ id: goal.id || slugify(goal.name), name: goal.name, description: goal.description }];
       } catch (err) { logError('routes/campaigns:generate:dungeonScenarioGoal', err); }
 
-      send({ type: 'progress', message: 'Generating dungeon…' });
       const dungeonId = randomUUID();
       const dungeon = await generateDungeon(
         title, 'dungeon-crawl', getFeatureProvider(config, 'dungeonGeneration'), synopsis,
-        { width: 100, height: 100, roomRange: [14, 20], partySize, id: dungeonId, predefinedChain, genre },
+        // Per-stage messages instead of one "Generating dungeon…" held for the whole run: this is
+        // several minutes of sequential model and image calls, and a single frozen message can't
+        // distinguish a slow stage from a hung one.
+        { width: 100, height: 100, roomRange: [14, 20], partySize, id: dungeonId, predefinedChain, genre, onProgress: message => send({ type: 'progress', message }) },
         token => send({ type: 'token', text: token }),
         config,
       );

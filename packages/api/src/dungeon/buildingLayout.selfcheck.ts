@@ -23,7 +23,7 @@ function schoolManifest(): DungeonManifest {
     // dangling reference — must be dropped without crashing
     { name: 'Rooftop', size: 'small', connectsTo: ['Nonexistent Room'] },
   ];
-  return { rooms, structureType: 'building', theme: 'medieval', questChain: [], illumination: 1, materials: [], props: [] };
+  return { rooms, structureType: 'building', theme: 'medieval', questChain: [], illumination: 1, materials: [] };
 }
 
 function overlaps(a: { x: number; y: number; width: number; height: number }, b: typeof a): boolean {
@@ -115,7 +115,7 @@ function townhouseManifest(): DungeonManifest {
     { name: 'Bedroom', size: 'large', floor: 1, connectsTo: ['Landing'] },
     { name: 'Study', size: 'medium', floor: 1, connectsTo: ['Landing'] },
   ];
-  return { rooms, structureType: 'building', theme: 'medieval', questChain: [], illumination: 1, materials: [], props: [] };
+  return { rooms, structureType: 'building', theme: 'medieval', questChain: [], illumination: 1, materials: [] };
 }
 
 const multi = townhouseManifest();

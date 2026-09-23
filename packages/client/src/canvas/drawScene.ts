@@ -280,9 +280,18 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           if (entity.type === 'object' && !entity.followsId) {
             const propImg = entity.spriteSrc ? propImgCache.current?.[entity.spriteSrc] : undefined;
             if (propImg) {
-              const w = (entity.width ?? 1) * cellSz;
-              const h = (entity.height ?? 1) * cellSz;
-              ctx.drawImage(propImg, entity.x * cellSz + panX, entity.y * cellSz + panY, w, h);
+              // Sprites are always square cells, but a footprint isn't (a long table is 1x2). The
+              // object is drawn inside its square cell at its TRUE proportions, so the sprite's own
+              // transparent margin already encodes the footprint — stretching the square to a
+              // non-square rect would squash the object on top of that. Instead draw the square at
+              // the footprint's LONGER side, centred on the footprint: the object lands exactly on
+              // its cells and only empty margin spills over the short axis.
+              const w = entity.width ?? 1;
+              const h = entity.height ?? 1;
+              const side = Math.max(w, h) * cellSz;
+              const left = (entity.x + w / 2) * cellSz - side / 2 + panX;
+              const top = (entity.y + h / 2) * cellSz - side / 2 + panY;
+              ctx.drawImage(propImg, left, top, side, side);
               continue;
             }
           }

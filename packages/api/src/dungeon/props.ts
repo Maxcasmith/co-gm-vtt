@@ -1,14 +1,15 @@
 import path from 'path';
 import sharp from 'sharp';
-import type { AppConfig, DungeonEntity, PropSpec } from 'shared';
+import type { AppConfig, CampaignGenre, DungeonEntity, PropSpec } from 'shared';
 import { slugifyTheme } from 'shared';
 import { PROPS_DIR } from '../storage.ts';
+import { propDir, propSpriteUrl, readPropBucket, recordPropSprites, splitReusableProps } from './propCatalogue.ts';
 import { getMediaStore } from '../storage/index.ts';
 import { generateTilesetAtlas } from '../providers/openai.ts';
 import { buildPropSpritePrompt } from '../session-processor/imagePrompts.ts';
 import type { GridRect } from './tilesets.ts';
 import { detectGridBoundaries } from './gridDetect.ts';
-import { logError } from '../logger.ts';
+import { logDebug, logError } from '../logger.ts';
 
 const GRID_SIZE = 6; // 36 cells — see the "6x6, capped at 32" call in props SCOPING
 const REAL_CAP = 32; // batch size — the real-content limit; the remaining 4 cells always pad blank
@@ -24,18 +25,6 @@ const CHROMA_THRESHOLD = 70;
 // real magenta spill from the source image's own edge anti-aliasing.
 const CHROMA_FEATHER = 50;
 
-function propSlug(name: string): string {
-  return slugifyTheme(name);
-}
-
-function propUrl(slug: string): string {
-  return `/api/props/${slug}/sprite_01.png`;
-}
-
-function hasPropSprite(slug: string): Promise<boolean> {
-  return getMediaStore().exists(path.join(PROPS_DIR, slug, 'sprite_01.png'));
-}
-
 function titleCase(s: string): string {
   return s.replace(/-+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
@@ -43,10 +32,15 @@ function titleCase(s: string): string {
 // Synchronous/deterministic — every decorative prop entity gets a spriteSrc before generateDungeon
 // returns, regardless of whether the file exists yet, same contract as assignPortraitSrcs. `object`
 // entities WITH followsId are Tenser's Floating Disk (spell-placed, no sprite) — never touched here.
-export function assignPropSpriteSrcs(entities: DungeonEntity[]): void {
+//
+// A genre is required to address a sprite now that art is per setting/tone (see propCatalogue.ts).
+// Without one there is no bucket, so the entity is left with no spriteSrc and the client falls back
+// to its plain marker — better than a URL that is guaranteed to 404.
+export function assignPropSpriteSrcs(entities: DungeonEntity[], genre?: CampaignGenre): void {
+  if (!genre) return;
   for (const entity of entities) {
     if (entity.type !== 'object' || entity.followsId) continue;
-    entity.spriteSrc = propUrl(propSlug(entity.name));
+    entity.spriteSrc = propSpriteUrl(genre, slugifyTheme(entity.name));
   }
 }
 
@@ -60,6 +54,12 @@ export interface PendingProp {
   slug: string;
   name: string;
   description: string;
+  /** Real-world footprint, so the sprite is drawn at the object's TRUE proportions inside its
+   * square cell rather than every object being scaled to fill the cell identically — which is why
+   * a candle stub used to render the same size as a grand piano. Omitted by the admin prompt-test
+   * flow, which has only names to work with; the prompt falls back to square in that case. */
+  widthFt?: number;
+  depthFt?: number;
 }
 
 async function stripChromaKey(tile: Buffer): Promise<Buffer> {
@@ -156,37 +156,54 @@ export async function previewGridCells(sourceBuffer: Buffer): Promise<Buffer[]> 
   return cells;
 }
 
-// Fire-and-forget — called unawaited from generateDungeon(), never blocks dungeon generation.
-// Sourced from the manifest's already-deduped PropSpec[] (real descriptions, first-seen order),
-// not re-derived from dungeon.entities — an entity only carries a bare name, not the vivid visual
-// description the manifest LLM wrote, so that has to come from the spec list. Skips anything
-// already on disk (global reuse across every dungeon/campaign, same philosophy as
-// creaturePortraits.ts), batches whatever's left into groups of 32.
-export async function generatePropSprites(propSpecs: PropSpec[], config: AppConfig): Promise<void> {
-  if (!config.image.generatePropImages) return;
+// Awaited by generateDungeon (NOT fire-and-forget — the client draws props synchronously, with no
+// background-fill/retry the way creature portraits get, so a dungeon must not ship before its
+// sprites exist). Sourced from the dressing call's deduped PropSpec[] (real descriptions, real
+// dimensions), not re-derived from dungeon.entities — an entity carries only a bare name.
+//
+// Reuse is the catalogue's job, not a disk probe: splitReusableProps decides what already has art
+// for this bucket, and only the remainder is drawn. Without a genre there's no bucket to write
+// into, so nothing is generated at all rather than dumped somewhere unaddressable.
+export async function generatePropSprites(propSpecs: PropSpec[], config: AppConfig, genre?: CampaignGenre): Promise<void> {
+  if (!config.image.generatePropImages || !genre || !propSpecs.length) return;
 
-  const exists = await Promise.all(propSpecs.map(spec => hasPropSprite(spec.key)));
-  const needed: PendingProp[] = propSpecs
-    .filter((_spec, i) => !exists[i])
-    .map(spec => ({ slug: spec.key, name: titleCase(spec.key), description: spec.description }));
-
+  const { fresh, reused } = splitReusableProps(propSpecs, await readPropBucket(genre));
+  logDebug(`prop sprites [${genre.setting}/${genre.tone}]: ${fresh.length} to draw, ${reused.length} reused — ${fresh.map(f => f.noun).join(', ') || 'none'}`);
   const apiKey = config.apiKeys.openai;
-  if (!apiKey || !needed.length) return;
+  if (!apiKey || !fresh.length) {
+    // Nothing to draw, but reused entries may still be missing dimensions recorded before the
+    // catalogue carried them — backfill and stop.
+    if (reused.length) await recordPropSprites(genre, [], reused);
+    return;
+  }
 
-  for (const batch of chunk(needed, REAL_CAP)) {
+  const needed: PendingProp[] = fresh.map(spec => ({
+    slug: spec.noun,
+    name: titleCase(spec.noun),
+    description: spec.description,
+    widthFt: spec.widthFt,
+    depthFt: spec.depthFt,
+  }));
+
+  const drawn: PropSpec[] = [];
+  for (const [i, batch] of chunk(needed, REAL_CAP).entries()) {
     try {
-      await generatePropSpriteBatch(batch, apiKey, config.image.model);
+      await generatePropSpriteBatch(batch, apiKey, config.image.model, undefined, genre);
+      drawn.push(...fresh.slice(i * REAL_CAP, i * REAL_CAP + batch.length));
     } catch (err) {
       logError('dungeon/props:generatePropSprites', err);
     }
   }
+  // Only batches that actually succeeded are recorded — a failed batch left in the catalogue would
+  // permanently claim art that isn't on disk, and every later dungeon would "reuse" a 404.
+  await recordPropSprites(genre, drawn, reused);
 }
 
 // Exported directly (rather than only through generatePropSprites' skip-if-exists/chunking wrapper)
 // for the admin "test the prompt" flow — trying prompt tweaks against a hand-picked batch of real
 // prop names without needing to spend money generating an entire dungeon to trigger it. Always
 // overwrites sprite_01.png for every slug in `batch`, existing or not — the caller decides scope.
-export async function generatePropSpriteBatch(batch: PendingProp[], apiKey: string, model: string, onProgress?: (message: string) => void): Promise<void> {
+export async function generatePropSpriteBatch(batch: PendingProp[], apiKey: string, model: string, onProgress?: (message: string) => void, genre?: CampaignGenre): Promise<void> {
   function report(message: string) {
     console.log(`[props] ${message}`);
     onProgress?.(message);
@@ -207,7 +224,11 @@ export async function generatePropSpriteBatch(batch: PendingProp[], apiKey: stri
   // The prompt must describe whichever size is actually being requested this call — it used to
   // hardcode 2048, which was simply false for the 1024 branch and fed the model a wrong canvas
   // size to lay its grid out against.
-  const prompt = buildPropSpritePrompt(batch.map(b => ({ name: b.name, description: b.description })), transparent, parseInt(requestSize, 10));
+  const prompt = buildPropSpritePrompt(
+    batch.map(b => ({ name: b.name, description: b.description, ...(b.widthFt !== undefined ? { widthFt: b.widthFt } : {}), ...(b.depthFt !== undefined ? { depthFt: b.depthFt } : {}) })),
+    transparent,
+    parseInt(requestSize, 10),
+  );
 
   report(`requesting atlas from ${model}…`);
   const rawAtlas = await generateTilesetAtlas(prompt, apiKey, model, requestSize, transparent ? 'transparent' : undefined);
@@ -242,9 +263,12 @@ export async function generatePropSpriteBatch(batch: PendingProp[], apiKey: stri
     rects.push({ material: b.slug, left: cols[c]!, top: rows[r]!, width: cols[c + 1]! - cols[c]!, height: rows[r + 1]! - rows[r]! });
   });
 
+  // Bucketed under the campaign's setting/tone when there is one (the real generation path), flat
+  // under props/<noun>/ when there isn't (the admin prompt-test flow, which is deliberately not
+  // writing into any campaign's catalogue).
   await Promise.all(rects.map(async rect => {
     if (rect.width <= 0 || rect.height <= 0) return;
-    const dir = path.join(PROPS_DIR, rect.material);
+    const dir = genre ? propDir(genre, rect.material) : path.join(PROPS_DIR, rect.material);
     const final = await cropCell(atlas, rect, transparent);
     await getMediaStore().put(path.join(dir, 'sprite_01.png'), final);
   }));
