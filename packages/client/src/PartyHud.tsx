@@ -15,12 +15,12 @@ interface Props {
   onSelectMember: (characterId: string) => void;
   /** Your current Party Groups track — tints the groups button beside your portrait. */
   selfTrack?: GroupColor | undefined;
-  /** Splitting and rejoining only happens in play, so the button is dead outside a running session. */
-  groupsEnabled: boolean;
-  onOpenGroups: () => void;
+  /** The Party Groups control — omitted entirely for a solo party, which has nothing to split.
+   * `enabled` is false outside a running session, when the button is shown but dead. */
+  groups?: { enabled: boolean; onOpen: () => void } | undefined;
 }
 
-export default function PartyHud({ roster, connected, aiControlled, portraitUrls, characterIds, self, hp, selfTempHp, onSelectMember, selfTrack, groupsEnabled, onOpenGroups }: Props) {
+export default function PartyHud({ roster, connected, aiControlled, portraitUrls, characterIds, self, hp, selfTempHp, onSelectMember, selfTrack, groups }: Props) {
   if (!roster.length) return null;
 
   const connectedSet = new Set(connected);
@@ -58,7 +58,7 @@ export default function PartyHud({ roster, connected, aiControlled, portraitUrls
           </div>
         );
         // Sibling of the card, not nested in it — the card itself is already clickable (opens the sheet).
-        return name === self ? (
+        return name === self && groups ? (
           <div key={name} className="party-hud-self-row">
             {card}
             <Button
@@ -66,9 +66,9 @@ export default function PartyHud({ roster, connected, aiControlled, portraitUrls
               size="sm"
               className="party-hud-groups-btn"
               data-color={selfTrack}
-              disabled={!groupsEnabled}
-              title={groupsEnabled ? 'Party groups' : 'Start the session to split or rejoin the party'}
-              onClick={onOpenGroups}
+              disabled={!groups.enabled}
+              title={groups.enabled ? 'Party groups' : 'Start the session to split or rejoin the party'}
+              onClick={groups.onOpen}
               aria-label="Party groups"
             >⑂</Button>
           </div>

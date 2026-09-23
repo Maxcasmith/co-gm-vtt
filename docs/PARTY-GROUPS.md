@@ -20,9 +20,11 @@ occupied the party is **split**:
 - Each track has its own open-world scene (location / NPCs / factions).
 - When everyone is back on one track the split **closes**: every branch becomes visible to everyone
   as an inline split block in the Adventure Log, and the DM gets a hidden LLM summary per branch.
-- **Only while a session is running.** Every group change (move, add track, delete track) is
-  refused outside one, on the server and in the modal — splitting is something the party does in
-  play. A session that ends mid-split leaves the split as it stands.
+- **Only while a session is running, and only for a party of 2+.** Every group change (move, add
+  track, delete track) is refused outside a session or for a solo party, on the server and in the
+  UI — splitting is something a group of players does in play. For a solo party the button, modal
+  and Space+G shortcut are hidden entirely. A session that ends mid-split leaves the split as it
+  stands.
 
 Separately (split or not) combat is per individual and per fight — see "Combat" below.
 

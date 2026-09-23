@@ -51,6 +51,11 @@ export interface EncounterReadyPayload { enemies: EnemyStatBlock[] }
 /** Enemy generation failed server-side — releases anything waiting on encounter:ready. */
 export type EncounterFailedPayload = Record<string, never>;
 
+/** Canvas's verdict on the scene it is drawing: every floor texture, token, portrait and prop
+ * sprite loaded (or 404'd) and drawn. The loading overlays come down on this, never on the socket
+ * event that merely delivered the data. */
+export interface SceneReadyPayload { ready: boolean }
+
 export interface CombatStatePayload { active: boolean }
 export type TargetingStartPayload =
   | { kind: 'weapon'; weapon: Weapon; actionType: 'action' | 'bonusAction' | 'reaction'; bonusSpell?: Spell; isOffhand?: boolean; useInspiration?: boolean }
@@ -306,6 +311,7 @@ export interface VTTEventMap {
   'vtt:combat:reaction:spent':    CombatReactionSpentPayload;
   'vtt:combat:log':             CombatLogPayload;
   'vtt:dungeon:loaded':         Dungeon;
+  'vtt:scene:ready':            SceneReadyPayload;
   'vtt:viewport:changed':       ViewportChangedPayload;
   'vtt:dev:redraw':             Record<string, never>;
 }

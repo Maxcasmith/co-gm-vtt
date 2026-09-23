@@ -25,11 +25,12 @@ if (!LLM_STUB) throw new Error('run with LLM_STUB=1 — this check must never ca
 
 const SLUG = '__selfcheck-party-groups__';
 const NAMES = ['Aria', 'Bex', 'Cal', 'Dax'] as const;
+type AnyName = (typeof NAMES)[number] | 'Solo';
 type Name = (typeof NAMES)[number];
 const idOf = (n: string) => `fixture-${n.toLowerCase()}`;
 
 // ── fixture ─────────────────────────────────────────────────────────────────────────────────
-function character(name: string): Character {
+function character(name: AnyName | string): Character {
   return {
     id: idOf(name), campaignId: SLUG, name, species: 'Human', background: 'Soldier', class: 'Fighter', level: 3,
     stats: { str: 14, dex: 12, con: 14, int: 10, wis: 10, cha: 10 }, skillProficiencies: [],
@@ -290,6 +291,26 @@ async function main(): Promise<void> {
     assert.equal(fightsIn(SLUG).length, 0);
   });
 
+  await check('a solo party is refused any group change (the client hides the control)', async () => {
+    const SOLO = `${SLUG}-solo`;
+    await deleteCampaign(SOLO);
+    await writeCharacter(SOLO, idOf('Solo'), { ...character('Solo'), campaignId: SOLO });
+    sessionState.set(SOLO, true);
+    const s = connect(url, { transports: ['websocket'], forceNew: true });
+    const seen: string[] = [];
+    s.onAny((ev: string) => seen.push(ev));
+    await new Promise<void>(r => s.on('connect', () => r()));
+    s.emit('player:join', { name: 'Solo', id: idOf('Solo'), campaignId: SOLO });
+    await waitFor('the solo player joins', () => seen.includes('groups:update'));
+    seen.length = 0;
+    s.emit('groups:move', { track: 'red' as never });
+    s.emit('groups:track:add');
+    await sleep(500);
+    s.close();
+    await deleteCampaign(SOLO);
+    assert.ok(!seen.includes('groups:update'), 'a one-character party was allowed to split');
+  });
+
   // ── 5. Split across places: one group in the dungeon, one out in the world ────────────────
   console.info('\nSplit locations');
   await setTrackLocations(SLUG, ['red'], undefined); // Dax (red) steps out into the world
@@ -323,6 +344,16 @@ async function main(): Promise<void> {
     const mapAt = inbox.Dax.findIndex(r => r.ev === 'dungeon:loaded' && (r.args[0] as { id: string }).id === fight!.arenaId);
     const enemiesAt = inbox.Dax.findIndex(r => r.ev === 'encounter:ready');
     assert.ok(mapAt >= 0 && (enemiesAt === -1 || mapAt < enemiesAt), `the arena map must arrive before the enemies (map@${mapAt}, enemies@${enemiesAt})`);
+    // ...and the FINISHED arena — enemies placed, floor art resolved — must arrive before
+    // encounter:ready too. That event is what the client's loading screen comes down on, so
+    // anything still to be broadcast after it is something the party watches pop in on a bare
+    // battlefield (which is exactly what placing the enemies after the emit used to do).
+    const lastMapAt = inbox.Dax.map((r, i) => [r, i] as const)
+      .filter(([r]) => r.ev === 'dungeon:loaded' && (r.args[0] as { id: string }).id === fight!.arenaId)
+      .map(([, i]) => i).at(-1)!;
+    assert.ok(enemiesAt === -1 || lastMapAt < enemiesAt, `the fully-populated arena must arrive before encounter:ready (last map@${lastMapAt}, enemies@${enemiesAt})`);
+    const finalArena = inbox.Dax[lastMapAt]!.args[0] as Dungeon;
+    assert.ok(finalArena.entities.some(e => e.type === 'creature'), 'the arena broadcast before encounter:ready had no enemies on it');
     for (const n of ['Aria', 'Bex', 'Cal'] as const) {
       assert.equal(fightOf(SLUG, n), undefined, `${n} was pulled into the world group's fight`);
       assert.ok(!got(n, 'dungeon:loaded'), `${n} (in the dungeon) got the arena map`);

@@ -388,8 +388,6 @@ export async function generateAndBroadcastEnemies(campaignId: string, encounter:
 
     encounter.expectedParticipantCount += uniqueStatBlocks.length;
     await saveEncounter(campaignId, encounter);
-    toFight(encounter).emit('encounter:ready', uniqueStatBlocks);
-    console.log('[encounter] ready:', statBlocks.map(e => `${e.name} (CR ${e.cr})`).join(', '));
 
     // The arena was put on screen the moment the fight started (see openArena) — the enemies just
     // took a model call to arrive. Place them on it now. A fight with no arena at all (shouldn't
@@ -409,6 +407,14 @@ export async function generateAndBroadcastEnemies(campaignId: string, encounter:
       await saveDungeon(campaignId, arena);
       broadcastDungeon(campaignId, arena);
     }
+
+    // Emitted LAST, after the arena has its enemies placed and its floor art resolved and has been
+    // rebroadcast — this is the event the loading screen comes down on, so anything still missing
+    // when it fires is something the party watches pop in on a bare map. It used to fire straight
+    // after the stat blocks came back, i.e. before placeArenaEnemies and before applyArenaTerrain
+    // had even been called.
+    toFight(encounter).emit('encounter:ready', uniqueStatBlocks);
+    console.log('[encounter] ready:', statBlocks.map(e => `${e.name} (CR ${e.cr})`).join(', '));
 
     if (!encounter.ended) rollEnemyInitiatives(campaignId, encounter);
   } catch (err) {

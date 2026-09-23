@@ -204,3 +204,34 @@ only shortens the list sent to the LLM. At ~15 tokens per material, even 50 in o
 **Progress log:**
 - 2026-09-22 — deferred when genre moved from a manual 3-option picker to LLM classification
   from tags. Largest bucket at the time: `modern/horror`, 16 materials.
+
+---
+
+### The loading screen waits for art that already exists, never for art still being generated
+
+**What we accepted:** the map/encounter loading screen now holds until the scene is fully loaded
+and drawn (`canvas/useSceneReady.ts` — tileset manifest fetched, floor textures decoded, every
+token/portrait/prop sprite settled). "Settled" deliberately counts a **404 as done**: creature
+portraits (`dungeon/creaturePortraits.ts`) and prop sprites are fire-and-forget image generations
+kicked off server-side without being awaited, so their files do not exist yet when the map ships.
+An enemy whose portrait is still being drawn therefore appears as its fallback token, and the real
+portrait pops in later — behind an already-dismissed loading screen.
+
+**Why we accepted the tradeoff:** the alternative is holding the whole party behind a full-screen
+lockout for a multi-image generation job (one call per distinct creature, tens of seconds with a
+real image provider), for art that is cosmetic — `drawToken`'s img-less branch has always covered
+its absence. Floor tilesets *are* awaited before the map ships (`ensureTilesetSupport` in
+`generateDungeon`, `applyArenaTerrain` for arenas) because the client draws them synchronously with
+no fallback-then-fill path; portraits have one, so they stay fire-and-forget.
+
+**What would tell us it's time to act:** players reporting enemies visibly "changing face"
+mid-fight rather than merely arriving unportraited, or portrait generation routinely outlasting the
+fight it was for. The fix, if wanted, is a `creature:portrait:ready` event that re-broadcasts the
+entity once its file lands, so it fades in deliberately instead of on the next incidental redraw —
+not extending the loading screen to cover it.
+
+**Progress log:**
+- 2026-09-23 — entry created while fixing the loading screen to wait for the rest of the scene
+  (arena enemies were being placed *after* `encounter:ready`, `syncFight` was emitting an empty
+  `encounter:ready` before generation even began, and readiness was being computed before the
+  tileset manifest had been fetched). Portraits were the one asset class deliberately left out.

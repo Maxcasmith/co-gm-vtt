@@ -5,7 +5,7 @@ interface Props {
 
 // Reuses EncounterLoadingOverlay's CSS (encounter-loading.css) — same full-screen spinner
 // treatment, just a different message and no delayed-dismiss sequencing (visible is driven
-// directly by useDungeonReady, no need to animate a hold-then-fade).
+// directly by GamePage's mapLoading, no need to animate a hold-then-fade).
 export default function DungeonLoadingOverlay({ visible, generating }: Props) {
   if (!visible) return null;
   return (

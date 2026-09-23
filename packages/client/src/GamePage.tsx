@@ -9,7 +9,6 @@ import EncounterLoadingOverlay from './EncounterLoadingOverlay.tsx';
 import DungeonLoadingOverlay from './DungeonLoadingOverlay.tsx';
 import StoryboardOverlay from './StoryboardOverlay.tsx';
 import PartyMemberOverlay from './PartyMemberOverlay.tsx';
-import { useDungeonReady } from './canvas/useDungeonReady.ts';
 import CommandPalette from './CommandPalette.tsx';
 import CharacterSheetOverlay from './CharacterSheetOverlay.tsx';
 import JournalOverlay from './JournalOverlay.tsx';
@@ -105,6 +104,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [groupsOpen, setGroupsOpen] = useState(false);
   // The session ending closes the modal with it — every group change is refused outside one.
   useEffect(() => { if (!sessionActive) setGroupsOpen(false); }, [sessionActive]);
+  // A solo party has nothing to split: no button, no modal, no shortcut.
+  const canSplitParty = Object.keys(partyCharacterIds).length > 1;
   const [acquisitions, setAcquisitions] = useState<Character['inventory']>([]);
   const [itemQtyOverrides, setItemQtyOverrides] = useState<Record<string, number>>({});
   const [resourceOverrides, setResourceOverrides] = useState<Record<string, number> | null>(null);
@@ -137,12 +138,18 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const dungeonRef = useRef<Dungeon | null>(null);
   useEffect(() => { dungeonRef.current = dungeon; }, [dungeon]);
   const [dungeonGenerating, setDungeonGenerating] = useState(false);
-  const [encounterGenerating, setEncounterGenerating] = useState(false);
-  const dungeonReady = useDungeonReady(dungeon ?? undefined, dungeonGenerating);
-  // Either generation in flight blocks this player's input entirely — see the loading overlays.
-  // The overlay itself covers every pointer surface (z-index), but a focused text input still
-  // takes keystrokes through it, so chat is disabled explicitly rather than merely covered.
-  const generationLocked = dungeonGenerating || encounterGenerating;
+  // The map-loading screen's own lifetime: raised the moment a new map is announced or delivered,
+  // lowered only when Canvas reports the scene fully loaded and drawn (vtt:scene:ready). NOT
+  // derived from `dungeon` being set — the map object arrives long before its textures, props and
+  // creature art do, which is what used to drop this screen over a blank floor.
+  const [mapLoading, setMapLoading] = useState(false);
+  // Mirrors EncounterLoadingOverlay's own visibility (it owns the encounter:generating →
+  // scene-ready sequence) rather than re-deriving it here.
+  const [combatLoading, setCombatLoading] = useState(false);
+  // Either loading screen blocks this player's input entirely. The overlay itself covers every
+  // pointer surface (z-index), but a focused text input still takes keystrokes through it, so chat
+  // is disabled explicitly rather than merely covered.
+  const generationLocked = mapLoading || combatLoading;
   const [questLogOpen, setQuestLogOpen] = useState(false);
   const [quests, setQuests] = useState<Quest[]>([]);
   // Set once the dungeon's whole questChain resolves (quest:update's `final` flag) — the full
@@ -206,6 +213,10 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   }, []);
 
   useEffect(() => { loadRuntimeTilesets(); }, []);
+
+  // The single exit from the map loading screen: Canvas has drawn the scene with every texture,
+  // token, portrait and prop sprite in place.
+  useEffect(() => on('vtt:scene:ready', ({ ready }) => { if (ready) setMapLoading(false); }), []);
 
   useEffect(() => {
     const derivedMax = (HIT_DICE[character.class] ?? 8) + Math.floor((character.stats.con - 10) / 2);
@@ -500,9 +511,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('token:moved', (pos: TokenPosition) => {
       setTokenPositions(prev => ({ ...prev, [pos.tokenId]: { gx: pos.gx, gy: pos.gy } }));
     });
-    socket.on('encounter:generating', () => { setEncounterGenerating(true); dispatch('vtt:encounter:generating', {}); });
-    socket.on('encounter:ready', enemies => { setEncounterGenerating(false); setEncounter(enemies); dispatch('vtt:encounter:ready', { enemies }); });
-    socket.on('encounter:failed', () => { setEncounterGenerating(false); dispatch('vtt:encounter:failed', {}); });
+    socket.on('encounter:generating', () => dispatch('vtt:encounter:generating', {}));
+    socket.on('encounter:ready', enemies => { setEncounter(enemies); dispatch('vtt:encounter:ready', { enemies }); });
+    socket.on('encounter:failed', () => dispatch('vtt:encounter:failed', {}));
     socket.on('session:recap', ({ text, senderName, checkRequests, splitId, trackIds }) => {
       dispatch('vtt:chat:message-received', { text: stripDmTags(text), senderName, timestamp: Date.now(), variant: 'recap', checkRequests, splitId, trackIds });
     });
@@ -517,12 +528,16 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('combat:alert:pause:end', () => dispatch('vtt:combat:alert:pause:end', {}));
     socket.on('combat:log', data => dispatch('vtt:combat:log', { kind: 'text', ...data }));
     socket.on('combat:roll', data => dispatch('vtt:combat:log', { kind: 'roll', timestamp: Date.now(), ...data }));
-    socket.on('dungeon:generating', () => setDungeonGenerating(true));
+    socket.on('dungeon:generating', () => { setDungeonGenerating(true); setMapLoading(true); });
     // Generation threw server-side — dungeon:loaded is never coming, so drop the loading screen
     // (and the input lockout with it) instead of leaving the party stuck behind it.
-    socket.on('dungeon:failed', () => setDungeonGenerating(false));
+    socket.on('dungeon:failed', () => { setDungeonGenerating(false); setMapLoading(false); });
     socket.on('dungeon:loaded', dungeon => {
       setDungeonGenerating(false);
+      // Only a different map raises the screen — dungeon:loaded is also the rebroadcast channel for
+      // a door opening or a room being marked visited, and those must not flash a loading screen
+      // over a map that's been on the table for an hour.
+      if (dungeonRef.current?.id !== dungeon.id) setMapLoading(true);
       // A different map entirely (this group walked into a dungeon or a combat arena, or out of
       // one) — drop the old map's tokens instead of merging, or its party lingers as ghosts on the
       // new floor. Compared against the ref, never inside the setDungeon updater: React runs
@@ -534,7 +549,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       dispatch('vtt:dungeon:loaded', dungeon);
       loadRuntimeTilesets();
     });
-    socket.on('dungeon:cleared', () => { dungeonRef.current = null; setDungeon(null); setTokenPositions({}); });
+    socket.on('dungeon:cleared', () => { dungeonRef.current = null; setDungeon(null); setTokenPositions({}); setMapLoading(false); });
     socket.on('quest:update', ({ quests: q, act: a, final }) => {
       setQuests(q);
       setAct(a);
@@ -761,14 +776,14 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       } else if (e.key === 'g' && now - lastSpaceRef.current < DOUBLE_TAP_MS) {
         lastSpaceRef.current = 0;
         // Same gate as the HUD button — splitting and rejoining only happens in play.
-        if (sessionActive) setGroupsOpen(o => !o);
+        if (sessionActive && canSplitParty) setGroupsOpen(o => !o);
       } else if (e.key === 'D' && e.shiftKey && debugMode) {
         setDevModalOpen(o => !o);
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [journalOpen, storyboardQueue, sessionActive, generationLocked, debugMode]);
+  }, [journalOpen, storyboardQueue, sessionActive, canSplitParty, generationLocked, debugMode]);
 
   const paletteItems = [
     {
@@ -885,10 +900,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         selfTempHp={playerHpState?.temp}
         onSelectMember={setViewingMemberId}
         selfTrack={partyGroups ? trackOf(partyGroups, character.name) : undefined}
-        groupsEnabled={sessionActive}
-        onOpenGroups={() => setGroupsOpen(open => !open)}
+        groups={canSplitParty ? { enabled: sessionActive, onOpen: () => setGroupsOpen(open => !open) } : undefined}
       />
-      {groupsOpen && partyGroups && (
+      {groupsOpen && partyGroups && canSplitParty && (
         <PartyGroupsModal
           groups={partyGroups}
           roster={Object.keys(partyCharacterIds)}
@@ -904,11 +918,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         />
       )}
       <CombatDock character={liveCharacter} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} activeBuffs={activeBuffs} elevationFt={elevations[character.id] ?? 0} connectedAllies={connected} allyCharacterIds={partyCharacterIds} />
-      <EncounterLoadingOverlay />
-      {/* dungeonGenerating on its own matters: the party is in the open world when the DM announces
-          a dungeon, so `dungeon` is still null for the whole generation. Gating on `!!dungeon`
-          alone meant the screen only ever appeared for an already-delivered map's textures. */}
-      <DungeonLoadingOverlay visible={dungeonGenerating || (!!dungeon && !dungeonReady)} generating={dungeonGenerating} />
+      <EncounterLoadingOverlay onActiveChange={setCombatLoading} />
+      <DungeonLoadingOverlay visible={mapLoading} generating={dungeonGenerating} />
       {storyboardQueue && <StoryboardOverlay queue={storyboardQueue} onDone={() => setStoryboardQueue(null)} skippable={false} />}
       <PartyMemberOverlay characterId={viewingMemberId} campaignId={character.campaignId} onClose={() => setViewingMemberId(null)} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} header={<span className="palette-clock">{formatWorldTime(worldTimeSecs)}</span>} />

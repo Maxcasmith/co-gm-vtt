@@ -13,11 +13,18 @@ export const FLOOR_FALLBACK_COLOR = '#4b5768';
 
 const TEXTURE_MAP: Record<string, Record<string, string[]>> = {};
 
+// >0 while a manifest fetch is in flight. Readiness below reports false for the whole window:
+// a dungeon whose freshly-generated tileset isn't in TEXTURE_MAP yet has *no* textures to wait on
+// (texturesFor returns []), so without this it answers "ready" instantly and the loading screen
+// comes down over a map that then paints its floors in as the manifest and its images arrive.
+let manifestPending = 0;
+
 // All tilesets are generated server-side (see api/dungeon/tilesets.ts) — nothing is bundled with
 // the client build. Fetched once at runtime; texturesFor() below returns [] for anything not in
 // the manifest, and callers fall back to FLOOR_FALLBACK_COLOR. Manifest keys are already
 // slugifyTheme'd server-side (that's the folder name), so this re-slug is just defensive.
 export async function loadRuntimeTilesets(): Promise<void> {
+  manifestPending++;
   try {
     const res = await fetch(`${API}/api/tilesets/manifest`);
     if (!res.ok) return;
@@ -32,6 +39,8 @@ export async function loadRuntimeTilesets(): Promise<void> {
   } catch {
     // best-effort — a failed fetch just means generated themes stay unavailable this session,
     // texturesFor() already returns [] for anything missing.
+  } finally {
+    manifestPending--;
   }
 }
 
@@ -65,8 +74,9 @@ export function packForMaterial(dungeon: Dungeon, material: string | undefined):
 // True once every floor texture this dungeon's rooms reference has finished decoding (or the
 // dungeon has none to load, e.g. no matching tileset — that room just paints
 // FLOOR_FALLBACK_COLOR). Also kicks off loading for anything not yet requested, same as
-// groundCache's own texturesFor/getImage calls — see canvas/useDungeonReady.ts, the only caller.
+// groundCache's own texturesFor/getImage calls — see canvas/useSceneReady.ts, the only caller.
 export function dungeonTexturesReady(dungeon: Dungeon): boolean {
+  if (manifestPending) return false;
   let ready = true;
   for (const room of dungeon.rooms) {
     const variants = texturesFor(packForMaterial(dungeon, room.material), room.material, dungeon.structureType);

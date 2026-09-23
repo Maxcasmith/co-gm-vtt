@@ -15,13 +15,16 @@ export function registerGroupHandlers(ctx: JoinContext): void {
   void getPartyGroups(campaignId).then(groups => socket.emit('groups:update', groups));
 
   // Splitting and rejoining is something the party does in play — outside a running session there's
-  // no narration, no DM turns and nothing to keep apart, so every group change is refused.
+  // no narration, no DM turns and nothing to keep apart, so every group change is refused. A solo
+  // party has nothing to split either (the client hides the control entirely); refused here too,
+  // so the rule doesn't live only in the UI.
   const sessionRunning = () => sessionState.get(campaignId) === true;
+  const canSplit = async () => sessionRunning() && (await rosterNames(campaignId)).length > 1;
 
   // Only ever moves the requester's own character — the payload carries no "who".
   socket.on('groups:move', ({ track }) => {
     void (async () => {
-      if (!sessionRunning()) return;
+      if (!(await canSplit())) return;
       // Changing track mid-fight would pull a combatant's chat out from under the fight they're in.
       if (fightOf(campaignId, charId)) return;
       const groups = await getPartyGroups(campaignId);
@@ -49,7 +52,7 @@ export function registerGroupHandlers(ctx: JoinContext): void {
 
   socket.on('groups:track:add', () => {
     void (async () => {
-      if (!sessionRunning()) return;
+      if (!(await canSplit())) return;
       const groups = await getPartyGroups(campaignId);
       if (!addTrack(groups, locationOf(campaignId, player))) return;
       await savePartyGroups(campaignId, groups);
@@ -59,7 +62,7 @@ export function registerGroupHandlers(ctx: JoinContext): void {
 
   socket.on('groups:track:remove', ({ track }) => {
     void (async () => {
-      if (!sessionRunning()) return;
+      if (!(await canSplit())) return;
       const groups = await getPartyGroups(campaignId);
       if (!removeTrack(groups, track, await rosterNames(campaignId))) return;
       await savePartyGroups(campaignId, groups);

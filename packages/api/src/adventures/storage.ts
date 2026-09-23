@@ -144,7 +144,20 @@ export async function saveCampaignAsAdventure(campaignSlug: string, adventureSlu
 export async function loadSavedAdventureMeta(slug: string): Promise<SavedAdventureMeta | null> {
   try {
     const raw = await getTextStore().get(path.join(adventureDir(slug), 'adventure.json'));
-    return raw === null ? null : (JSON.parse(raw) as SavedAdventureMeta);
+    if (raw === null) return null;
+    const meta = JSON.parse(raw) as SavedAdventureMeta;
+    // Only dungeon-crawls generate a scenarioSynopsis (see routes/campaigns.ts). Campaigns/one-shots
+    // already have an equivalent blurb in worldMeta.concept.description — same fallback HomePage
+    // and GameLobbyPage use client-side (c.scenarioSynopsis ?? c.concept?.description) — applied
+    // here, read-time, so saves made before this existed (e.g. vesper-hollow) pick it up too.
+    if (meta.scenarioSynopsis === undefined) {
+      try {
+        const worldRaw = await getTextStore().get(path.join(adventureDir(slug), 'world.json'));
+        const description = worldRaw === null ? undefined : (JSON.parse(worldRaw) as WorldMeta).concept?.description;
+        if (description) meta.scenarioSynopsis = description;
+      } catch (err) { logError('adventures/storage:loadSavedAdventureMeta:conceptFallback', err); }
+    }
+    return meta;
   } catch (err) {
     logError('adventures/storage:loadSavedAdventureMeta', err);
     return null;

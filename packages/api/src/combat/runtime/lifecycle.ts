@@ -451,7 +451,14 @@ export async function rollPlayerInitiatives(cid: string, encounter: Encounter, c
  * mid-fight by the chain rule, or merged in from another fight. */
 export function syncFight(encounter: Encounter, audience = toFight(encounter)): void {
   audience.emit('combat:state', true);
-  audience.emit('encounter:ready', encounter.enemies.filter(p => p.creature).map(p => p.creature!.toStatBlock()));
+  // Only with a roster to send. An open-world fight is synced the moment it opens (effects.ts),
+  // before its enemies have been generated at all — and encounter:ready is what the client's
+  // loading screen comes down on, so an empty one here dismissed it seconds before the enemies it
+  // was covering for even started generating. The real one follows from
+  // generateAndBroadcastEnemies; a reconnect mid-generation is covered by connection.ts's
+  // isFightGenerating branch.
+  const roster = encounter.enemies.filter(p => p.creature).map(p => p.creature!.toStatBlock());
+  if (roster.length) audience.emit('encounter:ready', roster);
   if (!encounter.turnOrder.length) return;
   audience.emit('combat:turn:order', encounter.turnOrder.map(p => p.toTurnOrderEntry()));
   const actor = encounter.currentRound ? encounter.currentActor : undefined;

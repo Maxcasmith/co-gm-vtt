@@ -11,6 +11,7 @@ import { useVision } from './canvas/useVision.ts';
 import { useCombatEffects } from './canvas/useCombatEffects.ts';
 import { useCanvasPointerControls } from './canvas/useCanvasPointerControls.ts';
 import { drawScene, type DrawSceneParams } from './canvas/drawScene.ts';
+import { useSceneReady } from './canvas/useSceneReady.ts';
 import type { GroundCache } from './canvas/groundCache.ts';
 import './app.css';
 
@@ -49,6 +50,12 @@ export default function Canvas({ player, characterId, character, connected, show
   // Keyed by spriteSrc URL, same reuse-by-shared-URL convention as enemyImgCache.
   const propImgCache   = useRef<Record<string, HTMLImageElement>>({});
   const [tokenCacheVer, setTokenCacheVer] = useState(0);
+  // Images this scene still has in flight, across all three caches above. Shared rather than one
+  // counter per loader because the loading overlays need a single "nothing left to wait on" answer
+  // (see useSceneReady) — a per-loader count can hit zero while another is still fetching.
+  // Counts an image as settled on error too: a portrait whose art hasn't been generated yet 404s,
+  // and waiting on it would hold the loading screen forever.
+  const pendingAssetsRef = useRef(0);
 
   // Per-cell floor texture variant, picked once and cached so it doesn't re-randomize (flicker)
   // every animation frame. Cleared when a different dungeon loads.
@@ -112,15 +119,22 @@ export default function Canvas({ player, characterId, character, connected, show
   useEffect(() => on('vtt:combat:state', ({ active }) => { if (!active) isMyTurnRef.current = true; }), []);
   useEffect(() => on('vtt:combat:turn', ({ actorName }) => { isMyTurnRef.current = actorName === playerRef.current; }), []);
 
+  // One redraw when the last in-flight image lands, not one per image — a burst of portraits
+  // arriving together would otherwise each force their own full drawScene.
+  function settleAsset() {
+    pendingAssetsRef.current--;
+    if (pendingAssetsRef.current === 0) setTokenCacheVer(v => v + 1);
+  }
+
   useEffect(() => {
     if (!tokenUrls) return;
-    let pending = Object.keys(tokenUrls).length;
-    if (pending === 0) return;
-    Object.entries(tokenUrls).forEach(([name, url]) => {
-      if (tokenImgCache.current[name]) { pending--; return; }
+    const wanted = Object.entries(tokenUrls).filter(([name]) => !tokenImgCache.current[name]);
+    if (!wanted.length) return;
+    pendingAssetsRef.current += wanted.length;
+    wanted.forEach(([name, url]) => {
       const img = new Image();
-      img.onload = () => { tokenImgCache.current[name] = img; pending--; if (pending === 0) setTokenCacheVer(v => v + 1); };
-      img.onerror = () => { pending--; };
+      img.onload = () => { tokenImgCache.current[name] = img; settleAsset(); };
+      img.onerror = settleAsset;
       img.src = url;
     });
   }, [tokenUrls]);
@@ -132,14 +146,14 @@ export default function Canvas({ player, characterId, character, connected, show
     const explorationUrls = (dungeon?.entities ?? [])
       .filter(e => e.type === 'creature')
       .map(e => e.statBlock?.portraitSrc);
-    const urls = [...new Set([...(encounter ?? []).map(e => e.portraitSrc), ...explorationUrls].filter((u): u is string => !!u))];
-    let pending = urls.length;
-    if (pending === 0) return;
+    const urls = [...new Set([...(encounter ?? []).map(e => e.portraitSrc), ...explorationUrls].filter((u): u is string => !!u))]
+      .filter(url => !enemyImgCache.current[url]);
+    if (!urls.length) return;
+    pendingAssetsRef.current += urls.length;
     urls.forEach(url => {
-      if (enemyImgCache.current[url]) { pending--; return; }
       const img = new Image();
-      img.onload = () => { enemyImgCache.current[url] = img; pending--; if (pending === 0) setTokenCacheVer(v => v + 1); };
-      img.onerror = () => { pending--; }; // no portrait yet (fire-and-forget hasn't finished) — drawToken's img-less branch covers this
+      img.onload = () => { enemyImgCache.current[url] = img; settleAsset(); };
+      img.onerror = settleAsset; // no portrait yet (fire-and-forget hasn't finished) — drawToken's img-less branch covers this
       img.src = `${API}${url}`;
     });
   }, [encounter, dungeon?.entities]);
@@ -147,17 +161,22 @@ export default function Canvas({ player, characterId, character, connected, show
   useEffect(() => {
     // Decorative props only — Tenser's Floating Disk also uses type 'object' but always sets
     // followsId and never has a spriteSrc, so it's naturally excluded by the filter below.
-    const urls = [...new Set((dungeon?.entities ?? []).map(e => e.spriteSrc).filter((u): u is string => !!u))];
-    let pending = urls.length;
-    if (pending === 0) return;
+    const urls = [...new Set((dungeon?.entities ?? []).map(e => e.spriteSrc).filter((u): u is string => !!u))]
+      .filter(url => !propImgCache.current[url]);
+    if (!urls.length) return;
+    pendingAssetsRef.current += urls.length;
     urls.forEach(url => {
-      if (propImgCache.current[url]) { pending--; return; }
       const img = new Image();
-      img.onload = () => { propImgCache.current[url] = img; pending--; if (pending === 0) setTokenCacheVer(v => v + 1); };
-      img.onerror = () => { pending--; }; // no sprite yet (fire-and-forget hasn't finished) — drawScene's img-less fallback covers this
+      img.onload = () => { propImgCache.current[url] = img; settleAsset(); };
+      img.onerror = settleAsset; // no sprite yet (fire-and-forget hasn't finished) — drawScene's img-less fallback covers this
       img.src = `${API}${url}`;
     });
   }, [dungeon?.entities]);
+
+  // Tells the loading overlays (GamePage, EncounterLoadingOverlay) when the map they're covering is
+  // fully loaded and drawn. Declared after the three loaders above, so by the time it runs they
+  // have already counted whatever the new scene brought with it.
+  useSceneReady(dungeon, pendingAssetsRef);
 
   // Subscribe to targeting events (registered once)
   useEffect(() => {
