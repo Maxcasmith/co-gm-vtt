@@ -95,7 +95,7 @@ export class RetaliationOfferHook extends Hook<'afterDamage'> {
 
     // Re-check after the await — the player spent the whole window deciding.
     if (!fightOf(cid, this.ownerId) || !participant.hasResource('reaction') || attacker.isDead()) return;
-    if (!(await trySpendSpellSlot(cid, this.ownerId, char, spell.level))) return;
+    if (!(await trySpendSpellSlot(cid, this.ownerId, char, spell.level, spell.name))) return;
     participant.trySpend('reaction');
     emitResources(cid, participant);
 

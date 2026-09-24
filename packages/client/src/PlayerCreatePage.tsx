@@ -14,7 +14,7 @@ import BackstoryTab from './character-creation/BackstoryTab.tsx';
 import SpellsTab from './character-creation/SpellsTab.tsx';
 import ShopTab from './character-creation/ShopTab.tsx';
 import FinishedTab from './character-creation/FinishedTab.tsx';
-import { BACKGROUND_SKILLS, CLASS_FEATURES } from './character-creation/srd.ts';
+import { BACKGROUND_SKILLS, BACKGROUND_FEAT, CLASS_FEATURES, FEAT_SPELL_GRANTS, speciesSpellGrant } from './character-creation/srd.ts';
 import './app.css';
 import './styles/create-campaign.css';
 
@@ -38,8 +38,14 @@ function genId(): string {
 function CreatePageInner({ campaignId, campaignName, isCampaign, attributeMethods }: { campaignId: string; campaignName: string; isCampaign: boolean; attributeMethods: typeof DEFAULT_HOUSE_RULES.attributeMethods }) {
   const c = useCharacter();
   const hasClassFeatures = c.characterClass ? hasClassFeaturesStep(c.characterClass) : false;
+  // A non-caster class still gets the Spells step when an Origin feat grants spells (Magic
+  // Initiate via Background, or a Human's Versatile pick) or its lineage grants cantrips —
+  // SpellsTab handles feat-only and lineage-only pools.
+  const hasFeatSpells = !!speciesSpellGrant(c.species, c.subspecies) ||
+    [c.background ? BACKGROUND_FEAT[c.background] : undefined, c.species === 'Human' ? c.speciesOriginFeat : undefined]
+      .some(name => !!name && name in FEAT_SPELL_GRANTS);
   const hasSpellcasting = c.characterClass
-    ? (CLASS_FEATURES[c.characterClass] ?? []).some(f => f.name === 'Spellcasting' || f.name === 'Pact Magic')
+    ? hasFeatSpells || (CLASS_FEATURES[c.characterClass] ?? []).some(f => f.name === 'Spellcasting' || f.name === 'Pact Magic')
     : false;
   const backDialogRef = useRef<HTMLDialogElement>(null);
   const successDialogRef = useRef<HTMLDialogElement>(null);

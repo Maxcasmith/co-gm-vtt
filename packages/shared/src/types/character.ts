@@ -86,7 +86,7 @@ export interface Character {
   /** Gained from Musician's performance (or a DM award) — spend it to give a just-rolled d20 Test Advantage, same mechanical effect as rerolling and taking the higher result. Granting always overwrites, never stacks (RAW). */
   heroicInspiration?: boolean;
   spells?: string[]; // learned spell names
-  spellSources?: Record<string, string>; // spell name → source label (class name or feat/species name), for display only
+  spellSources?: Record<string, string>; // spell name → source label (class name or feat/species name), also picks which Magic Initiate charge a cast spends (magicInitiateKeyForSpell)
   /** Origin feat picked at creation (e.g. 'Magic Initiate (Cleric)') — drives FEAT_SPELL_GRANTS below. */
   speciesOriginFeat?: string;
   /** Fighting Style feature pick at creation (Fighter's level 1 choice) — e.g. 'Archery', 'Dueling'. */
@@ -651,6 +651,18 @@ export function magicInitiateResourceKey(character: Pick<Character, "background"
   if (hasOriginFeat(character, "Magic Initiate (Druid)")) return "magicInitiateDruidSpell";
   if (hasOriginFeat(character, "Magic Initiate (Wizard)")) return "magicInitiateWizardSpell";
   return undefined;
+}
+
+/**
+ * Which Magic Initiate charge a cast of `spellName` draws on, if it is this character's Magic
+ * Initiate spell. Keyed off the spell's recorded source so a Human with two Magic Initiate feats
+ * spends the right one. Saves predating spellSources fall back to "a non-caster's only 1st-level
+ * spell must be its Magic Initiate one" — a caster's can't be told apart, so it just uses slots.
+ */
+export function magicInitiateKeyForSpell(character: Character, spellName: string): string | undefined {
+  const source = character.spellSources?.[spellName];
+  if (source) return source in FEAT_SPELL_GRANTS ? Object.values(RESOURCE_DEFS).find(d => d.featGate === source)?.key : undefined;
+  return spellSlotsForCharacter(character) === 0 ? magicInitiateResourceKey(character) : undefined;
 }
 
 function ownsResource(character: Character, def: ResourceDef): boolean {

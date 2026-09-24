@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Spell } from 'shared';
 import { useCharacter } from './CharacterContext.tsx';
-import { CLASS_FEATURES, FEAT_SPELL_GRANTS, BACKGROUND_FEAT, STAT_NAMES, BACKGROUND_ASI, CLASS_SKILLS, CLASS_SPELL_ALLOWANCE, SPECIES_SUBSPECIES } from './srd.ts';
+import { CLASS_FEATURES, STAT_NAMES, BACKGROUND_ASI, CLASS_SKILLS, CLASS_SPELL_ALLOWANCE, SPECIES_SUBSPECIES } from './srd.ts';
 
 const API = `http://${window.location.hostname}:3001`;
 
@@ -15,21 +15,16 @@ export default function FinishedTab({ error }: Props) {
   const [spellDetails, setSpellDetails] = useState<Spell[]>([]);
 
   const learnedNames = Object.keys(c.learnedSpells);
-  const bgFeatName = c.background ? BACKGROUND_FEAT[c.background] : undefined;
-  const featSourceNames = [...new Set([bgFeatName, c.species === 'Human' ? c.speciesOriginFeat : undefined])]
-    .filter((name): name is string => !!name && name in FEAT_SPELL_GRANTS);
-  const featForClasses = featSourceNames.map(name => FEAT_SPELL_GRANTS[name]!.forClass);
 
   useEffect(() => {
     if (!c.characterClass || learnedNames.length === 0) { setSpellDetails([]); return; }
-    const classList = [c.characterClass, ...featForClasses];
-    const params = classList.map(cl => `class=${encodeURIComponent(cl)}`).join('&');
-    fetch(`${API}/api/spells?${params}`)
+    // Not class-filtered: a lineage cantrip (Tiefling's Thaumaturgy) can sit on any class list.
+    fetch(`${API}/api/spells?level=0&level=1`)
       .then(r => r.json())
       .then((data: Spell[]) => setSpellDetails(data.filter(s => learnedNames.includes(s.name))))
       .catch(() => setSpellDetails([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [c.characterClass, featSourceNames.join(','), learnedNames.join(',')]);
+  }, [c.characterClass, learnedNames.join(',')]);
 
   type Tab = typeof c.activeTab;
   const missing: { text: string; tab: Tab }[] = [];
@@ -44,7 +39,7 @@ export default function FinishedTab({ error }: Props) {
   } else if (c.attributeMethod === 'standardArray' && c.standardArrayPool.length > 0) {
     missing.push({ text: `${c.standardArrayPool.length} ability score(s) not assigned`, tab: 'attributes' });
   }
-  if (c.species === 'Human' && !c.speciesOriginFeat) missing.push({ text: 'Versatile origin feat', tab: 'attributes' });
+  if (c.species === 'Human' && !c.speciesOriginFeat) missing.push({ text: 'Versatile origin feat', tab: 'species' });
   if (!c.background) missing.push({ text: 'Background', tab: 'attributes' });
   else {
     const asiLeft = 3 - (BACKGROUND_ASI[c.background] ?? []).reduce((n, st) => n + (c.backgroundAsi[st] ?? 0), 0);

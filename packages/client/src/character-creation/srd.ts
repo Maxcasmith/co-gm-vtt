@@ -286,37 +286,22 @@ export const SPECIES_FEATURES: Record<string, SpeciesFeature[]> = {
     {
       name: "Drow Magic",
       description:
-        "You know the Dancing Lights cantrip. Starting at 3rd level you can cast Faerie Fire once per Long Rest. At 5th level you can also cast Darkness once per Long Rest. Charisma is your spellcasting ability.",
-    },
-    {
-      name: "Drow Weapon Training",
-      description:
-        "You have proficiency with rapiers, shortswords, and hand crossbows.",
+        "You know the Dancing Lights cantrip. At 3rd level you learn Faerie Fire, and at 5th level Darkness. Each can be cast once per Long Rest without a spell slot, or with any spell slots you have.",
     },
   ],
   "High Elf": [
     {
-      name: "Cantrip",
+      name: "High Elf Magic",
       description:
-        "You know one cantrip of your choice from the Wizard spell list. Intelligence is your spellcasting ability for it.",
-    },
-    {
-      name: "Elf Weapon Training",
-      description:
-        "You have proficiency with longswords, shortswords, shortbows, and longbows.",
+        "You know the Prestidigitation cantrip. Whenever you finish a Long Rest, you can replace it with a different Wizard cantrip. At 3rd level you learn Detect Magic, and at 5th level Misty Step. Each can be cast once per Long Rest without a spell slot, or with any spell slots you have.",
     },
   ],
   "Wood Elf": [
     { name: "Fleet of Foot", description: "Your Speed increases to 35 feet." },
     {
-      name: "Mask of the Wild",
+      name: "Wood Elf Magic",
       description:
-        "You can attempt to Hide even when only lightly obscured by foliage, heavy rain, falling snow, mist, or other natural phenomena.",
-    },
-    {
-      name: "Elf Weapon Training",
-      description:
-        "You have proficiency with longswords, shortswords, shortbows, and longbows.",
+        "You know the Druidcraft cantrip. At 3rd level you learn Longstrider, and at 5th level Pass without Trace. Each can be cast once per Long Rest without a spell slot, or with any spell slots you have.",
     },
   ],
   Gnome: [
@@ -328,31 +313,21 @@ export const SPECIES_FEATURES: Record<string, SpeciesFeature[]> = {
     {
       name: "Gnomish Cunning",
       description:
-        "You have Advantage on Intelligence, Wisdom, and Charisma saving throws against magic.",
+        "You have Advantage on Intelligence, Wisdom, and Charisma saving throws.",
     },
   ],
   "Forest Gnome": [
     {
-      name: "Natural Illusionist",
+      name: "Forest Gnome Magic",
       description:
-        "You know the Minor Illusion cantrip. Intelligence is your spellcasting ability for it.",
-    },
-    {
-      name: "Speak with Small Beasts",
-      description:
-        "Through sounds and gestures you can communicate simple ideas to Small or smaller beasts.",
+        "You know the Minor Illusion cantrip. You always have Speak with Animals prepared, and can cast it without a spell slot a number of times equal to your Proficiency Bonus per Long Rest.",
     },
   ],
   "Rock Gnome": [
     {
-      name: "Artificer's Lore",
+      name: "Rock Gnome Magic",
       description:
-        "Whenever you make an Intelligence (History) check related to magic items, alchemical objects, or technological devices, you can add twice your Proficiency Bonus.",
-    },
-    {
-      name: "Tinker",
-      description:
-        "You have proficiency with Artisan's Tools (Tinker's Tools). Using those tools you can spend 1 hour and 10 GP worth of materials to construct a Tiny clockwork device.",
+        "You know the Mending and Prestidigitation cantrips. You can spend 10 minutes casting Prestidigitation to create a Tiny clockwork device (AC 5, 1 HP) that produces one of Prestidigitation's effects when activated. You can have up to three at a time, and each falls apart after 8 hours.",
     },
   ],
   Goliath: [
@@ -445,31 +420,58 @@ export const SPECIES_FEATURES: Record<string, SpeciesFeature[]> = {
     {
       name: "Fiendish Legacy",
       description:
-        "You have a supernatural connection to one of three fiendish realms. Choose Abyssal (demonic), Chthonic (devilish), or Infernal (fiendish) to determine your resistance and innate spells.",
+        "You have a supernatural connection to one of three fiendish realms. Choose Abyssal, Chthonic, or Infernal to determine your resistance and innate spells. Each legacy spell can be cast once per Long Rest without a spell slot, or with any spell slots you have.",
+    },
+    {
+      name: "Otherworldly Presence",
+      description: "You know the Thaumaturgy cantrip.",
     },
   ],
   Abyssal: [
     {
-      name: "Abyssal Resilience",
+      name: "Abyssal Legacy",
       description:
-        "You have Resistance to Poison damage, and you know the Poison Spray cantrip. At 3rd level you can cast Ray of Sickness once per Long Rest. At 5th level you can cast Hold Person once per Long Rest. Charisma is your spellcasting ability.",
+        "You have Resistance to Poison damage, and you know the Poison Spray cantrip. At 3rd level you learn Ray of Sickness, and at 5th level Hold Person.",
     },
   ],
   Chthonic: [
     {
-      name: "Chthonic Resilience",
+      name: "Chthonic Legacy",
       description:
-        "You have Resistance to Necrotic damage, and you know the Chill Touch cantrip. At 3rd level you can cast False Life once per Long Rest. At 5th level you can cast Ray of Enfeeblement once per Long Rest. Charisma is your spellcasting ability.",
+        "You have Resistance to Necrotic damage, and you know the Chill Touch cantrip. At 3rd level you learn False Life, and at 5th level Ray of Enfeeblement.",
     },
   ],
   Infernal: [
     {
       name: "Infernal Legacy",
       description:
-        "You have Resistance to Fire damage, and you know the Thaumaturgy cantrip. At 3rd level you can cast Hellish Rebuke once per Long Rest. At 5th level you can cast Darkness once per Long Rest. Charisma is your spellcasting ability.",
+        "You have Resistance to Fire damage, and you know the Fire Bolt cantrip. At 3rd level you learn Hellish Rebuke, and at 5th level Darkness.",
     },
   ],
 };
+
+/**
+ * Cantrips a species/lineage grants (2024 PHB), keyed by lineage when the species has one.
+ * Auto-learned when the lineage is picked (SpeciesTab), under their own `label` pool in the
+ * Spells step. `cantrips` are the defaults; with `forClass` any cantrip from that class list can
+ * replace them (High Elf), otherwise the defaults are the only eligible picks. Tiefling's
+ * Otherworldly Presence (Thaumaturgy) is folded into each legacy.
+ */
+export const SPECIES_SPELL_GRANTS: Record<string, { label: string; cantrips: string[]; forClass?: string }> = {
+  Aasimar:        { label: "Aasimar", cantrips: ["Light"] },
+  "High Elf":     { label: "High Elf (Wizard)", cantrips: ["Prestidigitation"], forClass: "Wizard" },
+  Drow:           { label: "Drow", cantrips: ["Dancing Lights"] },
+  "Wood Elf":     { label: "Wood Elf", cantrips: ["Druidcraft"] },
+  "Forest Gnome": { label: "Forest Gnome", cantrips: ["Minor Illusion"] },
+  "Rock Gnome":   { label: "Rock Gnome", cantrips: ["Mending", "Prestidigitation"] },
+  Abyssal:        { label: "Abyssal Tiefling", cantrips: ["Poison Spray", "Thaumaturgy"] },
+  Chthonic:       { label: "Chthonic Tiefling", cantrips: ["Chill Touch", "Thaumaturgy"] },
+  Infernal:       { label: "Infernal Tiefling", cantrips: ["Fire Bolt", "Thaumaturgy"] },
+};
+
+export function speciesSpellGrant(species: string, subspecies: string) {
+  return SPECIES_SPELL_GRANTS[subspecies] ?? SPECIES_SPELL_GRANTS[species];
+}
 
 // ── Backgrounds ───────────────────────────────────────────────────────────────
 

@@ -859,7 +859,7 @@ export async function resolvePlayerSpellAttack(
       const castCost = free ? 'bonusAction' : (spell.combat?.actionCostOverride ?? actionCostFromCastingTime(spell.castingTime));
       if (castCost && castCost !== 'reaction' && !trySpendAction(cid, casterId, castCost)) return;
 
-      if (!free && !(await trySpendSpellSlot(cid, casterId, char, slotLevel))) {
+      if (!free && !(await trySpendSpellSlot(cid, casterId, char, slotLevel, spell.name))) {
         const sid = playerSocketIds.get(casterId);
         if (sid) io.to(sid).emit('combat:attack:blocked', { reason: 'No spell slots left' });
         return;
@@ -1330,7 +1330,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         }
         const char = await getCharacter(cid, casterId);
         if (!char) return;
-        if (!(await trySpendSpellSlot(cid, casterId, char, slotLevel))) {
+        if (!(await trySpendSpellSlot(cid, casterId, char, slotLevel, spell.name))) {
           const sid = playerSocketIds.get(casterId);
           if (sid) io.to(sid).emit('combat:attack:blocked', { reason: 'No spell slots left' });
           return;
@@ -1349,7 +1349,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       if (spell.combat?.explorationCastable && !fightOf(cid, casterId)) {
         const char = await getCharacter(cid, casterId);
         if (!char) return;
-        if (!(await trySpendSpellSlot(cid, casterId, char, slotLevel))) {
+        if (!(await trySpendSpellSlot(cid, casterId, char, slotLevel, spell.name))) {
           const sid = playerSocketIds.get(casterId);
           if (sid) io.to(sid).emit('combat:attack:blocked', { reason: 'No spell slots left' });
           return;
@@ -1406,7 +1406,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       }
 
       const free = spentFavoredEnemy || alreadySustaining;
-      if (!free && !(await trySpendSpellSlot(cid, casterId, char, slotLevel))) {
+      if (!free && !(await trySpendSpellSlot(cid, casterId, char, slotLevel, spell.name))) {
         const sid = playerSocketIds.get(casterId);
         if (sid) io.to(sid).emit('combat:attack:blocked', { reason: 'No spell slots left' });
         return;

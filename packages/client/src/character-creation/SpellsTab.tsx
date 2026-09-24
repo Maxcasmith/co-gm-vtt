@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import type { Spell } from 'shared';
 import { Button } from '../components/Button/Button.tsx';
 import { useCharacter } from './CharacterContext.tsx';
-import { CLASS_FEATURES, CLASS_SPELL_ALLOWANCE, FEAT_SPELL_GRANTS, BACKGROUND_FEAT } from './srd.ts';
+import { CLASS_FEATURES, CLASS_SPELL_ALLOWANCE, FEAT_SPELL_GRANTS, BACKGROUND_FEAT, speciesSpellGrant } from './srd.ts';
 
 const API = `http://${window.location.hostname}:3001`;
 
@@ -47,11 +47,20 @@ export default function SpellsTab() {
     .filter((name): name is string => !!name && name in FEAT_SPELL_GRANTS);
   const featSources = featSourceNames.map(name => ({ name, grant: FEAT_SPELL_GRANTS[name]! }));
 
-  // A spell only reachable through a feat's class (not also on the character's own class list)
-  // is feat-only — it can never draw from the class pool. Used for the "foreign spell" badge in
-  // the browser; the actual pool a *learned* spell drew from is its recorded source.
+  // Species/lineage cantrips (High Elf, Tiefling, ...) — a third independent pool, labelled by
+  // lineage. Fixed-spell lineages only accept their own defaults; High Elf takes any Wizard cantrip.
+  const lineage = speciesSpellGrant(c.species, c.subspecies);
+  function lineageEligible(spell: Spell): boolean {
+    if (!lineage || spell.level !== 0) return false;
+    return lineage.forClass ? spell.classes.includes(lineage.forClass) : lineage.cantrips.includes(spell.name);
+  }
+
+  // A spell only reachable through a feat's class or a lineage (not also on the character's own
+  // class list) can never draw from the class pool. Used for the "foreign spell" badge in the
+  // browser; the actual pool a *learned* spell drew from is its recorded source.
   function featOnlySource(spell: Spell): string | undefined {
-    return featSources.find(fs => spell.classes.includes(fs.grant.forClass) && !spell.classes.includes(c.characterClass))?.name;
+    if (spell.classes.includes(c.characterClass)) return undefined;
+    return featSources.find(fs => spell.classes.includes(fs.grant.forClass))?.name ?? (lineageEligible(spell) ? lineage!.label : undefined);
   }
 
   // Thaumaturge (Divine Order) and Magician (Primal Order) each know one cantrip beyond the
@@ -70,22 +79,20 @@ export default function SpellsTab() {
   const [search, setSearch]             = useState('');
   const [selected, setSelected]         = useState<Spell | null>(null);
 
-  // Fetch spells for this class when the class is known
+  // Character creation is always level 1 — only cantrips and 1st-level spells are learnable. A
+  // lineage's fixed cantrips can sit on any class list, so fetch by level and keep whatever some
+  // pool (class, feat, lineage) could learn.
   useEffect(() => {
     if (!c.characterClass) return;
     setLoading(true);
-
-    // Which classes to fetch: own class + every feat-granted class
-    const classList = [c.characterClass, ...featSources.map(fs => fs.grant.forClass)];
-    const params = classList.map(cl => `class=${encodeURIComponent(cl)}`).join('&');
-
-    fetch(`${API}/api/spells?${params}`)
+    fetch(`${API}/api/spells?level=0&level=1`)
       .then(r => r.json())
-      // character creation is always level 1 — only cantrips and 1st-level spells are learnable
-      .then((data: Spell[]) => setAllSpells(data.filter(s => s.level <= 1)))
+      .then((data: Spell[]) => setAllSpells(data.filter(s =>
+        s.classes.includes(c.characterClass) || featSources.some(fs => s.classes.includes(fs.grant.forClass)) || lineageEligible(s))))
       .catch(() => setAllSpells([]))
       .finally(() => setLoading(false));
-  }, [c.characterClass, featSourceNames.join(',')]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [c.characterClass, featSourceNames.join(','), lineage?.label]);
 
   const schools = useMemo(() => [...new Set(allSpells.map(s => s.school))].sort(), [allSpells]);
 
@@ -113,6 +120,7 @@ export default function SpellsTab() {
   }
   const learnedCantrips     = countBySource(true, c.characterClass);
   const learnedSpellCount   = countBySource(false, c.characterClass);
+  const learnedLineageCantrips = lineage ? countBySource(true, lineage.label) : 0;
 
   // A same-class Magic Initiate merges its spell list with the class's own, so most spells are
   // eligible for either pool. Class slots fill first; once those are full, eligible spells spill
@@ -131,8 +139,12 @@ export default function SpellsTab() {
     })?.name;
   }
 
+  function lineageSlot(spell: Spell): string | undefined {
+    return lineage && lineageEligible(spell) && learnedLineageCantrips < lineage.cantrips.length ? lineage.label : undefined;
+  }
+
   function limitReached(spell: Spell): boolean {
-    return !classSlot(spell) && !featSlotSource(spell);
+    return !classSlot(spell) && !featSlotSource(spell) && !lineageSlot(spell);
   }
 
   function toggleLearn(spell: Spell) {
@@ -141,13 +153,13 @@ export default function SpellsTab() {
       delete next[spell.name];
       c.set('learnedSpells', next);
     } else {
-      const source = classSlot(spell) ? c.characterClass : featSlotSource(spell);
+      const source = classSlot(spell) ? c.characterClass : featSlotSource(spell) ?? lineageSlot(spell);
       if (!source) return;
       c.set('learnedSpells', { ...c.learnedSpells, [spell.name]: source });
     }
   }
 
-  if (!isSpellcaster && featSources.length === 0) {
+  if (!isSpellcaster && featSources.length === 0 && !lineage) {
     return (
       <div className="spells-placeholder">
         <p className="spells-placeholder-title">No Spellcasting</p>
@@ -178,6 +190,7 @@ export default function SpellsTab() {
                   fs.grant.spells > 0   && <span key={`${fs.name}-s`} className={learnedFeatSpells >= fs.grant.spells ? 'spells-count spells-count--full' : 'spells-count'}>{learnedFeatSpells}/{fs.grant.spells} {fs.name} spells</span>,
                 ];
               })}
+              {lineage && <span className={learnedLineageCantrips >= lineage.cantrips.length ? 'spells-count spells-count--full' : 'spells-count'}>{learnedLineageCantrips}/{lineage.cantrips.length} {lineage.label} cantrips</span>}
             </span>
           </div>
           {learnedSet.size === 0 ? (

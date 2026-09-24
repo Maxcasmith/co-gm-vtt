@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Character, Spell } from "shared";
-import { isWeapon, actionCostFromCastingTime, parseRangeFeet, FEAT_SPELL_GRANTS } from "shared";
+import { isWeapon, actionCostFromCastingTime, parseRangeFeet, FEAT_SPELL_GRANTS, magicInitiateKeyForSpell, resourceCurrent } from "shared";
 import { Button } from "../components/Button/Button.tsx";
 import { dispatch } from "../events.ts";
 import { API, ActionCostDot } from "./helpers.tsx";
@@ -60,9 +60,8 @@ export function SpellsTab({
     return spell.combat?.skillOptions;
   }
 
-  // Magic Initiate can grant spells from a different class entirely, so the fetch has to cover
-  // every class list or a feat-only spell would 404 out of the results. A character can have up
-  // to two independent sources: their Background's fixed feat, and (Human only) their own
+  // Magic Initiate can grant spells from a different class entirely. A character can have up to
+  // two independent sources: their Background's fixed feat, and (Human only) their own
   // "Versatile" pick — same dual-source shape as character-creation/SpellsTab.tsx.
   const bgFeatName = BACKGROUND_FEAT[character.background];
   const featSourceNames = [...new Set([bgFeatName, character.species === 'Human' ? character.speciesOriginFeat : undefined])]
@@ -115,9 +114,12 @@ export function SpellsTab({
   }
 
   // Only level-1 slots are tracked today, so a leveled spell is castable only while that
-  // pool has slots left — no higher tier exists yet to upcast into when it's empty.
+  // pool has slots left — no higher tier exists yet to upcast into when it's empty. A Magic
+  // Initiate spell with its once-per-Long-Rest charge unspent needs no slot (trySpendSpellSlot).
   function noSlotFor(spell: Spell): boolean {
-    return spell.level >= 1 && currentSpellSlots1 <= 0 && !isFreeRecast(spell);
+    const miKey = magicInitiateKeyForSpell(character, spell.name);
+    const miCharge = !!miKey && resourceCurrent(character, miKey) > 0;
+    return spell.level >= 1 && currentSpellSlots1 <= 0 && !miCharge && !isFreeRecast(spell);
   }
 
   function handleCast(spell: Spell) {
@@ -182,16 +184,16 @@ export function SpellsTab({
 
   useEffect(() => {
     if (!learnedNames.length) return;
-    const classes = [character.class, ...featSources.map((fs) => fs.grant.forClass)];
-    const params = classes.map((cl) => `class=${encodeURIComponent(cl)}`).join("&");
-    fetch(`${API}/api/spells?${params}`)
+    // Not class-filtered: feat and lineage spells (Tiefling's Thaumaturgy) can come from any class
+    // list, and learnedNames is already the exact set to show.
+    fetch(`${API}/api/spells`)
       .then((r) => r.json())
       .then((all: Spell[]) =>
         setSpells(all.filter((s) => learnedNames.includes(s.name))),
       )
       .catch(() => { });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [character.class, featSourceNames.join(","), learnedNames.join(",")]);
+  }, [learnedNames.join(",")]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return spells;

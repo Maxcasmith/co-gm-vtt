@@ -76,7 +76,7 @@ export class ReactionOfferHook extends Hook<'afterAttackRoll'> {
     // Re-check after the await — the player spent the whole window deciding, and anything could
     // have changed in it (another reaction resolved, the fight ended, the last slot went).
     if (!fightOf(cid, this.ownerId) || !participant.hasResource('reaction')) return;
-    if (!(await trySpendSpellSlot(cid, this.ownerId, char, chosen.spell.level))) return;
+    if (!(await trySpendSpellSlot(cid, this.ownerId, char, chosen.spell.level, chosen.spell.name))) return;
     participant.trySpend('reaction');
     emitResources(cid, participant);
 

@@ -1,5 +1,5 @@
 import type { Character } from 'shared';
-import { spellSlotsForCharacter, hasOriginFeat, trySpendResource, resourceCurrent, magicInitiateResourceKey } from 'shared';
+import { spellSlotsForCharacter, hasOriginFeat, trySpendResource, resourceCurrent, magicInitiateKeyForSpell } from 'shared';
 import { getCharacter, updateCharacter } from '../../storage.ts';
 import { io, campaignRoom, fightOf, playerSocketIds } from '../../state.ts';
 import { rollD20, keptDie } from '../dice.ts';
@@ -64,21 +64,20 @@ export async function trySpendHeroicInspiration(cid: string, characterId: string
 
 // Only level-1 slots are tracked today (no spells-known growth past level 1 exists yet
 // either — see spellSlotsForCharacter). Cantrips (slotLevel 0) and any untracked tier are free.
-export async function trySpendSpellSlot(cid: string, charId: string, char: Character, slotLevel: number): Promise<boolean> {
+export async function trySpendSpellSlot(cid: string, charId: string, char: Character, slotLevel: number, spellName: string): Promise<boolean> {
   if (slotLevel !== 1) return true;
 
-  // A non-caster class (spellSlotsForCharacter 0) has no slot pool of its own to spend from — the
-  // only 1st-level spell it could be casting is Magic Initiate's freebie, which comes out of its
-  // own once-per-Long-Rest pool instead (see magicInitiateResourceKey/FEAT_SPELL_GRANTS).
-  if (spellSlotsForCharacter(char) === 0) {
-    const key = magicInitiateResourceKey(char);
-    if (!key) return false;
-    const nextResourceUses = trySpendResource(char, key);
-    if (!nextResourceUses) return false;
+  // Magic Initiate's spell spends its own once-per-Long-Rest charge before any class slot; once
+  // that's gone it falls through to slots like any other known spell (2024 PHB). A non-caster
+  // (spellSlotsForCharacter 0) has no slots to fall through to, so it's blocked instead.
+  const miKey = magicInitiateKeyForSpell(char, spellName);
+  const nextResourceUses = miKey ? trySpendResource(char, miKey) : undefined;
+  if (nextResourceUses) {
     await updateCharacter(cid, charId, c => ({ ...c, resourceUses: nextResourceUses }));
     io.to(campaignRoom(cid)).emit('combat:player:featureResources', { characterId: charId, resourceUses: nextResourceUses });
     return true;
   }
+  if (spellSlotsForCharacter(char) === 0) return false;
 
   const current = char.currentSpellSlots1 ?? spellSlotsForCharacter(char);
   if (current <= 0) return false;

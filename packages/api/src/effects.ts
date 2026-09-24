@@ -467,7 +467,7 @@ export async function resolveSpellCast(cid: string, playerName: string, spellNam
   if (!char) { console.warn(`[spell_cast] no character named "${playerName}"`); return { ok: false }; }
   const spell = findSpell(spellName);
   const slotLevel = spell?.level ?? 0; // unknown spell name — treat as free rather than blocking a real cast over a lookup miss
-  const spent = slotLevel === 0 ? true : await trySpendSpellSlot(cid, char.id, char, slotLevel);
+  const spent = slotLevel === 0 ? true : await trySpendSpellSlot(cid, char.id, char, slotLevel, spell?.name ?? spellName);
   if (!spent) {
     const sid = playerSocketIds.get(char.id);
     // Private to the caster, not persisted — matches checkTrapAt's alert-only message, the

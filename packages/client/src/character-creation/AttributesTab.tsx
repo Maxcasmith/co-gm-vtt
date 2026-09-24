@@ -5,7 +5,7 @@ import { useCharacter, type AttributeMethod } from './CharacterContext.tsx';
 import {
   BACKGROUNDS, STAT_NAMES, CLASS_SAVING_THROWS, CLASS_ATTRIBUTE_ADVICE,
   BACKGROUND_ASI, BACKGROUND_FEAT,
-  ORIGIN_FEATS, ORIGIN_FEAT_DETAILS,
+  ORIGIN_FEAT_DETAILS,
   POINT_BUY_BUDGET, POINT_BUY_MIN, POINT_BUY_MAX, POINT_BUY_COSTS,
   type StatName,
 } from './srd.ts';
@@ -286,22 +286,6 @@ export default function AttributesTab({ attributeMethods }: Props) {
           </div>
         )}
       </div>
-
-      {/* ── species-granted origin feat (Human: Versatile) ── */}
-      {c.species === 'Human' && (
-        <div className="select-section">
-          <label className="modal-label modal-label--sub">
-            Versatile — Origin Feat
-            <select className="modal-select" value={c.speciesOriginFeat} onChange={e => c.set('speciesOriginFeat', e.target.value)}>
-              <option value="">Select origin feat…</option>
-              {ORIGIN_FEATS.map(f => <option key={f} value={f}>{f}</option>)}
-            </select>
-            {c.speciesOriginFeat && ORIGIN_FEAT_DETAILS[c.speciesOriginFeat] && (
-              <p className="origin-feat-desc">{ORIGIN_FEAT_DETAILS[c.speciesOriginFeat]!.description}</p>
-            )}
-          </label>
-        </div>
-      )}
 
       {/* ── skills ── */}
       <SkillPicker />
