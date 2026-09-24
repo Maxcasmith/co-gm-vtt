@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback } from 'react';
-import { useCharacter } from './CharacterContext.tsx';
+import { Button } from '../components/Button/Button.tsx';
+import { useCharacter, type ConceptSuggestions } from './CharacterContext.tsx';
 import ImageCropModal from './ImageCropModal.tsx';
 import InfoTooltip from '../create-campaign/InfoTooltip.tsx';
 
@@ -12,6 +13,27 @@ export default function ProfileTab({ campaignId }: { campaignId: string }) {
   const [cropFile, setCropFile] = useState<File | null>(null);
   const [tokenVersion, setTokenVersion] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState('');
+
+  async function suggestConcept() {
+    setSuggesting(true);
+    setSuggestError('');
+    try {
+      const r = await fetch(`${API}/api/campaigns/${campaignId}/party/concept-suggest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ concept: c.aiConcept }),
+      });
+      const data = await r.json() as ConceptSuggestions & { error?: string };
+      if (data.error) throw new Error(data.error);
+      c.set('aiConceptSuggestions', data);
+    } catch (err) {
+      setSuggestError(err instanceof Error ? err.message : 'Concept suggestion failed');
+    } finally {
+      setSuggesting(false);
+    }
+  }
 
   const uploadCroppedImage = useCallback(async (base64image: string) => {
     setCropFile(null);
@@ -84,6 +106,44 @@ export default function ProfileTab({ campaignId }: { campaignId: string }) {
           <input className="modal-input" type="password" value={c.password} onChange={e => c.set('password', e.target.value)} placeholder="Choose a password to join as this character" />
         </label>
       </div>
+
+      <section className="spells-section">
+        <div className="spells-section-header">
+          <h3 className="spells-section-title">Not Sure Where to Start?</h3>
+        </div>
+        <p className="origin-feat-desc">Tell us all about your character, we'll help you build them.</p>
+        <textarea
+          className="modal-textarea"
+          value={c.aiConcept}
+          onChange={e => c.set('aiConcept', e.target.value)}
+          placeholder="e.g. A grizzled ex-soldier who lost their squad and now just wants to protect people who can't protect themselves…"
+          rows={5}
+        />
+        <div className="finished-create-row">
+          <Button variant="outline" color="secondary" onClick={suggestConcept} disabled={suggesting || !c.aiConcept.trim()}>
+            {suggesting ? 'Thinking…' : 'Suggest a Build'}
+          </Button>
+        </div>
+        {suggestError && <p className="modal-error">{suggestError}</p>}
+
+        {c.aiConceptSuggestions && (
+          <div className="concept-suggestions">
+            <p className="origin-feat-desc">{c.aiConceptSuggestions.summary}</p>
+            {c.aiConceptSuggestions.options.map((opt, i) => (
+              <div key={i} className="concept-option">
+                <p className="concept-option-title">{opt.class} — {opt.subspecies ? `${opt.species} (${opt.subspecies})` : opt.species}</p>
+                <p className="concept-option-reason">{opt.reason}</p>
+                {opt.skills.length > 0 && (
+                  <p className="concept-option-line"><strong>Skills:</strong> {opt.skills.join(', ')}</p>
+                )}
+                {opt.spells.length > 0 && (
+                  <p className="concept-option-line"><strong>Spells:</strong> {opt.spells.join(', ')}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <ImageCropModal
         file={cropFile}

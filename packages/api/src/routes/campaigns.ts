@@ -21,7 +21,7 @@ import { calcMaxHp } from '../combat/dice.ts';
 import { getFeatureProvider } from '../providers/index.ts';
 import { copyCompendiumToCampaign, loadCompendiumMeta } from '../compendium/storage.ts';
 import { copyAdventureToCampaign, saveCampaignAsAdventure, slugifyAdventureName, uniqueAdventureSlug } from '../adventures/storage.ts';
-import { buildConceptsPrompt, buildWorldGenPrompt, buildDungeonCrawlPremisePrompt, buildDungeonScenarioSynopsisPrompt, buildDungeonScenarioGoalPrompt, buildBackstoryCheckPrompt, buildBackstoryGeneratePrompt, buildBackstoryRewritePrompt, buildBackstoryExtractPrompt, BACKSTORY_HOOKS } from '../prompts.ts';
+import { buildConceptsPrompt, buildWorldGenPrompt, buildDungeonCrawlPremisePrompt, buildDungeonScenarioSynopsisPrompt, buildDungeonScenarioGoalPrompt, buildBackstoryCheckPrompt, buildBackstoryGeneratePrompt, buildBackstoryRewritePrompt, buildBackstoryExtractPrompt, buildCharacterConceptPrompt, BACKSTORY_HOOKS } from '../prompts.ts';
 import { processSession, generateDmBrief } from '../session-processor/index.ts';
 import { processPortrait } from '../utils/image.ts';
 import { buildWorldMapPrompt } from '../session-processor/imagePrompts.ts';
@@ -571,6 +571,23 @@ async function syncCharacterToWorldLore(slug: string, character: Character): Pro
     logError('routes/campaigns:syncCharacterToWorldLore', err);
   }
 }
+
+campaignsRouter.post('/:id/party/concept-suggest', async (req, res) => {
+  const { concept } = req.body as { concept: string };
+  if (!concept?.trim()) { res.status(400).json({ error: 'A character concept is required' }); return; }
+  const config = await getConfig();
+  try {
+    const raw = await getFeatureProvider(config, 'characterConceptSuggestion').complete(buildCharacterConceptPrompt(concept));
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    res.json(parseLlmJson<{
+      summary: string;
+      options: { class: string; species: string; subspecies: string | null; skills: string[]; spells: string[]; reason: string }[];
+    }>(cleaned));
+  } catch (err) {
+    logError('routes/campaigns:concept-suggest', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Concept suggestion failed' });
+  }
+});
 
 campaignsRouter.post('/:id/party/backstory-check', async (req, res) => {
   const slug = req.params.id ?? '';

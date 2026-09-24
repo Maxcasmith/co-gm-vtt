@@ -29,6 +29,22 @@ interface CharacterDraft {
   inventory: InventoryItem[];
   learnedSpells: Record<string, string>; // spell name → source label (class name or feat name)
   backstory: string;
+  aiConcept: string;
+  aiConceptSuggestions: ConceptSuggestions | null;
+}
+
+export interface ConceptOption {
+  class: string;
+  species: string;
+  subspecies: string | null;
+  skills: string[];
+  spells: string[];
+  reason: string;
+}
+
+export interface ConceptSuggestions {
+  summary: string;
+  options: ConceptOption[];
 }
 
 interface CharacterContextValue extends CharacterDraft {
@@ -61,6 +77,8 @@ const BLANK: Omit<CharacterDraft, 'id'> = {
   inventory: [],
   learnedSpells: {},
   backstory: '',
+  aiConcept: '',
+  aiConceptSuggestions: null,
 };
 
 const STAT_IDX: Record<StatName, number> = { STR: 0, DEX: 1, CON: 2, INT: 3, WIS: 4, CHA: 5 };

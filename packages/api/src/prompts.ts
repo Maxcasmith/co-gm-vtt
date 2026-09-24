@@ -46,6 +46,53 @@ Return ONLY a single valid JSON object — no markdown fences, no explanation:
 If the concept already fits well, return an empty issues array and 1-2 small flavour suggestions rather than forcing problems that aren't there.`;
 }
 
+// Mirrors the canon lists in packages/client/src/character-creation/srd.ts (CLASSES/SPECIES/SKILLS/
+// SPECIES_SUBSPECIES) — kept as a local copy since api does not import client code. Constrains the
+// model to options the wizard actually supports, so every suggestion is one the player can
+// immediately pick from the tiles.
+const CONCEPT_CLASSES = ['Artificer', 'Barbarian', 'Bard', 'Cleric', 'Druid', 'Fighter', 'Monk', 'Paladin', 'Ranger', 'Rogue', 'Sorcerer', 'Warlock', 'Wizard'];
+const CONCEPT_SPECIES = ['Aasimar', 'Dragonborn', 'Dwarf', 'Elf', 'Gnome', 'Goliath', 'Halfling', 'Human', 'Orc', 'Tiefling'];
+const CONCEPT_SKILLS = ['Athletics', 'Acrobatics', 'Sleight of Hand', 'Stealth', 'Arcana', 'History', 'Investigation', 'Nature', 'Religion', 'Animal Handling', 'Insight', 'Medicine', 'Perception', 'Survival', 'Deception', 'Intimidation', 'Performance', 'Persuasion'];
+const CONCEPT_SUBSPECIES: Record<string, string[]> = {
+  Dragonborn: ['Chromatic', 'Gem', 'Metallic'],
+  Elf: ['Drow', 'High Elf', 'Wood Elf'],
+  Gnome: ['Forest Gnome', 'Rock Gnome'],
+  Tiefling: ['Abyssal', 'Chthonic', 'Infernal'],
+};
+// Classes whose Spellcasting feature is actually active at character level 1 in 2024 rules. Rogue
+// (Arcane Trickster) and Fighter (Eldritch Knight) only gain spells at level 3 via subclass, and
+// Barbarian/Monk never get spells at all — so none of those satisfy a "casts spells from level 1"
+// requirement, however tempting the flavor fit.
+const CONCEPT_LEVEL_ONE_CASTERS = ['Artificer', 'Bard', 'Cleric', 'Druid', 'Paladin', 'Ranger', 'Sorcerer', 'Warlock', 'Wizard'];
+
+export function buildCharacterConceptPrompt(concept: string): string {
+  return `You are a tabletop RPG session-zero advisor helping a total beginner turn a character fantasy into an actual D&D 2024 (5.5e) character build.
+
+PLAYER'S CONCEPT (their own words):
+${concept}
+
+Step 1 — before choosing anything, list out any explicit HARD mechanical requirements the player stated (e.g. "spells from level 1", "must dual-wield", "must wear heavy armor"). Every one of the 3 builds below must satisfy every hard requirement using rules and features that actually apply AT CHARACTER LEVEL 1 — a subclass feature gained later (e.g. Rogue's Arcane Trickster or Fighter's Eldritch Knight, both level 3) does NOT satisfy a "from level 1" requirement. If the concept requires casting spells from level 1, only choose from these classes, which are the only ones with an active Spellcasting feature at level 1: ${CONCEPT_LEVEL_ONE_CASTERS.join(', ')}.
+
+Then suggest exactly 3 distinct, concrete builds that could bring this concept to life. Each build must use only real D&D 2024 options so the player can pick it straight from the character creator:
+- class: exactly one of: ${CONCEPT_CLASSES.join(', ')}
+- species: exactly one of: ${CONCEPT_SPECIES.join(', ')}
+- subspecies: required and must be exactly one of that species's lineages if it has any (${Object.entries(CONCEPT_SUBSPECIES).map(([sp, subs]) => `${sp}: ${subs.join('/')}`).join('; ')}); otherwise null. Never credit a trait that only one lineage grants (e.g. a bonus cantrip, a specific resistance) to the species in general — name the exact lineage that grants it and put it here.
+- skills: 2-4 from: ${CONCEPT_SKILLS.join(', ')}
+- spells: 2-4 real D&D 2024 spell names that fit the class and concept (empty array if the class/build has no spells, e.g. a non-caster Fighter or Barbarian build)
+
+Write for someone who has never played D&D before — plain English, no unexplained jargon. "reason" must justify BOTH the class AND the species/lineage choice specifically against this concept (not generic flavor text, not just restating the concept) — if a species is arbitrary and isn't earning its place (no trait, culture, or flavor reason tying it to the concept), pick Human instead of a random exotic species.
+
+Make the 3 builds meaningfully different from each other (different class, or same class played a very different way) so the player has a real choice.
+
+Return ONLY a single valid JSON object — no markdown fences, no explanation:
+{
+  "summary": "string — one warm sentence reflecting back what kind of character they're imagining",
+  "options": [
+    { "class": "string", "species": "string", "subspecies": "string or null", "skills": ["string"], "spells": ["string"], "reason": "string" }
+  ]
+}`;
+}
+
 export const BACKSTORY_HOOKS = ['tragedy', 'mystery', 'ambition', 'schooling or training'] as const;
 
 // Shared by generate + rewrite. The world lore is GM-only — backstories set the character's

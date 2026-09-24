@@ -35,6 +35,10 @@ const AI_FEATURES: { id: AiFeature; label: string; description: string; group: s
     description: 'Scores a player-written backstory against world lore and suggests fixes. Player-facing during character creation.',
   },
   {
+    id: 'characterConceptSuggestion', label: 'Character Concept Suggestion', group: 'Narrative',
+    description: 'Turns a beginner’s free-text character fantasy into a few concrete class/species/skills/spells builds. Player-facing at the start of character creation — player is waiting on this.',
+  },
+  {
     id: 'worldLoreSync', label: 'World Lore Sync', group: 'World',
     description: 'After a character is finalized, extracts NPCs/locations/quest hooks from their backstory into the world. Fire-and-forget background task — never blocks character creation.',
   },

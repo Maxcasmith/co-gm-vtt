@@ -61,6 +61,8 @@ export const SPECIES_SUBSPECIES: Record<string, string[]> = {
   Tiefling: ["Abyssal", "Chthonic", "Infernal"],
 };
 
+// TODO: Max isn't happy with the current wording of SPECIES_BLURBS, SPECIES_PLAIN_PERKS,
+// CLASS_BLURBS, and CLASS_PLAIN_PERKS below — revisit and rewrite these later.
 export const SPECIES_BLURBS: Record<string, string> = {
   Aasimar:
     "Aasimar carry a spark of celestial power in their blood, quite literally touched by something otherworldly and divine.",

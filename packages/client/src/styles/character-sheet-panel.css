@@ -325,6 +325,44 @@ button.feature-toggle {
   line-height: 1.5;
 }
 
+/* AI character-concept suggestions */
+.concept-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.concept-option {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--gold);
+  border-radius: 4px;
+  padding: 10px 14px;
+}
+
+.concept-option-title {
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  color: var(--gold);
+  margin: 0 0 4px;
+}
+
+.concept-option-reason {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+  margin: 0 0 6px;
+}
+
+.concept-option-line {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
 /* Learned spells chips */
 .spells-learned-list {
   display: flex;
