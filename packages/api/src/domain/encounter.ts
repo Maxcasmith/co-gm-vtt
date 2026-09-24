@@ -155,12 +155,19 @@ export class Participant {
     this.currentHp = Math.max(0, this.currentHp - (amount - absorbed));
   }
 
-  heal(amount: number): void {
+  /** Returns whether this heal just brought a downed player back up — the single choke point
+   * every heal source (spell, potion, healer's kit) routes through, so death saves reset in
+   * one place regardless of what revived them. */
+  heal(amount: number): boolean {
     if (!this.isPlayer) {
       this.creature?.heal(amount);
-      return;
+      return false;
     }
+    const wasDown = this.isDown();
     this.currentHp = Math.min(this.maxHp, this.currentHp + amount);
+    const revived = wasDown && !this.isDown();
+    if (revived) this.deathSaves = { successes: 0, failures: 0, stable: false };
+    return revived;
   }
 
   /** Sets (not adds) temp HP — the higher of what's already there and this grant wins. */

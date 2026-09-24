@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import type { Spell } from 'shared';
 import { useCharacter } from './CharacterContext.tsx';
 import { CLASS_FEATURES, FEAT_SPELL_GRANTS, BACKGROUND_FEAT, STAT_NAMES, BACKGROUND_ASI, CLASS_SKILLS, CLASS_SPELL_ALLOWANCE, SPECIES_SUBSPECIES } from './srd.ts';
-import CharacterSheet from './CharacterSheet.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
 
@@ -34,27 +33,27 @@ export default function FinishedTab({ error }: Props) {
 
   type Tab = typeof c.activeTab;
   const missing: { text: string; tab: Tab }[] = [];
-  if (!c.name.trim()) missing.push({ text: 'Character name', tab: 'info' });
-  if (!c.password.trim()) missing.push({ text: 'Join password', tab: 'info' });
-  if (!c.rolled) missing.push({ text: 'Ability scores not rolled', tab: 'info' });
-  else if (c.pool.length > 0) missing.push({ text: `${c.pool.length} rolled score(s) not assigned`, tab: 'info' });
-  if (!c.species) missing.push({ text: 'Species', tab: 'info' });
-  else if ((SPECIES_SUBSPECIES[c.species] ?? []).length > 0 && !c.subspecies) missing.push({ text: 'Lineage', tab: 'info' });
-  if (c.species === 'Human' && !c.speciesOriginFeat) missing.push({ text: 'Versatile origin feat', tab: 'info' });
-  if (!c.background) missing.push({ text: 'Background', tab: 'info' });
+  if (!c.name.trim()) missing.push({ text: 'Character name', tab: 'profile' });
+  if (!c.password.trim()) missing.push({ text: 'Join password', tab: 'profile' });
+  if (!c.characterClass) missing.push({ text: 'Class', tab: 'class' });
+  if (!c.species) missing.push({ text: 'Species', tab: 'species' });
+  else if ((SPECIES_SUBSPECIES[c.species] ?? []).length > 0 && !c.subspecies) missing.push({ text: 'Lineage', tab: 'species' });
+  if (!c.rolled) missing.push({ text: 'Ability scores not rolled', tab: 'attributes' });
+  else if (c.pool.length > 0) missing.push({ text: `${c.pool.length} rolled score(s) not assigned`, tab: 'attributes' });
+  if (c.species === 'Human' && !c.speciesOriginFeat) missing.push({ text: 'Versatile origin feat', tab: 'attributes' });
+  if (!c.background) missing.push({ text: 'Background', tab: 'attributes' });
   else {
     const asiLeft = 3 - (BACKGROUND_ASI[c.background] ?? []).reduce((n, st) => n + (c.backgroundAsi[st] ?? 0), 0);
-    if (asiLeft > 0) missing.push({ text: `${asiLeft} background ability point(s) unspent`, tab: 'info' });
+    if (asiLeft > 0) missing.push({ text: `${asiLeft} background ability point(s) unspent`, tab: 'attributes' });
   }
-  if (!c.characterClass) missing.push({ text: 'Class', tab: 'info' });
-  else {
+  if (c.characterClass) {
     const classSkills = CLASS_SKILLS[c.characterClass];
     const picked = Object.values(c.skillProficiencies).filter(src => src === c.characterClass).length;
-    if (classSkills && picked < classSkills.count) missing.push({ text: `${classSkills.count - picked} class skill(s) not chosen`, tab: 'info' });
+    if (classSkills && picked < classSkills.count) missing.push({ text: `${classSkills.count - picked} class skill(s) not chosen`, tab: 'attributes' });
     const features = CLASS_FEATURES[c.characterClass] ?? [];
-    if (features.some(f => f.name === 'Fighting Style') && !c.fightingStyle) missing.push({ text: 'Fighting style', tab: 'fightingStyle' });
-    if (features.some(f => f.name === 'Divine Order' || f.name === 'Primal Order') && !c.classOrder) missing.push({ text: 'Class order', tab: 'classOrder' });
-    if (features.some(f => f.name === 'Eldritch Invocations') && c.invocations.length < 2) missing.push({ text: `${2 - c.invocations.length} invocation(s) not chosen`, tab: 'invocations' });
+    if (features.some(f => f.name === 'Fighting Style') && !c.fightingStyle) missing.push({ text: 'Fighting style', tab: 'classFeatures' });
+    if (features.some(f => f.name === 'Divine Order' || f.name === 'Primal Order') && !c.classOrder) missing.push({ text: 'Class order', tab: 'classFeatures' });
+    if (features.some(f => f.name === 'Eldritch Invocations') && c.invocations.length < 2) missing.push({ text: `${2 - c.invocations.length} invocation(s) not chosen`, tab: 'classFeatures' });
     const allowance = CLASS_SPELL_ALLOWANCE[c.characterClass];
     if (allowance && spellDetails.length === learnedNames.length) {
       const own = spellDetails.filter(sp => c.learnedSpells[sp.name] === c.characterClass);
@@ -66,8 +65,15 @@ export default function FinishedTab({ error }: Props) {
   }
 
   return (
-    <div className="player-info-layout">
-      <div className="tab-content">
+    <>
+        {c.backstory.trim() && (
+          <section className="spells-section">
+            <div className="spells-section-header">
+              <h3 className="spells-section-title">Backstory</h3>
+            </div>
+            <p className="origin-feat-desc">{c.backstory}</p>
+          </section>
+        )}
 
         <section className="spells-section">
           <div className="spells-section-header">
@@ -138,8 +144,6 @@ export default function FinishedTab({ error }: Props) {
         )}
 
         {error && <p className="modal-error create-error">{error}</p>}
-      </div>
-      <CharacterSheet />
-    </div>
+    </>
   );
 }

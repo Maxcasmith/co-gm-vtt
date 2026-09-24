@@ -24,7 +24,7 @@ interface CharacterDraft {
   fightingStyle: string;
   classOrder: string;
   invocations: string[];
-  activeTab: 'info' | 'backstory' | 'spells' | 'fightingStyle' | 'classOrder' | 'invocations' | 'shop' | 'finished';
+  activeTab: 'profile' | 'class' | 'classFeatures' | 'species' | 'attributes' | 'spells' | 'shop' | 'backstory' | 'finished';
   gold: number;
   inventory: InventoryItem[];
   learnedSpells: Record<string, string>; // spell name → source label (class name or feat name)
@@ -56,7 +56,7 @@ const BLANK: Omit<CharacterDraft, 'id'> = {
   fightingStyle: '',
   classOrder: '',
   invocations: [],
-  activeTab: 'info',
+  activeTab: 'profile',
   gold: 200,
   inventory: [],
   learnedSpells: {},

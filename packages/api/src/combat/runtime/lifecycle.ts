@@ -211,6 +211,20 @@ export async function endCombat(cid: string, encounter: Encounter): Promise<void
     }
   });
 
+  // Death saves are a per-fight concern — clear them for every player regardless of whether
+  // they were ever downed this fight, so a stale count can't carry into the next one.
+  void Promise.all(
+    encounter.players.filter(p => p.isPlayer).map(p =>
+      updateCharacter(cid, p.id, c => ({ ...c, deathSaves: { successes: 0, failures: 0, stable: false } }))
+    )
+  ).then(() => {
+    for (const p of encounter.players) {
+      if (!p.isPlayer) continue;
+      const sid = playerSocketIds.get(p.id);
+      if (sid) io.to(sid).emit('character:reward:update', { characterId: p.id });
+    }
+  });
+
   // Offline-AI-spawned party members (see rollPlayerInitiatives) only existed for this fight —
   // any player-participant whose name isn't currently connected was necessarily one of them,
   // since only connected names get added the normal way. Drop their token before teardown.

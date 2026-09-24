@@ -43,7 +43,14 @@ export async function resolvePlayerItemUse(
     const currentHp = Math.min(maxHp, (char.currentHp ?? maxHp) + healAmount);
     await updateCharacter(campaignId, characterId, c => ({ ...c, currentHp, maxHp }));
     const participant = fightOf(campaignId, characterId)?.findParticipant(characterId);
-    if (participant) { participant.maxHp = maxHp; participant.heal(healAmount); }
+    if (participant) {
+      participant.maxHp = maxHp;
+      if (participant.heal(healAmount)) {
+        await updateCharacter(campaignId, characterId, c => ({ ...c, deathSaves: participant.deathSaves }));
+        const sid = playerSocketIds.get(characterId);
+        if (sid) io.to(sid).emit('character:reward:update', { characterId });
+      }
+    }
     io.to(campaignRoom(campaignId)).emit('consumable:heal:result', { characterId, characterName, healAmount, currentHp, maxHp });
   }
 }
@@ -155,7 +162,11 @@ export function registerInventoryHandlers(ctx: JoinContext): void {
       const participant = fightOf(campaignId, characterId)?.findParticipant(characterId);
       if (participant) {
         participant.maxHp = maxHp;
-        participant.heal(healAmount);
+        if (participant.heal(healAmount)) {
+          await updateCharacter(campaignId, characterId, c => ({ ...c, deathSaves: participant.deathSaves }));
+          const sid = playerSocketIds.get(characterId);
+          if (sid) io.to(sid).emit('character:reward:update', { characterId });
+        }
       }
 
       io.to(campaignRoom(campaignId)).emit('consumable:heal:result', { characterId, characterName, healAmount, currentHp, maxHp });

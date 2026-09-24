@@ -46,6 +46,25 @@
 .pip-counter-dot[data-pip-color="bonusAction"] { background: #c2410c; border-color: #f97316; }
 .pip-counter-dot[data-pip-color="reaction"]    { background: #be185d; border-color: #ec4899; }
 
+/* Death saves (circle) — unmarked dots stay hollow (border only) rather than the generic dark
+   "spent" look, since an empty death-save dot means "not rolled yet", not "used up". Border
+   stays the theme's neutral grey in both states; only the fill toggles red/green. Sized up a
+   few px over the standard pip — bigger target for this specific widget only. */
+.pip-counter-dot[data-pip-color="deathSaveSuccess"],
+.pip-counter-dot[data-pip-color="deathSaveFailure"] {
+  width: 16px;
+  height: 16px;
+  border-color: var(--border);
+}
+.pip-counter-dot[data-pip-color="deathSaveSuccess"] { background: #22c55e; }
+.pip-counter-dot[data-pip-color="deathSaveFailure"] { background: #ef4444; }
+.pip-counter-dot[data-pip-color="deathSaveSuccess"].pip-counter-dot--spent,
+.pip-counter-dot[data-pip-color="deathSaveFailure"].pip-counter-dot--spent {
+  background: transparent !important;
+  border-color: var(--border) !important;
+  opacity: 1;
+}
+
 .pip-counter[data-active="true"][data-pip-color="action"]      { box-shadow: 0 0 0 3px #22c55e, 0 0 14px 3px #22c55e88; }
 .pip-counter[data-active="true"][data-pip-color="bonusAction"] { box-shadow: 0 0 0 3px #f97316, 0 0 14px 3px #f9731688; }
 .pip-counter[data-active="true"][data-pip-color="reaction"]    { box-shadow: 0 0 0 3px #ec4899, 0 0 14px 3px #ec489988; }

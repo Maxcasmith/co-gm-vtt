@@ -71,6 +71,10 @@ export default function CharacterSheet() {
 
   return (
     <div className="char-sheet">
+      {c.portraitBase64
+        ? <img className="char-sheet-portrait" src={`data:image/jpeg;base64,${c.portraitBase64}`} alt={c.name || 'Character portrait'} />
+        : <div className="char-sheet-portrait-placeholder" />
+      }
       <div className="char-sheet-header">
         <p className="char-sheet-name">
           {c.name || <span className="char-sheet-placeholder">Unnamed Character</span>}

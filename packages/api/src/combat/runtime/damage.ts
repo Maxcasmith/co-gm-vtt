@@ -104,6 +104,9 @@ export async function applyDamageToPlayer(
         failures: participant.deathSaves.failures, stable: false, dead: nowDead,
       });
     }
+    void updateCharacter(cid, charId, c => ({ ...c, deathSaves: participant.deathSaves })).then(() => {
+      if (socketId) io.to(socketId).emit('character:reward:update', { characterId: charId });
+    });
     if (nowDead) await markPlayerDead(cid, participant, charId, opts?.sourceId);
   } else if (participant.isDown()) {
     // 5e: being incapacitated ends concentration outright, no save.
@@ -144,8 +147,16 @@ export async function applyDamageToPlayer(
 
 /** Applies spell/effect healing to a player and persists/broadcasts the result (Cure Wounds, Healing Word). */
 export function applyHealingToPlayer(cid: string, participant: Participant, charId: string, amount: number, sourceName: string): void {
-  participant.heal(amount);
-  void updateCharacter(cid, charId, c => ({ ...c, currentHp: participant.currentHp }));
+  const revived = participant.heal(amount);
+  void updateCharacter(cid, charId, c => ({
+    ...c,
+    currentHp: participant.currentHp,
+    ...(revived ? { deathSaves: participant.deathSaves } : {}),
+  })).then(() => {
+    if (!revived) return;
+    const sid = playerSocketIds.get(charId);
+    if (sid) io.to(sid).emit('character:reward:update', { characterId: charId });
+  });
   io.to(campaignRoom(cid)).emit('combat:player:heal', {
     characterId: charId,
     characterName: participant.name,

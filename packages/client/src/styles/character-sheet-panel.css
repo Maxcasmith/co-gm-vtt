@@ -8,6 +8,21 @@
   overflow: hidden;
 }
 
+.char-sheet-portrait {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-bottom: 1px solid var(--border);
+}
+
+.char-sheet-portrait-placeholder {
+  width: 100%;
+  aspect-ratio: 1;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
 .char-sheet-header {
   padding: 20px 18px 16px;
   border-bottom: 1px solid var(--border);

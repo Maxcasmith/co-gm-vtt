@@ -3,19 +3,21 @@ import type { WorldMeta } from 'shared';
 import { CharacterProvider, useCharacter } from './character-creation/CharacterContext.tsx';
 import { Button } from './components/Button/Button.tsx';
 import { CreateRail } from './components/CreateRail/CreateRail.tsx';
-import PlayerInfoTab from './character-creation/PlayerInfoTab.tsx';
+import CreationLayout from './character-creation/CreationLayout.tsx';
+import ProfileTab from './character-creation/ProfileTab.tsx';
+import ClassTab from './character-creation/ClassTab.tsx';
+import ClassFeaturesTab, { hasClassFeaturesStep } from './character-creation/ClassFeaturesTab.tsx';
+import SpeciesTab from './character-creation/SpeciesTab.tsx';
+import AttributesTab from './character-creation/AttributesTab.tsx';
 import BackstoryTab from './character-creation/BackstoryTab.tsx';
 import SpellsTab from './character-creation/SpellsTab.tsx';
 import ShopTab from './character-creation/ShopTab.tsx';
 import FinishedTab from './character-creation/FinishedTab.tsx';
-import FightingStyleTab from './character-creation/FightingStyleTab.tsx';
-import OrderTab from './character-creation/OrderTab.tsx';
-import InvocationsTab from './character-creation/InvocationsTab.tsx';
 import { BACKGROUND_SKILLS, CLASS_FEATURES } from './character-creation/srd.ts';
 import './app.css';
 import './styles/create-campaign.css';
 
-type Tab = 'info' | 'backstory' | 'spells' | 'fightingStyle' | 'classOrder' | 'invocations' | 'shop' | 'finished';
+type Tab = 'profile' | 'class' | 'classFeatures' | 'species' | 'attributes' | 'spells' | 'shop' | 'backstory' | 'finished';
 
 interface Props { campaignId: string }
 
@@ -34,15 +36,7 @@ function genId(): string {
 
 function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId: string; campaignName: string; isCampaign: boolean }) {
   const c = useCharacter();
-  const hasFightingStyle = c.characterClass
-    ? (CLASS_FEATURES[c.characterClass] ?? []).some(f => f.name === 'Fighting Style')
-    : false;
-  const hasClassOrder = c.characterClass
-    ? (CLASS_FEATURES[c.characterClass] ?? []).some(f => f.name === 'Divine Order' || f.name === 'Primal Order')
-    : false;
-  const hasInvocations = c.characterClass
-    ? (CLASS_FEATURES[c.characterClass] ?? []).some(f => f.name === 'Eldritch Invocations')
-    : false;
+  const hasClassFeatures = c.characterClass ? hasClassFeaturesStep(c.characterClass) : false;
   const hasSpellcasting = c.characterClass
     ? (CLASS_FEATURES[c.characterClass] ?? []).some(f => f.name === 'Spellcasting' || f.name === 'Pact Magic')
     : false;
@@ -60,26 +54,28 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
   }
 
   const steps: Tab[] = [
-    'info',
-    ...(isCampaign ? ['backstory' as const] : []),
-    ...(hasFightingStyle ? ['fightingStyle' as const] : []),
-    ...(hasClassOrder ? ['classOrder' as const] : []),
-    ...(hasInvocations ? ['invocations' as const] : []),
+    'profile',
+    'class',
+    ...(hasClassFeatures ? ['classFeatures' as const] : []),
+    'species',
+    'attributes',
     ...(hasSpellcasting ? ['spells' as const] : []),
     'shop',
+    ...(isCampaign ? ['backstory' as const] : []),
     'finished',
   ];
   const stepIndex = steps.indexOf(c.activeTab);
 
   function titleFor(tab: Tab): string {
     switch (tab) {
-      case 'info': return 'Player Info';
-      case 'backstory': return 'Backstory';
+      case 'profile': return 'Profile';
+      case 'class': return 'Class';
+      case 'classFeatures': return 'Class Features';
+      case 'species': return 'Species';
+      case 'attributes': return 'Attributes';
       case 'spells': return 'Spells';
-      case 'fightingStyle': return 'Fighting Style';
-      case 'classOrder': return c.characterClass === 'Cleric' ? 'Divine Order' : 'Primal Order';
-      case 'invocations': return 'Invocations';
       case 'shop': return 'Shop';
+      case 'backstory': return 'Backstory';
       case 'finished': return 'Finished';
     }
   }
@@ -167,14 +163,17 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
         <div className="create-page-atmosphere" aria-hidden="true" />
         <div className="create-page-body">
           <h1 className="modal-title">{titleFor(c.activeTab)}</h1>
-          {c.activeTab === 'backstory' && isCampaign ? <BackstoryTab campaignId={campaignId} />
-            : c.activeTab === 'spells' && hasSpellcasting ? <SpellsTab />
-            : c.activeTab === 'fightingStyle' && hasFightingStyle ? <FightingStyleTab />
-            : c.activeTab === 'classOrder' && hasClassOrder ? <OrderTab />
-            : c.activeTab === 'invocations' && hasInvocations ? <InvocationsTab />
-            : c.activeTab === 'shop' ? <ShopTab />
-            : c.activeTab === 'finished' ? <FinishedTab error={error} />
-            : <PlayerInfoTab campaignId={campaignId} />}
+          <CreationLayout>
+            {c.activeTab === 'class' ? <ClassTab />
+              : c.activeTab === 'classFeatures' && hasClassFeatures ? <ClassFeaturesTab />
+              : c.activeTab === 'species' ? <SpeciesTab />
+              : c.activeTab === 'attributes' ? <AttributesTab />
+              : c.activeTab === 'backstory' && isCampaign ? <BackstoryTab campaignId={campaignId} />
+              : c.activeTab === 'spells' && hasSpellcasting ? <SpellsTab />
+              : c.activeTab === 'shop' ? <ShopTab />
+              : c.activeTab === 'finished' ? <FinishedTab error={error} />
+              : <ProfileTab campaignId={campaignId} />}
+          </CreationLayout>
         </div>
 
         <footer className="create-page-footer">

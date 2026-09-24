@@ -2,6 +2,18 @@
 // All item subtypes extend Item. Plain-object constructors (single props arg)
 // so instances serialize cleanly to/from JSON without custom toJSON logic.
 
+export interface ItemProps {
+  id: string;
+  name: string;
+  description: string;
+  quantity: number;
+  type?: string;
+  iconPath?: string;
+  lightEmissionRangeFt?: number;
+  expiresOnLongRest?: boolean;
+  cost?: number;
+}
+
 export class Item {
   id: string;
   name: string;
@@ -13,17 +25,10 @@ export class Item {
   lightEmissionRangeFt?: number;
   /** Removed from inventory the next time the owner finishes a Long Rest — Tinker's Magic's crafted items. */
   expiresOnLongRest?: boolean;
+  /** Base market value in gold — what a shop charges to buy it and the basis for buyback pricing. */
+  cost?: number;
 
-  constructor(props: {
-    id: string;
-    name: string;
-    description: string;
-    quantity: number;
-    type?: string;
-    iconPath?: string;
-    lightEmissionRangeFt?: number;
-    expiresOnLongRest?: boolean;
-  }) {
+  constructor(props: ItemProps) {
     this.id = props.id;
     this.name = props.name;
     this.description = props.description;
@@ -32,6 +37,7 @@ export class Item {
     this.iconPath = props.iconPath;
     this.lightEmissionRangeFt = props.lightEmissionRangeFt;
     this.expiresOnLongRest = props.expiresOnLongRest;
+    this.cost = props.cost;
   }
 }
 
@@ -48,11 +54,7 @@ export class Weapon extends Item {
   twoHanded?: boolean;
   ammoSlug?: string;
 
-  constructor(props: {
-    id: string;
-    name: string;
-    description: string;
-    quantity: number;
+  constructor(props: Omit<ItemProps, "type"> & {
     damage: string;
     damageType: string;
     attackBonus: number;
@@ -85,11 +87,7 @@ export class Armor extends Item {
   isShield: boolean;
   slot?: "head" | "body" | "gloves" | "boots";
 
-  constructor(props: {
-    id: string;
-    name: string;
-    description: string;
-    quantity: number;
+  constructor(props: Omit<ItemProps, "type"> & {
     armorType: "light" | "medium" | "heavy" | "none";
     acBonus: number;
     isShield: boolean;
@@ -108,11 +106,7 @@ export class Consumable extends Item {
   effect: string;
   actionCost: "action" | "bonusAction";
 
-  constructor(props: {
-    id: string;
-    name: string;
-    description: string;
-    quantity: number;
+  constructor(props: Omit<ItemProps, "type"> & {
     effect: string;
     actionCost: "action" | "bonusAction";
   }) {
@@ -126,11 +120,7 @@ export class Ammunition extends Item {
   declare type: "ammunition";
   usableBySlug: string;
 
-  constructor(props: {
-    id: string;
-    name: string;
-    description: string;
-    quantity: number;
+  constructor(props: Omit<ItemProps, "type"> & {
     usableBySlug: string;
   }) {
     super({ ...props, type: "ammunition" as const });

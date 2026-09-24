@@ -1,4 +1,6 @@
 export * from "./types/items.ts";
+export * from "./types/itemCatalog.ts";
+export * from "./types/shop.ts";
 export * from "./types/character.ts";
 export * from "./types/combat.ts";
 export * from "./types/combat-hooks.ts";

@@ -4,7 +4,7 @@ import { Button } from './components/Button/Button.tsx';
 import AdminPageShell from './AdminPageShell.tsx';
 import { iconSrcFor } from './ItemIcon.tsx';
 import emptyFrameIcon from './assets/icons/Icon-Frame-Blue.jpg';
-import { SHOP_ITEMS } from './character-creation/srd.ts';
+import { CHARACTER_CREATION_SHOP } from './character-creation/characterCreationShop.ts';
 import CreateIconsModal, { type IconCandidate } from './CreateIconsModal.tsx';
 import ItemDetailSidebar, { type DetailSubject } from './ItemDetailSidebar.tsx';
 
@@ -43,7 +43,7 @@ export default function AdminItemsPage({ password, onHome }: Props) {
   const [detailSubject, setDetailSubject] = useState<DetailSubject | null>(null);
 
   const iconCandidates: IconCandidate[] = [
-    ...SHOP_ITEMS.filter(item => !item.iconPath).map(item => ({ name: item.name, description: item.description })),
+    ...CHARACTER_CREATION_SHOP.items.filter(item => !item.iconPath).map(item => ({ name: item.name, description: item.description })),
     ...Object.values(ABILITY_DEFS).map(ability => ({ name: ability.label, description: `${ability.label}, a ${ability.class} class combat ability icon.` })),
   ];
 
@@ -56,7 +56,7 @@ export default function AdminItemsPage({ password, onHome }: Props) {
       </div>
 
       <div className="item-grid" key={`items-${iconsRefreshKey}`}>
-        {SHOP_ITEMS.map(item => (
+        {CHARACTER_CREATION_SHOP.items.map(item => (
           <IconCell
             key={item.id}
             name={item.name}

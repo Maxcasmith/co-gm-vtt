@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import type { InventoryItem } from 'shared';
+import type { Item, InventoryItem } from 'shared';
 import { hasOriginFeat } from 'shared';
 import { Button } from '../components/Button/Button.tsx';
 import ItemIcon from '../ItemIcon.tsx';
 import { useCharacter } from './CharacterContext.tsx';
-import { SHOP_ITEMS, type ShopItem } from './srd.ts';
+import { CHARACTER_CREATION_SHOP } from './characterCreationShop.ts';
 
 const CATEGORY_LABELS: Record<string, string> = {
   weapon: 'Weapons',
@@ -13,7 +13,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   consumable: 'Consumables',
 };
 const CATEGORY_ORDER = ['weapon', 'armor', 'ammunition', 'consumable'];
-const categoryOf = (item: ShopItem) => item.type && item.type in CATEGORY_LABELS ? item.type : 'consumable';
+const categoryOf = (item: Item) => item.type && item.type in CATEGORY_LABELS ? item.type : 'consumable';
 
 export default function ShopTab() {
   const c = useCharacter();
@@ -24,37 +24,36 @@ export default function ShopTab() {
     .map(key => ({
       key,
       label: CATEGORY_LABELS[key],
-      items: SHOP_ITEMS.filter(i => categoryOf(i) === key && i.name.toLowerCase().includes(query)),
+      items: CHARACTER_CREATION_SHOP.items.filter(i => categoryOf(i) === key && i.name.toLowerCase().includes(query)),
     }))
     .filter(g => g.items.length > 0 && (category === 'all' || category === g.key));
-  // Origin feat Crafter: 20% discount on nonmagical items — everything in SHOP_ITEMS qualifies
+  // Origin feat Crafter: 20% discount on nonmagical items — everything in this shop qualifies
   // (starting gear only, no magic items sold here).
   const hasCrafterDiscount = hasOriginFeat(c, 'Crafter');
   const priceFor = (cost: number) => hasCrafterDiscount ? Math.ceil(cost * 0.8) : cost;
 
-  function buy(shopItemId: string) {
-    const item = SHOP_ITEMS.find(i => i.id === shopItemId);
-    const price = item ? priceFor(item.cost) : 0;
+  function buy(itemId: string) {
+    const item = CHARACTER_CREATION_SHOP.items.find(i => i.id === itemId);
+    const price = item ? priceFor(item.cost ?? 0) : 0;
     if (!item || c.gold < price) return;
 
-    const qty = item.quantityPerPurchase ?? 1;
+    const qty = item.quantity;
     const existing = c.inventory.find(i => i.id === item.id);
-    const { cost: _cost, quantityPerPurchase: _qpp, ...itemData } = item;
     const next: InventoryItem[] = existing
       ? c.inventory.map(i => i.id === item.id ? { ...i, quantity: i.quantity + qty } : i)
-      : [...c.inventory, { ...itemData, quantity: qty } as InventoryItem];
+      : [...c.inventory, { ...item, quantity: qty }];
 
     c.set('inventory', next);
     c.set('gold', c.gold - price);
   }
 
   function sell(itemId: string) {
-    const shopItem = SHOP_ITEMS.find(i => i.id === itemId);
+    const shopItem = CHARACTER_CREATION_SHOP.items.find(i => i.id === itemId);
     const invItem  = c.inventory.find(i => i.id === itemId);
     if (!shopItem || !invItem) return;
 
-    const qty = shopItem.quantityPerPurchase ?? 1;
-    const refund = Math.floor(shopItem.cost / 2);
+    const qty = shopItem.quantity;
+    const refund = CHARACTER_CREATION_SHOP.sellPriceFor(shopItem);
     const next: InventoryItem[] = invItem.quantity > qty
       ? c.inventory.map(i => i.id === itemId ? { ...i, quantity: i.quantity - qty } : i)
       : c.inventory.filter(i => i.id !== itemId);
@@ -109,15 +108,15 @@ export default function ShopTab() {
                   </div>
                   <div className="shop-item-right">
                     <span className="shop-item-cost">
-                      {hasCrafterDiscount && priceFor(item.cost) !== item.cost && (
+                      {hasCrafterDiscount && priceFor(item.cost ?? 0) !== (item.cost ?? 0) && (
                         <span className="shop-item-cost-original">{item.cost} gp</span>
                       )}
-                      {priceFor(item.cost)} gp
+                      {priceFor(item.cost ?? 0)} gp
                     </span>
                     <Button
                       variant="ghost"
                       className="shop-buy-btn"
-                      disabled={c.gold < priceFor(item.cost)}
+                      disabled={c.gold < priceFor(item.cost ?? 0)}
                       onClick={() => buy(item.id)}
                     >Buy</Button>
                   </div>

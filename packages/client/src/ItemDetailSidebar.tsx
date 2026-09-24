@@ -7,10 +7,10 @@ export interface DetailSubject {
   name: string;
   description: string;
   iconPath?: string;
-  // Everything else about the underlying ShopItem/AbilityDef, dumped generically below — read-only,
-  // this app's items/abilities live in srd.ts/abilities.ts, not a database, so there's no field to
-  // write an edit back to. Only the icon is actually backed by real storage (storage/icons/), so
-  // it's the one thing this sidebar can genuinely change.
+  // Everything else about the underlying Item/AbilityDef, dumped generically below — read-only,
+  // this app's items/abilities live in characterCreationShop.ts/abilities.ts, not a database, so
+  // there's no field to write an edit back to. Only the icon is actually backed by real storage
+  // (storage/icons/), so it's the one thing this sidebar can genuinely change.
   raw: Record<string, unknown>;
 }
 

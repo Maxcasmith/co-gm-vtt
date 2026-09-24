@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Button } from '../components/Button/Button.tsx';
 import { useCharacter } from './CharacterContext.tsx';
-import CharacterSheet from './CharacterSheet.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
 
@@ -98,64 +97,61 @@ export default function BackstoryTab({ campaignId }: { campaignId: string }) {
   const scoreClass = result == null ? '' : result.score >= 70 ? 'lore-score--good' : result.score >= 40 ? 'lore-score--mixed' : 'lore-score--poor';
 
   return (
-    <div className="player-info-layout">
-      <div className="tab-content">
+    <>
+      <section className="spells-section">
+        <div className="spells-section-header">
+          <h3 className="spells-section-title">Backstory</h3>
+        </div>
+        <textarea
+          className="modal-textarea"
+          value={c.backstory}
+          onChange={e => c.set('backstory', e.target.value)}
+          placeholder="Where did your character come from? What do they want?"
+          rows={10}
+        />
+        <div className="finished-create-row">
+          <Button variant="outline" color="secondary" onClick={generateBackstory} disabled={generating}>
+            {generating ? 'Generating…' : 'Generate Backstory From World'}
+          </Button>
+          <Button variant="outline" color="secondary" onClick={checkConcept} disabled={checking || !c.backstory.trim()}>
+            {checking ? 'Checking…' : 'Check Concept Against World Lore'}
+          </Button>
+        </div>
+        {generateError && <p className="modal-error">{generateError}</p>}
+        {checkError && <p className="modal-error">{checkError}</p>}
+      </section>
+
+      {result && (
         <section className="spells-section">
           <div className="spells-section-header">
-            <h3 className="spells-section-title">Backstory</h3>
+            <h3 className="spells-section-title">Lore Fit</h3>
+            <span className={`lore-score ${scoreClass}`}>{result.score}/100</span>
           </div>
-          <textarea
-            className="modal-textarea"
-            value={c.backstory}
-            onChange={e => c.set('backstory', e.target.value)}
-            placeholder="Where did your character come from? What do they want?"
-            rows={10}
-          />
-          <div className="finished-create-row">
-            <Button variant="outline" color="secondary" onClick={generateBackstory} disabled={generating}>
-              {generating ? 'Generating…' : 'Generate Backstory From World'}
-            </Button>
-            <Button variant="outline" color="secondary" onClick={checkConcept} disabled={checking || !c.backstory.trim()}>
-              {checking ? 'Checking…' : 'Check Concept Against World Lore'}
-            </Button>
-          </div>
-          {generateError && <p className="modal-error">{generateError}</p>}
-          {checkError && <p className="modal-error">{checkError}</p>}
-        </section>
-
-        {result && (
-          <section className="spells-section">
-            <div className="spells-section-header">
-              <h3 className="spells-section-title">Lore Fit</h3>
-              <span className={`lore-score ${scoreClass}`}>{result.score}/100</span>
+          <p className="origin-feat-desc">{result.verdict}</p>
+          {result.issues.length > 0 && (
+            <div>
+              <span className="spells-section-title">Issues</span>
+              <ul className="lore-list">
+                {result.issues.map((issue, i) => <li key={i}>{issue}</li>)}
+              </ul>
             </div>
-            <p className="origin-feat-desc">{result.verdict}</p>
-            {result.issues.length > 0 && (
-              <div>
-                <span className="spells-section-title">Issues</span>
-                <ul className="lore-list">
-                  {result.issues.map((issue, i) => <li key={i}>{issue}</li>)}
-                </ul>
+          )}
+          {result.suggestions.length > 0 && (
+            <div>
+              <span className="spells-section-title">Suggestions</span>
+              <ul className="lore-list">
+                {result.suggestions.map((s, i) => <li key={i}>{s}</li>)}
+              </ul>
+              <div className="finished-create-row">
+                <Button variant="outline" color="secondary" onClick={rewriteBackstory} disabled={rewriting}>
+                  {rewriting ? 'Rewriting…' : 'Rewrite Using Suggestions'}
+                </Button>
               </div>
-            )}
-            {result.suggestions.length > 0 && (
-              <div>
-                <span className="spells-section-title">Suggestions</span>
-                <ul className="lore-list">
-                  {result.suggestions.map((s, i) => <li key={i}>{s}</li>)}
-                </ul>
-                <div className="finished-create-row">
-                  <Button variant="outline" color="secondary" onClick={rewriteBackstory} disabled={rewriting}>
-                    {rewriting ? 'Rewriting…' : 'Rewrite Using Suggestions'}
-                  </Button>
-                </div>
-                {rewriteError && <p className="modal-error">{rewriteError}</p>}
-              </div>
-            )}
-          </section>
-        )}
-      </div>
-      <CharacterSheet />
-    </div>
+              {rewriteError && <p className="modal-error">{rewriteError}</p>}
+            </div>
+          )}
+        </section>
+      )}
+    </>
   );
 }

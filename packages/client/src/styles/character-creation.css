@@ -275,6 +275,18 @@ button.asi-btn {
   margin-bottom: 16px;
 }
 
+.attribute-advice {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--gold);
+  border-radius: 4px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
 button.btn-roll {
   background: transparent;
   border: 1px solid var(--gold);

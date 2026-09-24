@@ -1,8 +1,7 @@
 import type { Character, SenseKind } from "shared";
 import { effectiveWeaponProfs, effectiveArmorTraining, getSenses } from "shared";
-import { useState } from "react";
-import { Button } from "../components/Button/Button.tsx";
 import { dispatch } from "../events.ts";
+import { PipCounter } from "../components/PipCounter/PipCounter.tsx";
 import { STAT_NAMES, CLASS_SAVING_THROWS, BACKGROUND_SKILLS, SKILLS } from "../character-creation/srd.ts";
 import { mod, modNum, profBonusForLevel } from "./helpers.tsx";
 
@@ -26,31 +25,8 @@ const STAT_KEYS: Array<keyof Character["stats"]> = [
 export function AbilitiesTab({ character }: { character: Character }) {
   const PROF =
     character.proficiencyBonus ?? profBonusForLevel(character.level ?? 1);
-  const [deathSuccesses, setDeathSuccesses] = useState(0);
-  const [deathFailures, setDeathFailures] = useState(0);
-
-  function rollDeathSave() {
-    const roll = Math.floor(Math.random() * 20) + 1;
-    let msg: string;
-    if (roll === 20) {
-      setDeathSuccesses(3);
-      msg = `(Death Save) ${character.name} rolls a 20 — miraculous recovery!`;
-    } else if (roll === 1) {
-      setDeathFailures((f) => Math.min(3, f + 2));
-      msg = `(Death Save) ${character.name} rolls a 1 — two failures!`;
-    } else if (roll >= 10) {
-      setDeathSuccesses((s) => Math.min(3, s + 1));
-      msg = `(Death Save) ${character.name} rolls ${roll} — success.`;
-    } else {
-      setDeathFailures((f) => Math.min(3, f + 1));
-      msg = `(Death Save) ${character.name} rolls ${roll} — failure.`;
-    }
-    dispatch("vtt:chat:message-sent", {
-      text: msg,
-      senderName: character.name,
-      timestamp: Date.now(),
-    });
-  }
+  const deathSuccesses = character.deathSaves?.successes ?? 0;
+  const deathFailures = character.deathSaves?.failures ?? 0;
 
   const cls = character.class;
   const proficientSaves = new Set<string>(CLASS_SAVING_THROWS[cls] ?? []);
@@ -115,27 +91,23 @@ export function AbilitiesTab({ character }: { character: Character }) {
             );
           })}
 
-          <Button
-            variant="ghost"
-            className="sheet-save-row sheet-save-row--clickable"
-            onClick={rollDeathSave}
-            title="Roll death saving throw"
-          >
-            <span className="sheet-save-dot" />
-            <span className="sheet-save-label">DEATH</span>
-            <span className="sheet-save-val">d20</span>
-          </Button>
-
+          <p className="sheet-section-title sheet-section-title--spaced">
+            Death Saves
+          </p>
           <div className="sheet-death-saves">
-            <progress
-              className="sheet-death-bar sheet-death-bar--life"
+            <PipCounter
+              color="deathSaveSuccess"
+              shape="circle"
               max={3}
-              value={deathSuccesses}
+              current={deathSuccesses}
+              title={`${deathSuccesses}/3 death save successes`}
             />
-            <progress
-              className="sheet-death-bar sheet-death-bar--death"
+            <PipCounter
+              color="deathSaveFailure"
+              shape="circle"
               max={3}
-              value={deathFailures}
+              current={deathFailures}
+              title={`${deathFailures}/3 death save failures`}
             />
           </div>
 

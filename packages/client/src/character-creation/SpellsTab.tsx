@@ -3,7 +3,6 @@ import type { Spell } from 'shared';
 import { Button } from '../components/Button/Button.tsx';
 import { useCharacter } from './CharacterContext.tsx';
 import { CLASS_FEATURES, CLASS_SPELL_ALLOWANCE, FEAT_SPELL_GRANTS, BACKGROUND_FEAT } from './srd.ts';
-import CharacterSheet from './CharacterSheet.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
 
@@ -56,7 +55,7 @@ export default function SpellsTab() {
   }
 
   // Thaumaturge (Divine Order) and Magician (Primal Order) each know one cantrip beyond the
-  // class's normal allowance — see OrderTab/effectiveWeaponProfs' sibling note in shared.
+  // class's normal allowance — see ClassFeaturesTab/effectiveWeaponProfs' sibling note in shared.
   const orderCantripBonus =
     (c.characterClass === 'Cleric' && c.classOrder === 'Thaumaturge') ||
     (c.characterClass === 'Druid' && c.classOrder === 'Magician') ? 1 : 0;
@@ -150,27 +149,21 @@ export default function SpellsTab() {
 
   if (!isSpellcaster && featSources.length === 0) {
     return (
-      <div className="player-info-layout">
-        <div className="tab-content">
-          <div className="spells-placeholder">
-            <p className="spells-placeholder-title">No Spellcasting</p>
-            <p className="spells-placeholder-body">
-              {c.characterClass
-                ? `${c.characterClass}s do not have the ability to cast spells.`
-                : 'Select a class to see spellcasting information.'}
-            </p>
-          </div>
-        </div>
-        <CharacterSheet />
+      <div className="spells-placeholder">
+        <p className="spells-placeholder-title">No Spellcasting</p>
+        <p className="spells-placeholder-body">
+          {c.characterClass
+            ? `${c.characterClass}s do not have the ability to cast spells.`
+            : 'Select a class to see spellcasting information.'}
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="player-info-layout">
-      <div className="tab-content spells-tab">
+    <div className="spells-tab">
 
-        {/* ── Section 1: Learned spells ── */}
+      {/* ── Section 1: Learned spells ── */}
         <section className="spells-section">
           <div className="spells-section-header">
             <h3 className="spells-section-title">Learned Spells</h3>
@@ -301,8 +294,6 @@ export default function SpellsTab() {
           )}
         </section>
 
-      </div>
-      <CharacterSheet />
     </div>
   );
 }

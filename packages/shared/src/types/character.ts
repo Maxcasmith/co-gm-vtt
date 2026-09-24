@@ -72,6 +72,7 @@ export interface Character {
   maxHp?: number;
   currentHp?: number;
   tempHp?: number;
+  deathSaves?: { successes: number; failures: number; stable: boolean };
   // Innate damage-type modifiers from species/class features (e.g. a Tiefling's Fire resistance).
   // Same shape and application path as EnemyStatBlock's — see DamageResistanceHook.
   damageResistances?: string[];

@@ -354,7 +354,6 @@ export default function CombatDock({ character, combatActive, movementRemaining,
           <span className="combat-dock-down-label">
             {isMyTurn ? 'Making death save…' : 'Unconscious'}
           </span>
-          <div className="combat-dock-down-saves" />
         </div>
       </div>
     );

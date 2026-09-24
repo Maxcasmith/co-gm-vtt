@@ -12,7 +12,7 @@ import { logError } from '../logger.ts';
 
 const GRID = 4;
 // Every shipped icon (packages/client/src/assets/icons/*) is 120x120 — matched exactly so a
-// generated icon can drop straight into ShopItem.iconPath/AbilityDef alongside the hand-made ones.
+// generated icon can drop straight into Item.iconPath/AbilityDef alongside the hand-made ones.
 const CELL_SIZE = 120;
 const ATLAS_SIZE = GRID * CELL_SIZE; // 480 — the atlas gets force-resized to this before cropping,
 // regardless of what size the model actually returns (the request `size` param is a request, not a

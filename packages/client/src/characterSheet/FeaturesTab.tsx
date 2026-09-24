@@ -19,7 +19,7 @@ export function FeaturesTab({ character }: { character: Character }) {
   const classes = characterClasses(character);
   const bgFeatName = BACKGROUND_FEAT[character.background];
   const bgFeat = bgFeatName ? ORIGIN_FEAT_DETAILS[bgFeatName] : undefined;
-  // Human gets a bonus Origin feat on top of the one from their background — see PlayerInfoTab.tsx.
+  // Human gets a bonus Origin feat on top of the one from their background — see AttributesTab.tsx.
   const originFeat = character.species === "Human" && character.speciesOriginFeat
     ? ORIGIN_FEAT_DETAILS[character.speciesOriginFeat]
     : undefined;

@@ -54,6 +54,9 @@ export async function runDeathSave(cid: string, actor: Participant): Promise<voi
   };
   const socketId = playerSocketIds.get(actor.id);
   if (socketId) io.to(socketId).emit('combat:death:save', saveData);
+  void updateCharacter(cid, actor.id, c => ({ ...c, deathSaves: saves })).then(() => {
+    if (socketId) io.to(socketId).emit('character:reward:update', { characterId: actor.id });
+  });
 
   // Only the terminal outcomes below (stabilize/miracle/death) ever reached the journal — the
   // roll-by-roll saves leading up to them (or a plain ongoing failure/success) had no record at
@@ -100,6 +103,9 @@ export async function stabilizeParticipant(cid: string, participant: Participant
       stable: true, dead: false,
     });
   }
+  void updateCharacter(cid, participant.id, c => ({ ...c, deathSaves: participant.deathSaves })).then(() => {
+    if (socketId) io.to(socketId).emit('character:reward:update', { characterId: participant.id });
+  });
   const stableMsg = { text: `${participant.name} has stabilized.`, senderName: 'Combat', timestamp: Date.now() };
   void postChat(cid, stableMsg, [participant.id]);
 }
