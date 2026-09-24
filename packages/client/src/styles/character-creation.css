@@ -275,6 +275,50 @@ button.asi-btn {
   margin-bottom: 16px;
 }
 
+.attr-method-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+button.attr-method-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-family: 'Cinzel', serif;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+button.attr-method-tab:hover { color: var(--text); }
+
+button.attr-method-tab--active {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+
+.point-buy-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.point-buy-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.point-buy-row .stat-label { min-width: 30px; }
+
 .attribute-advice {
   background: var(--bg);
   border: 1px solid var(--border);

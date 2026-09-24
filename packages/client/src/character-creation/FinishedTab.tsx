@@ -38,8 +38,12 @@ export default function FinishedTab({ error }: Props) {
   if (!c.characterClass) missing.push({ text: 'Class', tab: 'class' });
   if (!c.species) missing.push({ text: 'Species', tab: 'species' });
   else if ((SPECIES_SUBSPECIES[c.species] ?? []).length > 0 && !c.subspecies) missing.push({ text: 'Lineage', tab: 'species' });
-  if (!c.rolled) missing.push({ text: 'Ability scores not rolled', tab: 'attributes' });
-  else if (c.pool.length > 0) missing.push({ text: `${c.pool.length} rolled score(s) not assigned`, tab: 'attributes' });
+  if (c.attributeMethod === 'roll') {
+    if (!c.rolled) missing.push({ text: 'Ability scores not rolled', tab: 'attributes' });
+    else if (c.pool.length > 0) missing.push({ text: `${c.pool.length} rolled score(s) not assigned`, tab: 'attributes' });
+  } else if (c.attributeMethod === 'standardArray' && c.standardArrayPool.length > 0) {
+    missing.push({ text: `${c.standardArrayPool.length} ability score(s) not assigned`, tab: 'attributes' });
+  }
   if (c.species === 'Human' && !c.speciesOriginFeat) missing.push({ text: 'Versatile origin feat', tab: 'attributes' });
   if (!c.background) missing.push({ text: 'Background', tab: 'attributes' });
   else {

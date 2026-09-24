@@ -67,6 +67,14 @@ export interface WorldMeta {
   genre?: CampaignGenre;
 }
 
+/** Which ability-score generation methods a game's character creation offers. At least one
+ * must stay true — the settings UI refuses to uncheck the last one. */
+export interface AttributeGenerationMethods {
+  diceRoll: boolean;
+  pointBuy: boolean;
+  standardArray: boolean;
+}
+
 /** Optional per-campaign rule toggles, off by default. */
 export interface HouseRules {
   /** On a crit, add the die's max value instead of rolling a second time. */
@@ -83,6 +91,8 @@ export interface HouseRules {
   alertSwapTimerEnabled: boolean;
   /** How long (seconds) each Alert player has to swap before it counts as Cancel. Independent of reactionTimeoutSecs. */
   alertSwapTimeoutSecs: number;
+  /** Which ability-score generation methods are offered during character creation. */
+  attributeMethods: AttributeGenerationMethods;
 }
 
 export const DEFAULT_HOUSE_RULES: HouseRules = {
@@ -93,6 +103,7 @@ export const DEFAULT_HOUSE_RULES: HouseRules = {
   reactionShowDetailsByDefault: false,
   alertSwapTimerEnabled: true,
   alertSwapTimeoutSecs: 30,
+  attributeMethods: { diceRoll: true, pointBuy: true, standardArray: true },
 };
 
 export interface Quest {

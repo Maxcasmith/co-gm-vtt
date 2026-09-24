@@ -52,6 +52,15 @@ export const CLASSES = [
 export const STAT_NAMES = ["STR", "DEX", "CON", "INT", "WIS", "CHA"] as const;
 export type StatName = (typeof STAT_NAMES)[number];
 
+export const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8] as const;
+
+export const POINT_BUY_BUDGET = 27;
+export const POINT_BUY_MIN = 8;
+export const POINT_BUY_MAX = 15;
+export const POINT_BUY_COSTS: Record<number, number> = {
+  8: 0, 9: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 7, 15: 9,
+};
+
 // ── Species ───────────────────────────────────────────────────────────────────
 
 export const SPECIES_SUBSPECIES: Record<string, string[]> = {

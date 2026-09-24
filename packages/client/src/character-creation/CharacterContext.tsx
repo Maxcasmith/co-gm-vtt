@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
 import type { CharacterStats, InventoryItem } from 'shared';
-import type { StatName } from './srd.ts';
+import { STANDARD_ARRAY, type StatName } from './srd.ts';
+
+export type AttributeMethod = 'roll' | 'pointBuy' | 'standardArray';
 
 interface CharacterDraft {
   id: string;
@@ -13,10 +15,14 @@ interface CharacterDraft {
   backgroundAsi: Partial<Record<StatName, number>>;
   characterClass: string;
   skillProficiencies: Record<string, string>; // skill name → source label
-  stats: number[];       // 6 slots, 0 = unassigned
+  stats: number[];       // 6 slots, 0 = unassigned — Dice Roll tab's assignment
   pool: number[];        // rolled values not yet placed
   rolled: boolean;
   rerollUsed: boolean;
+  attributeMethod: AttributeMethod;
+  pointBuyStats: number[];      // 6 slots, each 8-15
+  standardArrayStats: number[]; // 6 slots, 0 = unassigned
+  standardArrayPool: number[];  // STANDARD_ARRAY values not yet placed
   portraitBase64: string;
   portraitPath: string;
   tokenPath: string;
@@ -51,6 +57,8 @@ interface CharacterContextValue extends CharacterDraft {
   set: <K extends keyof CharacterDraft>(key: K, value: CharacterDraft[K]) => void;
   isDirty: boolean;
   toStats: () => CharacterStats;
+  activeStats: number[];
+  attributesComplete: boolean;
 }
 
 const CharacterContext = createContext<CharacterContextValue | null>(null);
@@ -67,6 +75,10 @@ const BLANK: Omit<CharacterDraft, 'id'> = {
   background: '', backgroundAsi: {},
   characterClass: '', skillProficiencies: {},
   stats: [0, 0, 0, 0, 0, 0], pool: [], rolled: false, rerollUsed: false,
+  attributeMethod: 'roll',
+  pointBuyStats: [8, 8, 8, 8, 8, 8],
+  standardArrayStats: [0, 0, 0, 0, 0, 0],
+  standardArrayPool: [...STANDARD_ARRAY],
   portraitBase64: '', portraitPath: '', tokenPath: '',
   expertiseSkills: [],
   fightingStyle: '',
@@ -83,8 +95,8 @@ const BLANK: Omit<CharacterDraft, 'id'> = {
 
 const STAT_IDX: Record<StatName, number> = { STR: 0, DEX: 1, CON: 2, INT: 3, WIS: 4, CHA: 5 };
 
-export function CharacterProvider({ children, id }: { children: ReactNode; id: string }) {
-  const [draft, setDraft] = useState<CharacterDraft>({ ...BLANK, id });
+export function CharacterProvider({ children, id, initialAttributeMethod }: { children: ReactNode; id: string; initialAttributeMethod?: AttributeMethod }) {
+  const [draft, setDraft] = useState<CharacterDraft>({ ...BLANK, id, attributeMethod: initialAttributeMethod ?? BLANK.attributeMethod });
 
   function set<K extends keyof CharacterDraft>(key: K, value: CharacterDraft[K]) {
     setDraft(d => ({ ...d, [key]: value }));
@@ -92,15 +104,25 @@ export function CharacterProvider({ children, id }: { children: ReactNode; id: s
 
   const isDirty = draft.name !== '' || draft.rolled || draft.portraitBase64 !== '';
 
+  const activeStats =
+    draft.attributeMethod === 'pointBuy' ? draft.pointBuyStats
+    : draft.attributeMethod === 'standardArray' ? draft.standardArrayStats
+    : draft.stats;
+
+  const attributesComplete =
+    draft.attributeMethod === 'pointBuy' ? true
+    : draft.attributeMethod === 'standardArray' ? draft.standardArrayPool.length === 0
+    : draft.rolled && draft.pool.length === 0;
+
   function toStats(): CharacterStats {
-    const base = [...draft.stats];
+    const base = [...activeStats];
     const result = [0, 0, 0, 0, 0, 0].map((_, i) => (base[i] ?? 0) + (draft.backgroundAsi[(['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA'] as StatName[])[i]] ?? 0));
     const [str = 0, dex = 0, con = 0, int = 0, wis = 0, cha = 0] = result;
     return { str, dex, con, int, wis, cha };
   }
 
   return (
-    <CharacterContext.Provider value={{ ...draft, set, isDirty, toStats }}>
+    <CharacterContext.Provider value={{ ...draft, set, isDirty, toStats, activeStats, attributesComplete }}>
       {children}
     </CharacterContext.Provider>
   );

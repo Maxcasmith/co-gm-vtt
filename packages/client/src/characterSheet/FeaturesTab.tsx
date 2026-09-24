@@ -1,6 +1,14 @@
 import type { Character } from "shared";
 import { characterClasses, RESOURCE_DEFS, resourceCurrent, resourceMax } from "shared";
-import { CLASS_FEATURES, SPECIES_FEATURES, BACKGROUND_FEAT, BACKGROUND_SKILLS, ORIGIN_FEAT_DETAILS } from "../character-creation/srd.ts";
+import { CLASS_FEATURES, SPECIES_FEATURES, BACKGROUND_FEAT, BACKGROUND_SKILLS, ORIGIN_FEAT_DETAILS, FIGHTING_STYLES } from "../character-creation/srd.ts";
+
+// The generic "Fighting Style" class feature just lists the options — once a style is picked,
+// show that style's own name/description instead of the placeholder text.
+function resolveFeature(character: Character, f: { name: string; description: string }): { name: string; description: string } {
+  if (f.name !== "Fighting Style" || !character.fightingStyle) return f;
+  const style = FIGHTING_STYLES.find(s => s.name === character.fightingStyle);
+  return style ? { name: `Fighting Style: ${style.name}`, description: style.description } : f;
+}
 
 // Matches a feature's display name to its RESOURCE_DEFS pool (Second Wind, Rage, Lucky, ...) so
 // the uses badge works for any owned resource without hardcoding per-feature.
@@ -28,12 +36,15 @@ export function FeaturesTab({ character }: { character: Character }) {
       {classes.map((c) => (CLASS_FEATURES[c.class] ?? []).length > 0 && (
         <div key={c.class} className="sheet-feature-group">
           <p className="sheet-feature-group-title">{c.class} Features</p>
-          {CLASS_FEATURES[c.class]!.map((f) => (
-            <div key={f.name} className="sheet-feature">
-              <div className="sheet-feature-name">{f.name}<FeatureUses character={character} name={f.name} /></div>
-              <div className="sheet-feature-desc">{f.description}</div>
-            </div>
-          ))}
+          {CLASS_FEATURES[c.class]!.map((raw) => {
+            const f = resolveFeature(character, raw);
+            return (
+              <div key={raw.name} className="sheet-feature">
+                <div className="sheet-feature-name">{f.name}<FeatureUses character={character} name={raw.name} /></div>
+                <div className="sheet-feature-desc">{f.description}</div>
+              </div>
+            );
+          })}
         </div>
       ))}
 

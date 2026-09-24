@@ -53,7 +53,7 @@ export default function CharacterSheet() {
 
   const hitDie = c.characterClass ? HIT_DICE[c.characterClass] : null;
   const toughBonus = hasOriginFeat(c, 'Tough') ? 2 : 0; // 2 * level, level 1 at creation
-  const hp = hitDie != null ? hitDie + conMod(c.stats, c.backgroundAsi) + toughBonus : null;
+  const hp = hitDie != null ? hitDie + conMod(c.activeStats, c.backgroundAsi) + toughBonus : null;
 
   const classFeatures = c.characterClass ? (CLASS_FEATURES[c.characterClass] ?? []) : [];
   const speciesFeatures = c.species ? (SPECIES_FEATURES[c.species] ?? []) : [];

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { WorldMeta } from 'shared';
-import { CharacterProvider, useCharacter } from './character-creation/CharacterContext.tsx';
+import { DEFAULT_HOUSE_RULES } from 'shared';
+import { CharacterProvider, useCharacter, type AttributeMethod } from './character-creation/CharacterContext.tsx';
 import { Button } from './components/Button/Button.tsx';
 import { CreateRail } from './components/CreateRail/CreateRail.tsx';
 import CreationLayout from './character-creation/CreationLayout.tsx';
@@ -34,7 +35,7 @@ function genId(): string {
 
 // ── inner page (needs context) ────────────────────────────────────────────────
 
-function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId: string; campaignName: string; isCampaign: boolean }) {
+function CreatePageInner({ campaignId, campaignName, isCampaign, attributeMethods }: { campaignId: string; campaignName: string; isCampaign: boolean; attributeMethods: typeof DEFAULT_HOUSE_RULES.attributeMethods }) {
   const c = useCharacter();
   const hasClassFeatures = c.characterClass ? hasClassFeaturesStep(c.characterClass) : false;
   const hasSpellcasting = c.characterClass
@@ -88,7 +89,7 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
     if (stepIndex < steps.length - 1) c.set('activeTab', steps[stepIndex + 1]!);
   }
 
-  const canCreate = c.name.trim() !== '' && c.password.trim() !== '' && c.rolled && c.pool.length === 0;
+  const canCreate = c.name.trim() !== '' && c.password.trim() !== '' && c.attributesComplete;
 
   async function handleCreate() {
     if (!canCreate) return;
@@ -167,7 +168,7 @@ function CreatePageInner({ campaignId, campaignName, isCampaign }: { campaignId:
             {c.activeTab === 'class' ? <ClassTab />
               : c.activeTab === 'classFeatures' && hasClassFeatures ? <ClassFeaturesTab />
               : c.activeTab === 'species' ? <SpeciesTab />
-              : c.activeTab === 'attributes' ? <AttributesTab />
+              : c.activeTab === 'attributes' ? <AttributesTab attributeMethods={attributeMethods} />
               : c.activeTab === 'backstory' && isCampaign ? <BackstoryTab campaignId={campaignId} />
               : c.activeTab === 'spells' && hasSpellcasting ? <SpellsTab />
               : c.activeTab === 'shop' ? <ShopTab />
@@ -236,9 +237,13 @@ export default function PlayerCreatePage({ campaignId }: Props) {
     return <div className="error">Loading campaign…</div>;
   }
 
+  const attributeMethods = meta.houseRules?.attributeMethods ?? DEFAULT_HOUSE_RULES.attributeMethods;
+  const initialAttributeMethod: AttributeMethod =
+    attributeMethods.diceRoll ? 'roll' : attributeMethods.pointBuy ? 'pointBuy' : 'standardArray';
+
   return (
-    <CharacterProvider id={charId}>
-      <CreatePageInner campaignId={campaignId} campaignName={meta.name} isCampaign={meta.type === 'campaign'} />
+    <CharacterProvider id={charId} initialAttributeMethod={initialAttributeMethod}>
+      <CreatePageInner campaignId={campaignId} campaignName={meta.name} isCampaign={meta.type === 'campaign'} attributeMethods={attributeMethods} />
     </CharacterProvider>
   );
 }

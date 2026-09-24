@@ -122,6 +122,33 @@ export default function GameSettingsPage({ campaignId }: Props) {
             </div>
           </section>
           <section className="settings-section">
+            <h3 className="settings-section-title">Attribute Options</h3>
+            {([
+              ['diceRoll', 'Dice Roll', 'Roll 4d6, drop the lowest, six times.'],
+              ['pointBuy', 'Point Buy', '27-point budget, standard 2024 cost table.'],
+              ['standardArray', 'Standard Array', 'Assign the fixed array 15/14/13/12/10/8.'],
+            ] as const).map(([key, label, desc]) => (
+              <div className="settings-toggle-row" key={key}>
+                <div className="settings-toggle-text">
+                  <span className="settings-toggle-label">{label}</span>
+                  <span className="settings-toggle-desc">{desc}</span>
+                </div>
+                <Button
+                  variant="ghost"
+                  className={`settings-toggle ${rules.attributeMethods[key] ? 'settings-toggle--on' : ''}`}
+                  onClick={() => setRules(r => {
+                    const enabledCount = Object.values(r.attributeMethods).filter(Boolean).length;
+                    if (r.attributeMethods[key] && enabledCount <= 1) return r;
+                    return { ...r, attributeMethods: { ...r.attributeMethods, [key]: !r.attributeMethods[key] } };
+                  })}
+                  aria-pressed={rules.attributeMethods[key]}
+                >
+                  <span className="settings-toggle-thumb" />
+                </Button>
+              </div>
+            ))}
+          </section>
+          <section className="settings-section">
             <h3 className="settings-section-title">Reaction Sidebar</h3>
             <div className="settings-toggle-row">
               <div className="settings-toggle-text">

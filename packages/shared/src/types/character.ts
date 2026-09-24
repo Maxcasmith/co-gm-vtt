@@ -481,20 +481,24 @@ export function calcACBreakdown(character: Character): ACBreakdown {
 
   const base = (bodyArmor as Armor).acBonus;
   parts.unshift({ label: `Armor (${bodyArmor.name})`, value: base });
+  // Fighting Style: Defense — +1 AC while wearing armor. Mirrors AcModifierHook's requiresArmor
+  // check (combat/stateEngine/passiveClassHooks.ts), which applies this same bonus live in combat.
+  const defenseBonus = character.fightingStyle === "Defense" ? 1 : 0;
+  if (defenseBonus) parts.push({ label: "Fighting Style: Defense", value: defenseBonus });
   switch ((bodyArmor as Armor).armorType) {
     case "light":
       parts.push({ label: "Dex modifier", value: dex });
-      return { total: base + dex + shieldAc, parts };
+      return { total: base + dex + shieldAc + defenseBonus, parts };
     case "medium": {
       const cappedDex = Math.min(dex, 2);
       parts.push({ label: "Dex modifier (max +2)", value: cappedDex });
-      return { total: base + cappedDex + shieldAc, parts };
+      return { total: base + cappedDex + shieldAc + defenseBonus, parts };
     }
     case "heavy":
-      return { total: base + shieldAc, parts };
+      return { total: base + shieldAc + defenseBonus, parts };
     default:
       parts.push({ label: "Dex modifier", value: dex });
-      return { total: base + dex + shieldAc, parts };
+      return { total: base + dex + shieldAc + defenseBonus, parts };
   }
 }
 
