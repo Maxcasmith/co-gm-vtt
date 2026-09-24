@@ -26,16 +26,14 @@ const roomA = dungeon.rooms[0]!;
 const roomB = dungeon.rooms[1]!;
 
 // ── room entry ────────────────────────────────────────────────────────────────
-const entry = templateRoomEntry(dungeon, roomA);
-// Natural sentence, not the "Here: X." ground-truth label — that syntax is DM-eyes-only
-// elsewhere (describeDungeonGroundTruth/describeDungeonState) and shouldn't reach players verbatim.
-if (entry !== 'A low vaulted chamber.\nCracked flagstones underfoot.\nA toppled bench.\nRusty Key is here.') {
+const entry = templateRoomEntry(roomA);
+// Description and dressing only — never a roll-call of what's in the room, discovered or not.
+if (entry !== 'A low vaulted chamber.\nCracked flagstones underfoot.\nA toppled bench.') {
   throw new Error(`unexpected room-entry text:\n${entry}`);
 }
-if (entry.includes('Tripwire')) throw new Error(`undiscovered entity leaked into room-entry text:\n${entry}`);
 
-if (templateRoomEntry(dungeon, roomB) !== null) {
-  throw new Error('expected null for a room with no description, dressing, or discovered entities');
+if (templateRoomEntry(roomB) !== null) {
+  throw new Error('expected null for a room with no description or dressing');
 }
 
 // ── search results ────────────────────────────────────────────────────────────

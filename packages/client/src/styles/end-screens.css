@@ -223,8 +223,7 @@
   margin: 0 0 32px;
 }
 
-.congrats-quests-section,
-.congrats-leaderboard-section {
+.congrats-quests-section {
   width: 100%;
   border-top: 1px solid rgba(212, 175, 55, 0.25);
   padding-top: 24px;
@@ -254,43 +253,6 @@
   color: rgba(255, 255, 255, 0.85);
 }
 
-.congrats-leaderboard {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.congrats-leaderboard-row {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: baseline;
-  gap: 12px;
-  padding: 10px 16px;
-  background: rgba(212, 175, 55, 0.06);
-  border: 1px solid rgba(212, 175, 55, 0.2);
-  border-radius: 8px;
-}
-
-.congrats-leaderboard-label {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.6);
-  text-align: left;
-}
-
-.congrats-leaderboard-winner {
-  font-family: 'Cinzel', serif;
-  font-size: 16px;
-  color: #d4af37;
-}
-
-.congrats-leaderboard-value {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.45);
-}
-
 .congrats-finish {
   margin-top: 40px;
   padding: 14px 56px;
@@ -309,3 +271,55 @@
   background: rgba(212, 175, 55, 0.12);
 }
 
+/* ── Scores screen (after Congrats) — every player, every category ───────────── */
+
+.scores-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border-top: 1px solid rgba(212, 175, 55, 0.25);
+  padding-top: 24px;
+  margin-top: 16px;
+}
+
+.scores-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.scores-table th {
+  font-size: 12px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  padding: 0 12px 12px;
+  text-align: right;
+}
+
+.scores-table th:first-child,
+.scores-player {
+  text-align: left;
+}
+
+.scores-table td {
+  padding: 10px 12px;
+  border-top: 1px solid rgba(212, 175, 55, 0.12);
+}
+
+.scores-player {
+  font-family: 'Cinzel', serif;
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.scores-value {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.55);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.scores-value--best {
+  color: #d4af37;
+  font-weight: 700;
+}

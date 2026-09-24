@@ -1,4 +1,4 @@
-import type { AppConfig, Character, EnemyStatBlock, GroupColor } from 'shared';
+import type { AppConfig, Character, Dungeon, EnemyStatBlock, GroupColor } from 'shared';
 import { addCurrency, removeCurrency, trackOf } from 'shared';
 import { randomUUID } from 'crypto';
 import { updateCharacter, listCharacters, readEntity, writeEntity, readManifest, writeManifest, emptyManifest, parseEntityLinks, clearDungeon, getConfig, saveDungeon, saveDungeonAscii, readQuests, writeQuests, loadPartyAllies, savePartyAllies, readNemeses, writeNemeses, getWorldMeta, findVisitedDungeonByName } from './storage.ts';
@@ -18,7 +18,7 @@ import { rollPlayerInitiatives, addToTurnOrder, syncFight } from './combat/runti
 import { sweepGameTimeExpiries } from './combat/runtime/environment.ts';
 import { trySpendSpellSlot } from './combat/runtime/resources.ts';
 import { generateAndBroadcastEnemies, openArena, unlockDoorNear, resolveLockpickAttempt, resolveTrapDisarmAttempt } from './dungeon/runtime.ts';
-import { checkQuestChainTriggers } from './dungeon/questChain.ts';
+import { chainDungeonOf, checkQuestChainTriggers, completeChain, onStageSuccess } from './dungeon/questChain.ts';
 import { advancePlotArc } from './plotArcs.ts';
 import { findSpell } from './routes/spells.ts';
 import { postChat, audienceTracks, updateScene, sceneFor, readChatContext, getPartyGroups, setTrackLocations, locationsOfTracks, toTracks, type ChatAudience } from './partyGroups.ts';
@@ -185,8 +185,11 @@ export async function applyEffects(cid: string, effects: TagEffect[], audience: 
       await updateCharacter(cid, char.id, c => ({ ...c, [effect.denom]: next }));
       const sid = playerSocketIds.get(char.id);
       // No piecemeal currency state on the client (gold was never live-updated before this) —
-      // same "refetch the whole character" pattern rest/combat-end already use.
-      if (sid) io.to(sid).emit('character:currency:update', { characterId: char.id });
+      // same "refetch the whole character" pattern rest/combat-end already use. denom/amount ride
+      // along too so the client can toast the change without waiting on the refetch.
+      if (sid) io.to(sid).emit('character:currency:update', {
+        characterId: char.id, denom: effect.denom, amount: effect.type === 'currency_add' ? effect.amount : -effect.amount,
+      });
     } else if (effect.type === 'spell_cast') {
       await resolveSpellCast(cid, effect.player, effect.spellName);
     } else if (effect.type === 'scene_build') {
@@ -237,6 +240,13 @@ export async function applyEffects(cid: string, effects: TagEffect[], audience: 
     } else if (effect.type === 'dungeon_exit') {
       // Only the group this narration was for leaves. Never mid-fight.
       const leaving = await toTracks(cid, tracks);
+      // A dungeon crawl has nowhere to leave TO — the dungeon is the whole game. Walking out is
+      // quitting: no exit_dungeon trigger, no reward, the group's clients do exactly what the
+      // menu's Leave does. Winning is the last goal succeeding (questChain.ts's completeChain).
+      if ((await getWorldMeta(cid))?.type === 'dungeon-crawl') {
+        leaving.emit('game:left');
+        return;
+      }
       for (const dungeonId of await locationsOfTracks(cid, tracks)) {
         const dungeon = dungeonById(cid, dungeonId);
         if (!dungeon || fightsIn(cid).some(f => f.arenaId === dungeonId)) continue;
@@ -399,6 +409,8 @@ async function applyQuestEffects(cid: string, effects: QuestEffect[], tracks: Gr
   // pre-seeded relatedLocation, and there's no need to re-read per effect for that.
   const manifest = await readManifest(cid);
   const scene = manifest ? await sceneFor(cid, manifest, tracks) : null;
+  let finishedChain: Dungeon | undefined;
+  const newQuests: { id: string; name: string }[] = [];
 
   for (const effect of effects) {
     if (effect.type === 'quest_add') {
@@ -414,11 +426,21 @@ async function applyQuestEffects(cid: string, effects: QuestEffect[], tracks: Gr
           id: effect.id, name: effect.name, description: effect.description, status: 'open', log: [], addedAt: today,
           ...(relatedNpc ? { relatedNpc } : {}), ...(relatedLocation ? { relatedLocation } : {}),
         });
+        newQuests.push({ id: effect.id, name: effect.name });
       }
     } else if (effect.type === 'quest_update') {
       const q = quests.find(q => q.id === effect.id);
       if (q) q.log.push({ date: today, text: effect.entry });
     } else if (effect.type === 'quest_resolve') {
+      // A dungeon chain stage the DM declared done goes through the same onSuccess hook a
+      // mechanical trigger does — next stage opens, its creatures spawn, a last stage completes the
+      // game. Resolving it here directly skipped all of that (During the Storm's final stage never
+      // showed the Congrats screen).
+      const chainDungeon = chainDungeonOf(cid, effect.id);
+      if (chainDungeon) {
+        if (await onStageSuccess(cid, chainDungeon, quests, effect.id)) finishedChain = chainDungeon;
+        continue;
+      }
       const q = quests.find(q => q.id === effect.id);
       if (q) q.status = 'resolved';
       // If this quest was the live beat of a plot arc, this pushes the next beat into `quests`
@@ -428,7 +450,8 @@ async function applyQuestEffects(cid: string, effects: QuestEffect[], tracks: Gr
   }
 
   await writeQuests(cid, quests);
-  io.to(campaignRoom(cid)).emit('quest:update', { quests, act: manifest?.act ?? 1 });
+  io.to(campaignRoom(cid)).emit('quest:update', { quests, act: manifest?.act ?? 1, ...(newQuests.length ? { newQuests } : {}) });
+  if (finishedChain) await completeChain(cid, finishedChain);
 }
 
 /**

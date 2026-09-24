@@ -4,7 +4,7 @@
 // validation against the manifest's own loot), buildingLayout.ts's lockFor (cross-room conflict
 // resolution, carried through real geometry), and dungeon/index.ts's resolveDoorState (name -> real
 // placed entity id).
-import { resolveDoorLocks } from './manifest.ts';
+import { dropUnreachableLocks, resolveDoorLocks } from './manifest.ts';
 import type { DungeonManifest, ManifestRoom } from './manifest.ts';
 import { generateBuildingLayout } from './buildingLayout.ts';
 import { resolveDoorState } from './index.ts';
@@ -102,6 +102,38 @@ import { resolveDoorState } from './index.ts';
   }
 
   console.log('resolveDoorState: OK — resolvable key links to the real entity id with a lockpickDC (default or explicit), unresolvable key downgrades, undeclared defaults to closed.');
+}
+
+// ── 4. dropUnreachableLocks: a key behind its own lock is a wall ──────────────────────────────
+{
+  const rooms: ManifestRoom[] = [
+    { name: 'Hall', size: 'medium', role: 'entrance', connectsTo: ['Office', 'Vault', 'Cell'] },
+    // Office's key is in the Hall — solvable, must survive.
+    { name: 'Office', size: 'small', connectsTo: ['Hall'], doors: [{ toRoom: 'Hall', state: 'locked', keyName: 'Office Key' }], loot: [{ name: 'Vault Key', hideDC: -99 }] },
+    // Vault's key is inside the Office, which is itself locked but solvable — a chain, must survive.
+    { name: 'Vault', size: 'small', connectsTo: ['Hall'], doors: [{ toRoom: 'Hall', state: 'locked', keyName: 'Vault Key' }] },
+    // Cell's key is inside the Cell — never reachable, must be downgraded.
+    { name: 'Cell', size: 'small', connectsTo: ['Hall'], doors: [{ toRoom: 'Hall', state: 'locked', keyName: 'Cell Key' }], loot: [{ name: 'Cell Key', hideDC: -99 }] },
+  ];
+  rooms[0]!.loot = [{ name: 'Office Key', hideDC: -99 }];
+  const fixed = dropUnreachableLocks(rooms);
+  const state = (room: string) => fixed.find(r => r.name === room)!.doors![0]!.state;
+  if (state('Office') !== 'locked') throw new Error('a lock whose key is reachable must survive');
+  if (state('Vault') !== 'locked') throw new Error('a lock whose key sits behind another solvable lock must survive');
+  if (state('Cell') !== 'closed') throw new Error('a lock whose key is behind itself must downgrade to closed');
+  console.log('dropUnreachableLocks: OK — solvable locks and chains survive, a key behind its own door downgrades.');
+}
+
+// ── 5. 'none': an open way through, no Door entity ────────────────────────────────────────────
+{
+  const rooms: ManifestRoom[] = [
+    { name: 'Street', size: 'medium', role: 'entrance', connectsTo: ['Lot', 'Shop'], doors: [{ toRoom: 'Lot', state: 'none' }] },
+    { name: 'Lot', size: 'medium', connectsTo: ['Street'] },
+    { name: 'Shop', size: 'medium', connectsTo: ['Street'] },
+  ];
+  const { doors } = generateBuildingLayout({ rooms, structureType: 'building', theme: 'modern', questChain: [], illumination: 1, materials: [] });
+  if ((doors ?? []).length !== 1) throw new Error(`expected only the Street-Shop connection to become a Door, got ${JSON.stringify(doors)}`);
+  console.log("'none' doors: OK — carved as an open way through with no Door entity.");
 }
 
 console.log('doorLocks selfcheck: all assertions passed');

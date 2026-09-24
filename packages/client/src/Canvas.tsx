@@ -169,6 +169,10 @@ export default function Canvas({ player, characterId, character, connected, show
       const img = new Image();
       img.onload = () => { propImgCache.current[url] = img; settleAsset(); };
       img.onerror = settleAsset; // no sprite yet (fire-and-forget hasn't finished) — drawScene's img-less fallback covers this
+      // Cross-origin (the API is on its own port), so without this the canvas can't read the sprite's
+      // pixels and spriteBounds can't trim it to its visible content. The API's global cors() already
+      // sends the header this needs.
+      img.crossOrigin = 'anonymous';
       img.src = `${API}${url}`;
     });
   }, [dungeon?.entities]);

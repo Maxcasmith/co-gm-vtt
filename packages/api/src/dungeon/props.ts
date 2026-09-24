@@ -58,8 +58,7 @@ export interface PendingProp {
    * square cell rather than every object being scaled to fill the cell identically — which is why
    * a candle stub used to render the same size as a grand piano. Omitted by the admin prompt-test
    * flow, which has only names to work with; the prompt falls back to square in that case. */
-  widthFt?: number;
-  depthFt?: number;
+  sizeXY?: [number, number];
 }
 
 async function stripChromaKey(tile: Buffer): Promise<Buffer> {
@@ -181,8 +180,7 @@ export async function generatePropSprites(propSpecs: PropSpec[], config: AppConf
     slug: spec.noun,
     name: titleCase(spec.noun),
     description: spec.description,
-    widthFt: spec.widthFt,
-    depthFt: spec.depthFt,
+    sizeXY: spec.sizeXY,
   }));
 
   const drawn: PropSpec[] = [];
@@ -225,7 +223,7 @@ export async function generatePropSpriteBatch(batch: PendingProp[], apiKey: stri
   // hardcode 2048, which was simply false for the 1024 branch and fed the model a wrong canvas
   // size to lay its grid out against.
   const prompt = buildPropSpritePrompt(
-    batch.map(b => ({ name: b.name, description: b.description, ...(b.widthFt !== undefined ? { widthFt: b.widthFt } : {}), ...(b.depthFt !== undefined ? { depthFt: b.depthFt } : {}) })),
+    batch.map(b => ({ name: b.name, description: b.description, ...(b.sizeXY ? { sizeXY: b.sizeXY } : {}) })),
     transparent,
     parseInt(requestSize, 10),
   );

@@ -146,7 +146,8 @@
           "path": "tilesets/cosmic-horror-2d20b8bc08/barnacled-stone"
         },
         "wet-stone": {
-          "path": "tilesets/victorian-horror-032b06694b/wet-stone"
+          "path": "tilesets/victorian-horror-032b06694b/wet-stone",
+          "description": "dark stone steps running with rainwater, edges rounded by decades of feet, patches of black algae slick on the treads"
         },
         "stone": {
           "path": "tilesets/victorian-horror-032b06694b/stone"
@@ -195,7 +196,8 @@
       },
       "carpet": {
         "soaked-carpet": {
-          "path": "tilesets/cosmic-horror-89f12707c2/soaked-carpet"
+          "path": "tilesets/cosmic-horror-89f12707c2/soaked-carpet",
+          "description": "waterlogged courtyard paving hidden under windblown trash and leaf pulp, black with standing water, squelching underfoot like sodden carpet"
         },
         "carpet": {
           "path": "tilesets/survival-horror-2c2e19dc95/carpet",
@@ -234,6 +236,12 @@
         "cracked-asphalt": {
           "path": "tilesets/modern-horror-5b339d7a08/cracked-asphalt",
           "description": "weathered black asphalt spiderwebbed with cracks, faded yellow parking lines barely visible under dark dried smears and windblown trash"
+        }
+      },
+      "water": {
+        "storm-floodwater": {
+          "path": "tilesets/urban-horror-428de388cb/storm-floodwater",
+          "description": "waist-deep black floodwater under a concrete span, surface skinned with oily rainbow sheen, bobbing with bottles, branches, and pale unidentifiable debris"
         }
       }
     },

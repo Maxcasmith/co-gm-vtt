@@ -13,6 +13,7 @@ import { drawHazardCell } from './drawHazard.ts';
 import { drawSwing } from './drawSwing.ts';
 import { computeLighting, applyGroundLighting, tokenLightFilter } from './lighting.ts';
 import { buildGroundCache, resolveFloorSlice, type GroundCache } from './groundCache.ts';
+import { containFit, spriteBounds } from './spriteBounds.ts';
 import type { FloatEffect, FlashEffect, TokenSpecialEffect, SwingEffect, SenseCells, TokenDim, LightSourceCells } from './types.ts';
 
 // ponytail: debug-only perf overlay — draws aren't on a continuous rAF loop here (they fire per
@@ -280,18 +281,23 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           if (entity.type === 'object' && !entity.followsId) {
             const propImg = entity.spriteSrc ? propImgCache.current?.[entity.spriteSrc] : undefined;
             if (propImg) {
-              // Sprites are always square cells, but a footprint isn't (a long table is 1x2). The
-              // object is drawn inside its square cell at its TRUE proportions, so the sprite's own
-              // transparent margin already encodes the footprint — stretching the square to a
-              // non-square rect would squash the object on top of that. Instead draw the square at
-              // the footprint's LONGER side, centred on the footprint: the object lands exactly on
-              // its cells and only empty margin spills over the short axis.
+              // The sprite is drawn once in a fixed canonical orientation (PROP_ART_ORIENTATION:
+              // back at the top, use side facing down). Size and facing both come from the map:
+              // its visible content is fitted inside the footprint at its own aspect ratio (never
+              // stretched — see spriteBounds.ts), then turned. width/height are the footprint AFTER
+              // rotation, so a quarter-turned prop is fitted to its un-rotated box (h x w) and the
+              // turn lays it across the footprint.
               const w = entity.width ?? 1;
               const h = entity.height ?? 1;
-              const side = Math.max(w, h) * cellSz;
-              const left = (entity.x + w / 2) * cellSz - side / 2 + panX;
-              const top = (entity.y + h / 2) * cellSz - side / 2 + panY;
-              ctx.drawImage(propImg, left, top, side, side);
+              const rotation = entity.rotation ?? 0;
+              const quarterTurn = rotation === 90 || rotation === 270;
+              const { sx, sy, sw, sh } = spriteBounds(propImg);
+              const fit = containFit(sw, sh, (quarterTurn ? h : w) * cellSz, (quarterTurn ? w : h) * cellSz);
+              ctx.save();
+              ctx.translate((entity.x + w / 2) * cellSz + panX, (entity.y + h / 2) * cellSz + panY);
+              ctx.rotate((rotation * Math.PI) / 180);
+              ctx.drawImage(propImg, sx, sy, sw, sh, -fit.w / 2, -fit.h / 2, fit.w, fit.h);
+              ctx.restore();
               continue;
             }
           }

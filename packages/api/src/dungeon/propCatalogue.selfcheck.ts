@@ -8,13 +8,13 @@ import { buildPropNounBlock, splitReusableProps } from './propCatalogue.ts';
 import { parsePropPlan } from './propDressing.ts';
 
 const catalogue: PropCategoryMap = {
-  seating: { 'diner-booth': { path: 'props/modern/horror/diner-booth', description: 'a cracked vinyl booth', widthFt: 5, depthFt: 6 } },
+  seating: { 'diner-booth': { path: 'props/modern/horror/diner-booth', description: 'a cracked vinyl booth', sizeXY: [1, 2] } },
   surface: { 'long-table': { path: 'props/modern/horror/long-table' } },
-  machinery: { boiler: { path: 'props/modern/horror/boiler', description: 'a rust-streaked boiler', widthFt: 4, depthFt: 4 } },
+  machinery: { boiler: { path: 'props/modern/horror/boiler', description: 'a rust-streaked boiler', sizeXY: [1, 1] } },
 };
 
 const prop = (over: Partial<PropSpec> & Pick<PropSpec, 'noun' | 'category'>): PropSpec =>
-  ({ description: `${over.noun} description`, widthFt: 5, depthFt: 5, ...over });
+  ({ description: `${over.noun} description`, sizeXY: [1, 1], ...over });
 
 function main() {
   // A noun already drawn for this bucket is never drawn again.
@@ -50,17 +50,17 @@ function main() {
   // A noun already in the catalogue keeps its RECORDED dimensions — one sprite is drawn at one
   // aspect ratio, so letting a later dungeon re-declare it 2x9 would render that sprite distorted.
   const plan = parsePropPlan({
-    props: [{ noun: 'diner-booth', category: 'seating', description: 'a booth', widthFt: 2, depthFt: 9 }],
-    rooms: [{ name: 'Diner', props: [{ noun: 'diner-booth', count: 6, zone: 'wall' }] }],
+    props: [{ prop: 'diner-booth', category: 'seating', description: 'a booth', sizeXY: [1, 2] }],
+    rooms: [{ name: 'Diner', props: [{ prop: 'diner-booth', count: 6, zone: 'wall' }] }],
   }, catalogue);
-  if (plan.props[0]?.widthFt !== 5 || plan.props[0]?.depthFt !== 6) throw new Error('catalogue dimensions must win over a re-declared size');
+  if (plan.props[0]?.sizeXY[0] !== 1 || plan.props[0]?.sizeXY[1] !== 2) throw new Error('catalogue dimensions must win over a re-declared size');
   if (plan.byRoom.get('Diner')?.[0]?.count !== 6) throw new Error('a room request must keep its count');
 
   // A room asking for a noun that was never declared has no description and no dimensions, so it
   // can neither be drawn nor sized — dropped rather than guessed at.
   const undeclared = parsePropPlan({
-    props: [{ noun: 'crate', category: 'container', description: 'a crate', widthFt: 3, depthFt: 3 }],
-    rooms: [{ name: 'Store', props: [{ noun: 'ghost-shelf', count: 2, zone: 'wall' }, { noun: 'crate', count: 4, zone: 'corner' }] }],
+    props: [{ prop: 'crate', category: 'container', description: 'a crate', sizeXY: [1, 1] }],
+    rooms: [{ name: 'Store', props: [{ prop: 'ghost-shelf', count: 2, zone: 'wall' }, { prop: 'crate', count: 4, zone: 'corner' }] }],
   }, catalogue);
   const store = undeclared.byRoom.get('Store') ?? [];
   if (store.length !== 1 || store[0]?.noun !== 'crate') throw new Error('a request naming an undeclared noun must be dropped');
@@ -68,14 +68,14 @@ function main() {
   // Out-of-enum values fall back rather than inventing a bucket or a placement the placer can't
   // read, and absurd dimensions are clamped rather than swallowing a room.
   const junk = parsePropPlan({
-    props: [{ noun: 'Odd Thing', category: 'not-a-category', description: '', widthFt: 9999, depthFt: -4 }],
-    rooms: [{ name: 'Room', props: [{ noun: 'odd-thing', count: 999, zone: 'sideways' }] }],
+    props: [{ prop: 'Odd Thing', category: 'not-a-category', description: '', sizeXY: [2000, 1] }],
+    rooms: [{ name: 'Room', props: [{ prop: 'odd-thing', count: 999, zone: 'sideways' }] }],
   }, catalogue);
   const odd = junk.props[0];
   if (odd?.noun !== 'odd-thing') throw new Error('a noun must be slugified');
   if (odd?.category !== 'decor') throw new Error('an unknown category must fall back to decor');
   if (odd?.description !== 'odd thing') throw new Error('a missing description must fall back to the noun');
-  if (odd?.widthFt !== 30 || odd?.depthFt !== 1) throw new Error('dimensions must be clamped to a sane range');
+  if (odd?.sizeXY[0] !== 6 || odd?.sizeXY[1] !== 1) throw new Error('dimensions must be clamped to a sane range');
   if (junk.byRoom.get('Room')?.[0]?.zone !== 'floor') throw new Error('an unknown zone must fall back to floor');
 
   console.log('propCatalogue selfcheck passed');

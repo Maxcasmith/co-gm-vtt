@@ -83,11 +83,19 @@ export interface PropSpec {
   noun: string;
   category: PropCategory;
   description: string;
-  /** Real-world footprint in feet, authored once per prop TYPE (not per placement). The placer
-   * converts to grid cells at 5ft each; the sprite prompt draws the object at this aspect ratio.
-   * This is what stops a candle stub rendering the same size as a grand piano. */
-  widthFt: number;
-  depthFt: number;
+  /**
+   * Footprint in GRID CELLS, [x, y] — [1, 2] is one cell wide and two deep. Authored once per prop
+   * TYPE, not per placement.
+   *
+   * Cells rather than feet on purpose. Feet had to be converted, and the conversion is where the
+   * bugs lived: a 7ft truck rounded down to one 5ft cell, so the grid believed two fitted side by
+   * side and the art overlapped. There is no rounding to get wrong here — what the model declares
+   * is what gets stamped.
+   *
+   * Always given in the sprite's CANONICAL orientation (see PROP_ART_ORIENTATION): long axis
+   * vertical. A prop placed facing east or west swaps the pair.
+   */
+  sizeXY: [number, number];
 }
 
 // One room's request for a prop type it already named in PropSpec — how many, and where they go.
@@ -111,9 +119,45 @@ export interface RoomProp {
 export interface PropCatalogueEntry {
   path: string;
   description?: string;
+  /** Footprint in grid cells, [x, y] — see PropSpec.sizeXY. */
+  sizeXY?: [number, number];
+  /** @deprecated Pre-sizeXY entries recorded feet. Read through propSizeXY(), which converts. */
   widthFt?: number;
   depthFt?: number;
 }
+/**
+ * The single orientation every prop sprite is drawn in, so placement can rotate them deterministically.
+ *
+ * Without one fixed convention a sprite's facing is whatever the image model felt like, and no
+ * amount of rotation at draw time can correct for not knowing where it started. Stated here rather
+ * than only inside the image prompt because the layout pass, the placer and the renderer all have
+ * to assume the same thing.
+ */
+export const PROP_ART_ORIENTATION =
+  'Draw the object with its LONG AXIS RUNNING VERTICALLY (top to bottom of the cell). Its back — the side '
+  + 'that would stand against a wall — goes at the TOP, so the side a person approaches, sits at or uses '
+  + 'faces the BOTTOM: a bed has its headboard at the top, a chair its backrest. The one exception is '
+  + 'anything that travels — a cart, a vehicle, a boat — which points its front toward the TOP.';
+
+/**
+ * Categories whose objects hang on a wall rather than standing on the floor.
+ *
+ * Excluded from prop generation entirely. On a top-down map a wall-mounted object is seen edge-on or
+ * not at all, so it reads as a sign lying flat on the floor — which is exactly how the OPEN signs and
+ * the key hook board looked. Cutting them saves an image slot, prompt tokens and floor space, and
+ * removes the one class of prop the overhead view can never render honestly.
+ */
+export const WALL_MOUNTED_CATEGORIES: readonly PropCategory[] = ['signage'];
+
+export type PropRotation = 0 | 90 | 180 | 270;
+
+/** Footprint in cells for a catalogue entry, converting pre-sizeXY entries recorded in feet. */
+export function propSizeXY(entry: Pick<PropCatalogueEntry, 'sizeXY' | 'widthFt' | 'depthFt'>): [number, number] | undefined {
+  if (entry.sizeXY) return entry.sizeXY;
+  if (entry.widthFt === undefined || entry.depthFt === undefined) return undefined;
+  return [Math.max(1, Math.ceil(entry.widthFt / 5)), Math.max(1, Math.ceil(entry.depthFt / 5))];
+}
+
 export type PropCategoryMap = Partial<Record<PropCategory, Record<string, PropCatalogueEntry>>>;
 export type PropCatalogue = Partial<Record<GenreSetting, Partial<Record<GenreTone, PropCategoryMap>>>>;
 
@@ -237,6 +281,12 @@ export interface DungeonEntity {
   width?: number;
   height?: number;
   /**
+   * type === 'object' decorative props only — clockwise degrees from the sprite's canonical
+   * orientation (PROP_ART_ORIENTATION: back at the top, use side facing down). width/height above
+   * are the footprint AFTER rotation, so a [1, 2] prop turned 90° occupies 2x1. Omitted = 0.
+   */
+  rotation?: PropRotation;
+  /**
    * type === 'door' only. Toggled by a click (see toggleDoor) — for a 'locked' door, a click only
    * succeeds (and unlocks + opens in one step) if the clicking character is within 5ft AND the
    * door's key (requiresKeyId) has been discovered. A player can also narrate using the key or
@@ -278,7 +328,8 @@ export interface DungeonEntity {
  *   `discovered` — the existing sight-radius/hideDC mechanic, not a separate inventory check.
  * - 'defeat_boss': the dungeon's one `isBoss` creature dies. No name needed — a dungeon has at
  *   most one boss (see manifest.ts), so this is never ambiguous.
- * - 'exit_dungeon': the party leaves the dungeon entirely ([[DUNGEON_EXIT]]).
+ * - 'exit_dungeon': the party leaves the dungeon entirely ([[DUNGEON_EXIT]]). Campaigns only — in a
+ *   dungeon crawl walking out is quitting (effects.ts's dungeon_exit), so this never fires there.
  */
 export type DungeonQuestTriggerKind = "enter_room" | "discover_entity" | "defeat_boss" | "exit_dungeon";
 
@@ -305,6 +356,17 @@ export interface DungeonQuestStage {
   trigger: DungeonQuestTrigger;
 }
 
+/**
+ * A creature that isn't on the map yet. It appears in its room the moment quest stage `stageId`
+ * becomes the active stage (see questChain.ts's resolveStage) — the boss of a "defeat the boss"
+ * stage waits here so the party can't meet and kill it before that stage exists.
+ */
+export interface PendingSpawn {
+  stageId: string;
+  roomId: string;
+  statBlock: EnemyStatBlock;
+}
+
 export interface Dungeon {
   id: string;
   name: string;
@@ -321,6 +383,8 @@ export interface Dungeon {
   arena?: boolean;
   /** Ordered narrative quest chain for this dungeon — may be empty, never forced. See DungeonQuestStage. */
   questChain?: DungeonQuestStage[];
+  /** Creatures held back until a quest stage opens — server-only, stripped by toClientDungeon. See PendingSpawn. */
+  pendingSpawns?: PendingSpawn[];
   theme?: DungeonStylePack;
   /** Resolved folder key the client should fetch floor textures from — theme-slug, or theme-slug--<materials-hash> once a dynamic tileset has been generated for this dungeon's actual material set. Falls back to `theme` for dungeons predating this field. */
   tilesetSlug?: string;

@@ -403,7 +403,9 @@ export async function loadEncounters(slug: string): Promise<Encounter[]> {
   const out: Encounter[] = [];
   try {
     const dir = path.join(campaignDir(slug), 'encounters');
-    for (const name of await getTextStore().list(dir)) {
+    // .json only: without the filter any stray file here (a backup, an editor swap file) is parsed
+    // as a record and loads as a duplicate.
+    for (const name of (await getTextStore().list(dir)).filter(n => n.endsWith('.json'))) {
       const raw = await getTextStore().get(path.join(dir, name));
       if (raw !== null) out.push(Encounter.fromJSON(JSON.parse(raw)));
     }
@@ -523,7 +525,9 @@ export async function loadDungeons(slug: string): Promise<Dungeon[]> {
   const out: Dungeon[] = [];
   try {
     const dir = path.join(campaignDir(slug), 'dungeons');
-    for (const name of await getTextStore().list(dir)) {
+    // .json only: without the filter any stray file here (a backup, an editor swap file) is parsed
+    // as a record and loads as a duplicate.
+    for (const name of (await getTextStore().list(dir)).filter(n => n.endsWith('.json'))) {
       const raw = await getTextStore().get(path.join(dir, name));
       if (raw !== null) out.push(JSON.parse(raw) as Dungeon);
     }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { calcAC, CREATURE_TYPES, ENEMY_ROLES, MATERIAL_CATEGORIES, slugifyTheme } from 'shared';
+import { calcAC, CREATURE_TYPES, ENEMY_ROLES, MATERIAL_CATEGORIES, PROP_ART_ORIENTATION, slugifyTheme } from 'shared';
 import type { ChatPayload, Character, EnemyStatBlock, CreatureType, EnemyRole, AttackResult, SpellAttackResult, SpellSaveResult, WorldState, WorldActor, Goal, NemesisRecord, DungeonMaterialSpec, MaterialCategory, CampaignGenre, AbilityKey } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { buildGenreTileBlock } from '../dungeon/genreTiles.ts';
@@ -32,6 +32,9 @@ const FALLBACK_ENEMY: EnemyStatBlock = {
 export interface ArenaTerrain {
   theme: string;
   material: DungeonMaterialSpec;
+  /** What physically stands at the spot — the arena's room description, which is what the dungeon
+   * prop pass (generatePropDressing) furnishes from. */
+  description?: string;
 }
 
 export async function generateEncounterEnemies(
@@ -76,6 +79,7 @@ export async function generateEncounterEnemies(
     }
   ],
   "terrain": {
+    "description": "string — 1-2 sentences naming what physically stands at this exact spot (furniture, vehicles, crates, trees, rubble), as a room description. The fight's scenery is furnished from this.",
     "theme": "string — a short lowercase keyword for the art style/setting of the ground the party is fighting on, e.g. gothic_horror. Match the place the recent transcript says they actually are.",
     "material": "string — short lowercase key (1-2 words, e.g. wood, cracked-asphalt, wet-stone) naming the floor/ground underfoot at this exact spot.",
     "materialDescription": "string — vivid visual description of that ground's appearance (colour, wear, pattern) for an image generator.",
@@ -123,7 +127,8 @@ function normalizeArenaTerrain(raw: unknown): ArenaTerrain | undefined {
   if (!theme || !key) return undefined;
   const description = typeof t.materialDescription === 'string' && t.materialDescription.trim() ? t.materialDescription.trim() : key;
   const category = MATERIAL_CATEGORIES.includes(t.materialCategory as MaterialCategory) ? (t.materialCategory as MaterialCategory) : 'stone';
-  return { theme, material: { key, description, category, ...(t.materialReuse === false ? { reuse: false } : {}) } };
+  const place = typeof t.description === 'string' && t.description.trim() ? t.description.trim() : '';
+  return { theme, material: { key, description, category, ...(t.materialReuse === false ? { reuse: false } : {}) }, ...(place ? { description: place } : {}) };
 }
 
 function flattenMessages(messages: { role: string; content: string }[]): string {
@@ -629,26 +634,22 @@ There must be:
 export interface PropSpriteEntry {
   name: string;
   description: string;
-  /** Real-world footprint in feet. Present on the real generation path (authored per prop type by
-   * the dressing call); absent on the admin prompt-test flow, which has only names. Drives the
-   * proportion each object is drawn at inside its square cell — without it the object is drawn
-   * square, which is the old behaviour. */
-  widthFt?: number;
-  depthFt?: number;
+  /** Footprint in grid cells, [x, y]. Present on the real generation path (authored per prop type by
+   * the dressing call); absent on the admin prompt-test flow, which has only names. Used only to
+   * tell the model which way round the object is — the map applies the actual size itself. */
+  sizeXY?: [number, number];
 }
 
-// The proportion clause for one entry: how the object should sit inside its square cell. An object
-// wider than it is deep fills the cell's full width and proportionally less of its height, and vice
-// versa. This is what makes the sprite's own transparent margin encode the footprint, so the client
-// can draw the square sprite across a non-square footprint without distorting it (see drawScene.ts).
-function proportionClause(entry: PropSpriteEntry): string {
-  const { widthFt, depthFt } = entry;
-  if (widthFt === undefined || depthFt === undefined) return '';
-  const longest = Math.max(widthFt, depthFt);
-  const wPct = Math.round((widthFt / longest) * 100);
-  const hPct = Math.round((depthFt / longest) * 100);
-  const shape = wPct === hPct ? 'as wide as it is deep' : wPct > hPct ? 'wider than it is deep' : 'deeper than it is wide';
-  return ` Real size ${widthFt}ft wide by ${depthFt}ft deep — ${shape}. Draw it spanning about ${wPct}% of its cell's width and ${hPct}% of its cell's height, centered, so its proportions are truthful.`;
+// The shape clause for one entry. The map fits each sprite's VISIBLE CONTENT inside its sizeXY
+// footprint at the content's own aspect ratio, never stretching it (client canvas/spriteBounds.ts).
+// So the drawn shape is the rendered shape: an object drawn squarer than its footprint just fills
+// less of it. Asking for the footprint's shape is what makes it fill the footprint. Stated in grid
+// cells rather than as a precise ratio — a 20:1 request came back ~3:1, models pull toward square.
+function shapeClause(entry: PropSpriteEntry): string {
+  if (!entry.sizeXY) return '';
+  const [x, y] = entry.sizeXY;
+  const shape = x === y ? 'roughly square' : x > y ? 'wider than it is deep' : 'longer than it is wide';
+  return ` It is ${shape} — ${x} by ${y} on the map grid — so draw it at that shape, as large as fits in its cell: a 1 by 3 object is long and narrow, a 2 by 2 is square.`;
 }
 
 // Always exactly 36 slots (6x6) — the grid the prop atlas pipeline uses (see dungeon/props.ts),
@@ -659,7 +660,7 @@ function proportionClause(entry: PropSpriteEntry): string {
 // transparency option).
 export function buildPropSpritePrompt(entries: PropSpriteEntry[], transparent: boolean, atlasSize: number): string {
   const real = entries.slice(0, 36);
-  const lines = real.map((e, i) => `${i + 1}. **${e.name}** — ${e.description}${proportionClause(e)}`);
+  const lines = real.map((e, i) => `${i + 1}. **${e.name}** — ${e.description}${shapeClause(e)}`);
   if (real.length < 36) {
     const from = real.length + 1;
     const rangeLabel = from === 36 ? '36' : `${from}-36`;
@@ -717,7 +718,15 @@ That means:
 
 Height is conveyed only by a soft shadow and by the shading of the top surface, never by tilting the object toward the viewer.
 
-Every object must fit entirely inside its own single square cell, centered, with a small margin on every side — and at the true proportions given with it, so relative sizes read correctly: a small object drawn in its cell stays visibly small, an elongated one stays visibly elongated. Never enlarge an object to fill its cell when its stated size is small.
+**TALL objects are the ones most often drawn wrong — check every one of them.** Anything taller than it is wide — a cabinet, a wardrobe, a refrigerator or cooler, a shelving unit, a vending machine, a pump, a boiler, a statue, a bookcase — tempts a front view, because its front is its most recognisable face. Do not draw its front. From the ceiling you see only its **roof**: a flat or slightly domed top panel, usually a simple rectangle, with the object's footprint visible as a thin rim of shadow around it. A shelving unit seen from above is a long narrow rectangle with the tops of whatever sits on its highest shelf; it is NOT rows of shelves stacked one above another. A cooler seen from above is its flat lid, not its glass door. If you can see a door, a screen, a shelf face or a control panel head-on, that sprite is wrong — redraw it from the ceiling.
+
+# ORIENTATION — every object faces the same way
+
+${PROP_ART_ORIENTATION}
+
+This is not a stylistic preference. The map rotates these sprites to stand them against walls and face them at each other, and it can only do that if it knows which way each one started. An object drawn at some other angle is rotated to the wrong one.
+
+Every object must fit entirely inside its own single square cell, centered, with a small margin on every side. Draw it at the SHAPE given with it, as large as that shape allows in the cell — a long narrow object runs nearly the full height of its cell and only part of its width. Do not draw an object small to show that it is small; the map sizes every sprite to its own footprint.
 
 No environment, no floor texture, no other objects, no characters — just the one named object per cell.
 

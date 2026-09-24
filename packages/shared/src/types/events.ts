@@ -8,6 +8,7 @@ import type { Manoeuvre } from "./tactics.ts";
 import type { StoryboardQueuePayload } from "./storyboard.ts";
 import type { Goal, GoalTier } from "./goals.ts";
 import type { GroupColor, PartyGroups } from "./partyGroups.ts";
+import type { CurrencyDenomination } from "./character.ts";
 
 export type Player = string;
 
@@ -329,7 +330,9 @@ export interface ServerToClientEvents {
   "character:tactics:update": (data: { characterId: string; tactics: Manoeuvre[]; aiControlled: boolean }) => void;
   /** Broadcast to the whole room (unlike tactics:update above, which is private to the owner) so every client's party roster can show the AI pip / offline styling live. */
   "character:aiControlled:update": (data: { characterId: string; aiControlled: boolean }) => void;
-  "character:currency:update": (data: { characterId: string }) => void;
+  "character:currency:update": (data: { characterId: string; denom: CurrencyDenomination; amount: number }) => void;
+  /** xp (on kill) or scores (on endCombat) just landed on this character's record — client refetches. */
+  "character:reward:update": (data: { characterId: string }) => void;
   "dungeon:generating": () => void;
   /** Dungeon generation threw — the counterpart to dungeon:generating that releases a client
    * waiting on dungeon:loaded, which otherwise never arrives and leaves the party staring at a
@@ -337,8 +340,12 @@ export interface ServerToClientEvents {
   "dungeon:failed": () => void;
   "dungeon:loaded": (dungeon: Dungeon) => void;
   "dungeon:cleared": () => void;
-  /** `final`: true only when this update closed out a dungeon's questChain's last stage — the whole questline is done, not just one stage of it. Unset/false for every intermediate stage and for non-chain quest updates. */
-  "quest:update": (data: { quests: Quest[]; act: number; final?: boolean }) => void;
+  /** `newQuests` is set only when this update added brand-new quests (not reopens/log entries/resolves) — the client toasts off it. */
+  "quest:update": (data: { quests: Quest[]; act: number; newQuests?: { id: string; name: string }[] }) => void;
+  /** A dungeon crawl was won — its dungeon's last quest stage succeeded. Never sent for a campaign. `quests` is that dungeon's resolved chain. */
+  "game:complete": (data: { dungeonName: string; theme?: string; quests: Quest[] }) => void;
+  /** This group left a dungeon crawl without winning ([[DUNGEON_EXIT]]) — the client leaves exactly as the menu's Leave does. */
+  "game:left": () => void;
   "clock:update": (data: { worldTimeSecs: number }) => void;
   "rest:open": () => void;
   "rest:result": (payload: RestResultBroadcast) => void;

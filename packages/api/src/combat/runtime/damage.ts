@@ -248,7 +248,16 @@ export async function applyDamageToCreature(cid: string, targetId: string, damag
       toFight(encounter).emit('combat:victory', { xpPerPlayer, totalXp, kills: enemyStatBlocks.map(e => e.name) });
       console.log(`[combat] victory! ${totalXp} XP total, ${xpPerPlayer} per player`);
 
-      void Promise.all(fightChars.map(p => updateCharacter(cid, p.id, c => ({ ...c, xp: (c.xp ?? 0) + xpPerPlayer }))));
+      // combat:victory above is only the announcement — xp doesn't land on the character record
+      // until this write completes, so the client refetches once it actually has (same pattern as
+      // character:currency:update/rest:result), instead of the sheet staying stale until some
+      // unrelated event happens to trigger a refetch.
+      void Promise.all(fightChars.map(p => updateCharacter(cid, p.id, c => ({ ...c, xp: (c.xp ?? 0) + xpPerPlayer })))).then(() => {
+        for (const p of fightChars) {
+          const sid = playerSocketIds.get(p.id);
+          if (sid) io.to(sid).emit('character:reward:update', { characterId: p.id });
+        }
+      });
 
       // The fight counts as over right away so a player still moving on their last turn can't
       // trigger checkDungeonProximity/joinReinforcements against it mid-teardown — but the

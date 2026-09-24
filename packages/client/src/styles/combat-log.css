@@ -156,3 +156,38 @@
   font-weight: 700;
 }
 
+/* ── Mini combat log widget (HUD, bottom-left, above room-name-banner) ──── */
+
+.combat-log-widget {
+  position: fixed;
+  bottom: 60px;
+  left: 16px;
+  width: 400px;
+  height: 400px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.9);
+  border-radius: 0;
+  font-family: monospace;
+  z-index: 200;
+}
+
+.combat-log-widget-header {
+  flex-shrink: 0;
+  padding: 20px 10px;
+  font-family: 'Cinzel', serif;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.combat-log-widget-messages {
+  overflow-y: auto;
+  padding: 10px 14px;
+}
+
+.combat-log-widget-empty {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+}
+

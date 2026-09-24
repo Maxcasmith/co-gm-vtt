@@ -11,6 +11,7 @@ import { logError } from './logger.ts';
 import { io, campaignRoom, sessionState, dungeonsIn, dungeonOf, connected, dmQueue, fightOf, toFight, type Audience } from './state.ts';
 import { endCombat } from './combat/runtime/lifecycle.ts';
 import { applyEffects } from './effects.ts';
+import { dungeonEvents } from './dungeon/events.ts';
 import { audienceTracks, toTracks, tagForSplit, readChatContext, getPartyGroups, type ChatAudience } from './partyGroups.ts';
 
 // Keyed per campaign + audience tracks, not per campaign alone — two split groups' DM turns are
@@ -49,6 +50,21 @@ export function endSession(cid: string): void {
     }
   });
 }
+
+// A dungeon crawl's last goal succeeded (questChain.ts's completeChain): the game is won. Everyone
+// gets the Congrats screen with the chain they finished, and the session ends — same end-of-session
+// processing as the menu's End Session.
+dungeonEvents.on('game_complete', ({ cid, dungeon }) => {
+  void readQuests(cid).then(quests => {
+    const chainIds = new Set(dungeon.questChain?.map(s => s.id));
+    io.to(campaignRoom(cid)).emit('game:complete', {
+      dungeonName: dungeon.name,
+      ...(dungeon.theme ? { theme: dungeon.theme } : {}),
+      quests: quests.filter(q => chainIds.has(q.id) && q.status === 'resolved'),
+    });
+    endSession(cid);
+  }).catch(err => logError('session:game_complete', err));
+});
 
 async function buildEntitySummaries(campaignId: string): Promise<string> {
   const lines: string[] = [];

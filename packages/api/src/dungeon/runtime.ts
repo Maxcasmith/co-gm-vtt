@@ -6,14 +6,14 @@ import { rollD20, withModifiers, dexLine } from '../combat/dice.ts';
 import { conditionModeSources } from '../combat/conditions/rollModeFor.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateEncounterEnemies, assignCombatTeams, DEFAULT_ENEMY_SIDE, type CombatSide } from '../session-processor/imagePrompts.ts';
-import { generateEncounterDungeon, placeArenaEnemies, applyArenaTerrain, roomAt, chainClosure } from './index.ts';
+import { generateEncounterDungeon, placeArenaEnemies, applyArenaTerrain, furnishArena, roomAt, chainClosure } from './index.ts';
 import { assignPortraitSrcs, generateCreaturePortraits } from './creaturePortraits.ts';
 import { templateRoomEntry, type SearchFind } from './narrateEvents.ts';
 import { dungeonEvents } from './events.ts';
 import { Encounter, Participant, PLAYERS_TEAM_ID } from '../domain/encounter.ts';
 import { Creature } from '../domain/creature.ts';
 import { logError } from '../logger.ts';
-import { io, campaignRoom, positionsOf, dungeonOf, fightDungeon, registerDungeon, toDungeon, PLAYER_SIGHT_RADIUS, ENEMY_AGGRO_RADIUS, COMBAT_CHAIN_RADIUS, campaignPlayers, connected, fightOf, registerFight, toFight, toDungeonOf, markFightGenerating } from '../state.ts';
+import { io, campaignRoom, positionsOf, dungeonOf, occupantsOf, fightDungeon, registerDungeon, toDungeon, PLAYER_SIGHT_RADIUS, ENEMY_AGGRO_RADIUS, COMBAT_CHAIN_RADIUS, campaignPlayers, connected, fightOf, registerFight, toFight, toDungeonOf, markFightGenerating } from '../state.ts';
 import { addToTurnOrder, rollPlayerInitiatives, rollEnemyInitiatives, resolveFightChains, syncFight } from '../combat/runtime/lifecycle.ts';
 import { checkTrapAt } from '../combat/runtime/traps.ts';
 import { checkQuestChainTriggers } from './questChain.ts';
@@ -78,10 +78,7 @@ export async function checkDungeonProximity(cid: string, gx: number, gy: number,
       void checkQuestChainTriggers(cid, { kind: 'discover_entity', entityName: entity.name }, dungeon);
     }
 
-    const aggroed = aggroSources.some(pos =>
-      Math.max(Math.abs(pos.gx - entity.x), Math.abs(pos.gy - entity.y)) <= ENEMY_AGGRO_RADIUS &&
-      hasLineOfSight(dungeon.cells, pos.gx, pos.gy, entity.x, entity.y, blocked));
-    if (aggroed) aggro.push(entity);
+    if (aggroSources.some(pos => inAggroReach(dungeon, pos, entity, blocked))) aggro.push(entity);
   }
 
   if (changed) {
@@ -91,6 +88,52 @@ export async function checkDungeonProximity(cid: string, gx: number, gy: number,
   if (!aggro.length) return;
   if (encounter) joinReinforcements(cid, encounter, aggro);
   else await startDungeonCombat(cid, aggro, characterName);
+}
+
+/** Within a creature's aggro radius with a clear line of sight — a shut door blocks it like a wall. */
+function inAggroReach(dungeon: Dungeon, pos: { gx: number; gy: number }, entity: DungeonEntity, blocked: Set<string>): boolean {
+  return Math.max(Math.abs(pos.gx - entity.x), Math.abs(pos.gy - entity.y)) <= ENEMY_AGGRO_RADIUS &&
+    hasLineOfSight(dungeon.cells, pos.gx, pos.gy, entity.x, entity.y, blocked);
+}
+
+// A creature arriving with a quest stage gets the same checks a player's step runs: anyone who can
+// see it discovers it, and anyone in its aggro reach (outside the entrance room) is attacked — joining
+// the fight they're already in, or starting one. Without this a boss spawning beside the party stood
+// idle until somebody moved.
+dungeonEvents.on('creatures_spawned', ({ cid, dungeon, spawned }) => {
+  void checkSpawnAggro(cid, dungeon, spawned).catch(err => logError('dungeon/runtime:checkSpawnAggro', err));
+});
+
+async function checkSpawnAggro(cid: string, dungeon: Dungeon, spawned: DungeonEntity[]): Promise<void> {
+  const blocked = closedDoorCells(dungeon);
+  const standing = occupantsOf(cid, dungeon.id)
+    .map(name => ({ name, pos: dungeon.positions?.[name] }))
+    .filter((o): o is { name: string; pos: { gx: number; gy: number } } => !!o.pos);
+
+  let changed = false;
+  for (const entity of spawned) {
+    if (entity.discovered) continue;
+    const seen = standing.some(({ pos }) =>
+      Math.max(Math.abs(pos.gx - entity.x), Math.abs(pos.gy - entity.y)) <= PLAYER_SIGHT_RADIUS &&
+      hasLineOfSight(dungeon.cells, pos.gx, pos.gy, entity.x, entity.y, blocked));
+    if (!seen) continue;
+    entity.discovered = true;
+    changed = true;
+    void checkQuestChainTriggers(cid, { kind: 'discover_entity', entityName: entity.name }, dungeon);
+  }
+  if (changed) {
+    void saveDungeon(cid, dungeon);
+    broadcastDungeon(cid, dungeon);
+  }
+
+  for (const { name, pos } of standing) {
+    if (roomAt(dungeon, pos.gx, pos.gy)?.role === 'entrance') continue;
+    const aggro = spawned.filter(e => !fightOf(cid, e.id) && inAggroReach(dungeon, pos, e, blocked));
+    if (!aggro.length) continue;
+    const encounter = fightOf(cid, name);
+    if (encounter) joinReinforcements(cid, encounter, aggro);
+    else await startDungeonCombat(cid, aggro, name);
+  }
 }
 
 /** Opens an empty combat arena for an open-world fight and puts it on its players' screens right
@@ -384,10 +427,6 @@ export async function generateAndBroadcastEnemies(campaignId: string, encounter:
         creature,
       }));
     }
-    await assignSides(campaignId, encounter, uniqueStatBlocks, encounter.players.map(p => p.id));
-
-    encounter.expectedParticipantCount += uniqueStatBlocks.length;
-    await saveEncounter(campaignId, encounter);
 
     // The arena was put on screen the moment the fight started (see openArena) — the enemies just
     // took a model call to arrive. Place them on it now. A fight with no arena at all (shouldn't
@@ -397,18 +436,32 @@ export async function generateAndBroadcastEnemies(campaignId: string, encounter:
       for (const entity of placeArenaEnemies(arena, uniqueStatBlocks)) {
         toDungeonOf(campaignId, entity.id).emit('token:moved', { tokenId: entity.id, gx: entity.x, gy: entity.y });
       }
-      // Everything a generated dungeon's rooms and creatures get, the arena gets too — it just
-      // gets it here rather than up front, because the map deliberately ships before this model
-      // call returns (see openArena). Portraits are assigned synchronously and filled in in the
-      // background, same contract as generateDungeon's.
       assignPortraitSrcs(arena.entities);
-      void generateCreaturePortraits(arena.entities, config);
-      if (terrain) await applyArenaTerrain(arena, terrain, config, worldMeta?.genre);
+    }
+
+    // Everything the fight needs, all at once and all awaited: sides, portraits, floor art and
+    // furniture. The loading screen comes down on encounter:ready below, so nothing may still be
+    // generating when it fires — the party enters a finished arena, never one that fills in around
+    // them. Furnishing is the dungeon pipeline (furnishArena), run on the dungeon model.
+    const furnishAdapter = hasFeatureProvider(config, 'dungeonGeneration') ? getFeatureProvider(config, 'dungeonGeneration') : adapter;
+    await Promise.all([
+      assignSides(campaignId, encounter, uniqueStatBlocks, encounter.players.map(p => p.id)),
+      ...(arena.arena ? [
+        generateCreaturePortraits(arena.entities, config),
+        terrain ? applyArenaTerrain(arena, terrain, config, worldMeta?.genre) : Promise.resolve(),
+        // A furnishing failure costs the arena its props, never the fight.
+        terrain ? furnishArena(arena, terrain, encounter.players.length, config, furnishAdapter, worldMeta?.genre).catch(err => logError('dungeon/runtime:furnishArena', err)) : Promise.resolve(),
+      ] : []),
+    ]);
+
+    encounter.expectedParticipantCount += uniqueStatBlocks.length;
+    await saveEncounter(campaignId, encounter);
+    if (arena.arena) {
       await saveDungeon(campaignId, arena);
       broadcastDungeon(campaignId, arena);
     }
 
-    // Emitted LAST, after the arena has its enemies placed and its floor art resolved and has been
+    // Emitted LAST, after the arena has its enemies, portraits, floor art and props and has been
     // rebroadcast — this is the event the loading screen comes down on, so anything still missing
     // when it fires is something the party watches pop in on a bare map. It used to fire straight
     // after the stat blocks came back, i.e. before placeArenaEnemies and before applyArenaTerrain
@@ -476,6 +529,11 @@ export async function startDungeonCombat(cid: string, triggerEntities: DungeonEn
     toDungeonOf(cid, e.id).emit('token:moved', { tokenId: e.id, gx: e.x, gy: e.y });
   }
   console.log('[dungeon] combat triggered:', uniqueStatBlocks.map(e => `${e.name} (CR ${e.cr})`).join(', '), '— fighters:', fighters.join(', '));
+  // Loading screen up NOW, not once sides and initiative are settled — assignSides is a model call
+  // that can take most of a minute, and until combat:state arrived the fighters could keep walking,
+  // only to be snapped back when the fight opened. The overlay covers the map, and token:move
+  // refuses moves until the turn order exists (socketHandlers/combat.ts).
+  toFight(fight, cid).emit('combat:state', true);
 
   const [chars] = await Promise.all([listCharacters(cid), assignSides(cid, fight, uniqueStatBlocks, fighters)]);
   if (fight.ended) return;
@@ -510,17 +568,16 @@ export function joinReinforcements(cid: string, encounter: Encounter, triggerEnt
   }
 }
 
-// Posts the room's stored facts — pre-generated description, ambient dressing, anything already
-// discovered inside it — to the journal the instant a party first steps into it. No LLM call on
+// Posts the room's stored facts — pre-generated description and ambient dressing — to the journal the instant a party first steps into it. No LLM call on
 // this path, so there's no wait, and nothing is invented (see narrateEvents.templateRoomEntry).
-// Rooms carrying none of the three (e.g. the hand-authored GENERIC_ROOMS fallback) stay silent
+// Rooms carrying neither (e.g. the hand-authored GENERIC_ROOMS fallback) stay silent
 // rather than posting filler. room.visited (set in checkDungeonProximity) is what keeps this to
 // once per room. senderName is 'Virtual DM' so the line lands as an assistant turn in the LLM's
 // chat history rather than being replayed back to it as if a player had said it.
 dungeonEvents.on('room_entered', ({ cid, room, characterName }) => {
   const dungeon = dungeonOf(cid, characterName);
   if (!dungeon) return;
-  const text = templateRoomEntry(dungeon, room);
+  const text = templateRoomEntry(room);
   if (!text) return;
   void postChat(cid, { text, senderName: 'Virtual DM', timestamp: Date.now() }, [characterName]);
 });

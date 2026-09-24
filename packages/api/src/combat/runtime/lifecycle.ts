@@ -194,7 +194,9 @@ export async function endCombat(cid: string, encounter: Encounter): Promise<void
   void evaluateNemesisAfterCombat(cid, encounter);
 
   // One process: every kill/damage tallied during the fight lands on each character sheet
-  // in a single read-modify-write, rather than a write per hit.
+  // in a single read-modify-write, rather than a write per hit. The client's Scores tab is
+  // fed from that same character record, so it stays stale until this write actually lands —
+  // tell each owner to refetch once it has (see damage.ts's matching xp push).
   void Promise.all([...encounter.scores].map(([charId, s]) =>
     updateCharacter(cid, charId, c => ({
       ...c,
@@ -202,7 +204,12 @@ export async function endCombat(cid: string, encounter: Encounter): Promise<void
       damageDealt: (c.damageDealt ?? 0) + s.damageDealt,
       damageReceived: (c.damageReceived ?? 0) + s.damageReceived,
     }))
-  ));
+  )).then(() => {
+    for (const [charId] of encounter.scores) {
+      const sid = playerSocketIds.get(charId);
+      if (sid) io.to(sid).emit('character:reward:update', { characterId: charId });
+    }
+  });
 
   // Offline-AI-spawned party members (see rollPlayerInitiatives) only existed for this fight —
   // any player-participant whose name isn't currently connected was necessarily one of them,

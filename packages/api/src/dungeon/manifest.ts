@@ -1,5 +1,6 @@
 import type { EnemyStatBlock, DungeonMaterialSpec, DungeonStylePack, DungeonStructureType, CreatureType, DungeonQuestStage, DungeonQuestTrigger, DungeonQuestTriggerKind, MaterialCategory, PropCategory, CampaignGenre } from 'shared';
-import { CREATURE_TYPES, MATERIAL_CATEGORIES, PROP_CATEGORIES, slugifyTheme } from 'shared';
+import { CREATURE_TYPES, MATERIAL_CATEGORIES, slugifyTheme } from 'shared';
+import { FLOOR_PROP_CATEGORIES } from './propDressing.ts';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import { buildGenreTileBlock } from './genreTiles.ts';
 import { logError } from '../logger.ts';
@@ -30,11 +31,18 @@ export interface ManifestTrap {
   disarmDC?: number;
 }
 
+/** 'none' is no door at all — an open way through; the rest become a Door entity in that state. */
+export type DoorState = 'none' | 'open' | 'closed' | 'locked';
+
+/** A room's creature. `appears` names the quest stage whose start brings it onto the map — the room
+ * it's listed under is where it appears. Omitted = there from the beginning. */
+export type ManifestCreature = EnemyStatBlock & { appears?: string };
+
 export interface ManifestRoom {
   name: string;
   size: 'small' | 'medium' | 'large';
   role?: 'entrance' | 'exit';
-  creatures?: EnemyStatBlock[];
+  creatures?: ManifestCreature[];
   traps?: ManifestTrap[];
   loot?: ManifestHazard[];
   /**
@@ -64,7 +72,7 @@ export interface ManifestRoom {
    * default-filled if omitted — every locked door gets one either way. See buildingLayout.ts's
    * lockFor and dungeon/index.ts's requiresKeyId resolution.
    */
-  doors?: { toRoom: string; state?: 'open' | 'closed' | 'locked'; keyName?: string; lockpickDC?: number }[];
+  doors?: { toRoom: string; state?: DoorState; keyName?: string; lockpickDC?: number }[];
   description?: string; // 1-2 sentence read-aloud description, shown verbatim the moment a party first enters
   dressing?: string[]; // ambient set-dressing, always visible, no image/discovery gate
   hiddenDressing?: { id: string; text: string; hideDC: number }[]; // set-dressing that needs a hard search — id assigned on parse, `discovered` added when converted to DungeonRoom
@@ -125,7 +133,7 @@ function normalizeMaterialCategory(c: unknown): MaterialCategory {
 // the dressing call, and the cost of guessing wrong is a slightly wider noun list, not a bare room.
 function normalizePropCategories(categories: unknown): PropCategory[] | undefined {
   if (!Array.isArray(categories) || !categories.length) return undefined;
-  const normalized = [...new Set(categories.filter((c): c is PropCategory => (PROP_CATEGORIES as readonly unknown[]).includes(c)))];
+  const normalized = [...new Set(categories.filter((c): c is PropCategory => (FLOOR_PROP_CATEGORIES as readonly unknown[]).includes(c)))];
   return normalized.length ? normalized : ['decor'];
 }
 
@@ -206,11 +214,10 @@ export async function fetchManifest(
   const themeFallback = genre ? `a theme fitting a ${genre.tone} ${genre.setting} world` : 'high_fantasy';
 
   const [minRooms, maxRooms] = roomRange;
-  const prompt = `You are a location architect. First decide whether "${name}" is a BUILDING (a man-made structure with an intentional floor plan — house, school, church, office, ship, station, mansion, prison, police precinct, etc.) or ORGANIC (a natural or crudely-dug space with no designed floor plan — cave, natural crypt, tomb carved into rock, sewer, ruins). This decision changes how you produce rooms below.
+  const prompt = `You are a location architect. Lay out "${name}" as a floor plan of connected ROOMS. A room is any distinct PLACE a party can stand in — indoors or out: a street, a parking lot, a courtyard, a cave chamber and a kitchen are all rooms.
 
 Return ONLY valid JSON, no markdown fences, no explanation:
 {
-  "structureType": "building|organic",
   "theme": "string — a short lowercase keyword for this location's overall art style/setting, e.g. high_fantasy. Pick whatever actually fits the genre; if nothing fits, use ${themeFallback}.",
   "illumination": "number 0-1 — this location's ambient light level, on a continuous scale, not a pick between a few fixed labels. 1.0 = full daylight or lamps/torches everywhere, 0.9 = bright interior with a few shadowed corners, 0.7 = overcast daylight or a well-lit room with some unlit spots, 0.55 = dusk or scattered torchlight, 0.4 = single flickering light source in an otherwise dark room, 0.2 = deep dusk or moonlight only, 0.05 = almost no light, a sliver under a door, 0.0 = pitch black, no ambient light source at all. Weigh the location's actual light sources (windows, torches, time of day, depth underground) and land on the specific number those imply — don't default to the midpoint.",
   "rooms": [
@@ -218,12 +225,12 @@ Return ONLY valid JSON, no markdown fences, no explanation:
       "name": "string",
       "size": "small|medium|large",
       "role": "entrance|exit — omit for a normal room. Mark exactly as many entrance/exit rooms as make sense for this location (usually one of each, sometimes more).",
-      "isHallway": "boolean — BUILDING ONLY. true if this room's job is passage/circulation (a corridor or hallway) rather than being a destination in itself. Never use this for a stairwell — see isStairwell below.",
-      "floor": "number — BUILDING ONLY, omit for single-floor locations. Which floor this room sits on: omit or 0 for the ground floor, negative for a basement (-1, -2...), positive for upper floors (1, 2...). Decide the total floor count yourself, from what this location actually is (a house is 1-2 floors, a school 2-3, a mansion 2-4, a police precinct might have a basement). The ${minRooms}-${maxRooms} rooms are DISTRIBUTED across however many floors you choose, never added on top — a 16-room 3-floor building has roughly 5-6 rooms per floor, not 16 per floor.",
-      "isStairwell": "boolean — BUILDING ONLY, multi-floor locations only. true if this room IS the vertical connection between two floors. Always exactly a 2x2 footprint regardless of \"size\" — don't bother sizing it. Comes out of the same room budget as every other room.",
+      "isHallway": "boolean — true if this room's job is passage/circulation (a corridor or hallway) rather than being a destination in itself. Never use this for a stairwell — see isStairwell below.",
+      "floor": "number — omit for single-floor locations. Which floor this room sits on: omit or 0 for the ground floor, negative for a basement (-1, -2...), positive for upper floors (1, 2...). Decide the total floor count yourself, from what this location actually is (a house is 1-2 floors, a school 2-3, a mansion 2-4, a police precinct might have a basement). The ${minRooms}-${maxRooms} rooms are DISTRIBUTED across however many floors you choose, never added on top — a 16-room 3-floor building has roughly 5-6 rooms per floor, not 16 per floor.",
+      "isStairwell": "boolean — multi-floor locations only. true if this room IS the vertical connection between two floors. Always exactly a 2x2 footprint regardless of \"size\" — don't bother sizing it. Comes out of the same room budget as every other room.",
       "stairsTo": "string — isStairwell rooms ONLY. The EXACT \"name\" of the other isStairwell room (on the adjacent floor) this one connects to. Every floor transition needs exactly one such pair — one isStairwell room on each side, naming each other. Separate from \"connectsTo\": this is the vertical link, connectsTo is still how this room wires into its OWN floor's layout.",
-      "connectsTo": "string[] — BUILDING ONLY, REQUIRED for every room. Names of the other rooms on THIS SAME FLOOR in this list that this room directly opens onto (a door or opening exists there). Every room must be reachable from its floor's entrance/stairwell through this graph — no isolated rooms. Never list a room from a different floor here — floors connect only via isStairwell/stairsTo.",
-      "doors": [{ "toRoom": "string — BUILDING ONLY, one of this room's connectsTo names. Only declare an entry for an edge that ISN'T a plain open doorway — omit connectsTo edges you want left as ordinary unlocked doors entirely.", "state": "closed|locked — 'closed' is an ordinary shut-but-unlocked door (this is already the default for every connectsTo edge, so only write 'closed' here if you want to say so explicitly). 'locked' REQUIRES keyName.", "keyName": "string — 'locked' only. Must be the EXACT \"name\" of a loot entry placed somewhere in THIS response, ideally in a different room than either side of this door. That loot entry is the key — it is always trivially found (no hard search) once discovered.", "lockpickDC": "number 10-20 — 'locked' only. The DC to bypass this specific lock with Thieves' Tools instead of the key, scaled to how sturdy/important it is. Never hinted at anywhere in room text, same discipline as a trap's hidden DC." }],
+      "connectsTo": "string[] — REQUIRED for every room. Names of the other rooms on THIS SAME FLOOR in this list that this room directly opens onto (a door or opening exists there). Every room must be reachable from its floor's entrance/stairwell through this graph — no isolated rooms. Never list a room from a different floor here — floors connect only via isStairwell/stairsTo.",
+      "doors": [{ "toRoom": "string — one of this room's connectsTo names. Declare an entry only for a connection that ISN'T an ordinary shut door — omitted connections get one.", "state": "none|closed|locked — 'none' means NO door at all, just an open way through (a street running into a parking lot, a cave passage, an archway). 'closed' is an ordinary shut-but-unlocked door (already the default, so only write it to be explicit). 'locked' REQUIRES keyName.", "keyName": "string — 'locked' only. Must be the EXACT \"name\" of a loot entry placed somewhere in THIS response, ideally in a different room than either side of this door. That loot entry is the key — it is always trivially found (no hard search) once discovered.", "lockpickDC": "number 10-20 — 'locked' only. The DC to bypass this specific lock with Thieves' Tools instead of the key, scaled to how sturdy/important it is. Never hinted at anywhere in room text, same discipline as a trap's hidden DC." }],
       "material": "string — short lowercase key (1-2 words, e.g. wood, cracked-stone, wet-sand) naming this room's floor material, fitting its actual purpose (grass for an outdoor/dirt-floored space, wood for an indoor wood-floored room, stone for an indoor stone-floored room like a dungeon or crypt).",
       "materialDescription": "string — vivid visual description of this exact floor texture's appearance (color, wear, pattern) for an image generator. Reuse the EXACT SAME material key AND description verbatim across every room that should share the same texture (e.g. two plain-stone rooms both use key 'stone' with identical wording) rather than inventing near-duplicate keys for the same material — this dungeon may use AT MOST 16 distinct material keys in total across all rooms.",
       "materialCategory": "one of: ${MATERIAL_CATEGORIES.join('|')} — the coarse real-world material family this room's floor belongs to. Pick whichever actually matches; this is separate from \"material\" above (that's a specific short label, this is always one of this fixed list).",
@@ -239,7 +246,8 @@ Return ONLY valid JSON, no markdown fences, no explanation:
         "stats": { "str": 11, "dex": 12, "con": 12, "int": 10, "wis": 10, "cha": 10 },
         "attacks": [{ "name": "string", "bonus": 3, "damage": "1d6+1" }],
         "creatureType": "one of: ${CREATURE_TYPES.join('|')}",
-        "appearance": "string — 1-2 sentence physical description (build, coloring, notable features, worn/carried gear). No narrative framing, just what it looks like — this feeds an image generator, not the read-aloud text."
+        "appearance": "string — 1-2 sentence physical description (build, coloring, notable features, worn/carried gear). No narrative framing, just what it looks like — this feeds an image generator, not the read-aloud text.",
+        "appears": "string — omit for a creature that is here from the start. Otherwise the EXACT \"id\" of a questChain stage: the creature is NOT on the map until that stage begins, then appears in this room. Use it for threats the story brings in later — reinforcements, something that followed the party, a boss that arrives for its stage."
       }],
       "traps": [{
         "name": "string — pure sensory/flavor description of the trap. NEVER include a DC, a skill name, or how to beat it — e.g. write 'a swollen door with a rusted latch', never 'a swollen door (DC 14 Athletics to force)'.",
@@ -254,7 +262,7 @@ Return ONLY valid JSON, no markdown fences, no explanation:
         "disarmDC": "number 10-20 — either kind. The Thieves' Tools DC to neutralize this trap before it ever triggers (a Trap Disarm Kit rolls against this). Scale it to how well-hidden/dangerous the trap is. Never hinted at anywhere, same discipline as escapeDC."
       }],
       "loot": [{ "name": "string — the container or where it's found, e.g. 'Treasure Chest', 'Loose Floorboard'", "hideDC": 8, "contents": ["string — a specific item actually inside, e.g. '15 gold pieces', 'a silver locket'. 1-3 entries. This is the ONLY source of truth for what's in it — nothing else gets improvised when a player opens it."] }],
-      "propCategories": "string[] — one of: ${PROP_CATEGORIES.join('|')}. Which KINDS of furniture/decor this room needs, not the objects themselves (those are decided separately). Pick every category a real room of this type would contain and no more: a diner is [\\"seating\\",\\"surface\\",\\"appliance\\",\\"signage\\"], a walk-in freezer is [\\"storage\\",\\"container\\",\\"machinery\\"], a barracks is [\\"bedding\\",\\"storage\\",\\"lighting\\"]. Omit entirely for a room that really is bare (a stripped corridor, a collapsed passage).",
+      "propCategories": "string[] — one of: ${FLOOR_PROP_CATEGORIES.join('|')}. Which KINDS of furniture/decor this room needs, not the objects themselves (those are decided separately). Pick every category a real room of this type would contain and no more: a diner is [\\"seating\\",\\"surface\\",\\"appliance\\",\\"cooking\\"], a walk-in freezer is [\\"storage\\",\\"container\\",\\"machinery\\"], a barracks is [\\"bedding\\",\\"storage\\",\\"lighting\\"]. Omit entirely for a room that really is bare (a stripped corridor, a collapsed passage).",
       "dressing": ["string — a short ambient sensory or set-dressing detail, always visible the instant a party enters (no roll needed, no sprite generated). E.g. 'Cold draft from a cracked window', 'Faint smell of tallow smoke', 'Scorch marks streak the ceiling.'"],
       "hiddenDressing": [{
         "text": "string — a set-dressing detail that needs a hard search to notice (nothing worth a full loot/trap entry, but not ambient either — e.g. a faded symbol scratched under a shelf, a second set of footprints in the dust).",
@@ -268,7 +276,7 @@ Return ONLY valid JSON, no markdown fences, no explanation:
       "name": "Short, evocative quest title (2-6 words) — a proper name for the stage, not a restatement of its description, e.g. 'The Cellar Key', 'Silence the Ritual'.",
       "description": "2-3 short bullet points, one per line, each starting with '- ' — concrete, distinct beats of what the party needs to do for this stage specifically.",
       "trigger": {
-        "kind": "enter_room|discover_entity|defeat_boss|exit_dungeon — what mechanically resolves this stage and advances to the next one.",
+        "kind": "enter_room|discover_entity|defeat_boss|exit_dungeon — what mechanically resolves this stage and advances to the next one. An escape or extraction goal (get out, reach the evac point) is enter_room on the room the party escapes through — never exit_dungeon, which is only for walking off to somewhere else in a wider campaign.",
         "roomName": "enter_room ONLY — must be the EXACT \"name\" of one of the rooms in \"rooms\" above.",
         "entityName": "discover_entity ONLY — must be the EXACT \"name\" of a creature, loot, or trap nested inside one of the rooms above. Never a prop: props are always visible, so nothing ever 'discovers' one and a stage triggered on it can never resolve."
       }
@@ -276,9 +284,9 @@ Return ONLY valid JSON, no markdown fences, no explanation:
   ]
 }
 
-IF BUILDING: produce the ${minRooms}-${maxRooms} REAL rooms a location of this exact type would actually have — plain functional names only, never evocative or archaic diction (write "Chapel", never "Weeping Narthex"; write "Storage Closet", never "Sacristy of Moth-Eaten Vestments"). Reuse a letter/number suffix for repeated room types the way a real building would (e.g. "Classroom A".."Classroom E", "Boys Locker Room" / "Girls Locker Room"). Include hallway(s) as their own room(s) in the list whenever the building has more than a couple rooms — do not fold circulation space silently into other rooms. Every room needs "connectsTo". Only go multi-floor (see "floor" above) when the location genuinely would be — a small shop or single cottage stays one floor; don't force floors onto a location that wouldn't have them just because you can.
+Produce the ${minRooms}-${maxRooms} REAL rooms a location of this exact type would actually have — plain functional names only, never evocative or archaic diction (write "Chapel", never "Weeping Narthex"; write "Storage Closet", never "Sacristy of Moth-Eaten Vestments"; write "Cave Chamber", never "Hall of Whispering Bones"). Reuse a letter/number suffix for repeated room types the way a real place would (e.g. "Classroom A".."Classroom E", "Boys Locker Room" / "Girls Locker Room"). Where a building has more than a couple rooms, include its hallway(s) as their own room(s) — do not fold circulation space silently into other rooms. Every room needs "connectsTo". Only go multi-floor (see "floor" above) when the location really would be — a small shop or single cottage stays one floor; don't force floors onto a location that wouldn't have them just because you can.
 
-IF ORGANIC: produce ${minRooms}-${maxRooms} rooms with location-authentic, atmospheric names fitting a natural/dug space (e.g. for a crypt: "Ossuary", "Collapsed Passage"). Omit "isHallway", "connectsTo", "floor", "isStairwell", and "stairsTo" entirely for organic rooms — layout is handled separately, and a natural/dug space never has a built stairwell.
+A ROOM IS A PLACE, NEVER A THING. A wrecked bus, an overturned ambulance, a crashed car or a statue is an object standing IN a place — it belongs to that place's description and furnishing, not in the room list. Only make a vehicle a room when the party truly walks around inside a large one (a ship's deck, a train carriage). Every connection must make physical sense: two rooms connect only where a person could really walk straight from one into the other.
 
 Omit "creatures"/"traps"/"loot" for rooms that don't have any — not every room needs them. Match creature types and stat blocks (use official 5e monster stat blocks as reference) to the genre. hideDC ranges 1-22 (higher = harder to spot); scale it to how well-concealed the trap/item narratively is. If the story context implies a non-hostile purpose (e.g. sneaking in to gather information), it's fine for rooms to have no creatures at all — don't force combat that doesn't fit.
 Most traps should be "seal" kind, not "damage" — an environmental obstacle (a door that slams shut, a passage that collapses, an alarm) makes for better play than a random damage roll on discovery. Reach for "damage" only when the trap's whole concept is physically hurting whoever sets it off (a dart trap, a pressure-plate blade). Never let "name" hint at the DC or the way past it — that's the players' problem to solve, not something you hand them.
@@ -291,9 +299,9 @@ This dungeon is built for a party of ${partySize} level ${partyLevel} player cha
 
 At most ONE creature in the entire dungeon may have "isBoss": true — only set it when the scenario genuinely supports a climactic final threat (a named leader, the thing the story context is building toward). Leave every other creature without the field entirely; not every dungeon needs a boss.
 
-"questChain" (0+ stages, ordered — this is the sequence a party actually plays through, not a flat wishlist): a mutating quest, each stage replacing the last as it resolves. Design the ROOMS/CREATURES/LOOT above and this CHAIN together, as one coherent plan — a stage's trigger must reference something you actually placed (a real room name, or a real creature/loot/trap/prop name), never something invented only in the quest text. "defeat_boss" is only valid if you actually set a creature "isBoss": true above. Keep stages concrete and distinct from each other — never generic filler like "explore the dungeon" or "find the exit" as their own stage (a real "escape" stage should mean something specific happened first: supplies gathered, a threat that wasn't there before). An empty array is correct for a dungeon with no specific narrative hook beyond exploring it — do not force a chain onto a location the story context gives no reason to want one for.
+"questChain" (0+ stages, ordered — this is the sequence a party actually plays through, not a flat wishlist): a mutating quest, each stage replacing the last as it resolves. Pace it in bites, the way a survival-horror scenario does: each stage is one concrete step that opens the next, not the same pattern repeated. The last stage can be reaching a way out, or a final confrontation, or anything else the story ends on — whatever this scenario really ends with. When a stage begins, creatures whose "appears" names it arrive; a "defeat_boss" stage's boss always arrives when that stage begins, so it is never met early. Design the ROOMS/CREATURES/LOOT above and this CHAIN together, as one coherent plan — a stage's trigger must reference something you actually placed (a real room name, or a real creature/loot/trap/prop name), never something invented only in the quest text. "defeat_boss" is only valid if you actually set a creature "isBoss": true above. Keep stages concrete and distinct from each other — never generic filler like "explore the dungeon" or "find the exit" as their own stage (a real "escape" stage should mean something specific happened first: supplies gathered, a threat that wasn't there before). An empty array is correct for a dungeon with no specific narrative hook beyond exploring it — do not force a chain onto a location the story context gives no reason to want one for.
 
-"doors" (BUILDING ONLY) is where you gate a connectsTo edge instead of leaving it a plain doorway — use it deliberately, tied to the chain above, not scattered at random (a good use: an early "enter_room" stage's target room is "locked" so the party needs the earlier stage's key first; most edges should stay plain doorways with no "doors" entry at all). Whenever you write a "locked" entry, its keyName's loot item must actually be reachable — place it somewhere the party can get to WITHOUT needing to go through this same locked door, and never behind a second lock whose own key sits behind this one (no circular locks). A key is always trivially found once its loot is discovered, so don't hesitate to place it plainly — the difficulty is in finding the room, not in the search roll once there.
+"doors" decides what stands between two connected rooms. Put a door wherever a real place would have one — between rooms of a building, at a building's street entrance — and "none" wherever it wouldn't (open ground, a passage, a hallway opening onto its rooms). Locked doors make a map worth exploring: a locked door whose key lies elsewhere turns a straight walk into a search, and stops the party skipping half the map. Use a few where they make sense; the goal rooms do NOT need to be locked away. Whenever you write a "locked" entry, its keyName's loot item must actually be reachable — place it somewhere the party can get to WITHOUT needing to go through this same locked door, and never behind a second lock whose own key sits behind this one (no circular locks). A key is always trivially found once its loot is discovered, so don't hesitate to place it plainly — the difficulty is in finding the room, not in the search roll once there.
 ${questsBlock}${contextBlock}${genreBlock}
 Location: ${name}
 Genre: ${dungeonType}`;
@@ -302,7 +310,13 @@ Genre: ${dungeonType}`;
     const raw = await adapter.stream(prompt, onToken);
     const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
     const parsed = JSON.parse(cleaned) as Partial<DungeonManifest>;
-    const structureType: DungeonStructureType = parsed.structureType === 'building' ? 'building' : 'organic';
+    // Always building. The organic generator (generator.ts's generateGrid) chained rooms in list
+    // order with thin corridors, which read as nonsense ("subway -> ambulance -> pharmacy"), so the
+    // model is no longer told it exists. Kept dormant for the fallback manifest and arenas, and so
+    // it can be switched back on — see ADD-IT-TO-THE-LATERBASE.md.
+    // (An empty room list falls back to GENERIC_ROOMS, which have no connectsTo — organic is the
+    // only layout that can place those.)
+    const structureType: DungeonStructureType = parsed.rooms?.length ? 'building' : 'organic';
     const rawTheme = typeof parsed.theme === 'string' ? parsed.theme.trim().toLowerCase() : '';
     const theme: DungeonStylePack = rawTheme || 'high_fantasy';
     let bossSeen = false;
@@ -330,7 +344,7 @@ Genre: ${dungeonType}`;
         }),
       };
     });
-    const lockedRooms = resolveStairLinks(resolveDoorLocks(rooms));
+    const lockedRooms = dropUnreachableLocks(resolveStairLinks(resolveDoorLocks(rooms)));
     const roomNames = new Set(lockedRooms.map(r => r.name));
     const entityNames = new Set(lockedRooms.flatMap(r => [
       ...(r.creatures ?? []).map(c => c.name),
@@ -338,8 +352,9 @@ Genre: ${dungeonType}`;
       ...(r.traps ?? []).map(t => t.name),
     ]));
     const questChain = parseQuestChain(parsed.questChain, predefinedChain, roomNames, entityNames, bossSeen);
+    const spawnedRooms = resolveAppearances(lockedRooms, questChain);
     const illumination = typeof parsed.illumination === 'number' && Number.isFinite(parsed.illumination) ? Math.max(0, Math.min(1, parsed.illumination)) : 1;
-    return { rooms: assignKeys(lockedRooms), structureType, theme, questChain, illumination, materials: collectDungeonMaterials(lockedRooms) };
+    return { rooms: assignKeys(spawnedRooms), structureType, theme, questChain, illumination, materials: collectDungeonMaterials(spawnedRooms) };
   } catch (err) {
     logError('dungeon/manifest:fetchManifest', err);
     const questChain: DungeonQuestStage[] = predefinedChain.map(s => ({ ...s, trigger: { kind: 'exit_dungeon' } }));
@@ -393,7 +408,7 @@ function parseQuestChain(
   return [seedStage, ...parsedStages.filter(s => s.id !== seed.id)];
 }
 
-const VALID_DOOR_STATES: readonly ('open' | 'closed' | 'locked')[] = ['open', 'closed', 'locked'];
+const VALID_DOOR_STATES: readonly DoorState[] = ['none', 'open', 'closed', 'locked'];
 
 // Every locked door not otherwise given one gets this Thieves' Tools DC — "every locked door has
 // a lockpick DC" is a hard guarantee, not something the model can skip by omission.
@@ -465,5 +480,74 @@ export function resolveStairLinks(rooms: ManifestRoom[]): ManifestRoom[] {
     if (!r.isStairwell || claimed.has(r.name)) return r;
     const { isStairwell: _isStairwell, stairsTo: _stairsTo, ...rest } = r;
     return rest;
+  });
+}
+
+/**
+ * A locked door whose key can never be reached is a wall. resolveDoorLocks only checks the key
+ * EXISTS; this checks the party can get to it. Walks the room graph (connectsTo plus stair pairs)
+ * from the entrance, only through a locked door once its key's room has been reached, repeating
+ * until nothing new opens. Any lock still shut at the end — its key behind itself, or behind a
+ * chain of locks that loops back — is downgraded to 'closed'. Downgrading can open more of the
+ * map, so the walk reruns until every surviving lock is solvable.
+ */
+export function dropUnreachableLocks(rooms: ManifestRoom[]): ManifestRoom[] {
+  let current = rooms;
+  for (;;) {
+    const keyRoom = new Map(current.flatMap(r => (r.loot ?? []).map(l => [l.name, r.name] as const)));
+    const lockOn = (a: ManifestRoom, b: ManifestRoom) =>
+      [...(a.doors ?? []).filter(d => d.toRoom === b.name), ...(b.doors ?? []).filter(d => d.toRoom === a.name)]
+        .find(d => d.state === 'locked')?.keyName;
+    const byName = new Map(current.map(r => [r.name, r]));
+    const neighbours = new Map(current.map(r => [r.name, new Set<string>()]));
+    for (const r of current) {
+      for (const n of [...(r.connectsTo ?? []), ...(r.stairsTo ? [r.stairsTo] : [])]) {
+        if (!byName.has(n)) continue;
+        neighbours.get(r.name)!.add(n);
+        neighbours.get(n)!.add(r.name);
+      }
+    }
+    const start = current.find(r => r.role === 'entrance') ?? current[0];
+    if (!start) return current;
+    const reached = new Set([start.name]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const name of [...reached]) {
+        for (const n of neighbours.get(name)!) {
+          if (reached.has(n)) continue;
+          const key = lockOn(byName.get(name)!, byName.get(n)!);
+          if (key && !reached.has(keyRoom.get(key) ?? '')) continue;
+          reached.add(n);
+          grew = true;
+        }
+      }
+    }
+    const stuck = new Set(current.flatMap(r => (r.doors ?? [])
+      .filter(d => d.state === 'locked' && !reached.has(keyRoom.get(d.keyName ?? '') ?? ''))
+      .map(d => `${r.name}|${d.toRoom}`)));
+    if (!stuck.size) return current;
+    current = current.map(r => !r.doors?.some(d => stuck.has(`${r.name}|${d.toRoom}`)) ? r : {
+      ...r,
+      doors: r.doors.map(d => stuck.has(`${r.name}|${d.toRoom}`) ? { toRoom: d.toRoom, state: 'closed' as const } : d),
+    });
+  }
+}
+
+/**
+ * Settles every creature's `appears` against the parsed chain. An id that names no stage, or the
+ * first stage (active from the start anyway), is dropped — the creature is simply there from the
+ * beginning. A "defeat_boss" stage past the first always holds its boss back until that stage
+ * begins, whatever the model wrote: a boss standing on the map from turn one gets killed during
+ * stage one, its defeat_boss event arrives while it can't match, and the chain can never finish.
+ */
+export function resolveAppearances(rooms: ManifestRoom[], chain: DungeonQuestStage[]): ManifestRoom[] {
+  const laterStages = new Set(chain.slice(1).map(s => s.id));
+  const bossStage = chain.slice(1).find(s => s.trigger.kind === 'defeat_boss')?.id;
+  return rooms.map(r => !r.creatures?.length ? r : {
+    ...r,
+    creatures: r.creatures.map(({ appears, ...c }) => {
+      const stage = c.isBoss && bossStage ? bossStage : typeof appears === 'string' && laterStages.has(appears) ? appears : undefined;
+      return stage ? { ...c, appears: stage } : c;
+    }),
   });
 }

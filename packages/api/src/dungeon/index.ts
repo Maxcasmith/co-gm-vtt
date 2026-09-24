@@ -5,16 +5,17 @@ import { toDungeon, occupantsOf, type Audience } from '../state.ts';
 import { slugifyTheme, hasLineOfSight, closedDoorCells } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import type { ArenaTerrain } from '../session-processor/imagePrompts.ts';
-import { fetchManifest } from './manifest.ts';
+import { fetchManifest, type ManifestRoom } from './manifest.ts';
 import { generateGrid, type DoorRect } from './generator.ts';
 import { generateBuildingLayout } from './buildingLayout.ts';
-import { placeEntities, placeEncounterEntities } from './placer.ts';
+import { collectPendingSpawns, pendingSpawnEntity, placeEntities, placeEncounterEntities } from './placer.ts';
 import { ensureTilesetSupport, type TilesetResolution } from './tilesets.ts';
 import { assignPortraitSrcs, generateCreaturePortraits } from './creaturePortraits.ts';
 import { assignPropSpriteSrcs, generatePropSprites } from './props.ts';
 import { readPropBucket } from './propCatalogue.ts';
 import { logDebug } from '../logger.ts';
 import { EMPTY_PROP_PLAN, generatePropDressing } from './propDressing.ts';
+import { furnishRooms } from './roomLayout.ts';
 
 export async function generateDungeon(
   name: string,
@@ -78,11 +79,13 @@ export async function generateDungeon(
     : EMPTY_PROP_PLAN;
   logDebug(`dungeon "${name}": prop dressing (${propPlan.props.length} types) ${since()}`);
 
-  const entities = placeEntities(rooms, manifest, cells, propPlan);
-  // Third and last place props can silently vanish (after the manifest's categories and the
-  // dressing call's plan): a plan the placer couldn't fit anywhere. Logged so a propless dungeon
-  // names which stage dropped them instead of all three looking identical from disk.
-  logDebug(`dungeon "${name}": placed ${entities.filter(e => e.type === 'object').length} props from ${propPlan.props.length} types across ${rooms.length} rooms`);
+  // Everything except props. Props go last (pass 3, below), because the layout call has to be shown
+  // which cells creatures, loot, traps, stairs and doors already hold.
+  const entities = placeEntities(rooms, manifest, cells);
+  const pendingSpawns = collectPendingSpawns(rooms, manifest);
+  // Held creatures get their portraits now, with everyone else's — by the time they spawn mid-play
+  // there is no generation step left to draw them.
+  const withHeld = [...entities, ...pendingSpawns.map(p => pendingSpawnEntity(p))];
   // Multi-floor building layouts only — already fully resolved (id + reciprocal linkTo) by
   // generateBuildingLayout's stitching step, nothing left to look up here (unlike doors' keyName,
   // stairs pairing never depends on placeEntities' output).
@@ -104,26 +107,31 @@ export async function generateDungeon(
   }
   // Synchronous/deterministic — every creature entity gets a portraitSrc before this function
   // returns, regardless of whether the file exists yet (see creaturePortraits.ts).
-  assignPortraitSrcs(entities);
-  // Same contract for decorative prop entities' spriteSrc — see props.ts. Genre-scoped, because a
-  // sprite now lives under its setting/tone bucket: without a genre there is no bucket to point at,
-  // so props render as plain markers rather than at a URL that can never resolve.
-  assignPropSpriteSrcs(entities, opts?.genre);
+  assignPortraitSrcs(withHeld);
 
   // Creatures never gate dungeon return — fired first, resolves in the background regardless of
   // how long tilesets/props take (errors caught/logged inside generateCreaturePortraits itself).
-  if (config) void generateCreaturePortraits(entities, config);
+  if (config) void generateCreaturePortraits(withHeld, config);
 
-  // Tilesets and props both must exist before the dungeon ships (the client draws them
-  // synchronously — no background-fill/retry pattern like creature portraits get), so the dungeon
-  // is paused behind these two. Fired together via Promise.all rather than sequentially, so their
-  // atlas requests overlap instead of queueing one behind the other.
-  progress('Drawing floor textures and props…');
-  const [tileset] = await Promise.all([
+  // Tilesets, prop sprites and pass 3 (room layout) must all exist before the dungeon ships — the
+  // client draws them synchronously, no background fill like creature portraits get. None of the
+  // three depends on another (layout needs only the prop plan, which already exists), so they run
+  // together and the dungeon waits for the slowest rather than the sum.
+  progress('Arranging furniture, drawing floor textures and props…');
+  const descriptions = new Map(manifest.rooms.map(r => [r.name, r.description ?? '']));
+  const [tileset, props] = await Promise.all([
     config ? ensureTilesetSupport(manifest.theme, manifest.materials, config, opts?.genre) : Promise.resolve<TilesetResolution>({ tilesetSlug: slugifyTheme(manifest.theme) }),
+    config && propPlan.props.length ? furnishRooms(rooms, propPlan, cells, entities, adapter, descriptions, opts?.genre) : Promise.resolve([]),
     config ? generatePropSprites(propPlan.props, config, opts?.genre) : Promise.resolve(),
   ]);
-  logDebug(`dungeon "${name}": tilesets + prop sprites ${since()}`);
+  entities.push(...props);
+  // Same contract as creature portraits: spriteSrc set synchronously whether or not the file
+  // exists yet. Genre-scoped, because a sprite lives under its setting/tone bucket — without a genre
+  // there is no bucket to point at, so props render as plain markers rather than at a dead URL.
+  assignPropSpriteSrcs(entities, opts?.genre);
+  // Last place props can silently vanish (after the manifest's categories and the dressing plan):
+  // a layout that couldn't fit them. Logged so a propless dungeon names the stage that dropped them.
+  logDebug(`dungeon "${name}": tilesets + prop sprites + room layout — ${props.length} props from ${propPlan.props.length} types across ${rooms.length} rooms ${since()}`);
 
   const dungeon: Dungeon = {
     id: opts?.id ?? randomUUID(),
@@ -136,6 +144,7 @@ export async function generateDungeon(
     rooms,
     entities,
     questChain: manifest.questChain,
+    ...(pendingSpawns.length ? { pendingSpawns } : {}),
     theme: manifest.theme,
     tilesetSlug: tileset.tilesetSlug,
     ...(tileset.materialSources ? { materialSources: tileset.materialSources } : {}),
@@ -235,7 +244,9 @@ export function broadcastDungeon(cid: string, dungeon: Dungeon, audience: Audien
 
 export function toClientDungeon(dungeon: Dungeon): Dungeon {
   // Party-placed traps skip the discovered gate — you always know where your own trap is.
-  return { ...dungeon, entities: dungeon.entities.filter(e => e.discovered || e.placedBy) };
+  // pendingSpawns is spoiler data (who's coming, and when) — never sent.
+  const { pendingSpawns: _pendingSpawns, ...visible } = dungeon;
+  return { ...visible, entities: dungeon.entities.filter(e => e.discovered || e.placedBy) };
 }
 
 /**
@@ -252,6 +263,41 @@ export async function applyArenaTerrain(arena: Dungeon, terrain: ArenaTerrain, c
   const { tilesetSlug, materialSources } = await ensureTilesetSupport(terrain.theme, [terrain.material], config, genre);
   arena.tilesetSlug = tilesetSlug;
   if (materialSources) arena.materialSources = materialSources;
+}
+
+/**
+ * Furnishes an open-world fight's arena with the exact dungeon prop pipeline — pass 2 dressing, pass
+ * 3 layout and sprite art — so a change to how dungeons are furnished changes arenas too. The arena
+ * is one room, described by the encounter call's terrain. Awaited in full: the fight's loading
+ * screen stays up until the props exist, same contract generateDungeon has.
+ *
+ * `partySize` keeps the room centre clear, because that is where the client spreads the party
+ * (GamePage's entrance placement) — props there would sit under the players' tokens.
+ */
+export async function furnishArena(arena: Dungeon, terrain: ArenaTerrain, partySize: number, config: AppConfig, adapter: StoryProviderAdapter, genre?: CampaignGenre): Promise<void> {
+  const room = arena.rooms[0];
+  if (!room) return;
+  if (!terrain.description) logDebug(`arena: encounter call gave no scene description — furnishing from the floor alone`);
+  const description = terrain.description ?? `A fight on ${terrain.material.description}.`;
+  const manifestRoom: ManifestRoom = { name: room.name, size: 'large', description };
+  const plan = await generatePropDressing(arena.rooms, [manifestRoom], arena.cells, terrain.theme, adapter, await readPropBucket(genre), genre);
+  if (!plan.props.length) return;
+
+  // A stand-in footprint over the party's spawn area, only so furnishRooms counts those cells as
+  // taken. Never stored on the arena.
+  const side = Math.ceil(Math.sqrt(Math.max(1, partySize))) + 2;
+  const partyArea: DungeonEntity = {
+    id: 'party-spawn', type: 'object', name: 'party-spawn', discovered: false, width: side, height: side,
+    x: room.x + Math.floor(room.width / 2) - Math.floor(side / 2),
+    y: room.y + Math.floor(room.height / 2) - Math.floor(side / 2),
+  };
+  const [props] = await Promise.all([
+    furnishRooms(arena.rooms, plan, arena.cells, [...arena.entities, partyArea], adapter, new Map([[room.name, description]]), genre),
+    generatePropSprites(plan.props, config, genre),
+  ]);
+  arena.entities.push(...props);
+  assignPropSpriteSrcs(arena.entities, genre);
+  logDebug(`arena: ${props.length} props from ${plan.props.length} types`);
 }
 
 /** Drops freshly generated enemies into an existing arena, returning the entities placed. */

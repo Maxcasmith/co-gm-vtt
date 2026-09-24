@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
-import type { ChatPayload, Character, Player, EnemyStatBlock, TokenPosition, Dungeon, Quest, TurnOrderEntry, StoryboardQueuePayload, HouseRules, Goal, PartyGroups } from 'shared';
+import type { ChatPayload, Character, Player, EnemyStatBlock, TokenPosition, Dungeon, Quest, TurnOrderEntry, StoryboardQueuePayload, HouseRules, Goal, PartyGroups, CurrencyDenomination } from 'shared';
 import { DEFAULT_HOUSE_RULES, trackOf, activeSplit, stripDmTags } from 'shared';
 import { HIT_DICE } from './character-creation/srd.ts';
 import { Button } from './components/Button/Button.tsx';
@@ -14,6 +14,7 @@ import CharacterSheetOverlay from './CharacterSheetOverlay.tsx';
 import JournalOverlay from './JournalOverlay.tsx';
 import QuestLog from './QuestLog.tsx';
 import CombatLogOverlay from './CombatLogOverlay.tsx';
+import CombatLogWidget from './CombatLogWidget.tsx';
 import NotesOverlay from './NotesOverlay.tsx';
 import ChatWidget from './ChatWidget.tsx';
 import QuickChat from './QuickChat.tsx';
@@ -68,6 +69,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [journalOpen, setJournalOpen] = useState(false);
   const [journalVariant, setJournalVariant] = useState<'full' | 'side'>('side');
   const [combatLogOpen, setCombatLogOpen] = useState(false);
+  const [combatLogWidgetOpen, setCombatLogWidgetOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const [quickChatOpen, setQuickChatOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -131,6 +133,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [elevations, setElevations] = useState<Record<string, number>>({});
   const [itemNotifications, setItemNotifications] = useState<{ id: string; name: string }[]>([]);
   const [errorNotifications, setErrorNotifications] = useState<{ id: string; reason: string }[]>([]);
+  const [currencyNotifications, setCurrencyNotifications] = useState<{ id: string; denom: CurrencyDenomination; amount: number }[]>([]);
+  const [questNotifications, setQuestNotifications] = useState<{ id: string; name: string }[]>([]);
   const [worldMapUrl, setWorldMapUrl] = useState<string | undefined>(undefined);
   const [dungeon, setDungeon] = useState<Dungeon | null>(null);
   // The big socket-setup effect below only re-registers on character.name change, so its handlers
@@ -150,11 +154,13 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   // pointer surface (z-index), but a focused text input still takes keystrokes through it, so chat
   // is disabled explicitly rather than merely covered.
   const generationLocked = mapLoading || combatLoading;
+  const generationLockedRef = useRef(generationLocked);
+  generationLockedRef.current = generationLocked;
   const [questLogOpen, setQuestLogOpen] = useState(false);
   const [quests, setQuests] = useState<Quest[]>([]);
-  // Set once the dungeon's whole questChain resolves (quest:update's `final` flag) — the full
-  // page recap screen, not the old per-stage popup. Cleared once Finish navigates away.
-  const [congrats, setCongrats] = useState<{ dungeon: Dungeon; quests: Quest[]; roster: Character[] } | null>(null);
+  // Set when a dungeon crawl is won (game:complete) — the full page Congrats -> Scores screens.
+  // Cleared by navigating away (Back to Lobby).
+  const [congrats, setCongrats] = useState<{ dungeonName: string; theme?: string; quests: Quest[]; roster: Character[] } | null>(null);
   const [act, setAct] = useState(1);
   const [worldTimeSecs, setWorldTimeSecs] = useState(43200);
   // Reaction-sidebar display prefs — set on GameSettingsPage, fetched once here since they never
@@ -187,16 +193,20 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   }, []);
 
   // Block browser back button — push a sentinel state so we can intercept popstate
+  // The one way out of a game: the menu's Leave, the browser's back button, and walking out of a
+  // dungeon crawl ([[DUNGEON_EXIT]] -> game:left) all come through here — confirm first while the
+  // adventure is still running, otherwise straight back to the main menu.
+  function requestLeave() {
+    if (shouldConfirmRef.current) { setShowLeaveConfirm(true); return; }
+    socketRef.current?.disconnect();
+    window.location.href = '/';
+  }
+
   useEffect(() => {
     history.pushState(null, '', window.location.href);
     function onPopState() {
       history.pushState(null, '', window.location.href); // re-push to stay on page
-      if (shouldConfirmRef.current) {
-        setShowLeaveConfirm(true);
-      } else {
-        socketRef.current?.disconnect();
-        window.location.href = '/';
-      }
+      requestLeave();
     }
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -329,12 +339,15 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     socket.on('character:inspiration:update', ({ heroicInspiration }) => {
       setInspirationOverride(heroicInspiration);
     });
-    socket.on('character:currency:update', ({ characterId }) => {
+    socket.on('character:currency:update', ({ characterId, denom, amount }) => {
       if (characterId !== character.id) return;
       fetch(`${API}/api/campaigns/${character.campaignId}/party/${character.id}`)
         .then(r => r.json())
         .then((c: Character) => onCharacterUpdateRef.current(c))
         .catch(() => {});
+      const id = crypto.randomUUID();
+      setCurrencyNotifications(prev => [...prev, { id, denom, amount }]);
+      setTimeout(() => setCurrencyNotifications(prev => prev.filter(x => x.id !== id)), 8500);
     });
     socket.on('character:condition:update', ({ targetId, conditions }) => {
       if (targetId !== character.id) return;
@@ -508,6 +521,15 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       dispatch('vtt:combat:victory', data);
       setVictory(data);
     });
+    // xp lands on kill, scores land on endCombat (~7s later) — both fire this once their write
+    // actually completes, so the sheet's xp bar and Scores tab don't wait on an unrelated event.
+    socket.on('character:reward:update', ({ characterId }: { characterId: string }) => {
+      if (characterId !== character.id) return;
+      fetch(`${API}/api/campaigns/${character.campaignId}/party/${character.id}`)
+        .then(r => r.json())
+        .then((c: Character) => onCharacterUpdateRef.current(c))
+        .catch(() => {});
+    });
     socket.on('token:moved', (pos: TokenPosition) => {
       setTokenPositions(prev => ({ ...prev, [pos.tokenId]: { gx: pos.gx, gy: pos.gy } }));
     });
@@ -550,23 +572,30 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       loadRuntimeTilesets();
     });
     socket.on('dungeon:cleared', () => { dungeonRef.current = null; setDungeon(null); setTokenPositions({}); setMapLoading(false); });
-    socket.on('quest:update', ({ quests: q, act: a, final }) => {
+    socket.on('quest:update', ({ quests: q, act: a, newQuests }) => {
       setQuests(q);
       setAct(a);
-      // `final` (see questChain.ts) means this update closed the dungeon's whole questChain, not
-      // just one stage of it — only then does the full recap screen show, once, at the true end.
-      const dungeonNow = dungeonRef.current;
-      if (!final || !dungeonNow) return;
-      const resolvedChain = q.filter((nq: Quest) => nq.sourceDungeonId === dungeonNow.id && nq.status === 'resolved');
+      if (newQuests?.length) {
+        const notifs = newQuests.map(nq => ({ id: crypto.randomUUID(), name: nq.name }));
+        setQuestNotifications(prev => [...prev, ...notifs]);
+        notifs.forEach(n => setTimeout(() => setQuestNotifications(prev => prev.filter(x => x.id !== n.id)), 8500));
+      }
+    });
+    socket.on('game:complete', ({ dungeonName, theme, quests: won }) => {
+      const show = (roster: Character[]) => setCongrats({ dungeonName, ...(theme ? { theme } : {}), quests: won, roster });
       fetch(`${API}/api/campaigns/${character.campaignId}/party`)
         .then(r => r.json())
-        .then((roster: Character[]) => setCongrats({ dungeon: dungeonNow, quests: resolvedChain, roster }))
-        .catch(() => setCongrats({ dungeon: dungeonNow, quests: resolvedChain, roster: [] }));
+        .then(show)
+        .catch(() => show([]));
     });
+    socket.on('game:left', requestLeave);
     socket.on('clock:update', ({ worldTimeSecs: t }) => { setWorldTimeSecs(t); });
     socket.on('groups:update', setPartyGroups);
 
     const unsubTokenMove = on('vtt:token:move', pos => {
+      // The loading screen blocks new input, but a drag already in hand when it came up still
+      // drops here — the server refuses it (fight still setting up), so don't move it locally either.
+      if (generationLockedRef.current) return;
       socket.emit('token:move', pos);
       setTokenPositions(prev => ({ ...prev, [pos.tokenId]: { gx: pos.gx, gy: pos.gy } }));
     });
@@ -734,9 +763,15 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       defaults[name] = pos;
     });
 
+    // Saved positions only fill tokens this client doesn't know yet (first load, reconnect). A token
+    // it already tracks is kept: this effect re-runs on EVERY rebroadcast of the same dungeon (room
+    // entered, entity discovered, door toggled), and that payload's positions are a snapshot taken
+    // when the server sent it — overwriting from it yanked a token that had already moved on back
+    // to an earlier cell ("dropped into the room, landed nearer the doorway"). Live moves arrive as
+    // token:moved; a move the server refuses is sent straight back to the mover (token:move).
     setTokenPositions(prev => {
       const next = { ...prev };
-      Object.entries(saved).forEach(([id, pos]) => { next[id] = pos; });
+      Object.entries(saved).forEach(([id, pos]) => { if (!next[id]) next[id] = pos; });
       Object.entries(defaults).forEach(([id, pos]) => { if (!next[id]) next[id] = pos; });
       return next;
     });
@@ -777,6 +812,9 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         lastSpaceRef.current = 0;
         // Same gate as the HUD button — splitting and rejoining only happens in play.
         if (sessionActive && canSplitParty) setGroupsOpen(o => !o);
+      } else if (e.key === 'l' && now - lastSpaceRef.current < DOUBLE_TAP_MS) {
+        lastSpaceRef.current = 0;
+        setCombatLogWidgetOpen(o => !o);
       } else if (e.key === 'D' && e.shiftKey && debugMode) {
         setDevModalOpen(o => !o);
       }
@@ -836,10 +874,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     {
       label: 'Leave',
       description: 'Disconnect and return to the main menu',
-      onSelect: () => {
-        if (shouldConfirmRef.current) { setShowLeaveConfirm(true); }
-        else { socketRef.current?.disconnect(); window.location.href = '/'; }
-      },
+      onSelect: requestLeave,
     },
   ];
 
@@ -888,6 +923,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         sessionActive={sessionActive}
       />
       {currentRoomName && <div className="room-name-banner">{currentRoomName}</div>}
+      <CombatLogWidget open={combatLogWidgetOpen} showText={combatLogText} />
       <TurnOrderBar campaignId={character.campaignId} encounter={encounter} deadCreatureIds={deadCreatureIds} />
       <PartyHud
         roster={Object.keys(partyCharacterIds)}
@@ -941,10 +977,11 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
       {defeated && <DefeatScreen onDismiss={() => setDefeated(false)} />}
       {congrats && (
         <CongratsScreen
-          dungeon={congrats.dungeon}
+          dungeonName={congrats.dungeonName}
+          {...(congrats.theme ? { theme: congrats.theme } : {})}
           quests={congrats.quests}
           roster={congrats.roster}
-          onFinish={() => { socketRef.current?.disconnect(); window.location.href = `/${character.campaignId}/lobby`; }}
+          onBackToLobby={() => { socketRef.current?.disconnect(); window.location.href = `/${character.campaignId}/lobby`; }}
         />
       )}
       <AlertSwapSidebar character={liveCharacter} portraitUrls={portraitUrls} />
@@ -959,6 +996,18 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
         {itemNotifications.map(n => (
           <div key={n.id} className="item-notification">
             <span className="item-notification-label">Item received</span>
+            <span className="item-notification-name">{n.name}</span>
+          </div>
+        ))}
+        {currencyNotifications.map(n => (
+          <div key={n.id} className={`item-notification ${n.amount < 0 ? 'item-notification--currency-loss' : 'item-notification--currency'}`}>
+            <span className="item-notification-label">{n.amount < 0 ? 'Currency spent' : 'Currency received'}</span>
+            <span className="item-notification-name">{n.amount > 0 ? '+' : ''}{n.amount} {n.denom}</span>
+          </div>
+        ))}
+        {questNotifications.map(n => (
+          <div key={n.id} className="item-notification item-notification--quest">
+            <span className="item-notification-label">New quest</span>
             <span className="item-notification-name">{n.name}</span>
           </div>
         ))}

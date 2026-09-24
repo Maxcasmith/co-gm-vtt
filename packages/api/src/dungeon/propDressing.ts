@@ -1,5 +1,5 @@
 import type { CampaignGenre, DungeonRoom, PropCategory, PropCatalogueEntry, PropCategoryMap, PropSpec, PropZone, RoomProp } from 'shared';
-import { PROP_CATEGORIES, PROP_ZONES, slugifyTheme } from 'shared';
+import { PROP_CATEGORIES, PROP_ZONES, WALL_MOUNTED_CATEGORIES, propSizeXY, slugifyTheme } from 'shared';
 import type { StoryProviderAdapter } from '../providers/index.ts';
 import type { ManifestRoom } from './manifest.ts';
 import { buildPropNounBlock } from './propCatalogue.ts';
@@ -43,24 +43,31 @@ export function propTargetFor(room: DungeonRoom, cells: number[][]): number {
   return Math.max(MIN_PROPS_PER_ROOM, Math.min(MAX_PROPS_PER_ROOM, Math.round(area / CELLS_PER_PROP)));
 }
 
+/** The categories a prop may actually be — everything that stands on the floor. */
+export const FLOOR_PROP_CATEGORIES = PROP_CATEGORIES.filter(c => !WALL_MOUNTED_CATEGORIES.includes(c));
+
 function normalizeCategory(c: unknown): PropCategory {
-  return (PROP_CATEGORIES as readonly unknown[]).includes(c) ? (c as PropCategory) : 'decor';
+  return (FLOOR_PROP_CATEGORIES as readonly unknown[]).includes(c) ? (c as PropCategory) : 'decor';
 }
 
 function normalizeZone(z: unknown): PropZone {
   return (PROP_ZONES as readonly unknown[]).includes(z) ? (z as PropZone) : 'floor';
 }
 
-// 1-30ft. The floor keeps a sub-5ft object (a candle, a bucket) from collapsing to zero cells; the
-// ceiling stops a hallucinated 500ft table from swallowing a room. Both ends are defensive only —
-// realistic furniture sits well inside them.
-function normalizeFeet(v: unknown, fallback: number): number {
-  return typeof v === 'number' && Number.isFinite(v) ? Math.max(1, Math.min(30, v)) : fallback;
+// 1-6 cells per axis. The floor keeps a small object from collapsing to nothing; the ceiling stops
+// a hallucinated 100-cell table from swallowing a room. Both ends are defensive only — real
+// furniture sits well inside them, and the largest room is 13 cells across.
+function normalizeAxis(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) ? Math.max(1, Math.min(6, Math.round(v))) : 1;
+}
+
+function normalizeSize(v: unknown): [number, number] {
+  return Array.isArray(v) ? [normalizeAxis(v[0]), normalizeAxis(v[1])] : [1, 1];
 }
 
 interface RawPropPlan {
-  props?: { noun?: unknown; category?: unknown; description?: unknown; widthFt?: unknown; depthFt?: unknown }[];
-  rooms?: { name?: unknown; props?: { noun?: unknown; count?: unknown; zone?: unknown }[] }[];
+  props?: { prop?: unknown; category?: unknown; description?: unknown; sizeXY?: unknown }[];
+  rooms?: { name?: unknown; props?: { prop?: unknown; count?: unknown; zone?: unknown }[] }[];
 }
 
 /**
@@ -77,7 +84,7 @@ export function parsePropPlan(raw: RawPropPlan, catalogue: PropCategoryMap): Pro
   const seen = new Set<string>();
 
   for (const p of raw.props ?? []) {
-    const noun = typeof p.noun === 'string' ? slugifyTheme(p.noun) : '';
+    const noun = typeof p.prop === 'string' ? slugifyTheme(p.prop) : '';
     if (!noun || seen.has(noun) || props.length >= MAX_PROP_TYPES) continue;
     const category = normalizeCategory(p.category);
     const existing: PropCatalogueEntry | undefined = catalogue[category]?.[noun];
@@ -86,8 +93,7 @@ export function parsePropPlan(raw: RawPropPlan, catalogue: PropCategoryMap): Pro
       noun,
       category,
       description: typeof p.description === 'string' && p.description.trim() ? p.description.trim() : noun.replace(/-/g, ' '),
-      widthFt: existing?.widthFt ?? normalizeFeet(p.widthFt, 5),
-      depthFt: existing?.depthFt ?? normalizeFeet(p.depthFt, 5),
+      sizeXY: (existing && propSizeXY(existing)) ?? normalizeSize(p.sizeXY),
     });
   }
 
@@ -97,7 +103,7 @@ export function parsePropPlan(raw: RawPropPlan, catalogue: PropCategoryMap): Pro
     if (!name) continue;
     const requests: RoomProp[] = [];
     for (const r of room.props ?? []) {
-      const noun = typeof r.noun === 'string' ? slugifyTheme(r.noun) : '';
+      const noun = typeof r.prop === 'string' ? slugifyTheme(r.prop) : '';
       // A request for a type that was never declared has no description and no dimensions, so it
       // can neither be drawn nor sized — dropped rather than guessed at.
       if (!noun || !seen.has(noun)) continue;
@@ -168,25 +174,26 @@ export async function generatePropDressing(
   const prompt = `You are furnishing the rooms of a "${theme}" location for a top-down tabletop map. Return ONLY valid JSON, no markdown fences, no explanation:
 {
   "props": [{
-    "noun": "string — kebab-case name for ONE type of object, e.g. diner-booth, wooden-crate, helm-console. Declare each type ONCE here no matter how many rooms use it or how many copies exist.",
-    "category": "one of: ${PROP_CATEGORIES.join('|')}",
+    "prop": "string — kebab-case name for ONE type of object, e.g. diner-booth, wooden-crate, helm-console. Declare each type ONCE here no matter how many rooms use it or how many copies exist.",
+    "category": "one of: ${FLOOR_PROP_CATEGORIES.join('|')}",
     "description": "string — vivid visual description of this object seen FROM DIRECTLY ABOVE (its top surface, materials, colour, wear), isolated with no background or scenery. This feeds an image generator.",
-    "widthFt": "number — the object's real-world width in feet (a dining chair is about 2, a diner booth about 5, a long table about 4).",
-    "depthFt": "number — its real-world depth in feet. Give the TRUE proportions: a long table might be 4 wide and 10 deep. Do not make everything square."
+    "sizeXY": "[x, y] — footprint in GRID CELLS, one cell being 5 feet. x is across, y is down, measured with the object's LONG AXIS VERTICAL. Scale against a person, who stands in exactly one cell: something one person sits on is [1,1], a table four people sit round is [1,2], a bed [1,2], anything the size of a cart or a car [2,4]. Never bigger than [6,6]."
   }],
   "rooms": [{
     "name": "string — must be the EXACT name of one of the rooms listed below",
     "props": [{
-      "noun": "string — one of the nouns declared in \\"props\\" above",
-      "count": "number — how many copies of it stand in this room. This is how a room gets full: a diner has 6 booths, not 1.",
+      "prop": "string — one of the props declared in \\"props\\" above",
+      "count": "number — how many copies of it stand in this room. This is how a room gets full: repeat an object as many times as the room really holds it, rather than listing one of each.",
       "zone": "one of: ${PROP_ZONES.join('|')} — where they sit. 'wall' hugs a wall (beds, shelves, counters, lockers); 'corner' tucks into a corner; 'centre' stands in the middle (a dining table, an altar, a machine); 'floor' means anywhere sensible."
     }]
   }]
 }
 ${toneLine}
-Fill each room to roughly its stated target count. That target comes from the room's real floor area, and a room well under it reads as abandoned rather than lived-in — a real diner has booths along every wall, stools at the counter, and clutter on the surfaces, not two booths in the middle of an empty floor. Use "count" to get there; repeating one type is normal and costs nothing.
+Fill each room to roughly its stated target count. That target comes from the room's real floor area, and a room well under it reads as abandoned rather than lived-in. Use "count" to get there; repeating one type is normal and costs nothing.
 Where a room lists categories, stay within them — they say what KINDS of object belong there, not which ones; the room's description and its established details say which. Anything those name as physically present must appear as a prop (a room described with cars in the lot gets cars; one with a buzzing neon sign gets that sign), then fill the rest of the target with what else really stands in a place like that. Where a room lists no categories, furnish it with whatever a real room of that name and description would hold. Stay inside the room's stated size — the props must physically fit in the floor area given.
-At most ${MAX_PROP_TYPES} distinct nouns across the entire location. Reuse the same noun across rooms wherever the object would really be the same.
+FLOOR-STANDING OBJECTS ONLY. Nothing mounted on a wall or hanging from a ceiling — no signs, posters, pictures, clocks, mirrors, wall brackets or hooks. Seen from directly overhead a wall-mounted object is edge-on or hidden entirely, so it reads as a sign lying flat on the floor.
+OBJECTS ONLY, NEVER BEINGS. Nothing alive, undead or able to act — no people, animals, monsters, zombies or statues-that-move. Those are creatures, placed and run separately; as props they would stand frozen as scenery. Corpses, bones and remains are fine — they are objects.
+At most ${MAX_PROP_TYPES} distinct props across the entire location. Reuse the same prop across rooms wherever the object would really be the same.
 ${nounBlock}
 ROOMS TO FURNISH:
 ${roomLines}

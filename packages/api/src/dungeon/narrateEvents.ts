@@ -4,7 +4,7 @@
 // room.description in particular is documented as static pre-authored text (see manifest.ts), so
 // this concatenates rather than narrates. The closed-world LLM pathway
 // (buildDungeonNarrationPrompt) only fires for turns these two functions can't fully cover.
-import type { Dungeon, DungeonEntity, DungeonRoom } from 'shared';
+import type { DungeonEntity, DungeonRoom } from 'shared';
 
 /** A hiddenDressing entry — same discovery gate as DungeonEntity, but text-only. */
 export type HiddenDressing = NonNullable<DungeonRoom['hiddenDressing']>[number];
@@ -16,30 +16,13 @@ function isEntity(found: DungeonEntity | HiddenDressing): found is DungeonEntity
   return 'type' in found;
 }
 
-// Factual block for the party's first steps into a room: the pre-authored description, its ambient
-// dressing, then whatever's already been discovered here (creatures spotted from the doorway, loot
-// in plain sight). Returns null when the room carries none of the three — nothing to say, so the
-// caller should stay silent or fall through to the LLM rather than post an empty message.
-export function templateRoomEntry(dungeon: Dungeon, room: DungeonRoom): string | null {
-  const lines: string[] = [];
-  if (room.description) lines.push(room.description);
-  lines.push(...(room.dressing ?? []));
-
-  const here = dungeon.entities.filter(e =>
-    e.discovered &&
-    e.x >= room.x && e.x < room.x + room.width &&
-    e.y >= room.y && e.y < room.y + room.height,
-  );
-  // Natural sentence, not a "Here: X, Y." label — this line is posted verbatim to players (see
-  // runtime.ts's room_entered handler), and that ground-truth-style listing syntax is meant to
-  // stay DM-eyes-only (describeDungeonGroundTruth/describeDungeonState use it internally); posting
-  // it straight to chat read as a debug readout bleeding into the narration.
-  if (here.length) {
-    const names = here.map(e => e.name);
-    const subject = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-    lines.push(`${subject} ${names.length === 1 ? 'is' : 'are'} here.`);
-  }
-
+// Factual block for the party's first steps into a room: the pre-authored description and its
+// ambient dressing. Deliberately no roll-call of what's in the room — a "crate, crate, shelving and
+// crate are here." list read as a debug dump players skipped past; the map shows the furniture, and
+// creatures announce themselves when they join a fight. Returns null when the room has neither, so
+// the caller stays silent rather than posting an empty message.
+export function templateRoomEntry(room: DungeonRoom): string | null {
+  const lines = [...(room.description ? [room.description] : []), ...(room.dressing ?? [])];
   return lines.length ? lines.join('\n') : null;
 }
 

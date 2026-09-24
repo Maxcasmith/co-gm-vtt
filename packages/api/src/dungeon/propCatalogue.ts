@@ -1,5 +1,6 @@
 import path from 'path';
 import type { CampaignGenre, PropCatalogueEntry, PropCategory, PropCategoryMap, PropSpec } from 'shared';
+import { WALL_MOUNTED_CATEGORIES, propSizeXY } from 'shared';
 import { PROPS_DIR, readPropCatalogue, writePropCatalogue } from '../storage.ts';
 import { logError } from '../logger.ts';
 
@@ -64,7 +65,9 @@ export function splitReusableProps(
  */
 export function buildPropNounBlock(catalogue: PropCategoryMap, categories: PropCategory[]): string {
   const wanted = categories.length ? categories : (Object.keys(catalogue) as PropCategory[]);
-  const lines = [...new Set(wanted)]
+  // Never offer wall-mounted art for reuse, even when a room asks for no categories and so sees the
+  // whole bucket — the catalogue still holds signage drawn before it was excluded.
+  const lines = [...new Set(wanted)].filter(c => !WALL_MOUNTED_CATEGORIES.includes(c))
     .map(category => {
       const nouns = Object.keys(catalogue[category] ?? {}).sort();
       return nouns.length ? `- ${category}: ${nouns.join(', ')}` : '';
@@ -72,7 +75,7 @@ export function buildPropNounBlock(catalogue: PropCategoryMap, categories: PropC
     .filter(Boolean);
   if (!lines.length) return '';
 
-  return `\nThese prop nouns ALREADY HAVE ART for this setting and tone, grouped by category — drawing one again costs real money, so reuse them wherever they genuinely fit:\n${lines.join('\n')}\nTo reuse one, set "noun" to that exact spelling (verbatim, same hyphenation) and "category" to its category above. That alone reuses the sprite.\nInvent a new noun only for an object the list genuinely doesn't cover. A "storage-crate" when "crate" is already listed is the same object — reuse it. A "helm-console" when only "desk" exists is a different object — invent it. Don't force a bad match to save a generation; a wrong prop is worse than a new one.\n`;
+  return `\nThese props ALREADY HAVE ART for this setting and tone, grouped by category — drawing one again costs real money, so reuse them wherever they genuinely fit:\n${lines.join('\n')}\nTo reuse one, set "prop" to that exact spelling (verbatim, same hyphenation) and "category" to its category above. That alone reuses the sprite.\nInvent a new prop only for an object the list genuinely doesn't cover. A "storage-crate" when "crate" is already listed is the same object — reuse it. A "helm-console" when only "desk" exists is a different object — invent it. Don't force a bad match to save a generation; a wrong prop is worse than a new one.\n`;
 }
 
 /**
@@ -93,8 +96,7 @@ export async function recordPropSprites(genre: CampaignGenre, fresh: PropSpec[],
       const entry: PropCatalogueEntry = {
         path: propDir(genre, prop.noun),
         description: prop.description,
-        widthFt: prop.widthFt,
-        depthFt: prop.depthFt,
+        sizeXY: prop.sizeXY,
       };
       bucket[prop.category] = { ...(bucket[prop.category] ?? {}), [prop.noun]: entry };
       changed = true;
@@ -102,14 +104,13 @@ export async function recordPropSprites(genre: CampaignGenre, fresh: PropSpec[],
 
     for (const prop of reused) {
       const entry = bucket[prop.category]?.[prop.noun];
-      if (!entry || (entry.description && entry.widthFt !== undefined)) continue;
+      if (!entry || (entry.description && propSizeXY(entry) !== undefined)) continue;
       bucket[prop.category] = {
         ...bucket[prop.category],
         [prop.noun]: {
           ...entry,
           description: entry.description ?? prop.description,
-          widthFt: entry.widthFt ?? prop.widthFt,
-          depthFt: entry.depthFt ?? prop.depthFt,
+          sizeXY: propSizeXY(entry) ?? prop.sizeXY,
         },
       };
       changed = true;

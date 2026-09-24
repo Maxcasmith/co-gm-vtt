@@ -1106,8 +1106,18 @@ export function registerCombatHandlers(ctx: JoinContext): void {
   const { socket, campaignId, charId } = ctx;
 
   socket.on('token:move', ({ tokenId, gx, gy }) => {
+    // The mover's client already drew the token at gx/gy — every refusal below sends it back where
+    // the server still has it, or that client shows it somewhere nobody else does.
+    const refuse = () => {
+      const at = positionsOf(campaignId, tokenId)[tokenId];
+      if (at) socket.emit('token:moved', { tokenId, ...at });
+    };
     void (async () => {
-      if (!(await canMove(campaignId, tokenId))) return;
+      if (!(await canMove(campaignId, tokenId))) return refuse();
+      // A fight still being set up (sides, initiative — no turn order yet) holds everyone in it
+      // where aggro caught them; the loading screen is already up (dungeon/runtime.ts's startDungeonCombat).
+      const settingUp = fightOf(campaignId, tokenId);
+      if (settingUp && !settingUp.turnOrder.length) return refuse();
 
       // Moves happen on the map the token is standing in — a player in a different dungeon, or out
       // in the open world, has no position here to move.
@@ -1126,7 +1136,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         const blocked = origin
           ? !findPath(cells, origin.gx, origin.gy, gx, gy, undefined, doorBlocked)
           : cells[gy]?.[gx] !== 1 || doorBlocked?.has(`${gx},${gy}`);
-        if (blocked) return;
+        if (blocked) return refuse();
 
         // A player can't drag their own token to a tile outside their own line of sight — a
         // GM-dragged creature/ally isn't gated (the GM already sees the whole map).
@@ -1134,7 +1144,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           const sightBlocked = closedDoorCells(dungeon);
           const dist = Math.max(Math.abs(gx - origin.gx), Math.abs(gy - origin.gy));
           const visible = dist <= PLAYER_SIGHT_RADIUS && hasLineOfSight(cells, origin.gx, origin.gy, gx, gy, sightBlocked);
-          if (!visible) return;
+          if (!visible) return refuse();
         }
       }
 

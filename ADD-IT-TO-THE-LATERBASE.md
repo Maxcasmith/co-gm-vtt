@@ -235,3 +235,50 @@ not extending the loading screen to cover it.
   (arena enemies were being placed *after* `encounter:ready`, `syncFight` was emitting an empty
   `encounter:ready` before generation even began, and readiness was being computed before the
   tileset manifest had been fetched). Portraits were the one asset class deliberately left out.
+- 2026-09-23 — correction: prop sprites are **not** fire-and-forget. `generatePropSprites` is
+  awaited inside `generateDungeon`'s `Promise.all` alongside tilesets, so prop art exists before
+  the map ships. This entry now only covers creature portraits.
+
+### Room layout (pass 3) fires one model call per room with no concurrency cap
+
+`furnishRooms` (`dungeon/roomLayout.ts`) lays out every non-stairwell room in parallel via a bare
+`Promise.all` — a 19-room dungeon sends ~17 simultaneous streamed calls to the dungeonGeneration
+provider (currently kimi-k3), on top of the tileset and prop-sprite image calls running alongside.
+
+**Why we accepted the tradeoff:** the whole point of the per-room split is wall-clock time. Measured
+in the prototype, one room takes 52–83s; serial, 17 rooms would be ~20 minutes, parallel it is
+roughly the slowest single room. Each room also falls back to the zone placer on any failure, so a
+rate-limited room degrades to the old layout rather than an empty one.
+
+**What would tell us it's time to act:** `dungeon/roomLayout:<room>` errors in `storage/logs`
+naming a 429 / rate limit, or a run where several rooms fall back together. The fix is a small
+concurrency limit (4–6 in flight) around the per-room map — not serialising it.
+
+**Progress log:**
+- 2026-09-23 — entry created when pass 3 was wired into `generateDungeon`.
+- 2026-09-23 — first real measurement (refurnishing the 17-room gas-station adventure): rooms
+  finished between ~30s and ~7.5min, 455.7s wall clock. The prototype's 52–83s per room did not
+  hold with 17 in flight — consistent with provider-side throttling. No 429s logged, so not yet the
+  trigger, but concurrency is already costing time.
+
+### Organic dungeon layout kept dormant instead of deleted
+
+`fetchManifest` (`dungeon/manifest.ts`) no longer tells the model organic layouts exist and always
+sets `structureType: 'building'` — every dungeon, outdoor ones included, is now a graph of rooms
+wired by `connectsTo`, with per-connection `doors` (`none | open | closed | locked`). The organic
+path (`generator.ts`'s `generateGrid`, the organic branch in `dungeon/index.ts`, `ManifestRoom.key`)
+is still live code: the fixed fallback manifest and combat arenas use it, and it lets the switch be
+reverted by one line.
+
+**Why we accepted the tradeoff:** the organic generator chained rooms in list order with thin
+corridors, so connections meant nothing ("Subway Entrance → Overturned Ambulance → Pharmacy" in
+During the Storm). Deleting it outright would also mean rebuilding the fallback manifest and arena
+map on the building layout, which nothing currently needs.
+
+**What would tell us it's time to act:** a decision that organic is gone for good (delete it, move
+the fallback and arena onto the building layout), or a location type the building layout can't
+express (a real cave system wanting irregular walls) — which would mean a new organic generator
+that follows `connectsTo`, not reviving the old one.
+
+**Progress log:**
+- 2026-09-23 — entry created when the manifest prompt went building-only.

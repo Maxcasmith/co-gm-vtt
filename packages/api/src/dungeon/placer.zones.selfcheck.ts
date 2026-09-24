@@ -3,7 +3,7 @@
 // Pure, no storage or network: placeRoomProps is exported precisely so the geometry that decides
 // whether a furnished room reads as a real place can be checked without an LLM or an image call.
 import type { DungeonRoom, PropSpec, RoomProp } from 'shared';
-import { cellsForFeet, placeRoomProps } from './placer.ts';
+import { placeRoomProps } from './placer.ts';
 import { propTargetFor } from './propDressing.ts';
 
 // An 8x8 room of solid floor at (1,1), ringed by wall — so "against a wall" is a real, checkable
@@ -15,12 +15,12 @@ const cells: number[][] = Array.from({ length: SIZE }, (_, y) =>
 const room: DungeonRoom = { id: 'r1', name: 'Diner', x: 1, y: 1, width: 8, height: 8 };
 
 const spec = (over: Partial<PropSpec> & Pick<PropSpec, 'noun'>): PropSpec =>
-  ({ category: 'surface', description: over.noun, widthFt: 5, depthFt: 5, ...over });
+  ({ category: 'surface', description: over.noun, sizeXY: [1, 1], ...over });
 
 const specs = new Map<string, PropSpec>([
   ['booth', spec({ noun: 'booth', category: 'seating' })],
-  ['long-table', spec({ noun: 'long-table', widthFt: 5, depthFt: 15 })],
-  ['stool', spec({ noun: 'stool', category: 'seating', widthFt: 2, depthFt: 2 })],
+  ['long-table', spec({ noun: 'long-table', sizeXY: [1, 3] })],
+  ['stool', spec({ noun: 'stool', category: 'seating', sizeXY: [1, 1] })],
 ]);
 
 const place = (requests: RoomProp[]) => placeRoomProps(room, requests, specs, new Set<string>(), cells);
@@ -32,8 +32,6 @@ const againstWall = (x: number, y: number) =>
 function main() {
   // Feet to cells at the standard 5ft square — a 2ft stool still occupies a cell, a 15ft table
   // occupies three. This is the conversion that stops everything being a square blob.
-  if (cellsForFeet(2) !== 1) throw new Error('a sub-5ft object must still occupy one cell');
-  if (cellsForFeet(5) !== 1 || cellsForFeet(15) !== 3) throw new Error('feet must convert to cells at 5ft each');
 
   // Non-square footprints survive the trip — the whole point of authoring real dimensions.
   const table = place([{ noun: 'long-table', count: 1, zone: 'centre' }])[0];

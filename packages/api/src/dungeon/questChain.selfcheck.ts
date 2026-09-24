@@ -6,7 +6,7 @@
 import type { Dungeon } from 'shared';
 import { deleteCampaign, writeQuests, readQuests } from '../storage.ts';
 import { registerDungeon, unregisterDungeon } from '../state.ts';
-import { checkQuestChainTriggers } from './questChain.ts';
+import { chainDungeonOf, checkQuestChainTriggers, onStageSuccess } from './questChain.ts';
 
 const SLUG = '__selfcheck-questchain__';
 
@@ -16,8 +16,10 @@ const dungeon: Dungeon = {
   width: 10,
   height: 10,
   cells: Array.from({ length: 10 }, () => new Array(10).fill(1)),
-  rooms: [],
+  rooms: [{ id: 'pit', name: 'Pit', x: 2, y: 2, width: 4, height: 4 }],
   entities: [],
+  // The boss waits for stage-3 — it must not exist until stage-2 resolves.
+  pendingSpawns: [{ stageId: 'stage-3', roomId: 'pit', statBlock: { id: 'boss', name: 'Pit Boss', cr: 3, hp: 40, ac: 14, speed: 30, stats: { str: 16, dex: 10, con: 14, int: 8, wis: 10, cha: 8 }, attacks: [], isBoss: true } }],
   questChain: [
     { id: 'stage-1', name: 'Find the Cellar', description: '- Get into the cellar', trigger: { kind: 'enter_room', roomName: 'Cellar' } },
     { id: 'stage-2', name: 'Find Food', description: '- Find food in the pit', trigger: { kind: 'discover_entity', entityName: 'Iron Rations' } },
@@ -55,6 +57,8 @@ async function main() {
   quests = await readQuests(SLUG);
   if (quests.find(q => q.id === 'stage-2')?.status !== 'resolved') throw new Error('stage-2 should resolve on discover_entity');
   if (quests.find(q => q.id === 'stage-3')?.status !== 'open') throw new Error('stage-3 should open once stage-2 resolves');
+  if (!dungeon.entities.some(e => e.name === 'Pit Boss')) throw new Error('stage-3 opening must spawn the creature held for it');
+  if (dungeon.pendingSpawns?.length) throw new Error('a spawned creature must leave pendingSpawns');
 
   // stage-3's trigger — resolves it, and since there's no stage-4, no new quest is added.
   await checkQuestChainTriggers(SLUG, { kind: 'defeat_boss' }, dungeon);
@@ -66,10 +70,18 @@ async function main() {
   await checkQuestChainTriggers(SLUG, { kind: 'exit_dungeon' }, dungeon);
   quests = await readQuests(SLUG);
   if (quests.length !== 3) throw new Error('an event with no active stage left must no-op');
+
+  // The DM path ([[QUEST_RESOLVE]] in effects.ts) goes through the same hook: resolving the last
+  // stage by hand must report the chain finished — the Congrats screen hangs off that.
+  const byHand = quests.map(q => q.id === 'stage-3' ? { ...q, status: 'open' as const } : q);
+  if (chainDungeonOf(SLUG, 'stage-3') !== dungeon) throw new Error('a chain stage id must find its dungeon');
+  if (!await onStageSuccess(SLUG, dungeon, byHand, 'stage-3')) throw new Error('resolving the last stage must report the chain finished');
+  if (byHand.find(q => q.id === 'stage-3')?.status !== 'resolved') throw new Error('the hook must resolve the stage');
+  if (await onStageSuccess(SLUG, dungeon, byHand, 'not-a-stage')) throw new Error('an unknown id must no-op');
 }
 
 main()
-  .then(() => console.log('questChain selfcheck: OK — stages resolve only on their own exact trigger, in order, never skip ahead, chain completes cleanly.'))
+  .then(() => console.log('questChain selfcheck: OK — stages resolve only on their own exact trigger, in order, never skip ahead, chain completes cleanly, held creatures spawn on their stage, the DM path reports completion.'))
   .catch(err => { console.error(err); process.exitCode = 1; })
   .finally(async () => {
     unregisterDungeon(SLUG, dungeon.id);

@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import type { DungeonEntity, DungeonRoom } from 'shared';
-import type { DungeonManifest, ManifestRoom } from './manifest.ts';
+import type { DoorState, DungeonManifest, ManifestRoom } from './manifest.ts';
 import {
   SIZE_RANGE,
   carveCorridor,
@@ -114,10 +114,10 @@ function placeAnywhere(size: { w: number; h: number }, placed: (Rect | undefined
   return best;
 }
 
-// If a and b sit either side of a single wall line, punch a 1-2 cell door through it — returning
-// the carved rect (for the caller to turn into a Door entity), or null if they don't actually
-// share a wall.
-function carveDoorway(cells: number[][], a: Rect, b: Rect): { x: number; y: number; width: number; height: number } | null {
+// If a and b sit either side of a single wall line, punch a door-sized gap (up to maxLen cells)
+// through it — returning the carved rect (for the caller to turn into a Door entity), or null if
+// they don't actually share a wall.
+function carveDoorway(cells: number[][], a: Rect, b: Rect, maxLen = 2): { x: number; y: number; width: number; height: number } | null {
   const span = (aStart: number, aLen: number, bStart: number, bLen: number) => {
     const from = Math.max(aStart, bStart);
     const to = Math.min(aStart + aLen, bStart + bLen);
@@ -128,7 +128,7 @@ function carveDoorway(cells: number[][], a: Rect, b: Rect): { x: number; y: numb
   if (vertical !== null) {
     const s = span(a.y, a.h, b.y, b.h);
     if (!s) return null;
-    const doorLen = Math.min(2, s.len);
+    const doorLen = Math.min(maxLen, s.len);
     const y0 = s.from + Math.floor((s.len - doorLen) / 2);
     for (let y = y0; y < y0 + doorLen; y++) cells[y]![vertical] = 1;
     return { x: vertical, y: y0, width: 1, height: doorLen };
@@ -138,7 +138,7 @@ function carveDoorway(cells: number[][], a: Rect, b: Rect): { x: number; y: numb
   if (horizontal !== null) {
     const s = span(a.x, a.w, b.x, b.w);
     if (!s) return null;
-    const doorLen = Math.min(2, s.len);
+    const doorLen = Math.min(maxLen, s.len);
     const x0 = s.from + Math.floor((s.len - doorLen) / 2);
     for (let x = x0; x < x0 + doorLen; x++) cells[horizontal]![x] = 1;
     return { x: x0, y: horizontal, width: doorLen, height: 1 };
@@ -147,6 +147,9 @@ function carveDoorway(cells: number[][], a: Rect, b: Rect): { x: number; y: numb
   return null;
 }
 
+/** Width of a 'none' connection — an open way through, not a door. */
+const OPEN_WAY_CELLS = 4;
+
 const center = (r: Rect) => ({ x: r.x + Math.floor(r.w / 2), y: r.y + Math.floor(r.h / 2) });
 
 // A room-pair's door state/key, if either side of the edge declared one via ManifestRoom.doors
@@ -154,9 +157,9 @@ const center = (r: Rect) => ({ x: r.x + Math.floor(r.w / 2), y: r.y + Math.floor
 // this just carries the already-validated name through, unresolved to a real id until placement).
 // Only one side typically declares an edge, but if both do and disagree, the more restrictive
 // state wins — a lock should never be silently loosened by the other room's laxer entry.
-const RESTRICTIVENESS: Record<'open' | 'closed' | 'locked', number> = { open: 0, closed: 1, locked: 2 };
+const RESTRICTIVENESS: Record<DoorState, number> = { none: -1, open: 0, closed: 1, locked: 2 };
 
-function lockFor(roomA: ManifestRoom, roomB: ManifestRoom): { doorState: 'open' | 'closed' | 'locked'; keyName?: string; lockpickDC?: number } | null {
+function lockFor(roomA: ManifestRoom, roomB: ManifestRoom): { doorState: DoorState; keyName?: string; lockpickDC?: number } | null {
   const fromA = roomA.doors?.find(d => d.toRoom === roomB.name);
   const fromB = roomB.doors?.find(d => d.toRoom === roomA.name);
   const candidates = [fromA, fromB].filter((d): d is NonNullable<typeof d> => !!d);
@@ -294,10 +297,12 @@ function layoutOneFloor(manifestRooms: ManifestRoom[], opts?: { width?: number; 
       carvedPairs.add(pairKey);
       const b = rects[indexOf.get(neighborName)!];
       if (!b) continue;
-      const door = carveDoorway(cells, a, b);
-      if (!door) continue;
       const lock = lockFor(manifestRooms[indexOf.get(name)!]!, manifestRooms[indexOf.get(neighborName)!]!);
-      doors.push(lock ? { ...door, ...lock } : door);
+      // 'none' is an open way through with no Door entity — carved wider, since nothing has to
+      // swing in it and a street meeting a parking lot through a door-width gap reads as a wall.
+      const door = carveDoorway(cells, a, b, lock?.doorState === 'none' ? OPEN_WAY_CELLS : 2);
+      if (!door || lock?.doorState === 'none') continue;
+      doors.push(lock ? { ...door, ...lock, doorState: lock.doorState } : door);
     }
   }
 

@@ -1,7 +1,6 @@
 import { randomUUID } from 'crypto';
-import type { DungeonRoom, DungeonEntity, EnemyStatBlock, PropSpec, PropZone, RoomProp, TrapEffect } from 'shared';
+import type { Dungeon, DungeonRoom, DungeonEntity, EnemyStatBlock, PendingSpawn, PropSpec, PropZone, RoomProp, TrapEffect } from 'shared';
 import type { DungeonManifest, ManifestTrap } from './manifest.ts';
-import { EMPTY_PROP_PLAN, type PropPlan } from './propDressing.ts';
 
 // Every AI-authored dungeon trap not otherwise given one gets this Thieves' Tools disarm DC — a
 // hard guarantee, not something the model can skip by omission (same pattern as manifest.ts's
@@ -62,12 +61,6 @@ function findFreeCell(room: DungeonRoom, targetX: number, targetY: number, occup
     }
   }
   return null;
-}
-
-/** Real-world feet to grid cells at the standard 5ft square, floored at 1 — a 2ft stool still
- * occupies a cell, it just doesn't occupy two. */
-export function cellsForFeet(ft: number): number {
-  return Math.max(1, Math.round(ft / 5));
 }
 
 /** Every cell of an anchor's footprint is floor and unoccupied. Unlike the pre-density placer —
@@ -156,14 +149,13 @@ export function placeRoomProps(
   // Largest first: a 2x3 counter placed after thirty 1x1 stools would find no contiguous rect left.
   const ordered = [...requests].sort((a, b) => {
     const sa = specs.get(a.noun), sb = specs.get(b.noun);
-    return (sb ? sb.widthFt * sb.depthFt : 0) - (sa ? sa.widthFt * sa.depthFt : 0);
+    return (sb ? sb.sizeXY[0] * sb.sizeXY[1] : 0) - (sa ? sa.sizeXY[0] * sa.sizeXY[1] : 0);
   });
 
   for (const request of ordered) {
     const spec = specs.get(request.noun);
     if (!spec) continue;
-    const w = cellsForFeet(spec.widthFt);
-    const h = cellsForFeet(spec.depthFt);
+    const [w, h] = spec.sizeXY;
     const candidates = zoneCandidates(room, cells, request.zone);
     let remaining = request.count;
     for (const { x, y } of candidates) {
@@ -177,13 +169,61 @@ export function placeRoomProps(
   return placed;
 }
 
-export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, cells: number[][], propPlan: PropPlan = EMPTY_PROP_PLAN): DungeonEntity[] {
+/**
+ * The creatures placeEntities skipped because they `appears` with a later quest stage — stored on
+ * the dungeon and placed in their room when that stage opens (questChain.ts's resolveStage). Same
+ * entrance/stairwell exclusion as placeEntities, so a held creature can't land somewhere a placed
+ * one never could.
+ */
+export function collectPendingSpawns(rooms: DungeonRoom[], manifest: DungeonManifest): PendingSpawn[] {
+  const startRoom = rooms.find(r => r.role === 'entrance') ?? rooms[0];
+  return rooms.flatMap(room => {
+    if (room.id === startRoom?.id || room.isStairwell) return [];
+    const creatures = manifest.rooms.find(mr => mr.name === room.name)?.creatures ?? [];
+    return creatures.flatMap(({ appears, ...creature }) => appears ? [{ stageId: appears, roomId: room.id, statBlock: { ...creature, id: randomUUID() } }] : []);
+  });
+}
+
+/** A held creature as the entity it becomes — also how generation hands held creatures to the
+ * portrait pipeline before they exist on the map (the statBlock is shared, so portraitSrc sticks). */
+export function pendingSpawnEntity(spawn: PendingSpawn, x = 0, y = 0): DungeonEntity {
+  return { id: spawn.statBlock.id, type: 'creature', x, y, name: spawn.statBlock.name, discovered: false, statBlock: spawn.statBlock };
+}
+
+/**
+ * Brings every creature held for `stageId` onto the map, each on the free floor cell nearest its
+ * room's centre — clear of every entity footprint and every token standing there. Mutates the
+ * dungeon (entities in, pendingSpawns out) and returns what it placed. A room with no free cell
+ * keeps its creature pending rather than dropping it.
+ */
+export function spawnPending(dungeon: Dungeon, stageId: string): DungeonEntity[] {
+  const occupied = new Set<string>();
+  for (const e of dungeon.entities) {
+    for (let dy = 0; dy < (e.height ?? 1); dy++) for (let dx = 0; dx < (e.width ?? 1); dx++) occupied.add(key(e.x + dx, e.y + dy));
+  }
+  for (const pos of Object.values(dungeon.positions ?? {})) occupied.add(key(pos.gx, pos.gy));
+
+  const spawned: DungeonEntity[] = [];
+  const kept: PendingSpawn[] = [];
+  for (const spawn of dungeon.pendingSpawns ?? []) {
+    const room = spawn.stageId === stageId ? dungeon.rooms.find(r => r.id === spawn.roomId) : undefined;
+    const cell = room && findFreeCell(room, room.x + Math.floor(room.width / 2), room.y + Math.floor(room.height / 2), occupied, dungeon.cells);
+    if (!cell) { kept.push(spawn); continue; }
+    occupied.add(key(cell.x, cell.y));
+    spawned.push(pendingSpawnEntity(spawn, cell.x, cell.y));
+  }
+  dungeon.entities.push(...spawned);
+  if (kept.length) dungeon.pendingSpawns = kept;
+  else delete dungeon.pendingSpawns;
+  return spawned;
+}
+
+export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, cells: number[][]): DungeonEntity[] {
   if (rooms.length === 0) return [];
 
   const entities: DungeonEntity[] = [];
   const manifestRooms = manifest.rooms;
   const occupied = new Set<string>();
-  const propSpecs = new Map(propPlan.props.map(p => [p.noun, p]));
 
   // Smallest third = loot caches. Everything else is empty unless the manifest itself put
   // something there — no invented filler creature/boss for a room the manifest left alone.
@@ -218,7 +258,8 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
 
     const isLoot = !skipContent && lootRooms.has(room.id);
 
-    for (const creatureHint of skipContent ? [] : hints?.creatures ?? []) {
+    // Creatures that arrive with a later quest stage aren't placed — collectPendingSpawns holds them.
+    for (const creatureHint of skipContent ? [] : (hints?.creatures ?? []).filter(c => !c.appears)) {
       const cell = findFreeCell(room, cx, cy, occupied, cells);
       if (cell) {
         occupied.add(key(cell.x, cell.y));
@@ -243,14 +284,6 @@ export function placeEntities(rooms: DungeonRoom[], manifest: DungeonManifest, c
         occupied.add(key(cell.x, cell.y));
         entities.push({ id: randomUUID(), type: 'trap', x: cell.x, y: cell.y, name: trapHint.name, discovered: false, hideDC: trapHint.hideDC, trap: trapEffectFor(trapHint) });
       }
-    }
-
-    // Decorative props — always visible (discovered: true), since furniture isn't something a
-    // Perception check reveals. Placed last in the room so creatures, loot and traps have already
-    // claimed their cells: at real density props would otherwise fill the room and leave the
-    // content that actually matters nowhere to go.
-    if (!isStairwellRoom) {
-      entities.push(...placeRoomProps(room, propPlan.byRoom.get(room.name) ?? [], propSpecs, occupied, cells));
     }
   }
 
