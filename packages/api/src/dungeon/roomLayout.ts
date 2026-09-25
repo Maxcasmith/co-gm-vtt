@@ -345,6 +345,13 @@ export function renderPlaced(mask: RoomMask, props: PlacedProp[], room: DungeonR
  * Streamed for the same reason passes 1 and 2 are — a non-streaming request that sits silent past
  * undici's 300s headers timeout is killed and retried, paying for the answer each time.
  */
+/** Enough of a failed layout reply to tell a wrong shape (other keys, one long string) from a
+ * miscounted grid. The model is the workflow's first one unless a providers/index:chain error for
+ * this call appears above it in the log. */
+function rawSample(raw: string): string {
+  return `raw reply (${raw.length} chars): ${raw.slice(0, 500)}${raw.length > 500 ? '…' : ''}`;
+}
+
 export async function furnishRoom(
   room: DungeonRoom,
   requests: RoomProp[],
@@ -354,7 +361,7 @@ export async function furnishRoom(
   adapter: StoryProviderAdapter,
   description: string,
   tone: string,
-): Promise<LayoutResult> {
+): Promise<LayoutResult & { raw: string }> {
   const nouns = [...new Set(requests.map(r => r.noun))];
   const legend = buildLegend(nouns.map(n => specs.get(n)).filter((s): s is PropSpec => !!s));
   const mask = renderRoomMask(room, cells, findThresholds(room, cells), blocked);
@@ -363,7 +370,13 @@ export async function furnishRoom(
   const target = requests.reduce((n, r) => n + r.count, 0);
   const raw = await adapter.stream(buildLayoutPrompt(room, mask, legend, description, tone, target), () => {});
   const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
-  return parseLayout(JSON.parse(cleaned) as RawLayout, room, mask, legend);
+  let parsed: RawLayout;
+  try {
+    parsed = JSON.parse(cleaned) as RawLayout;
+  } catch {
+    throw new Error(`reply is not JSON — ${rawSample(raw)}`);
+  }
+  return { ...parseLayout(parsed, room, mask, legend), raw };
 }
 
 /**
@@ -409,7 +422,7 @@ export async function furnishRooms(
         logDebug(`room layout "${room.name}": ${result.props.length} props`);
         return result.props.map(toEntity);
       }
-      logError('dungeon/roomLayout:empty', new Error(`"${room.name}" laid out nothing usable — falling back to the zone placer`));
+      logError('dungeon/roomLayout:empty', new Error(`"${room.name}" laid out nothing usable — falling back to the zone placer. ${rawSample(result.raw)}`));
     } catch (err) {
       logError(`dungeon/roomLayout:${room.name}`, err);
     }

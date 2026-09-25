@@ -115,3 +115,22 @@ Decided with Max; don't re-flag these as bugs:
   in your own location, and a dungeon stays loaded while any group is still inside it. Several
   dungeons (and an arena per open-world fight) can be loaded at once; positions live on each
   `Dungeon`, not in a campaign-wide table. See `docs/PARTY-GROUPS.md`.
+
+### Undiscovered quests are scoped to where the party is — intentional (2026-09-25)
+
+`session-processor/index.ts` `buildEntitySummaries` only shows the DM undiscovered quests whose
+`relatedLocation` is the current location or whose `relatedNpc` is in the scene. A quest with
+neither (e.g. `the-stolen-mirror`) stays hidden until its NPC shows up. Decided with Max after
+the DM kept cramming other-room hooks into unrelated actions ("downstairs, the hissed argument
+stops dead"). Don't re-flag "quest never gets surfaced" as a bug without checking this first.
+The STORY BEAT rule (`prompts.ts`) was softened in the same pass — seam in the current exchange
+only, never forced — and the DM is told the `[CURRENT]` location notes cover the whole place, so
+it narrates only the room the party is in.
+
+### Combat movement: corpses passable, AI opens doors — intentional (2026-09-25)
+
+Closes two cheese routes against enemy AI pathing (`combat/runtime/movement.ts` `walkParticipant`):
+dead participants don't occupy their cell (anyone may walk through or stop on a corpse; the
+client paints dead tokens first and faded, so the live one on top gets the click/nameplate), and a
+`closed` door no longer blocks an AI walker — it opens the door as it steps in. `locked` doors
+still wall off. Downed-but-alive players still block.

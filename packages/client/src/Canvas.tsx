@@ -647,6 +647,7 @@ export default function Canvas({ player, characterId, character, connected, show
         const extendedRange = targetingNow.kind === 'weapon' ? targetingNow.weapon.extendedRange : undefined;
         const maxRangeCells = extendedRange ? Math.floor(extendedRange / 5) : Math.floor(range / 5);
         for (const enemy of encounter ?? []) {
+          if (deadCreatureIds?.has(enemy.id)) continue;
           const epos = tokenPositions[enemy.id];
           if (!epos || Math.max(Math.abs(epos.gx - playerPos.gx), Math.abs(epos.gy - playerPos.gy)) > maxRangeCells) continue;
           const ex = epos.gx * mmCellSz + mmCellSz / 2;
@@ -697,7 +698,9 @@ export default function Canvas({ player, characterId, character, connected, show
       if (Math.hypot(mx - tx, my - ty) <= TOKEN_R) { hovered = name; break; }
     }
     if (!hovered) {
-      for (const enemy of encounter ?? []) {
+      // Live creatures first — one can stand on a corpse's cell, and it's the one that should nameplate.
+      const liveFirst = [...(encounter ?? [])].sort((a, b) => Number(!!deadCreatureIds?.has(a.id)) - Number(!!deadCreatureIds?.has(b.id)));
+      for (const enemy of liveFirst) {
         const p = tokenPositions[enemy.id];
         if (!p || !isCellVisible(p.gx, p.gy)) continue;
         const tx = p.gx * grabCellSz + grabCellSz / 2;

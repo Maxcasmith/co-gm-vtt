@@ -187,18 +187,24 @@ async function buildEntitySummaries(campaignSlug: string, audience: ChatAudience
 
   // Quests — pending shown as story beats to trigger, active shown as ongoing goals
   const quests = await readQuests(campaignSlug);
-  const pendingQuests = quests.filter(q => q.status === 'undiscovered').slice(0, 3);
+  // Only hooks tied to where the party is (or to an NPC standing there) — a quest based across
+  // town isn't the DM's to push mid-scene. No location yet (cold start) = nothing to scope by.
+  const here = scene ?? manifest;
+  const isLocal = (q: Quest) => !here?.currentLocation
+    || q.relatedLocation === here.currentLocation
+    || (!!q.relatedNpc && here.npcs.includes(q.relatedNpc));
+  const pendingQuests = quests.filter(q => q.status === 'undiscovered' && isLocal(q)).slice(0, 3);
   const activeQuests = quests.filter(q => q.status === 'open');
   if (pendingQuests.length) {
     const section = pendingQuests.map(q => {
       // A quest's relatedNpc is a concrete cross-reference to an entity file — spell it out when
       // that NPC is actually in the current scene instead of leaving the match to inference (the
       // gap that let "an old lamplighter" and NPC Obed Marsh sit unlinked in the same session).
-      const inScene = q.relatedNpc && scene?.npcs.includes(q.relatedNpc);
+      const inScene = q.relatedNpc && here?.npcs.includes(q.relatedNpc);
       const flag = inScene ? ` [${q.relatedNpc} is in the current scene — this is their hook]` : '';
       return `- ${q.id}: ${q.name} — ${q.description}${flag}`;
     }).join('\n');
-    lines.push(`### Undiscovered quests (steer the player toward these — do not wait for them to ask)\n${section}`);
+    lines.push(`### Undiscovered quests (hooks at the party's current location — introduce at a natural seam, never forced)\n${section}`);
   }
   if (activeQuests.length) {
     const section = activeQuests.map(q => {
@@ -208,8 +214,7 @@ async function buildEntitySummaries(campaignSlug: string, audience: ChatAudience
     lines.push(`### Open quests (player is tracking these — push toward resolution)\n${section}`);
   }
 
-  if (!manifest) return lines.join('\n\n') || '(no entity notes yet)';
-  const here = scene ?? manifest;
+  if (!manifest || !here) return lines.join('\n\n') || '(no entity notes yet)';
 
   const totalSecs = manifest.worldTimeSecs ?? 43200;
   const day = Math.floor(totalSecs / 86400) + 1;

@@ -62,9 +62,8 @@ export default function CharacterSheetOverlay({
   const [playingBackstory, setPlayingBackstory] = useState<CharacterStoryboard | null>(null);
   const [levelingUp, setLevelingUp] = useState(false);
   const hasSpells = (character.spells?.length ?? 0) > 0;
-  // The Info tab is the backstory/storyboard tab — meaningless outside a real campaign (one-shots
-  // and dungeon-crawls don't carry a character arc the same way) and pointless with no backstory
-  // to show, so it doesn't exist at all rather than existing empty.
+  // The Info tab is the backstory/storyboard tab — campaign-only (one-shots, modules and
+  // dungeon-crawls don't carry a character arc the same way).
   const [worldType, setWorldType] = useState<WorldMeta["type"] | null>(null);
   const [houseRules, setHouseRules] = useState<HouseRules>(DEFAULT_HOUSE_RULES);
   useEffect(() => {
@@ -76,8 +75,7 @@ export default function CharacterSheetOverlay({
       })
       .catch(() => setWorldType(null));
   }, [character.campaignId]);
-  const hasBackstory = !!character.backstory?.trim();
-  const showInfoTab = worldType === "campaign" && hasBackstory;
+  const showInfoTab = worldType === "campaign";
   const TABS = TAB_ORDER.filter((t) => (t.id !== "spells" || hasSpells) && (t.id !== "info" || showInfoTab) && (t.id !== "goals" || worldType !== "dungeon-crawl"));
   const [combatActive, setCombatActive] = useState(false);
   const [isMyTurn, setIsMyTurn] = useState(false);

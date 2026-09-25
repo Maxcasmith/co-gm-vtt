@@ -134,6 +134,13 @@ export function getFeatureProvider(config: AppConfig, feature: AiFeature): Story
   return buildChainAdapter(workflow.models, config.apiKeys);
 }
 
+/** `feature`'s own model when a workflow has it ticked, otherwise `fallback`. For features split out
+ * of a bigger one (furnishing out of dungeon generation) — saved configs never pick up a newly added
+ * feature, so an unticked one keeps running on the model it always did. */
+export function getFeatureProviderOr(config: AppConfig, feature: AiFeature, fallback: StoryProviderAdapter): StoryProviderAdapter {
+  return hasFeatureProvider(config, feature) ? getFeatureProvider(config, feature) : fallback;
+}
+
 export function getImageProvider(config: AppConfig) {
   return {
     validateKey: () => openaiValidateImageKey(config.apiKeys.openai),

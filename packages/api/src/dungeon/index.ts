@@ -3,7 +3,7 @@ import type { AppConfig, Dungeon, DungeonEntity, DungeonRoom, EnemyStatBlock, Ca
 import type { Socket } from 'socket.io';
 import { toDungeon, occupantsOf, type Audience } from '../state.ts';
 import { slugifyTheme, hasLineOfSight, closedDoorCells } from 'shared';
-import type { StoryProviderAdapter } from '../providers/index.ts';
+import { getFeatureProviderOr, type StoryProviderAdapter } from '../providers/index.ts';
 import type { ArenaTerrain } from '../session-processor/imagePrompts.ts';
 import { fetchManifest, type ManifestRoom } from './manifest.ts';
 import { generateGrid, type DoorRect } from './generator.ts';
@@ -13,7 +13,7 @@ import { ensureTilesetSupport, type TilesetResolution } from './tilesets.ts';
 import { assignPortraitSrcs, generateCreaturePortraits } from './creaturePortraits.ts';
 import { assignPropSpriteSrcs, generatePropSprites } from './props.ts';
 import { readPropBucket } from './propCatalogue.ts';
-import { logDebug } from '../logger.ts';
+import { logDebug, timed } from '../logger.ts';
 import { EMPTY_PROP_PLAN, generatePropDressing } from './propDressing.ts';
 import { furnishRooms } from './roomLayout.ts';
 
@@ -75,7 +75,7 @@ export async function generateDungeon(
   progress('Furnishing the rooms…');
   const propCatalogue = await readPropBucket(opts?.genre);
   const propPlan = config
-    ? await generatePropDressing(rooms, manifest.rooms, cells, manifest.theme, adapter, propCatalogue, opts?.genre, onToken)
+    ? await generatePropDressing(rooms, manifest.rooms, cells, manifest.theme, getFeatureProviderOr(config, 'propSelection', adapter), propCatalogue, opts?.genre, onToken)
     : EMPTY_PROP_PLAN;
   logDebug(`dungeon "${name}": prop dressing (${propPlan.props.length} types) ${since()}`);
 
@@ -121,7 +121,7 @@ export async function generateDungeon(
   const descriptions = new Map(manifest.rooms.map(r => [r.name, r.description ?? '']));
   const [tileset, props] = await Promise.all([
     config ? ensureTilesetSupport(manifest.theme, manifest.materials, config, opts?.genre) : Promise.resolve<TilesetResolution>({ tilesetSlug: slugifyTheme(manifest.theme) }),
-    config && propPlan.props.length ? furnishRooms(rooms, propPlan, cells, entities, adapter, descriptions, opts?.genre) : Promise.resolve([]),
+    config && propPlan.props.length ? furnishRooms(rooms, propPlan, cells, entities, getFeatureProviderOr(config, 'roomLayout', adapter), descriptions, opts?.genre) : Promise.resolve([]),
     config ? generatePropSprites(propPlan.props, config, opts?.genre) : Promise.resolve(),
   ]);
   entities.push(...props);
@@ -280,7 +280,7 @@ export async function furnishArena(arena: Dungeon, terrain: ArenaTerrain, partyS
   if (!terrain.description) logDebug(`arena: encounter call gave no scene description — furnishing from the floor alone`);
   const description = terrain.description ?? `A fight on ${terrain.material.description}.`;
   const manifestRoom: ManifestRoom = { name: room.name, size: 'large', description };
-  const plan = await generatePropDressing(arena.rooms, [manifestRoom], arena.cells, terrain.theme, adapter, await readPropBucket(genre), genre);
+  const plan = await timed('encounter: furnishing — prop picker', generatePropDressing(arena.rooms, [manifestRoom], arena.cells, terrain.theme, getFeatureProviderOr(config, 'propSelection', adapter), await readPropBucket(genre), genre));
   if (!plan.props.length) return;
 
   // A stand-in footprint over the party's spawn area, only so furnishRooms counts those cells as
@@ -292,8 +292,8 @@ export async function furnishArena(arena: Dungeon, terrain: ArenaTerrain, partyS
     y: room.y + Math.floor(room.height / 2) - Math.floor(side / 2),
   };
   const [props] = await Promise.all([
-    furnishRooms(arena.rooms, plan, arena.cells, [...arena.entities, partyArea], adapter, new Map([[room.name, description]]), genre),
-    generatePropSprites(plan.props, config, genre),
+    timed('encounter: furnishing — layout', furnishRooms(arena.rooms, plan, arena.cells, [...arena.entities, partyArea], getFeatureProviderOr(config, 'roomLayout', adapter), new Map([[room.name, description]]), genre)),
+    timed('encounter: furnishing — prop art', generatePropSprites(plan.props, config, genre)),
   ]);
   arena.entities.push(...props);
   assignPropSpriteSrcs(arena.entities, genre);

@@ -12,7 +12,7 @@ import { templateRoomEntry, type SearchFind } from './narrateEvents.ts';
 import { dungeonEvents } from './events.ts';
 import { Encounter, Participant, PLAYERS_TEAM_ID } from '../domain/encounter.ts';
 import { Creature } from '../domain/creature.ts';
-import { logError } from '../logger.ts';
+import { logDebug, logError, timed } from '../logger.ts';
 import { io, campaignRoom, positionsOf, dungeonOf, occupantsOf, fightDungeon, registerDungeon, toDungeon, PLAYER_SIGHT_RADIUS, ENEMY_AGGRO_RADIUS, COMBAT_CHAIN_RADIUS, campaignPlayers, connected, fightOf, registerFight, toFight, toDungeonOf, markFightGenerating } from '../state.ts';
 import { addToTurnOrder, rollPlayerInitiatives, rollEnemyInitiatives, resolveFightChains, syncFight } from '../combat/runtime/lifecycle.ts';
 import { checkTrapAt } from '../combat/runtime/traps.ts';
@@ -405,7 +405,8 @@ export async function generateAndBroadcastEnemies(campaignId: string, encounter:
     );
 
     const worldMeta = await getWorldMeta(campaignId);
-    const { enemies: statBlocks, terrain } = await generateEncounterEnemies(messages, characters, adapter, availableNemeses, combatants, worldMeta?.genre);
+    const started = Date.now();
+    const { enemies: statBlocks, terrain } = await timed('encounter: enemies + terrain call', generateEncounterEnemies(messages, characters, adapter, availableNemeses, combatants, worldMeta?.genre));
 
     // The fight was resolved while the model was still thinking. endCombat's own combat:state:false
     // normally brings the loading screen down, but emit the explicit release too rather than
@@ -442,15 +443,16 @@ export async function generateAndBroadcastEnemies(campaignId: string, encounter:
     // Everything the fight needs, all at once and all awaited: sides, portraits, floor art and
     // furniture. The loading screen comes down on encounter:ready below, so nothing may still be
     // generating when it fires — the party enters a finished arena, never one that fills in around
-    // them. Furnishing is the dungeon pipeline (furnishArena), run on the dungeon model.
+    // them. Furnishing is the dungeon pipeline (furnishArena): its Prop Selection / Room Layout models,
+    // falling back to the dungeon model.
     const furnishAdapter = hasFeatureProvider(config, 'dungeonGeneration') ? getFeatureProvider(config, 'dungeonGeneration') : adapter;
     await Promise.all([
-      assignSides(campaignId, encounter, uniqueStatBlocks, encounter.players.map(p => p.id)),
+      timed('encounter: side assignment', assignSides(campaignId, encounter, uniqueStatBlocks, encounter.players.map(p => p.id))),
       ...(arena.arena ? [
-        generateCreaturePortraits(arena.entities, config),
-        terrain ? applyArenaTerrain(arena, terrain, config, worldMeta?.genre) : Promise.resolve(),
+        timed('encounter: portraits', generateCreaturePortraits(arena.entities, config)),
+        terrain ? timed('encounter: floor tiles', applyArenaTerrain(arena, terrain, config, worldMeta?.genre)) : Promise.resolve(),
         // A furnishing failure costs the arena its props, never the fight.
-        terrain ? furnishArena(arena, terrain, encounter.players.length, config, furnishAdapter, worldMeta?.genre).catch(err => logError('dungeon/runtime:furnishArena', err)) : Promise.resolve(),
+        terrain ? timed('encounter: furnishing (total)', furnishArena(arena, terrain, encounter.players.length, config, furnishAdapter, worldMeta?.genre)).catch(err => logError('dungeon/runtime:furnishArena', err)) : Promise.resolve(),
       ] : []),
     ]);
 
@@ -467,6 +469,7 @@ export async function generateAndBroadcastEnemies(campaignId: string, encounter:
     // after the stat blocks came back, i.e. before placeArenaEnemies and before applyArenaTerrain
     // had even been called.
     toFight(encounter).emit('encounter:ready', uniqueStatBlocks);
+    logDebug(`encounter: ready — ${((Date.now() - started) / 1000).toFixed(1)}s from the enemies call to the loading screen coming down`);
     console.log('[encounter] ready:', statBlocks.map(e => `${e.name} (CR ${e.cr})`).join(', '));
 
     if (!encounter.ended) rollEnemyInitiatives(campaignId, encounter);

@@ -280,7 +280,7 @@ Return ONLY a single valid JSON object — no markdown fences, no explanation:
     "regions": [
       { "name": "string", "description": "string", "keyLocations": [{ "name": "string", "description": "string" }] }
     ],
-    "startingLocation": { "name": "string — a specific named place, not 'abandoned warehouse'", "description": "string — richly detailed, grounded in the world's specifics. This is where session 1 opens." }
+    "startingLocation": { "name": "string — a specific named place, not 'abandoned warehouse'", "description": "string — reference notes on the place, not a narrated scene. Two short parts, each on its own line: 'Arrival:' the specific room or spot the party first stands in and only what is directly perceivable from there; 'Elsewhere here:' other rooms, floors, and what is going on behind closed doors — kept separate so the DM reveals them only when the party goes there. Grounded in the world's specifics. Session 1 opens at the Arrival spot." }
   },
   "factions": [
     { "name": "string", "description": "string", "goals": "string", "methods": "string" }
@@ -342,7 +342,7 @@ Return ONLY a single valid JSON object — no markdown fences, no explanation:
       { "name": "string", "description": "string", "keyLocations": [{ "name": "string", "description": "string" }, { "name": "string", "description": "string" }, { "name": "string", "description": "string" }] },
       { "name": "string", "description": "string", "keyLocations": [{ "name": "string", "description": "string" }, { "name": "string", "description": "string" }, { "name": "string", "description": "string" }] }
     ],
-    "startingLocation": { "name": "string — a specific named place that fits the world", "description": "string — richly detailed and grounded in the world's specifics. Enough to open play immediately." }
+    "startingLocation": { "name": "string — a specific named place that fits the world", "description": "string — reference notes on the place, not a narrated scene. Two short parts, each on its own line: 'Arrival:' the specific room or spot the party first stands in and only what is directly perceivable from there; 'Elsewhere here:' other rooms, floors, and what is going on behind closed doors — kept separate so the DM reveals them only when the party goes there. Grounded in the world's specifics. Enough to open play immediately." }
   },
   "factions": [
     { "name": "string", "description": "string", "goals": "string — what they are actively doing right now, not just what they want long-term", "methods": "string" }

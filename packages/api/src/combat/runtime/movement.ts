@@ -1,7 +1,8 @@
 import type { Character, ActiveCondition, RollModifier } from 'shared';
 import { statMod, calcAC, effectiveWeaponProfs, findPath, isWeapon, isMonkWeapon, closedDoorCells, unarmedStrikeFor, monkMartialArtsActive, monkLevel, martialArtsDie } from 'shared';
-import { getCharacter, listCharacters, getHouseRules } from '../../storage.ts';
-import { Participant } from '../../domain/encounter.ts';
+import { getCharacter, listCharacters, getHouseRules, saveDungeon } from '../../storage.ts';
+import { broadcastDungeon } from '../../dungeon/index.ts';
+import { Participant, type Encounter } from '../../domain/encounter.ts';
 import { io, campaignRoom, fightOf, toFightOf, positionsOf, dungeonOf, toDungeonOf, getStateEngine } from '../../state.ts';
 import { rollD20, dis, keptDie, withModifiers, reconcile, sumModifiers, rollDice, fmtMod, resolveHit, maxDiceValue } from '../dice.ts';
 import { conditionModeSources, targetModeSources } from '../conditions/rollModeFor.ts';
@@ -15,8 +16,10 @@ import { conditionsHolder } from './statusEffects.ts';
 import { checkTrapAt } from './traps.ts';
 import { postChat } from '../../partyGroups.ts';
 
-function isOccupied(positions: Record<string, { gx: number; gy: number }>, gx: number, gy: number, excludeId: string): boolean {
-  return Object.entries(positions).some(([id, p]) => id !== excludeId && p.gx === gx && p.gy === gy);
+// Dead tokens stay on the map (faded) but don't hold their cell — anyone can walk through or stop
+// on a corpse, so a body in a doorway can't wall off a corridor.
+function isOccupied(fight: Encounter | undefined, positions: Record<string, { gx: number; gy: number }>, gx: number, gy: number, excludeId: string): boolean {
+  return Object.entries(positions).some(([id, p]) => id !== excludeId && p.gx === gx && p.gy === gy && !fight?.findParticipant(id)?.isDead());
 }
 
 /**
@@ -43,15 +46,21 @@ export async function walkParticipant(
 
   const dungeon = dungeonOf(cid, key);
   const cells = dungeon?.cells;
-  const doorBlocked = dungeon ? closedDoorCells(dungeon, { forMovement: true }) : undefined;
+  // Closed-but-unlocked doors don't block the route — the walker opens them as it reaches them
+  // (below), so shutting a door on your turn can't strand a pursuer. Locked doors still wall off.
+  const openableDoors = dungeon?.entities.filter(e => e.type === 'door' && e.doorState === 'closed') ?? [];
+  const inDoor = (d: typeof openableDoors[number], x: number, y: number) =>
+    x >= d.x && x < d.x + (d.width ?? 1) && y >= d.y && y < d.y + (d.height ?? 1);
+  const doorBlocked = dungeon ? closedDoorCells({ ...dungeon, entities: dungeon.entities.filter(e => e.doorState !== 'closed') }, { forMovement: true }) : undefined;
+  const fight = fightOf(cid, actor.id);
   const startPositions = positionsOf(cid, key);
   const occupied = new Set(
-    Object.entries(startPositions).filter(([k]) => k !== key).map(([, p]) => `${p.gx},${p.gy}`),
+    Object.entries(startPositions).filter(([k]) => k !== key && !fight?.findParticipant(k)?.isDead()).map(([, p]) => `${p.gx},${p.gy}`),
   );
   // If every detour is also blocked by other combatants, fall back to the wall-only route so
   // the actor still makes partial progress and stops at the first occupied cell (below), rather
   // than not moving at all — same graceful degradation as the pre-occupancy-aware behavior. A
-  // shut door blocks either route the same as a wall.
+  // locked door blocks either route the same as a wall.
   const path = cells
     ? (findPath(cells, gx, gy, destination.gx, destination.gy, occupied, doorBlocked) ??
       findPath(cells, gx, gy, destination.gx, destination.gy, undefined, doorBlocked))
@@ -67,7 +76,14 @@ export async function walkParticipant(
     let next: { gx: number; gy: number } | undefined;
     if (cells) {
       next = path?.[step];
-      if (!next || isOccupied(pos, next.gx, next.gy, key)) break;
+      if (!next || isOccupied(fight, pos, next.gx, next.gy, key)) break;
+      const door = openableDoors.find(d => d.doorState === 'closed' && inDoor(d, next!.gx, next!.gy));
+      if (door && dungeon) {
+        door.doorState = 'open';
+        console.log(`[ai] ${actor.name} opens a door`);
+        await saveDungeon(cid, dungeon);
+        broadcastDungeon(cid, dungeon);
+      }
     } else {
       const dx = Math.sign(destination.gx - gx);
       const dy = Math.sign(destination.gy - gy);
@@ -75,7 +91,7 @@ export async function walkParticipant(
         { gx: gx + dx, gy: gy + dy },
         { gx: gx + dx, gy },
         { gx,          gy: gy + dy },
-      ].filter(c => c.gx >= 0 && c.gy >= 0 && !isOccupied(pos, c.gx, c.gy, key));
+      ].filter(c => c.gx >= 0 && c.gy >= 0 && !isOccupied(fight, pos, c.gx, c.gy, key));
       next = candidates[0];
       if (!next) break;
     }

@@ -92,6 +92,14 @@ const AI_FEATURES: { id: AiFeature; label: string; description: string; group: s
     description: 'Picks a campaign\'s setting and tone from its tags at creation, so dungeons reuse matching floor art. One tiny call per campaign — a cheap, fast model is ideal. Falls back to the Dungeon Generation model if unassigned.',
   },
   {
+    id: 'propSelection', label: 'Prop Selection', group: 'World',
+    description: 'Picks what furnishes each dungeon room and combat arena — which props, how many, their size, and the description their art is drawn from. Runs before layout, so a fast model shortens every wait; descriptions become catalogue art that later maps reuse, so not the weakest one. Falls back to the Dungeon Generation model if unassigned.',
+  },
+  {
+    id: 'roomLayout', label: 'Room Layout', group: 'World',
+    description: 'Arranges the picked props inside each room as a grid drawing — grouping, facing, keeping doorways clear. Spatial work: needs a reasoning model, and a weak one sends more rooms to the plain zone placer. One call per room, all rooms at once. Falls back to the Dungeon Generation model if unassigned.',
+  },
+  {
     id: 'worldStateAdvance', label: 'World State Advance', group: 'World',
     description: 'Advances world state and narrative events when the party takes a long rest. Runs in the background, not time-critical.',
   },

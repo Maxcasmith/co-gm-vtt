@@ -20,7 +20,7 @@ import path from 'node:path';
 import type { CampaignGenre, Dungeon, PropSpec, RoomProp } from 'shared';
 import { propSizeXY } from 'shared';
 import { getConfig } from '../storage.ts';
-import { getFeatureProvider } from '../providers/index.ts';
+import { getFeatureProvider, getFeatureProviderOr } from '../providers/index.ts';
 import { readPropBucket } from './propCatalogue.ts';
 import { assignPropSpriteSrcs } from './props.ts';
 import { furnishRooms } from './roomLayout.ts';
@@ -60,7 +60,8 @@ async function main(): Promise<void> {
 
   const plan = { props: [...specs.values()].filter(s => [...byRoom.values()].flat().some(r => r.noun === s.noun)), byRoom };
   const descriptions = new Map(dungeon.rooms.map(r => [r.name, r.description ?? '']));
-  const adapter = getFeatureProvider(await getConfig(), 'dungeonGeneration');
+  const config = await getConfig();
+  const adapter = getFeatureProviderOr(config, 'roomLayout', getFeatureProvider(config, 'dungeonGeneration'));
 
   console.log(`${dungeon.name}: ${oldProps.length} old props across ${byRoom.size} rooms, ${plan.props.length} types, genre ${genre.setting}/${genre.tone}`);
   if (dropped.size) console.log(`dropping (no longer catalogued): ${[...dropped].join(', ')}`);

@@ -27,6 +27,17 @@ export function logDebug(message: string): void {
   appendFileSync(path.join(LOGS_DIR, `${date}.log`), `[DEBUG ${time}] ${message}\n`, 'utf-8');
 }
 
+/** Awaits `work` and logs how long it took, whether it resolved or threw. For attributing a slow
+ * multi-step wait (a fight's loading screen) to the step that caused it. */
+export async function timed<T>(label: string, work: Promise<T>): Promise<T> {
+  const started = Date.now();
+  try {
+    return await work;
+  } finally {
+    logDebug(`${label} ${((Date.now() - started) / 1000).toFixed(1)}s`);
+  }
+}
+
 // Tag audit trail — persisted to storage/logs only when DEBUG_MODE=true, since every DM turn with
 // tags writes several lines.
 export function logTagDebug(message: string): void {

@@ -250,10 +250,8 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
         // Entity markers
         const entityR = DUNGEON_ENTITY_R * dungeonZoomRef.current;
         for (const entity of dungeon.entities) {
-          // Combat token (drawn below) replaces the marker only for a creature actually in the
-          // active encounter — a creature that hasn't joined the fight yet (not yet aggro'd, e.g.
-          // a second monster in the same room) still needs its own marker or it renders as nothing.
-          if (entity.type === 'creature' && encounter?.some(e => e.id === entity.id)) continue;
+          // Creatures paint in their own pass below, after props, so a creature never sits under furniture.
+          if (entity.type === 'creature') continue;
           const ex = entity.x * cellSz + cellSz / 2 + panX;
           const ey = entity.y * cellSz + cellSz / 2 + panY;
           // Party-placed traps (Snare, ...) get their own pip + "X's Snare" hover nameplate,
@@ -261,14 +259,6 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           // an AI-authored trap that stays a plain dot until Perception finds it.
           if (entity.type === 'trap' && entity.placedBy) {
             drawToken(ctx, ex, ey, '', `${entity.placedBy}'s ${entity.name}`, 'rgba(150,60,220,0.85)', entityR, hoveredTokenKey === entity.id, zoom, undefined, 'trap');
-            continue;
-          }
-          if (entity.type === 'creature') {
-            const portraitSrc = entity.statBlock?.portraitSrc;
-            const portraitImg = portraitSrc ? enemyImgCache.current?.[portraitSrc] : undefined;
-            // Full combat-token size (tokenR), not the smaller entityR other map markers use —
-            // a creature should read at its normal battle size while exploring, not as a pip.
-            drawToken(ctx, ex, ey, (entity.name[0] ?? '?').toUpperCase(), entity.name, 'rgba(192,57,43,0.8)', tokenR, hoveredTokenKey === entity.id, zoom, portraitImg);
             continue;
           }
           // Doors are drawn later, in their own passive-awareness pass (see below) — a flat
@@ -308,6 +298,18 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           ctx.strokeStyle = 'rgba(255,255,255,0.5)';
           ctx.lineWidth = 1;
           ctx.stroke();
+        }
+        for (const entity of dungeon.entities) {
+          if (entity.type !== 'creature') continue;
+          // Combat token (drawn below) replaces the marker only for a creature actually in the
+          // active encounter — a creature that hasn't joined the fight yet (not yet aggro'd, e.g.
+          // a second monster in the same room) still needs its own marker or it renders as nothing.
+          if (encounter?.some(e => e.id === entity.id)) continue;
+          const portraitSrc = entity.statBlock?.portraitSrc;
+          const portraitImg = portraitSrc ? enemyImgCache.current?.[portraitSrc] : undefined;
+          // Full combat-token size (tokenR), not the smaller entityR other map markers use —
+          // a creature should read at its normal battle size while exploring, not as a pip.
+          drawToken(ctx, entity.x * cellSz + cellSz / 2 + panX, entity.y * cellSz + cellSz / 2 + panY, (entity.name[0] ?? '?').toUpperCase(), entity.name, 'rgba(192,57,43,0.8)', tokenR, hoveredTokenKey === entity.id, zoom, portraitImg);
         }
       } else {
         // Plain battle map grid with pan/zoom
@@ -498,7 +500,9 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
         });
 
         // Enemy tokens — dimmed/desaturated per-cell like the ground beneath them; not exempt.
-        encounter?.forEach(enemy => {
+        // Dead ones paint first and faded, so a live creature standing on a corpse's cell sits on top.
+        const deadFirst = [...(encounter ?? [])].sort((a, b) => Number(!!deadCreatureIds?.has(b.id)) - Number(!!deadCreatureIds?.has(a.id)));
+        deadFirst.forEach(enemy => {
           const pos = tokenPositions[enemy.id];
           if (!pos) return;
           const isDragged = drag?.id === enemy.id;
@@ -506,7 +510,7 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           const y = isDragged ? drag!.y : pos.gy * cellSz + cellSz / 2 + panY;
 
           const isDead = deadCreatureIds?.has(enemy.id);
-          const dim: TokenDim = isDead ? { redHue: true, opacity: 0.45 } : tokenLightFilter(pos.gx, pos.gy, litCells, senses, lighting);
+          const dim: TokenDim = isDead ? { redHue: true, opacity: 0.3 } : tokenLightFilter(pos.gx, pos.gy, litCells, senses, lighting);
           // enemy.portraitSrc missing or not yet loaded (fire-and-forget generation still running,
           // or never ran) -> img is undefined -> drawToken's existing img-less branch (colored
           // circle + initial) covers it, same fallback it's always had.
@@ -518,7 +522,7 @@ export function drawScene(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext
           effectDraws.push(() => {
             // Red targeting ring for enemies in weapon/single-target-spell range, or inside an AoE
             // template — abilities (Bardic Inspiration) target allies only, so enemies never ring for them.
-            if (targeting && targeting.kind !== 'ability' && playerPos) {
+            if (targeting && targeting.kind !== 'ability' && playerPos && !isDead) {
               if (spellArea && aoeOrigin) {
                 if (inArea(spellArea, aoeOrigin.originGx, aoeOrigin.originGy, aoeOrigin.dirGx, aoeOrigin.dirGy, pos.gx + 0.5, pos.gy + 0.5, aoeOrigin.isSelf)) {
                   drawTargetRing(ctx, x, y, tokenR);

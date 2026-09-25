@@ -185,6 +185,14 @@
             2,
             4
           ]
+        },
+        "tavern-table": {
+          "path": "props/modern/horror/tavern-table",
+          "description": "a heavy rectangular tavern table seen from directly overhead, rough-planked dark oak with gouges, ring stains, and corners chewed by decades of elbows and blades",
+          "sizeXY": [
+            1,
+            2
+          ]
         }
       },
       "container": {
@@ -243,6 +251,14 @@
         "mop-bucket": {
           "path": "props/modern/horror/mop-bucket",
           "description": "A plastic mop bucket seen from above, its wringer basket crusted, water long dried into a grey scum ring tidemarked around the inside, mop handle fallen across the rim.",
+          "sizeXY": [
+            1,
+            1
+          ]
+        },
+        "ale-spill": {
+          "path": "props/modern/horror/ale-spill",
+          "description": "an irregular dark glossy puddle seen from overhead, sticky-looking amber-brown liquid spread between floorboards with smeared footprints and a sour, blood-like sheen",
           "sizeXY": [
             1,
             1
@@ -312,6 +328,14 @@
           "sizeXY": [
             1,
             1
+          ]
+        },
+        "tavern-bench": {
+          "path": "props/modern/horror/tavern-bench",
+          "description": "a stout wooden bench from above, narrow and elongated, with cracked seat boards, soot-darkened grain, and legs scuffed pale by constant dragging",
+          "sizeXY": [
+            1,
+            2
           ]
         }
       },
