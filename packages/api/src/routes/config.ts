@@ -15,7 +15,9 @@ export const configRouter = Router();
 configRouter.get('/', async (_req, res) => {
   const config = await getConfig();
   const platform = process.env.DEPLOY_TARGET === 'saas' ? 'web' : 'desktop';
-  res.json({ ...config, adminPassword: '', platform });
+  // Non-SRD content (Artificer, Aasimar, most backgrounds/feats) is pickable only in development.
+  const srdOnly = process.env.NODE_ENV !== 'development';
+  res.json({ ...config, adminPassword: '', platform, srdOnly });
 });
 
 // Only the admin Settings UI issues PUTs, so gate the write side on the current admin password —

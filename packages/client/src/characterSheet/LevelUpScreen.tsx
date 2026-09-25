@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { Character, CharacterClassLevel, HouseRules } from "shared";
 import { hasOriginFeat, hpBonusPerLevel, spellSlotsForCharacter } from "shared";
-import { CLASSES, CLASS_FEATURES, HIT_DICE, meetsMulticlassPrereq } from "../character-creation/srd.ts";
+import { useAppMeta } from "../AppMetaContext.tsx";
+import { CLASSES, playable, CLASS_FEATURES, HIT_DICE, meetsMulticlassPrereq } from "../character-creation/srd.ts";
 import { Button } from "../components/Button/Button.tsx";
 
 interface Props {
@@ -61,6 +62,7 @@ export function LevelUpScreen({
   onConfirm,
   onClose,
 }: Props) {
+  const playableClasses = playable(useAppMeta().srdOnly).classes;
   const [selectedClass, setSelectedClass] = useState(classes[0]?.class ?? character.class);
   const [dieResult, setDieResult] = useState(() =>
     hpDieResult(levelUpHpMode, HIT_DICE[selectedClass] ?? 8),
@@ -106,7 +108,8 @@ export function LevelUpScreen({
               value={selectedClass}
               onChange={e => handleClassChange(e.target.value)}
             >
-              {CLASSES.map(cls => {
+              {/* A non-SRD class stays listed only for a character who already has levels in it. */}
+              {CLASSES.filter(cls => playableClasses.includes(cls) || classes.some(c => c.class === cls)).map(cls => {
                 const already = classes.some(c => c.class === cls);
                 const eligible = already || meetsMulticlassPrereq(cls, character.stats);
                 return (

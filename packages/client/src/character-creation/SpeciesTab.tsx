@@ -1,10 +1,12 @@
 import { useCharacter } from './CharacterContext.tsx';
-import { SPECIES, SPECIES_SUBSPECIES, SPECIES_BLURBS, SPECIES_PLAIN_PERKS, ORIGIN_FEATS, ORIGIN_FEAT_DETAILS, speciesSpellGrant } from './srd.ts';
+import { playable, SPECIES_SUBSPECIES, SPECIES_BLURBS, SPECIES_PLAIN_PERKS, ORIGIN_FEAT_DETAILS, speciesSpellGrant } from './srd.ts';
+import { useAppMeta } from '../AppMetaContext.tsx';
 import TileGrid from './TileGrid.tsx';
 import TileDetailPanel from './TileDetailPanel.tsx';
 
 export default function SpeciesTab() {
   const c = useCharacter();
+  const { species, originFeats } = playable(useAppMeta().srdOnly);
   const subspecies = SPECIES_SUBSPECIES[c.species] ?? [];
 
   // Lineage cantrips are pre-learned the moment the lineage is picked, replacing whatever the
@@ -23,7 +25,7 @@ export default function SpeciesTab() {
     <div className="select-section">
       <span className="modal-label">Species</span>
       <TileGrid
-        items={SPECIES.map(s => ({ id: s, name: s }))}
+        items={species.map(s => ({ id: s, name: s }))}
         selectedId={c.species}
         onSelect={id => { setLineage(id, ''); c.set('speciesOriginFeat', ''); }}
       />
@@ -41,7 +43,7 @@ export default function SpeciesTab() {
           Versatile — Origin Feat
           <select className="modal-select" value={c.speciesOriginFeat} onChange={e => c.set('speciesOriginFeat', e.target.value)}>
             <option value="">Select origin feat…</option>
-            {ORIGIN_FEATS.map(f => <option key={f} value={f}>{f}</option>)}
+            {originFeats.map(f => <option key={f} value={f}>{f}</option>)}
           </select>
           {c.speciesOriginFeat && ORIGIN_FEAT_DETAILS[c.speciesOriginFeat] && (
             <p className="origin-feat-desc">{ORIGIN_FEAT_DETAILS[c.speciesOriginFeat]!.description}</p>

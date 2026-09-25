@@ -44,9 +44,8 @@ function CreatePageInner({ campaignId, campaignName, isCampaign, attributeMethod
   const hasFeatSpells = !!speciesSpellGrant(c.species, c.subspecies) ||
     [c.background ? BACKGROUND_FEAT[c.background] : undefined, c.species === 'Human' ? c.speciesOriginFeat : undefined]
       .some(name => !!name && name in FEAT_SPELL_GRANTS);
-  const hasSpellcasting = c.characterClass
-    ? hasFeatSpells || (CLASS_FEATURES[c.characterClass] ?? []).some(f => f.name === 'Spellcasting' || f.name === 'Pact Magic')
-    : false;
+  const hasSpellcasting = hasFeatSpells ||
+    (CLASS_FEATURES[c.characterClass] ?? []).some(f => f.name === 'Spellcasting' || f.name === 'Pact Magic');
   const backDialogRef = useRef<HTMLDialogElement>(null);
   const successDialogRef = useRef<HTMLDialogElement>(null);
   const [saving, setSaving] = useState(false);

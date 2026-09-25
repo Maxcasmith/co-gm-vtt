@@ -2,8 +2,9 @@ import { useRef, useState } from 'react';
 import type { AttributeGenerationMethods } from 'shared';
 import { Button } from '../components/Button/Button.tsx';
 import { useCharacter, type AttributeMethod } from './CharacterContext.tsx';
+import { useAppMeta } from '../AppMetaContext.tsx';
 import {
-  BACKGROUNDS, STAT_NAMES, CLASS_SAVING_THROWS, CLASS_ATTRIBUTE_ADVICE,
+  playable, STAT_NAMES, CLASS_SAVING_THROWS, CLASS_ATTRIBUTE_ADVICE,
   BACKGROUND_ASI, BACKGROUND_FEAT,
   ORIGIN_FEAT_DETAILS,
   POINT_BUY_BUDGET, POINT_BUY_MIN, POINT_BUY_MAX, POINT_BUY_COSTS,
@@ -41,6 +42,7 @@ interface Props { attributeMethods: AttributeGenerationMethods }
 
 export default function AttributesTab({ attributeMethods }: Props) {
   const c = useCharacter();
+  const { backgrounds } = playable(useAppMeta().srdOnly);
   const drag = useRef<DragSrc | null>(null);
   const [dragOverStat, setDragOverStat] = useState<number | null>(null);
   const [dragOverPool, setDragOverPool] = useState(false);
@@ -247,7 +249,7 @@ export default function AttributesTab({ attributeMethods }: Props) {
           Background
           <select className="modal-select" value={c.background} onChange={e => { c.set('background', e.target.value); c.set('backgroundAsi', {}); }}>
             <option value="">Select background…</option>
-            {BACKGROUNDS.map(b => <option key={b} value={b}>{b}</option>)}
+            {backgrounds.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
         </label>
 

@@ -88,6 +88,13 @@ export interface DamageContext {
   isMelee?: boolean | undefined;
   weaponTwoHanded?: boolean | undefined;
   hasOffhandWeapon?: boolean | undefined;
+  // Sneak Attack's gate (2024 PHB): Advantage, or an ally within 5ft substitute, plus a
+  // Finesse/Ranged weapon. Set only on a weapon-attack hit (resolvePlayerAttack) — nothing
+  // else reads these today.
+  attackRollMode?: "normal" | "advantage" | "disadvantage" | undefined;
+  isFinesseOrRangedWeapon?: boolean | undefined;
+  /** A living, non-Incapacitated ally of the attacker is within 5ft of the target. */
+  allyAdjacentToTargetNotIncapacitated?: boolean | undefined;
   /**
    * Bonus damage folded into `amount` by a hook this stage (OnHitBonusDamageHook — Hunter's
    * Mark, Divine Favor, ...), kept itemized here too so a caller building a combat-log breakdown

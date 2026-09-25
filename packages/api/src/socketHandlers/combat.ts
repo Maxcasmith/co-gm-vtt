@@ -66,6 +66,29 @@ function hasHostileWithinMeleeRange(cid: string, actorId: string, gx: number, gy
     .some(id => encounter.findParticipant(id)?.teamId !== actor.teamId);
 }
 
+/**
+ * True if a living, non-Incapacitated ally of actorId (same team, excluding actorId) is within
+ * 5ft of (gx,gy) — Sneak Attack's (2024 PHB) "ally within 5 feet of the target" substitute for
+ * Advantage. Unlike hasHostileWithinMeleeRange this does check Incapacitated, since Sneak
+ * Attack's own text calls it out by name.
+ */
+async function hasHelpfulAllyWithinMeleeRange(cid: string, actorId: string, gx: number, gy: number): Promise<boolean> {
+  const encounter = fightOf(cid, actorId);
+  const actor = encounter?.findParticipant(actorId);
+  if (!encounter || !actor) return false;
+  const allyIds = participantsNearPoint(cid, encounter, gx, gy, 5, new Set([actorId]))
+    .filter(id => encounter.findParticipant(id)?.teamId === actor.teamId);
+  for (const id of allyIds) {
+    const participant = encounter.findParticipant(id);
+    if (!participant) continue;
+    const conditions = participant.isPlayer
+      ? (await getCharacter(cid, id))?.conditions
+      : encounter.findCreature(id)?.conditions;
+    if (!conditions?.some(c => c.name === 'Incapacitated')) return true;
+  }
+  return false;
+}
+
 /** Every living participant within radiusFt of centerId's own token, centerId included — see participantsNearPoint for the underlying distance rule. */
 function nearbyParticipantIds(cid: string, centerId: string, radiusFt: number): string[] {
   const encounter = fightOf(cid, centerId);
@@ -760,10 +783,15 @@ export async function resolvePlayerAttack(
           }
         }
 
+        // Sneak Attack's gate: Advantage, or a non-Incapacitated ally within 5ft of the target.
+        const helpfulAllyNearTarget = !!targetPos && await hasHelpfulAllyWithinMeleeRange(cid, attackerId, targetPos.gx, targetPos.gy);
         const dmgCtx = await engine.trigger('beforeDamage', {
           sourceId: attackerId, targetId, targetName: creature.name,
           amount: damage, damageType: weapon.damageType, sourceName: weapon.name,
           isMelee, weaponTwoHanded: weapon.twoHanded, hasOffhandWeapon,
+          attackRollMode: breakdown.mode,
+          isFinesseOrRangedWeapon: weapon.isFinesse || !isMelee,
+          allyAdjacentToTargetNotIncapacitated: helpfulAllyNearTarget,
         });
         damage = Math.max(0, dmgCtx.amount);
         // Hunter's Mark, Divine Favor, ... — OnHitBonusDamageHook already folded these into

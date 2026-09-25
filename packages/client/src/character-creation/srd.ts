@@ -49,6 +49,23 @@ export const CLASSES = [
   "Wizard",
 ];
 
+// Content outside SRD 5.1 / 5.2.1 stays fully defined (existing characters keep working) but is
+// hidden from every picker a player can reach — creation tiles/selects and the level-up
+// multiclass list — unless the API runs with NODE_ENV=development (AppMeta's srdOnly).
+const NON_SRD_CLASSES = ["Artificer"];
+const NON_SRD_SPECIES = ["Aasimar"];
+const SRD_BACKGROUNDS = ["Acolyte", "Criminal", "Sage", "Soldier"];
+const SRD_ORIGIN_FEATS = ["Alert", "Magic Initiate (Cleric)", "Magic Initiate (Druid)", "Magic Initiate (Wizard)", "Savage Attacker", "Skilled"];
+export function playable(srdOnly: boolean) {
+  if (!srdOnly) return { classes: CLASSES, species: SPECIES, backgrounds: BACKGROUNDS, originFeats: ORIGIN_FEATS };
+  return {
+    classes: CLASSES.filter(c => !NON_SRD_CLASSES.includes(c)),
+    species: SPECIES.filter(s => !NON_SRD_SPECIES.includes(s)),
+    backgrounds: BACKGROUNDS.filter(b => SRD_BACKGROUNDS.includes(b)),
+    originFeats: ORIGIN_FEATS.filter(f => SRD_ORIGIN_FEATS.includes(f)),
+  };
+}
+
 export const STAT_NAMES = ["STR", "DEX", "CON", "INT", "WIS", "CHA"] as const;
 export type StatName = (typeof STAT_NAMES)[number];
 

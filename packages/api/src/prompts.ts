@@ -49,9 +49,11 @@ If the concept already fits well, return an empty issues array and 1-2 small fla
 // Mirrors the canon lists in packages/client/src/character-creation/srd.ts (CLASSES/SPECIES/SKILLS/
 // SPECIES_SUBSPECIES) — kept as a local copy since api does not import client code. Constrains the
 // model to options the wizard actually supports, so every suggestion is one the player can
-// immediately pick from the tiles.
-const CONCEPT_CLASSES = ['Artificer', 'Barbarian', 'Bard', 'Cleric', 'Druid', 'Fighter', 'Monk', 'Paladin', 'Ranger', 'Rogue', 'Sorcerer', 'Warlock', 'Wizard'];
-const CONCEPT_SPECIES = ['Aasimar', 'Dragonborn', 'Dwarf', 'Elf', 'Gnome', 'Goliath', 'Halfling', 'Human', 'Orc', 'Tiefling'];
+// immediately pick from the tiles. Outside development, only the SRD-playable subset
+// (PLAYABLE_CLASSES/PLAYABLE_SPECIES) — Artificer and Aasimar exist but are hidden from players.
+const SRD_ONLY = process.env.NODE_ENV !== 'development';
+const CONCEPT_CLASSES = [...(SRD_ONLY ? [] : ['Artificer']), 'Barbarian', 'Bard', 'Cleric', 'Druid', 'Fighter', 'Monk', 'Paladin', 'Ranger', 'Rogue', 'Sorcerer', 'Warlock', 'Wizard'];
+const CONCEPT_SPECIES = [...(SRD_ONLY ? [] : ['Aasimar']), 'Dragonborn', 'Dwarf', 'Elf', 'Gnome', 'Goliath', 'Halfling', 'Human', 'Orc', 'Tiefling'];
 const CONCEPT_SKILLS = ['Athletics', 'Acrobatics', 'Sleight of Hand', 'Stealth', 'Arcana', 'History', 'Investigation', 'Nature', 'Religion', 'Animal Handling', 'Insight', 'Medicine', 'Perception', 'Survival', 'Deception', 'Intimidation', 'Performance', 'Persuasion'];
 const CONCEPT_SUBSPECIES: Record<string, string[]> = {
   Dragonborn: ['Chromatic', 'Gem', 'Metallic'],
@@ -63,7 +65,7 @@ const CONCEPT_SUBSPECIES: Record<string, string[]> = {
 // (Arcane Trickster) and Fighter (Eldritch Knight) only gain spells at level 3 via subclass, and
 // Barbarian/Monk never get spells at all — so none of those satisfy a "casts spells from level 1"
 // requirement, however tempting the flavor fit.
-const CONCEPT_LEVEL_ONE_CASTERS = ['Artificer', 'Bard', 'Cleric', 'Druid', 'Paladin', 'Ranger', 'Sorcerer', 'Warlock', 'Wizard'];
+const CONCEPT_LEVEL_ONE_CASTERS = [...(SRD_ONLY ? [] : ['Artificer']), 'Bard', 'Cleric', 'Druid', 'Paladin', 'Ranger', 'Sorcerer', 'Warlock', 'Wizard'];
 
 export function buildCharacterConceptPrompt(concept: string): string {
   return `You are a tabletop RPG session-zero advisor helping a total beginner turn a character fantasy into an actual D&D 2024 (5.5e) character build.

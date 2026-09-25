@@ -4,6 +4,8 @@ export type Platform = 'web' | 'desktop';
 
 interface AppMeta {
   platform: Platform;
+  /** Hide non-SRD classes/species/backgrounds/feats — false only when the API runs with NODE_ENV=development. */
+  srdOnly: boolean;
 }
 
 const AppMetaContext = createContext<AppMeta | null>(null);
@@ -20,13 +22,18 @@ export function AppMetaProvider({ children }: { children: ReactNode }) {
   // Desktop is the no-env-file default (see authMiddleware's DEPLOY_TARGET split) — assume it
   // until /api/config says otherwise, rather than flashing web-only UI before the fetch lands.
   const [platform, setPlatform] = useState<Platform>('desktop');
+  // Filtered until the API says it's running in development.
+  const [srdOnly, setSrdOnly] = useState(true);
 
   useEffect(() => {
     fetch(`${API}/api/config`)
       .then(r => r.json())
-      .then((data: { platform?: Platform }) => { if (data.platform) setPlatform(data.platform); })
+      .then((data: { platform?: Platform; srdOnly?: boolean }) => {
+        if (data.platform) setPlatform(data.platform);
+        if (data.srdOnly === false) setSrdOnly(false);
+      })
       .catch(() => {});
   }, []);
 
-  return <AppMetaContext.Provider value={{ platform }}>{children}</AppMetaContext.Provider>;
+  return <AppMetaContext.Provider value={{ platform, srdOnly }}>{children}</AppMetaContext.Provider>;
 }

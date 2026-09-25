@@ -24,13 +24,9 @@ export const PASSIVE_HOOK_DEFS: PassiveHookDef[] = [
   {
     class: 'Rogue',
     source: 'Sneak Attack',
-    // 2024 PHB: 1d6 at level 1, +1d6 every odd level.
-    // ponytail: OnHitBonusDamageHook fires on ANY hit by the owner — real Sneak Attack also
-    // requires the hit to have had Advantage (or an ally adjacent to the target) and use a
-    // Finesse/Ranged weapon. Neither is available on DamageContext today (no roll-mode or
-    // weapon-property field reaches beforeDamage), so this pilot grants the bonus damage
-    // unconditionally once per turn rather than gating it — upgrade when DamageContext carries
-    // enough attack-roll context to check it.
+    // 2024 PHB: 1d6 at level 1, +1d6 every odd level. Requires Advantage (or a non-Incapacitated
+    // ally within 5ft of the target, absent Disadvantage) and a Finesse/Ranged weapon — see
+    // requiresSneakAttackConditions in OnHitBonusDamageHook.
     build: (ownerId, casterLevel) => new OnHitBonusDamageHook({
       id: `passive:${ownerId}:sneakAttack`,
       ownerId,
@@ -39,6 +35,7 @@ export const PASSIVE_HOOK_DEFS: PassiveHookDef[] = [
       casterLevel,
       slotLevel: 0,
       consumeOnUse: true,
+      requiresSneakAttackConditions: true,
       scaling: {
         mode: 'cantrip',
         base: '1d6',

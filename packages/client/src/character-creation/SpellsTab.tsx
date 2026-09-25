@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import type { Spell } from 'shared';
-import { Button } from '../components/Button/Button.tsx';
 import { useCharacter } from './CharacterContext.tsx';
+import TileGrid from './TileGrid.tsx';
 import { CLASS_FEATURES, CLASS_SPELL_ALLOWANCE, FEAT_SPELL_GRANTS, BACKGROUND_FEAT, speciesSpellGrant } from './srd.ts';
 
 const API = `http://${window.location.hostname}:3001`;
@@ -10,25 +10,6 @@ const LEVEL_LABELS: Record<number, string> = {
   0: 'Cantrip', 1: '1st', 2: '2nd', 3: '3rd', 4: '4th',
   5: '5th', 6: '6th', 7: '7th', 8: '8th', 9: '9th',
 };
-
-function SpellCard({ spell, onClick, selected }: { spell: Spell; onClick: () => void; selected: boolean }) {
-  return (
-    <Button
-      variant="ghost"
-      className={`spell-card ${selected ? 'spell-card--selected' : ''}`}
-      onClick={onClick}
-    >
-      <div className="spell-card-header">
-        <span className="spell-card-name">{spell.name}</span>
-        <span className="spell-card-level">{spell.levelLabel}</span>
-      </div>
-      <div className="spell-card-meta">
-        <span className="spell-card-school">{spell.school}{spell.isRitual ? ' · Ritual' : ''}</span>
-        <span className="spell-card-cast">{spell.castingTime}</span>
-      </div>
-    </Button>
-  );
-}
 
 export default function SpellsTab() {
   const c = useCharacter();
@@ -83,7 +64,7 @@ export default function SpellsTab() {
   // lineage's fixed cantrips can sit on any class list, so fetch by level and keep whatever some
   // pool (class, feat, lineage) could learn.
   useEffect(() => {
-    if (!c.characterClass) return;
+    if (!c.characterClass && featSources.length === 0 && !lineage) return;
     setLoading(true);
     fetch(`${API}/api/spells?level=0&level=1`)
       .then(r => r.json())
@@ -175,10 +156,10 @@ export default function SpellsTab() {
   return (
     <div className="spells-tab">
 
-      {/* ── Section 1: Learned spells ── */}
+      {/* ── Spell tiles: selecting a tile learns it, deselecting forgets it ── */}
         <section className="spells-section">
           <div className="spells-section-header">
-            <h3 className="spells-section-title">Learned Spells</h3>
+            <h3 className="spells-section-title">Spells</h3>
             <span className="spells-section-counts">
               {maxCantrips > 0 && <span className={learnedCantrips >= maxCantrips ? 'spells-count spells-count--full' : 'spells-count'}>{learnedCantrips}/{maxCantrips} cantrips</span>}
               {maxSpells > 0   && <span className={learnedSpellCount >= maxSpells ? 'spells-count spells-count--full' : 'spells-count'}>{learnedSpellCount}/{maxSpells} spells</span>}
@@ -192,31 +173,6 @@ export default function SpellsTab() {
               })}
               {lineage && <span className={learnedLineageCantrips >= lineage.cantrips.length ? 'spells-count spells-count--full' : 'spells-count'}>{learnedLineageCantrips}/{lineage.cantrips.length} {lineage.label} cantrips</span>}
             </span>
-          </div>
-          {learnedSet.size === 0 ? (
-            <p className="spells-empty">No spells learned yet — browse below and click Learn to add them.</p>
-          ) : (
-            <div className="spells-learned-list">
-              {Object.entries(c.learnedSpells).map(([name, source]) => {
-                const spell = allSpells.find(s => s.name === name);
-                if (!spell) return null;
-                return (
-                  <div key={name} className="spells-learned-chip">
-                    <Button variant="ghost" className="spells-learned-name" onClick={() => setSelected(spell)}>{name}</Button>
-                    {source !== c.characterClass && <span className="spells-tag spells-tag--ritual">{source}</span>}
-                    <span className="spells-learned-level">{spell.levelLabel}</span>
-                    <Button variant="ghost" className="spells-learned-remove" onClick={() => toggleLearn(spell)} title="Forget">×</Button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
-
-        {/* ── Section 2: Spell browser ── */}
-        <section className="spells-section">
-          <div className="spells-section-header">
-            <h3 className="spells-section-title">Available Spells</h3>
           </div>
 
           <div className="spells-filters">
@@ -246,35 +202,33 @@ export default function SpellsTab() {
           {loading && <p className="spells-empty">Loading spells…</p>}
           {!loading && filtered.length === 0 && <p className="spells-empty">No spells match your filters.</p>}
           {!loading && filtered.length > 0 && (
-            <div className="spells-browser-list">
-              {filtered.map(spell => {
-                const learned = learnedSet.has(spell.name);
-                const atLimit = limitReached(spell);
-                const source = c.learnedSpells[spell.name] ?? featOnlySource(spell) ?? null;
-                return (
-                  <div key={spell.name} className={`spells-browser-row ${selected?.name === spell.name ? 'spells-browser-row--selected' : ''}`}>
-                    <Button variant="ghost" className="spells-browser-info" onClick={() => setSelected(selected?.name === spell.name ? null : spell)}>
-                      <span className="spells-browser-name">{spell.name}</span>
-                      <span className="spells-browser-tags">
+            <div className="spells-tile-scroll">
+              <TileGrid
+                items={filtered.map(spell => {
+                  const source = c.learnedSpells[spell.name] ?? featOnlySource(spell);
+                  return {
+                    id: spell.name,
+                    name: spell.name,
+                    // A full pool doesn't block the click — it still opens the details.
+                    dimmed: !learnedSet.has(spell.name) && limitReached(spell),
+                    meta: (
+                      <span className="spells-tile-tags">
                         <span className="spells-tag">{spell.levelLabel}</span>
                         <span className="spells-tag">{spell.school}</span>
                         {source && source !== c.characterClass && <span className="spells-tag spells-tag--ritual">{source}</span>}
                         {spell.isRitual && <span className="spells-tag spells-tag--ritual">Ritual</span>}
-                        <span className="spells-tag spells-tag--cast">{spell.castingTime}</span>
                       </span>
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      className={`spells-learn-btn ${learned ? 'spells-learn-btn--learned' : ''}`}
-                      onClick={() => toggleLearn(spell)}
-                      disabled={!learned && atLimit}
-                      title={learned ? 'Forget' : atLimit ? 'Limit reached' : 'Learn'}
-                    >
-                      {learned ? 'Forget' : 'Learn'}
-                    </Button>
-                  </div>
-                );
-              })}
+                    ),
+                  };
+                })}
+                selectedId={[...learnedSet]}
+                onSelect={name => {
+                  const spell = filtered.find(s => s.name === name);
+                  if (!spell) return;
+                  setSelected(spell);
+                  toggleLearn(spell);
+                }}
+              />
             </div>
           )}
         </section>
@@ -285,7 +239,7 @@ export default function SpellsTab() {
             <h3 className="spells-section-title">Spell Details</h3>
           </div>
           {!selected ? (
-            <p className="spells-empty">Click a spell above to see its details.</p>
+            <p className="spells-empty">Click a spell to learn it and see its details — click it again to forget it.</p>
           ) : (
             <div className="spells-detail">
               <div className="spells-detail-header">

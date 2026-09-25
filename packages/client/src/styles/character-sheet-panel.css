@@ -396,18 +396,6 @@ button.spells-learned-name {
   color: var(--muted);
 }
 
-button.spells-learned-remove {
-  background: none;
-  border: none;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 2px;
-}
-
-.spells-learned-remove:hover { color: #e57373; }
-
 /* Filters */
 .spells-filters {
   display: flex;
@@ -436,52 +424,16 @@ button.spells-learned-remove {
   cursor: pointer;
 }
 
-/* Spell browser rows */
-.spells-browser-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  max-height: 280px;
+/* Spell tiles (TileGrid) */
+.spells-tile-scroll {
+  max-height: 460px;
   overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  padding-right: 4px;
 }
 
-.spells-browser-row {
+.spells-tile-tags {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  background: var(--surface);
-  transition: background 0.1s;
-}
-
-.spells-browser-row:hover,
-.spells-browser-row--selected {
-  background: var(--surface-raised, #2a2a2e);
-}
-
-button.spells-browser-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  background: none;
-  border: none;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-  padding: 0;
-}
-
-.spells-browser-name {
-  font-size: 13px;
-  color: var(--text);
-}
-
-.spells-browser-tags {
-  display: flex;
+  justify-content: center;
   gap: 4px;
   flex-wrap: wrap;
 }
@@ -496,24 +448,6 @@ button.spells-browser-info {
 }
 
 .spells-tag--ritual { color: #9c7ae0; border-color: #9c7ae044; background: #9c7ae011; }
-.spells-tag--cast   { color: var(--text); }
-
-.spells-learn-btn {
-  font-size: 11px;
-  padding: 3px 10px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: none;
-  color: var(--text);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.1s, color 0.1s;
-}
-
-.spells-learn-btn:hover:not(:disabled) { background: var(--accent); color: #fff; border-color: var(--accent); }
-.spells-learn-btn--learned { color: #e57373; border-color: #e5737344; }
-.spells-learn-btn--learned:hover { background: #e5737322; }
-.spells-learn-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* Spell detail panel */
 .spells-detail-section { border-top: 1px solid var(--border); padding-top: 16px; }

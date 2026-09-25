@@ -23,6 +23,7 @@ export class OnHitBonusDamageHook extends Hook<'beforeDamage'> {
   private readonly slotLevel: number;
   private readonly consumeOnUse: boolean;
   private readonly requiresOneHandedMeleeNoOffhand: boolean;
+  private readonly requiresSneakAttackConditions: boolean;
 
   constructor(props: HookProps & {
     markedTargetId?: string | undefined;
@@ -33,6 +34,12 @@ export class OnHitBonusDamageHook extends Hook<'beforeDamage'> {
     consumeOnUse?: boolean | undefined;
     /** Dueling Fighting Style: only fires on a Melee weapon hit made one-handed, with no other weapon equipped. */
     requiresOneHandedMeleeNoOffhand?: boolean | undefined;
+    /**
+     * Sneak Attack (2024 PHB): fires only on a Finesse/Ranged weapon hit that either had
+     * Advantage, or had a non-Incapacitated ally within 5ft of the target while the attacker
+     * didn't have Disadvantage.
+     */
+    requiresSneakAttackConditions?: boolean | undefined;
   }) {
     super(props);
     this.markedTargetId = props.markedTargetId;
@@ -42,12 +49,19 @@ export class OnHitBonusDamageHook extends Hook<'beforeDamage'> {
     this.slotLevel = props.slotLevel;
     this.consumeOnUse = props.consumeOnUse ?? false;
     this.requiresOneHandedMeleeNoOffhand = props.requiresOneHandedMeleeNoOffhand ?? false;
+    this.requiresSneakAttackConditions = props.requiresSneakAttackConditions ?? false;
   }
 
   matches(ctx: DamageContext): boolean {
     if (ctx.sourceId !== this.ownerId) return false;
     if (this.markedTargetId !== undefined && ctx.targetId !== this.markedTargetId) return false;
     if (this.requiresOneHandedMeleeNoOffhand && !(ctx.isMelee && !ctx.weaponTwoHanded && !ctx.hasOffhandWeapon)) return false;
+    if (this.requiresSneakAttackConditions) {
+      if (!ctx.isFinesseOrRangedWeapon) return false;
+      const hadAdvantage = ctx.attackRollMode === 'advantage';
+      const allyHelped = !!ctx.allyAdjacentToTargetNotIncapacitated && ctx.attackRollMode !== 'disadvantage';
+      if (!hadAdvantage && !allyHelped) return false;
+    }
     return true;
   }
 
