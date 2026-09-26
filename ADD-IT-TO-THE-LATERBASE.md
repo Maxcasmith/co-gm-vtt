@@ -282,3 +282,22 @@ that follows `connectsTo`, not reviving the old one.
 
 **Progress log:**
 - 2026-09-23 — entry created when the manifest prompt went building-only.
+
+---
+
+### Level-up grants no per-level class/species features (Ranger's Deft Explorer is simply absent)
+
+**What we accepted:** `CLASS_FEATURES` (`character-creation/srd.ts`) is a level-1-only table, and
+`LevelUpScreen.tsx` only re-lists it — nothing grants a feature, or asks for a choice, at level 2+.
+On 2026-09-25 the Ranger's level-1 "Expertise (two skills)" was removed because it isn't a 2024
+level-1 feature; the real one, Deft Explorer (Expertise in one skill + two languages), arrives at
+Ranger level 2 and so currently never arrives at all. Same gap covers every later-level trait
+already described in text (Celestial Revelation L3, Large Form / Chromatic Warding / Gem Flight L5,
+lineage spells at L3/L5, Bard's Expertise at L2, ...).
+
+**Why deferred:** building per-level feature grants + choice UI into level-up is its own feature;
+removing the wrong level-1 grant was the correct fix on its own.
+
+**Trigger to revisit:** players regularly levelling past 1 and noticing missing features, or the
+next time any level-2+ feature needs to actually work mechanically. Ranger characters created before
+2026-09-25 still carry their two persisted `expertiseSkills` — leave them or clean up at that point.

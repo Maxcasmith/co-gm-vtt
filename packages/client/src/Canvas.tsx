@@ -485,7 +485,9 @@ export default function Canvas({ player, characterId, character, connected, show
             const ex = epos.gx * hdCellSz + hdCellSz / 2;
             const ey = epos.gy * hdCellSz + hdCellSz / 2;
             if (Math.hypot(mx - ex, my - ey) <= TOKEN_R) {
-              if (targetingNow.kind === 'weapon') {
+              if (targetingNow.kind === 'weapon' && targetingNow.viaFamiliar) {
+                dispatch('vtt:combat:familiar:attack', { attackerId: characterId, targetId: enemy.id });
+              } else if (targetingNow.kind === 'weapon') {
                 dispatch('vtt:combat:attack', { attackerName: player, attackerId: characterId, targetId: enemy.id, targetName: enemy.name, weapon: targetingNow.weapon, actionType: targetingNow.actionType === 'bonusAction' ? 'bonusAction' : 'action', ...(targetingNow.bonusSpell ? { bonusSpell: targetingNow.bonusSpell } : {}), ...(targetingNow.isOffhand ? { isOffhand: true } : {}), ...(targetingNow.useInspiration ? { useInspiration: true } : {}) });
               } else {
                 tryCastOnTarget(enemy.id);

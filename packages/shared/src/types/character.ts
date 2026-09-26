@@ -46,6 +46,10 @@ export interface Character {
   campaignId: string;
   name: string;
   species: string;
+  /** Lineage picked at creation (Dragonborn's Chromatic/Gem/Metallic, Elf's Drow/High/Wood, ...). */
+  subspecies?: string;
+  /** Dragonborn's exact dragon (Red, Silver, ...) within their lineage — see DRACONIC_ANCESTRIES. */
+  draconicAncestry?: string;
   background: string;
   class: string;
   /** Full multiclass breakdown. Undefined for a single-class character — see characterClasses, which falls back to `[{ class, level }]` so untouched consumers reading `class`/`level` (primary class / total level) keep working unchanged. */
@@ -93,8 +97,12 @@ export interface Character {
   fightingStyle?: string;
   /** Divine Order (Cleric) or Primal Order (Druid) pick at creation — e.g. 'Protector', 'Thaumaturge', 'Magician', 'Warden'. See effectiveWeaponProfs/effectiveArmorTraining. */
   classOrder?: string;
-  /** Eldritch Invocations picked at creation (Warlock's level 1 choice, choose 2) — selection only, no mechanics wired yet. */
+  /** Eldritch Invocations picked at creation (Warlock's level 1 choice, choose 1 in 2024). See ELDRITCH_INVOCATIONS (client srd.ts) for where each is wired. */
   invocations?: string[];
+  /** Familiars this character has summoned before (Find Familiar modal's "stored familiars") — upserted by name on every summon. `form` is a PACT_FAMILIAR_FORMS key, or unset for the default Familiar. */
+  familiars?: StoredFamiliar[];
+  /** Pact of the Blade's bond (2024 PHB): the inventory item it's on, whether it was conjured (vanishes when the bond moves), and the Necrotic/Psychic/Radiant swap if picked. */
+  pactWeapon?: { itemId: string; conjured: boolean; damageType?: string };
   equipment?: {
     head?: string;
     body?: string;
@@ -230,6 +238,36 @@ export const FEAT_SPELL_GRANTS: Record<string, { cantrips: number; spells: numbe
   'Magic Initiate (Wizard)': { cantrips: 2, spells: 1, forClass: 'Wizard' },
 };
 
+/**
+ * Eldritch Invocations that grant a spell cast without a slot (2024 PHB). Armor of Shadows'
+ * Mage Armor is self-only. The spell is recorded in spells/spellSources at creation under the
+ * invocation's name; the free cast keys off `invocations`, so it holds whatever the source says.
+ */
+export const INVOCATION_SPELLS: Record<string, { spell: string; selfOnly?: true }> = {
+  'Armor of Shadows':  { spell: 'Mage Armor', selfOnly: true },
+  'Pact of the Chain': { spell: 'Find Familiar' },
+};
+
+export interface StoredFamiliar { name: string; description: string; form?: string }
+
+/** Pact of the Blade may swap its bonded weapon's damage to one of these (2024 PHB). */
+export const PACT_WEAPON_DAMAGE_TYPES = ['necrotic', 'psychic', 'radiant'] as const;
+
+/** Is `weapon` this character's Pact of the Blade weapon — proficient, and Charisma may replace Str/Dex. */
+export function isPactWeapon(character: Pick<Character, 'invocations' | 'pactWeapon'>, weapon: { id: string }): boolean {
+  return !!character.invocations?.includes('Pact of the Blade') && character.pactWeapon?.itemId === weapon.id;
+}
+
+/** The damage type `weapon` deals for this character — its own, unless it's the pact weapon with a swapped type. */
+export function weaponDamageType(character: Pick<Character, 'invocations' | 'pactWeapon'>, weapon: { id: string; damageType: string }): string {
+  return (isPactWeapon(character, weapon) && character.pactWeapon?.damageType) || weapon.damageType;
+}
+
+/** The invocation grant that lets this character cast `spellName` without a slot, if any. */
+export function invocationSpell(character: Pick<Character, 'invocations'>, spellName: string): { spell: string; selfOnly?: true } | undefined {
+  return Object.entries(INVOCATION_SPELLS).find(([inv, g]) => g.spell === spellName && character.invocations?.includes(inv))?.[1];
+}
+
 // The Origin feat every Background grants at 1st level (2024 PHB). Canonical here rather than
 // client-only because API-side mechanics (Savage Attacker, Tough, Alert, ...) need it too.
 export const BACKGROUND_FEAT: Record<string, string> = {
@@ -296,7 +334,7 @@ export function hpBonusPerLevel(char: Pick<Character, 'background' | 'species' |
 export type SenseKind = "darkvision" | "blindsight" | "truesight" | "devilsSight" | "tremorsense";
 export interface Sense { kind: SenseKind; rangeFt: number }
 
-/** Species-granted senses (2024 PHB). Species not listed have none. Subspecies overrides (Drow's Superior Darkvision, 120ft) aren't tracked — Character has no subspecies field. Activated/limited-use senses (Dwarf's Stonecunning Tremorsense) stay character-sheet flavor text only, not modeled here — they're not passive/always-on like everything else in this table. */
+/** Species-granted senses (2024 PHB). Species not listed have none. Subspecies overrides (Drow's Superior Darkvision, 120ft) aren't tracked here yet — only species is read. Activated/limited-use senses (Dwarf's Stonecunning Tremorsense) stay character-sheet flavor text only, not modeled here — they're not passive/always-on like everything else in this table. */
 export const SPECIES_SENSES: Record<string, Sense[]> = {
   Aasimar: [{ kind: "darkvision", rangeFt: 60 }],
   Dragonborn: [{ kind: "darkvision", rangeFt: 60 }],
@@ -309,6 +347,60 @@ export const SPECIES_SENSES: Record<string, Sense[]> = {
 
 export function getSenses(species: string): Sense[] {
   return SPECIES_SENSES[species] ?? [];
+}
+
+/** Dragonborn lineage → dragon → the damage type its Breath Weapon and Damage Resistance use. */
+export const DRACONIC_ANCESTRIES: Record<string, Record<string, string>> = {
+  Chromatic: { Black: "Acid", Blue: "Lightning", Green: "Poison", Red: "Fire", White: "Cold" },
+  Gem: { Amethyst: "Force", Crystal: "Radiant", Emerald: "Psychic", Sapphire: "Thunder", Topaz: "Necrotic" },
+  Metallic: { Brass: "Fire", Bronze: "Lightning", Copper: "Acid", Gold: "Fire", Silver: "Cold" },
+};
+
+export function draconicDamageType(character: Pick<Character, "species" | "subspecies" | "draconicAncestry">): string | undefined {
+  if (character.species !== "Dragonborn" || !character.subspecies || !character.draconicAncestry) return undefined;
+  return DRACONIC_ANCESTRIES[character.subspecies]?.[character.draconicAncestry];
+}
+
+/** Species/lineage damage resistances (2024 PHB), keyed by species or lineage. Dragonborn's comes from draconicDamageType instead. */
+const SPECIES_RESISTANCES: Record<string, string[]> = {
+  Aasimar: ["Necrotic", "Radiant"],
+  Dwarf: ["Poison"],
+  Abyssal: ["Poison"],
+  Chthonic: ["Necrotic"],
+  Infernal: ["Fire"],
+};
+
+/** 2024 PHB species traits granting Advantage on saves to avoid or end a specific condition. */
+const SPECIES_CONDITION_SAVE_ADVANTAGE: Record<string, { trait: string; condition: string }> = {
+  Dwarf: { trait: "Dwarven Resilience", condition: "Poisoned" },
+  Elf: { trait: "Fey Ancestry", condition: "Charmed" },
+  Halfling: { trait: "Brave", condition: "Frightened" },
+};
+
+/**
+ * The species trait giving this save Advantage, if any — its label for the roll breakdown.
+ * `againstConditions` is what the save is avoiding or ending (empty when the caller doesn't know,
+ * e.g. a plain damage save); Gnomish Cunning ignores it and keys off the ability alone.
+ */
+export function speciesSaveAdvantage(character: Pick<Character, "species">, ability: AbilityKey, againstConditions: readonly string[]): string | undefined {
+  if (character.species === "Gnome" && (ability === "int" || ability === "wis" || ability === "cha")) return "Gnomish Cunning";
+  const entry = SPECIES_CONDITION_SAVE_ADVANTAGE[character.species];
+  return entry && againstConditions.includes(entry.condition) ? entry.trait : undefined;
+}
+
+/**
+ * Every damage type this character resists: whatever's persisted on the sheet plus what their
+ * species/lineage grants. Derived rather than persisted so existing characters pick it up too —
+ * read at combat start (registerStaticDamageModifiers) and on the character sheet.
+ */
+export function characterDamageResistances(character: Pick<Character, "species" | "subspecies" | "draconicAncestry" | "damageResistances">): string[] {
+  const draconic = draconicDamageType(character);
+  return [...new Set([
+    ...(character.damageResistances ?? []),
+    ...(SPECIES_RESISTANCES[character.species] ?? []),
+    ...(character.subspecies ? SPECIES_RESISTANCES[character.subspecies] ?? [] : []),
+    ...(draconic ? [draconic] : []),
+  ])];
 }
 
 export const CLASS_SPELLCASTING_ABILITY: Record<string, AbilityKey> = {
@@ -526,6 +618,8 @@ export interface ResourceDef {
   class?: string;
   /** Origin feat that grants this pool instead of a class (e.g. Lucky, Musician) — checked via hasOriginFeat. */
   featGate?: string;
+  /** Species that grants this pool instead of a class or feat (Breath Weapon, Healing Hands, ...). */
+  speciesGate?: string;
   max: (character: Character) => number;
   /** Amount regained on finishing that rest type; 'full' tops off to max. Omit a rest type if the feature doesn't regain on it (e.g. most features don't regain on a short rest). */
   regain: { short?: "full" | number; long?: "full" | number };
@@ -633,6 +727,15 @@ export const RESOURCE_DEFS: Record<string, ResourceDef> = {
   // Origin feat Musician: play an instrument once per Short or Long Rest to grant Heroic
   // Inspiration to nearby allies (see grantMusicianInspiration, runtime.ts).
   musicianPerformance: { key: "musicianPerformance", label: "Musician's Performance", featGate: "Musician", max: () => 1, regain: { short: "full", long: "full" } },
+  // 2024 PHB Dragonborn: uses equal to proficiency bonus, all regained on a Long Rest. None until
+  // an ancestry is picked — the breath has no damage type without one (breathWeaponSpell).
+  breathWeapon: { key: "breathWeapon", label: "Breath Weapon", speciesGate: "Dragonborn", max: character => draconicDamageType(character) ? character.proficiencyBonus ?? 2 : 0, regain: { long: "full" } },
+  // 2024 PHB Aasimar: once per Long Rest.
+  healingHands: { key: "healingHands", label: "Healing Hands", speciesGate: "Aasimar", max: () => 1, regain: { long: "full" } },
+  // 2024 PHB Orc: uses equal to proficiency bonus, all regained on a Short or Long Rest.
+  adrenalineRush: { key: "adrenalineRush", label: "Adrenaline Rush", speciesGate: "Orc", max: character => character.proficiencyBonus ?? 2, regain: { short: "full", long: "full" } },
+  // 2024 PHB Orc: once per Long Rest, spent automatically in applyDamageToPlayer (damage.ts).
+  relentlessEndurance: { key: "relentlessEndurance", label: "Relentless Endurance", speciesGate: "Orc", max: () => 1, regain: { long: "full" } },
 };
 
 /**
@@ -668,6 +771,7 @@ export function magicInitiateKeyForSpell(character: Character, spellName: string
 function ownsResource(character: Character, def: ResourceDef): boolean {
   if (def.class) return hasClassLevel(character, def.class);
   if (def.featGate) return hasOriginFeat(character, def.featGate);
+  if (def.speciesGate) return character.species === def.speciesGate;
   return false;
 }
 

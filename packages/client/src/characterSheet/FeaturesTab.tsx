@@ -1,6 +1,10 @@
+import { useState } from "react";
 import type { Character } from "shared";
 import { characterClasses, RESOURCE_DEFS, resourceCurrent, resourceMax } from "shared";
-import { CLASS_FEATURES, SPECIES_FEATURES, BACKGROUND_FEAT, BACKGROUND_SKILLS, ORIGIN_FEAT_DETAILS, FIGHTING_STYLES } from "../character-creation/srd.ts";
+import { CLASS_FEATURES, SPECIES_FEATURES, BACKGROUND_FEAT, BACKGROUND_SKILLS, ORIGIN_FEAT_DETAILS, FIGHTING_STYLES, ELDRITCH_INVOCATIONS } from "../character-creation/srd.ts";
+import { Button } from "../components/Button/Button.tsx";
+import { ActionCostDot } from "./helpers.tsx";
+import { PactWeaponModal, startFamiliarAttack } from "./PactActions.tsx";
 
 // The generic "Fighting Style" class feature just lists the options — once a style is picked,
 // show that style's own name/description instead of the placeholder text.
@@ -23,7 +27,17 @@ function FeatureUses({ character, name }: { character: Character; name: string }
   return <span className="sheet-feature-uses">{resourceCurrent(character, key)}/{max}</span>;
 }
 
-export function FeaturesTab({ character }: { character: Character }) {
+/**
+ * `canAction`/`canBonusAction`: whether this character could spend that resource right now. Pact
+ * Weapon is free outside combat; Familiar Attack only exists inside one (it replaces an attack).
+ */
+export function FeaturesTab({ character, combatActive, canAction, canBonusAction }: {
+  character: Character; combatActive: boolean; canAction: boolean; canBonusAction: boolean;
+}) {
+  const [pactModal, setPactModal] = useState(false);
+  const invocations = ELDRITCH_INVOCATIONS.filter((inv) => character.invocations?.includes(inv.name));
+  const pactBlocked = combatActive && !canBonusAction;
+  const familiarBlocked = !combatActive || !canAction;
   const classes = characterClasses(character);
   const bgFeatName = BACKGROUND_FEAT[character.background];
   const bgFeat = bgFeatName ? ORIGIN_FEAT_DETAILS[bgFeatName] : undefined;
@@ -47,6 +61,41 @@ export function FeaturesTab({ character }: { character: Character }) {
           })}
         </div>
       ))}
+
+      {invocations.length > 0 && (
+        <div className="sheet-feature-group">
+          <p className="sheet-feature-group-title">Eldritch Invocations</p>
+          {invocations.map((inv) => (
+            <div key={inv.name} className="sheet-feature">
+              <div className="sheet-feature-name">{inv.name}</div>
+              <div className="sheet-feature-desc">{inv.description}</div>
+              {inv.name === "Pact of the Blade" && (
+                <Button
+                  variant="ghost"
+                  className={`sheet-spell-cast-btn${pactBlocked ? " sheet-spell-cast-btn--disabled" : ""}`}
+                  disabled={pactBlocked}
+                  onClick={() => setPactModal(true)}
+                >
+                  {combatActive && <ActionCostDot cost="bonusAction" />}
+                  Pact Weapon
+                </Button>
+              )}
+              {inv.name === "Pact of the Chain" && (
+                <Button
+                  variant="ghost"
+                  className={`sheet-spell-cast-btn${familiarBlocked ? " sheet-spell-cast-btn--disabled" : ""}`}
+                  disabled={familiarBlocked}
+                  onClick={() => startFamiliarAttack(character)}
+                >
+                  <ActionCostDot cost="action" />
+                  Familiar Attack
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {pactModal && <PactWeaponModal character={character} onClose={() => setPactModal(false)} />}
 
       {((SPECIES_FEATURES[character.species] ?? []).length > 0 || originFeat) && (
         <div className="sheet-feature-group">

@@ -424,3 +424,25 @@ export function effectApplies(effect: Pick<EffectSpec, "appliesIf">, targetCreat
   const types = effect.appliesIf?.creatureType;
   return !types || types.includes(targetCreatureType);
 }
+
+type FamiliarForm = Omit<EnemyStatBlock, "id">;
+const familiar = (name: string, creatureType: CreatureType, cr: number, hp: number, ac: number, speed: number, [str, dex, con, int, wis, cha]: number[], reactionAttack: FamiliarForm["reactionAttack"], extra: Partial<FamiliarForm> = {}): FamiliarForm =>
+  ({ name, creatureType, cr, hp, ac, speed, stats: { str: str!, dex: dex!, con: con!, int: int!, wis: wis!, cha: cha! }, attacks: [], reactionAttack, ...extra });
+
+/**
+ * Pact of the Chain's special Find Familiar forms (2024 PHB), stat blocks per the 2024 Monster
+ * Manual. Attacks live in reactionAttack, never attacks[]: a familiar can't attack on its own
+ * turn, only when its Warlock forgoes an attack (combat:familiar:attack).
+ * ponytail: damage is the attack's first die term only (Imp's Sting also deals 2d6 Poison,
+ * Sphinx of Wonder's Rend 2d6 Radiant) — rollDice takes one "XdY+Z"; fly/swim speeds dropped too.
+ */
+export const PACT_FAMILIAR_FORMS: Record<string, FamiliarForm> = {
+  Imp: familiar("Imp", "Fiend", 1, 21, 13, 20, [6, 17, 13, 11, 12, 14], { name: "Sting", bonus: 5, damage: "1d6+3" }, { damageResistances: ["Cold"], damageImmunities: ["Fire", "Poison"] }),
+  Pseudodragon: familiar("Pseudodragon", "Dragon", 0.25, 10, 14, 15, [6, 15, 13, 10, 12, 10], { name: "Bite", bonus: 4, damage: "1d4+2" }),
+  Quasit: familiar("Quasit", "Fiend", 1, 25, 13, 40, [5, 17, 10, 7, 10, 10], { name: "Rend", bonus: 5, damage: "1d4+3" }, { damageResistances: ["Cold", "Fire", "Lightning"], damageImmunities: ["Poison"] }),
+  Skeleton: familiar("Skeleton", "Undead", 0.25, 13, 14, 30, [10, 16, 15, 6, 8, 5], { name: "Shortsword", bonus: 5, damage: "1d6+3" }, { damageVulnerabilities: ["Bludgeoning"], damageImmunities: ["Poison"] }),
+  "Slaad Tadpole": familiar("Slaad Tadpole", "Aberration", 0.125, 7, 12, 30, [7, 15, 10, 3, 5, 3], { name: "Bite", bonus: 4, damage: "1d6+2" }, { damageResistances: ["Acid", "Cold", "Fire", "Lightning", "Thunder"] }),
+  "Sphinx of Wonder": familiar("Sphinx of Wonder", "Celestial", 1, 24, 13, 20, [6, 17, 13, 15, 12, 11], { name: "Rend", bonus: 5, damage: "1d4+3" }, { damageResistances: ["Necrotic", "Psychic", "Radiant"] }),
+  Sprite: familiar("Sprite", "Fey", 0.25, 10, 15, 10, [3, 18, 10, 14, 13, 11], { name: "Needle Sword", bonus: 6, damage: "1d4+4" }),
+  "Venomous Snake": familiar("Venomous Snake", "Beast", 0.125, 5, 12, 30, [2, 15, 11, 1, 10, 3], { name: "Bite", bonus: 4, damage: "1d4+2" }),
+};

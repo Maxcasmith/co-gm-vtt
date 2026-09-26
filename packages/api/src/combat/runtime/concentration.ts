@@ -74,7 +74,7 @@ export async function checkConcentration(cid: string, targetId: string, damage: 
   if (!holder || !link) return;
 
   const dc = Math.max(CONCENTRATION_MIN_DC, Math.floor(damage / 2));
-  const { saved, roll, bonus, total, breakdown } = await rollSavingThrow(cid, targetId, 'con', dc);
+  const { saved, roll, bonus, total, breakdown } = await rollSavingThrow(cid, targetId, 'con', dc, ['Concentrating']);
   console.log(`[concentration] ${holder.label} save vs DC${dc}: d20=${roll}${fmtMod(bonus)}=${total} — ${saved ? 'MAINTAINED' : 'BROKEN'}`);
   emitCombatRoll(cid, targetId, { actorName: holder.label, label: `CON save to keep concentrating on ${link.spellName}`, dc, success: saved, breakdown });
   if (!saved) await breakConcentration(cid, targetId);

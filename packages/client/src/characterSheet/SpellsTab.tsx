@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Character, Spell } from "shared";
-import { isWeapon, actionCostFromCastingTime, parseRangeFeet, FEAT_SPELL_GRANTS, magicInitiateKeyForSpell, resourceCurrent } from "shared";
+import { FEAT_SPELL_GRANTS } from "shared";
 import { Button } from "../components/Button/Button.tsx";
-import { dispatch } from "../events.ts";
 import { API, ActionCostDot } from "./helpers.tsx";
 import { BACKGROUND_FEAT } from "../character-creation/srd.ts";
+import { castBlocked, castSpell, defaultSpellChoices, isBundledSmite, spellActionCost } from "./spellCasting.ts";
+import type { CastContext, SpellChoices } from "./spellCasting.ts";
+import { SpellOptions } from "./SpellOptions.tsx";
+import { FindFamiliarModal } from "./FindFamiliarModal.tsx";
 
 const LEVEL_HEADINGS: Record<number, string> = {
   0: "Cantrips",
@@ -42,23 +45,10 @@ export function SpellsTab({
   const [spells, setSpells] = useState<Spell[]>([]);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Spell | null>(null);
-  const [damageType, setDamageType] = useState<string | undefined>(undefined);
-  const [command, setCommand] = useState<string | undefined>(undefined);
+  const [choices, setChoices] = useState<SpellChoices>({});
   const [customCommand, setCustomCommand] = useState("");
-  const [skill, setSkill] = useState<string | undefined>(undefined);
-
-  function damageTypeOptionsFor(spell: Spell): string[] | undefined {
-    return spell.combat?.onHit?.find((e) => e.damageTypeOptions?.length)?.damageTypeOptions
-      ?? spell.combat?.hooks?.find((h) => h.damageTypeOptions?.length)?.damageTypeOptions;
-  }
-
-  function commandOptionsFor(spell: Spell): string[] | undefined {
-    return spell.combat?.commandOptions;
-  }
-
-  function skillOptionsFor(spell: Spell): string[] | undefined {
-    return spell.combat?.skillOptions;
-  }
+  // Find Familiar asks for a name/description (FindFamiliarModal) before it casts.
+  const [familiarSpell, setFamiliarSpell] = useState<Spell | null>(null);
 
   // Magic Initiate can grant spells from a different class entirely. A character can have up to
   // two independent sources: their Background's fixed feat, and (Human only) their own
@@ -76,109 +66,25 @@ export function SpellsTab({
     return character.spellSources?.[spell.name] ?? featSpellSource(spell) ?? character.class;
   }
 
-  const resourceAvailable: Record<
-    "action" | "bonusAction" | "reaction",
-    boolean
-  > = {
-    action: actionAvailable,
-    bonusAction: bonusActionAvailable,
-    reaction: reactionAvailable,
+  const castCtx: CastContext = {
+    character,
+    combatActive,
+    isMyTurn,
+    resources: { action: actionAvailable, bonusAction: bonusActionAvailable, reaction: reactionAvailable },
+    currentSpellSlots1,
   };
 
-  const mainHandItem = character.inventory?.find(
-    (i) => i.id === character.equipment?.mainHand,
-  );
-  const mainHandWeapon =
-    mainHandItem && isWeapon(mainHandItem) ? mainHandItem : undefined;
-
-  // One-shot self-buffs that only matter on the weapon hit they're cast for (Divine Smite,
-  // Booming Blade/Green-Flame Blade, ...) — bundle cast + attack into one interaction rather than
-  // a separate "next hit" queue. Duration buffs like Divine Favor/Zephyr Strike stay on the old
-  // immediate-self-cast path below — they carry hooks now, not an onHit damage effect, so the
-  // damage-effect check below already excludes them without needing a duration check too.
-  function isBundledSmite(spell: Spell): boolean {
-    return (
-      spell.combat?.resolution !== "attack" &&
-      !spell.combat?.save &&
-      parseRangeFeet(spell.range) === 0 &&
-      !!spell.combat?.onHit?.some((e) => e.type === "damage")
-    );
-  }
-
-  // Redirecting an already-sustained spell (Hunter's Mark, Witch Bolt) is free — no slot spent —
-  // so the empty-slots gate must not block it.
-  function isFreeRecast(spell: Spell): boolean {
-    return character.conditions?.some(
-      (c) => c.name === "Concentrating" && c.concentration?.spellName === spell.name,
-    ) ?? false;
-  }
-
-  // Only level-1 slots are tracked today, so a leveled spell is castable only while that
-  // pool has slots left — no higher tier exists yet to upcast into when it's empty. A Magic
-  // Initiate spell with its once-per-Long-Rest charge unspent needs no slot (trySpendSpellSlot).
-  function noSlotFor(spell: Spell): boolean {
-    const miKey = magicInitiateKeyForSpell(character, spell.name);
-    const miCharge = !!miKey && resourceCurrent(character, miKey) > 0;
-    return spell.level >= 1 && currentSpellSlots1 <= 0 && !miCharge && !isFreeRecast(spell);
-  }
-
   function handleCast(spell: Spell) {
-    // Casting times outside action/bonus/reaction (Snare/Alarm's "1 Min.", ...) cost a full
-    // action in this app's simplified combat model — same fallback CombatDock already uses.
-    const cost = actionCostFromCastingTime(spell.castingTime) ?? 'action';
-    // Exploration-castable spells (Snare) skip the action-economy gate entirely outside combat —
-    // same spell slot spend, no action/turn requirement. Cast mid-fight, they're gated normally.
-    // journalOnly (Ceremony) needs the same bypass since it never resolves through combat at all
-    // — the server hard-blocks it separately if combat is active.
-    const explorationCast = (spell.combat?.explorationCastable || spell.combat?.journalOnly) && !combatActive;
-    if (!explorationCast && (!combatActive || !isMyTurn || !resourceAvailable[cost])) return;
-    if (noSlotFor(spell)) return;
-
-    if (isBundledSmite(spell)) {
-      if (!mainHandWeapon || !actionAvailable) return;
-      dispatch("vtt:sheet:closed", {});
-      dispatch("vtt:targeting:start", {
-        kind: "weapon",
-        weapon: mainHandWeapon,
-        actionType: "action",
-        bonusSpell: spell,
-      });
+    if (spell.name === "Find Familiar") {
+      setFamiliarSpell(spell);
       return;
     }
-
-    dispatch("vtt:sheet:closed", {});
-
-    // Self-range, no area (pure buff/utility) — nothing to place, just resolve immediately.
-    if (parseRangeFeet(spell.range) === 0 && !spell.combat?.area) {
-      dispatch("vtt:combat:spell:cast", {
-        casterName: character.name,
-        casterId: character.id,
-        spell,
-        slotLevel: spell.level,
-        targetIds: [character.id],
-      });
-      return;
-    }
-    dispatch("vtt:targeting:start", {
-      kind: "spell",
-      spell,
-      casterId: character.id,
-      actionType: cost,
-      chosenDamageType: damageTypeOptionsFor(spell) ? damageType : undefined,
-      chosenCommand: commandOptionsFor(spell) ? (customCommand.trim() || command) : undefined,
-      chosenSkill: skillOptionsFor(spell) ? skill : undefined,
-      casterLevel: character.level,
-    });
+    castSpell(castCtx, spell, { ...choices, command: customCommand.trim() || choices.command });
   }
 
   useEffect(() => {
-    const options = selected ? damageTypeOptionsFor(selected) : undefined;
-    setDamageType(options ? (options.includes("Thunder") ? "Thunder" : options[0]) : undefined);
-    const commandOptions = selected ? commandOptionsFor(selected) : undefined;
-    setCommand(commandOptions?.[0]);
+    setChoices(selected ? defaultSpellChoices(selected) : {});
     setCustomCommand("");
-    const skillOptions = selected ? skillOptionsFor(selected) : undefined;
-    setSkill(skillOptions?.[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.name]);
 
@@ -225,7 +131,7 @@ export function SpellsTab({
           <span className="sheet-inv-name">{spell.name}</span>
           <div className="sheet-inv-card-header-right">
             <ActionCostDot
-              cost={actionCostFromCastingTime(spell.castingTime) ?? 'action'}
+              cost={spellActionCost(spell)}
             />
             {spell.isRitual && (
               <span className="sheet-spell-ritual">R</span>
@@ -288,62 +194,16 @@ export function SpellsTab({
               <em>At Higher Levels.</em> {selected.atHigherLevels}
             </p>
           )}
-          {damageTypeOptionsFor(selected) && (
-            <div className="sheet-spell-damage-types">
-              {damageTypeOptionsFor(selected)!.map((type) => (
-                <Button
-                  key={type}
-                  variant="ghost"
-                  className={`sheet-damage-type-btn sheet-damage-type-btn--${type.toLowerCase()}${damageType === type ? " sheet-damage-type-btn--active" : ""}`}
-                  onClick={() => setDamageType(type)}
-                >
-                  {type}
-                </Button>
-              ))}
-            </div>
-          )}
-          {commandOptionsFor(selected) && (
-            <div className="sheet-spell-damage-types">
-              {commandOptionsFor(selected)!.map((word) => (
-                <Button
-                  key={word}
-                  variant="ghost"
-                  className={`sheet-damage-type-btn${!customCommand && command === word ? " sheet-damage-type-btn--active" : ""}`}
-                  onClick={() => { setCommand(word); setCustomCommand(""); }}
-                >
-                  {word}
-                </Button>
-              ))}
-              <input
-                className="sheet-command-custom-input"
-                placeholder="Or your own word…"
-                value={customCommand}
-                maxLength={20}
-                onChange={(e) => setCustomCommand(e.target.value.replace(/\s+/g, ""))}
-              />
-            </div>
-          )}
-          {skillOptionsFor(selected) && (
-            <div className="sheet-spell-damage-types">
-              {skillOptionsFor(selected)!.map((s) => (
-                <Button
-                  key={s}
-                  variant="ghost"
-                  className={`sheet-damage-type-btn${skill === s ? " sheet-damage-type-btn--active" : ""}`}
-                  onClick={() => setSkill(s)}
-                >
-                  {s}
-                </Button>
-              ))}
-            </div>
-          )}
+          <SpellOptions
+            spell={selected}
+            choices={choices}
+            customCommand={customCommand}
+            onChange={setChoices}
+            onCustomCommandChange={setCustomCommand}
+          />
           {(() => {
-            const cost = actionCostFromCastingTime(selected.castingTime) ?? 'action';
-            const explorationCast = (selected.combat?.explorationCastable || selected.combat?.journalOnly) && !combatActive;
-            const disabled =
-              (!explorationCast && (!combatActive || !isMyTurn || !resourceAvailable[cost])) ||
-              noSlotFor(selected) ||
-              (isBundledSmite(selected) && (!mainHandWeapon || !actionAvailable));
+            const cost = spellActionCost(selected);
+            const disabled = castBlocked(castCtx, selected);
             return (
               <Button
                 variant="ghost"
@@ -363,6 +223,16 @@ export function SpellsTab({
               </Button>
             );
           })()}
+          {familiarSpell && (
+            <FindFamiliarModal
+              character={character}
+              onClose={() => setFamiliarSpell(null)}
+              onSummon={(familiar) => {
+                setFamiliarSpell(null);
+                castSpell(castCtx, familiarSpell, { familiar });
+              }}
+            />
+          )}
         </div>
       )}
 

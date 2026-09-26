@@ -1,5 +1,6 @@
 import type { RollModifier } from 'shared';
-import { updateCharacter, saveEncounter, clearDungeon, saveDungeon, listCharacters, getConfig } from '../../storage.ts';
+import { resourceMax, trySpendResource } from 'shared';
+import { getCharacter, updateCharacter, saveEncounter, clearDungeon, saveDungeon, listCharacters, getConfig } from '../../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../../providers/index.ts';
 import { generateCombatAftermath } from '../../session-processor/imagePrompts.ts';
 import { toClientDungeon, broadcastDungeon } from '../../dungeon/index.ts';
@@ -76,6 +77,19 @@ export async function applyDamageToPlayer(
   const wasDown = participant.isDown();
 
   participant.takeDamage(damage);
+  // Orc Relentless Endurance (2024 PHB): dropping to 0 HP leaves them at 1 instead, once per Long
+  // Rest. Spent automatically — RAW "you can", but there's no case where declining helps.
+  // ponytail: massive-damage instant death isn't modeled anywhere, so "not killed outright" always holds.
+  if (!wasDown && participant.isDown()) {
+    const char = await getCharacter(cid, charId);
+    const nextResourceUses = char && resourceMax(char, 'relentlessEndurance') > 0 ? trySpendResource(char, 'relentlessEndurance') : undefined;
+    if (nextResourceUses) {
+      participant.currentHp = 1;
+      await updateCharacter(cid, charId, c => ({ ...c, resourceUses: nextResourceUses }));
+      io.to(campaignRoom(cid)).emit('combat:player:featureResources', { characterId: charId, resourceUses: nextResourceUses });
+      void postChat(cid, { text: `${participant.name} refuses to fall — Relentless Endurance leaves them at 1 HP.`, senderName: 'System', timestamp: Date.now() }, [charId]);
+    }
+  }
   void updateCharacter(cid, charId, c => ({ ...c, currentHp: participant.currentHp, tempHp: participant.tempHp }));
   io.to(campaignRoom(cid)).emit('combat:player:damage', {
     characterId: charId,

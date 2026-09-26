@@ -10,6 +10,7 @@ interface CharacterDraft {
   password: string;
   species: string;
   subspecies: string;
+  draconicAncestry: string; // Dragonborn only — dragon within the lineage (Red, Silver, ...)
   speciesOriginFeat: string;
   background: string;
   backgroundAsi: Partial<Record<StatName, number>>;
@@ -71,7 +72,7 @@ export function useCharacter(): CharacterContextValue {
 
 const BLANK: Omit<CharacterDraft, 'id'> = {
   name: '', password: '',
-  species: '', subspecies: '', speciesOriginFeat: '',
+  species: '', subspecies: '', draconicAncestry: '', speciesOriginFeat: '',
   background: '', backgroundAsi: {},
   characterClass: '', skillProficiencies: {},
   stats: [0, 0, 0, 0, 0, 0], pool: [], rolled: false, rerollUsed: false,

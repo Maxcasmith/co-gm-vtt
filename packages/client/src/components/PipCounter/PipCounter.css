@@ -99,6 +99,9 @@
 .pip-counter-dot[data-pip-color="luckPoints"]                 { background: #059669; border-color: #6ee7b7; }
 .pip-counter[data-pip-color="luckPoints"]               { background: rgba(5, 150, 105, 0.16); border-color: rgba(5, 150, 105, 0.4); }
 
+.pip-counter-dot[data-pip-color="spellSlot1"]                 { background: #2563eb; border-color: #93c5fd; }
+.pip-counter[data-pip-color="spellSlot1"]               { background: rgba(37, 99, 235, 0.16); border-color: rgba(37, 99, 235, 0.4); }
+
 .pip-counter-dot[data-pip-color="magicInitiateClericSpell"]   { background: #0e7490; border-color: #67e8f9; }
 .pip-counter[data-pip-color="magicInitiateClericSpell"] { background: rgba(14, 116, 144, 0.16); border-color: rgba(14, 116, 144, 0.4); }
 

@@ -1,5 +1,5 @@
 import type { Character } from 'shared';
-import { hasOriginFeat, trackOf } from 'shared';
+import { hasOriginFeat, trackOf, characterDamageResistances } from 'shared';
 import { getCharacter, updateCharacter, readChatLog, saveEncounter, clearEncounter, saveDungeon, listCharacters, loadPartyAllies, readNemeses, getConfig, getHouseRules } from '../../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../../providers/index.ts';
 import { evaluateNemesisCandidates } from '../../session-processor/imagePrompts.ts';
@@ -392,7 +392,7 @@ function buildPlayerParticipant(cid: string, name: string, char: Character | und
   });
   if (char) {
     registerReactionOffers(cid, char);
-    registerStaticDamageModifiers(cid, char.id, char);
+    registerStaticDamageModifiers(cid, char.id, { ...char, damageResistances: characterDamageResistances(char) });
   }
   return participant;
 }

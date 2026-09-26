@@ -1,4 +1,4 @@
-import { CLASS_SPELLCASTING_ABILITY, resolveSpellDamageDice, statMod } from 'shared';
+import { CLASS_SPELLCASTING_ABILITY, resolveSpellDamageDice, statMod, isPactWeapon } from 'shared';
 import type { Character, Directive } from 'shared';
 import { weaponFor } from '../runtime/ai.ts';
 import { findSpell } from '../../routes/spells.ts';
@@ -21,7 +21,8 @@ function expectedWeaponDamage(character: Character): number {
   const strMod = statMod(character.stats.str);
   const dexMod = statMod(character.stats.dex);
   const useDex = !isMelee || (weapon.isFinesse && dexMod > strMod);
-  return (averageDamage(weapon.damage) + (useDex ? dexMod : strMod)) * FLAT_HIT_CHANCE;
+  const statBonus = Math.max(useDex ? dexMod : strMod, isPactWeapon(character, weapon) ? statMod(character.stats.cha) : -Infinity);
+  return (averageDamage(weapon.damage) + statBonus) * FLAT_HIT_CHANCE;
 }
 
 function expectedSpellDamage(character: Character, spellName: string): number {

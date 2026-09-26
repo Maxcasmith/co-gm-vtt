@@ -1,5 +1,5 @@
-import type { AbilityKey, ActiveCondition, Character, CharacterStats, CombatRollEvent, RollBreakdown, RollModifier } from 'shared';
-import { statMod, CLASS_SAVING_THROWS, SKILL_ABILITY } from 'shared';
+import type { AbilityKey, ActiveCondition, Character, CharacterStats, CombatRollEvent, EffectSpec, HookSpec, RollBreakdown, RollModifier } from 'shared';
+import { statMod, CLASS_SAVING_THROWS, SKILL_ABILITY, speciesSaveAdvantage } from 'shared';
 import { getCharacter } from '../../storage.ts';
 import { fightOf, toFight, getStateEngine, STAT_FULL, BG_SKILLS } from '../../state.ts';
 import { rollD20, withModifiers, keptDie } from '../dice.ts';
@@ -47,13 +47,28 @@ export function checkModifiers(engine: StateEngine, ownerId: string, stats: Char
 }
 
 /** Rolls a d20 save for a known roller — the exploration roll:save and rollSavingThrow share it. */
-export function rollSave(engine: StateEngine, ownerId: string, stats: CharacterStats, holder: { conditions?: ActiveCondition[] | undefined }, char: Character | undefined, ability: AbilityKey, extraSources: Parameters<typeof rollD20>[0] = []): RollBreakdown {
-  return withModifiers(rollD20([...conditionModeSources(holder, 'save', ability), ...extraSources]), saveModifiers(engine, ownerId, stats, char, ability));
+/**
+ * `againstConditions` — the conditions this save avoids or ends (see effectConditions), so species
+ * traits like Fey Ancestry/Brave/Dwarven Resilience can grant Advantage (speciesSaveAdvantage).
+ * Concentration saves pass ['Concentrating'] (the condition kept, not avoided) for Eldritch Mind.
+ */
+export function rollSave(engine: StateEngine, ownerId: string, stats: CharacterStats, holder: { conditions?: ActiveCondition[] | undefined }, char: Character | undefined, ability: AbilityKey, extraSources: Parameters<typeof rollD20>[0] = [], againstConditions: readonly string[] = []): RollBreakdown {
+  const speciesTrait = char && speciesSaveAdvantage(char, ability, againstConditions);
+  const eldritchMind = ability === 'con' && againstConditions.includes('Concentrating') && char?.invocations?.includes('Eldritch Mind');
+  return withModifiers(rollD20([...conditionModeSources(holder, 'save', ability), ...extraSources, speciesTrait && { label: speciesTrait, sign: 1 }, eldritchMind && { label: 'Eldritch Mind', sign: 1 }], char), saveModifiers(engine, ownerId, stats, char, ability));
+}
+
+/** Every condition a save-gated effect/hook set would apply — what that save is "against". */
+export function effectConditions(effects: EffectSpec[] | undefined, hooks?: HookSpec[] | undefined): string[] {
+  return [
+    ...(effects ?? []).flatMap(e => (e.type === 'condition' && e.condition ? [e.condition] : [])),
+    ...(hooks ?? []).flatMap(h => h.conditionNames ?? (h.conditionName ? [h.conditionName] : [])),
+  ];
 }
 
 /** Rolls a d20 ability/skill check for a known roller — the exploration roll:check and rollSkillCheck share it. */
 export function rollCheck(engine: StateEngine, ownerId: string, stats: CharacterStats, holder: { conditions?: ActiveCondition[] | undefined }, char: Character | undefined, ability: AbilityKey, skill?: string, extraSources: Parameters<typeof rollD20>[0] = []): RollBreakdown {
-  return withModifiers(rollD20([...conditionModeSources(holder, 'check', ability), ...extraSources]), checkModifiers(engine, ownerId, stats, char, ability, skill));
+  return withModifiers(rollD20([...conditionModeSources(holder, 'check', ability), ...extraSources], char), checkModifiers(engine, ownerId, stats, char, ability, skill));
 }
 
 /**
@@ -63,7 +78,7 @@ export function rollCheck(engine: StateEngine, ownerId: string, stats: Character
  * auto-succeeds rather than crashing; that should not happen for anyone actually in the fight.
  */
 export async function rollSavingThrow(
-  cid: string, targetId: string, ability: AbilityKey, dc: number,
+  cid: string, targetId: string, ability: AbilityKey, dc: number, againstConditions: readonly string[] = [],
 ): Promise<{ saved: boolean; roll: number; bonus: number; total: number; breakdown: RollBreakdown | undefined }> {
   const participant = fightOf(cid, targetId)?.findParticipant(targetId);
   const creature = participant?.creature;
@@ -71,7 +86,7 @@ export async function rollSavingThrow(
   const stats = creature?.stats ?? char?.stats;
   if (!stats) return { saved: true, roll: 0, bonus: 0, total: 0, breakdown: undefined };
 
-  const breakdown = rollSave(getStateEngine(cid), targetId, stats, creature ?? char ?? {}, char, ability);
+  const breakdown = rollSave(getStateEngine(cid), targetId, stats, creature ?? char ?? {}, char, ability, [], againstConditions);
   const roll = keptDie(breakdown);
   return { saved: breakdown.total >= dc, roll, bonus: breakdown.total - roll, total: breakdown.total, breakdown };
 }

@@ -325,7 +325,7 @@ export async function resolveLockpickAttempt(cid: string, characterId: string, c
   if (!char || !dungeon || !pos) return;
 
   // Thieves' Tools is a DEX check — conditions affecting checks (Poisoned) apply; no tool proficiency is modeled.
-  const breakdown = withModifiers(rollD20(conditionModeSources(char, 'check', 'dex')), [dexLine(char.stats)]);
+  const breakdown = withModifiers(rollD20(conditionModeSources(char, 'check', 'dex'), char), [dexLine(char.stats)]);
   const { total } = breakdown;
   await appendChatLogAndBroadcast(cid, characterName, `${characterName} rolls Thieves' Tools (DEX) to pick a lock: ${total}.`, breakdown);
 
@@ -355,7 +355,7 @@ export async function resolveTrapDisarmAttempt(cid: string, characterId: string,
   const pos = dungeon?.positions?.[characterName];
   if (!char || !dungeon || !pos) return;
 
-  const breakdown = withModifiers(rollD20(conditionModeSources(char, 'check', 'dex')), [dexLine(char.stats)]);
+  const breakdown = withModifiers(rollD20(conditionModeSources(char, 'check', 'dex'), char), [dexLine(char.stats)]);
   const { total } = breakdown;
   await appendChatLogAndBroadcast(cid, characterName, `${characterName} rolls Thieves' Tools (DEX) to disarm a trap: ${total}.`, breakdown);
 

@@ -28,6 +28,8 @@ export interface RollBreakdown {
   keptIndex: number;
   /** A Lucky reroll replaced this die — shown faded before the kept one. */
   rerolledFrom?: number | undefined;
+  /** What caused that reroll, when it's a named trait (Halfling Luck). */
+  rerolledBy?: string | undefined;
   modifiers: RollModifier[];
   total: number;
 }
@@ -90,6 +92,10 @@ export interface EnemyStatBlock {
   speed: number;
   stats: CharacterStats;
   attacks: { name: string; bonus: number; damage: string }[];
+  /** An attack it never makes on its own turn — only when its owner forgoes one of theirs (Pact of the Chain familiar), spending its Reaction. The AI never sees it. */
+  reactionAttack?: { name: string; bonus: number; damage: string };
+  /** Summoned by Find Familiar — a caster has at most one, so a new summon replaces the one tagged here. */
+  familiar?: true;
   xp?: number;
   level?: number;
   creatureType?: CreatureType;

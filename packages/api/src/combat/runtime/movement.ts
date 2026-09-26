@@ -1,5 +1,5 @@
 import type { Character, ActiveCondition, RollModifier } from 'shared';
-import { statMod, calcAC, effectiveWeaponProfs, findPath, isWeapon, isMonkWeapon, closedDoorCells, unarmedStrikeFor, monkMartialArtsActive, monkLevel, martialArtsDie } from 'shared';
+import { statMod, calcAC, effectiveWeaponProfs, findPath, isWeapon, isMonkWeapon, closedDoorCells, unarmedStrikeFor, monkMartialArtsActive, monkLevel, martialArtsDie, isPactWeapon, weaponDamageType } from 'shared';
 import { getCharacter, listCharacters, getHouseRules, saveDungeon } from '../../storage.ts';
 import { broadcastDungeon } from '../../dungeon/index.ts';
 import { Participant, type Encounter } from '../../domain/encounter.ts';
@@ -267,11 +267,14 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
     const isMeleeReach = !weapon || weapon.range <= 10;
     const monkActive = monkMartialArtsActive(char);
     const useDex = isMeleeReach && (effectiveWeapon.isFinesse || (monkActive && isMonkWeapon(effectiveWeapon))) && dexMod > strMod;
-    statBonus = useDex ? dexMod : strMod;
-    statName = useDex ? 'Dexterity' : 'Strength';
+    // Pact of the Blade — same proficiency and Charisma swap as resolvePlayerAttack.
+    const pact = isPactWeapon(char, effectiveWeapon);
+    const usePactCha = pact && statMod(char.stats.cha) > (useDex ? dexMod : strMod);
+    statBonus = usePactCha ? statMod(char.stats.cha) : useDex ? dexMod : strMod;
+    statName = usePactCha ? 'Charisma (Pact of the Blade)' : useDex ? 'Dexterity' : 'Strength';
     const charProf = char.proficiencyBonus ?? 2;
     const classWeaponProfs = effectiveWeaponProfs(char);
-    const isProficient = !weapon || weapon.properties?.some(p => classWeaponProfs.includes(p as 'simple' | 'martial'));
+    const isProficient = !weapon || pact || weapon.properties?.some(p => classWeaponProfs.includes(p as 'simple' | 'martial'));
     toHitLines = [
       { label: statName, value: statBonus },
       ...(isProficient ? [{ label: 'Proficiency', value: charProf }] : []),
@@ -279,7 +282,7 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
     ];
     weaponName = effectiveWeapon.name;
     damageFormula = monkActive && isMonkWeapon(effectiveWeapon) ? martialArtsDie(monkLevel(char)) : effectiveWeapon.damage;
-    damageType = effectiveWeapon.damageType;
+    damageType = weaponDamageType(char, effectiveWeapon);
   } else if (reactor.creature) {
     const atk = reactor.creature.attacks[0];
     if (!atk) return;
@@ -312,7 +315,7 @@ async function resolveOpportunityAttack(cid: string, reactor: Participant, targe
     ...conditionModeSources(reactorChar ?? reactor.creature ?? {}, 'attack'),
     ...targetModeSources(targetChar ?? target.creature ?? {}),
     luckDisadvantage && dis('Luck Point'),
-  ]), toHitLines);
+  ], reactorChar), toHitLines);
   const roll = keptDie(breakdown);
   const atkCtx = await engine.trigger('afterAttackRoll', await engine.trigger('beforeAttackRoll', {
     attackerId: reactor.id, attackerName: reactor.name,

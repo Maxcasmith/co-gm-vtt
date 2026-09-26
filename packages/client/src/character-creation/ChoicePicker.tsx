@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Button } from '../components/Button/Button.tsx';
 
-export interface ChoiceOption { name: string; description: string }
+// disabledReason: shown muted and previewable, but can't be picked (an invocation's unmet prerequisite).
+export interface ChoiceOption { name: string; description: string; disabledReason?: string }
 
 interface Props {
   title: string;
@@ -15,9 +16,9 @@ export default function ChoicePicker({ title, options, selected, max, onToggle }
   const [preview, setPreview] = useState(options[0]?.name ?? '');
   const active = options.find(o => o.name === preview) ?? options[0];
 
-  function handleClick(name: string) {
-    setPreview(name);
-    onToggle(name);
+  function handleClick(opt: ChoiceOption) {
+    setPreview(opt.name);
+    if (!opt.disabledReason) onToggle(opt.name);
   }
 
   return (
@@ -34,13 +35,13 @@ export default function ChoicePicker({ title, options, selected, max, onToggle }
       <div className="choice-list">
         {options.map(opt => {
           const isMine = selected.includes(opt.name);
-          const isFull = max !== undefined && !isMine && selected.length >= max;
+          const isFull = (max !== undefined && !isMine && selected.length >= max) || !!opt.disabledReason;
           return (
             <Button
               key={opt.name}
               variant="ghost"
               className={`choice-item${isMine ? ' choice-item--active' : ''}${opt.name === active?.name ? ' choice-item--preview' : ''}${isFull ? ' choice-item--full' : ''}`}
-              onClick={() => handleClick(opt.name)}
+              onClick={() => handleClick(opt)}
             >
               <span className="choice-check">{isMine ? '✓' : ''}</span>
               <span className="choice-name">{opt.name}</span>
@@ -52,6 +53,7 @@ export default function ChoicePicker({ title, options, selected, max, onToggle }
       {active && (
         <div className="choice-info">
           <p className="choice-info-name">{active.name}</p>
+          {active.disabledReason && <p className="choice-info-req">{active.disabledReason}</p>}
           <p className="choice-info-desc">{active.description}</p>
         </div>
       )}

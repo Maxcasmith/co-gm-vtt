@@ -8,7 +8,7 @@ import type { Manoeuvre } from "./tactics.ts";
 import type { StoryboardQueuePayload } from "./storyboard.ts";
 import type { Goal, GoalTier } from "./goals.ts";
 import type { GroupColor, PartyGroups } from "./partyGroups.ts";
-import type { CurrencyDenomination } from "./character.ts";
+import type { Character, CurrencyDenomination, StoredFamiliar } from "./character.ts";
 
 export type Player = string;
 
@@ -322,6 +322,10 @@ export interface ServerToClientEvents {
     itemId: string;
     quantity: number;
   }) => void;
+  /** A summon upserted Character.familiars (Find Familiar modal). */
+  "character:familiars:update": (data: { characterId: string; familiars: StoredFamiliar[] }) => void;
+  /** Pact of the Blade's bond moved (combat:pact:bond) — see Character.pactWeapon. */
+  "character:pactWeapon:update": (data: { characterId: string; pactWeapon: NonNullable<Character["pactWeapon"]> }) => void;
   "character:equipment:update": (data: {
     characterId: string;
     slot: "head" | "body" | "gloves" | "boots" | "mainHand" | "offHand";
@@ -398,6 +402,12 @@ export interface ClientToServerEvents {
   "stairs:use": (payload: { campaignId: string; stairsId: string; characterName: string }) => void;
   "combat:turn:end": () => void;
   "combat:initiative:roll": (entry: TurnOrderEntry) => void;
+  /** Removes a familiar from Character.familiars by name (the Find Familiar modal's stored list). Doesn't dismiss a summoned one. */
+  "character:familiar:delete": (payload: { characterId: string; name: string }) => void;
+  /** Pact of the Blade (Bonus Action in combat): conjure a catalog weapon (`weaponId`, PACT_WEAPON_CHOICES) or bond a magic one already carried (`itemId`), optionally swapping its damage type (PACT_WEAPON_DAMAGE_TYPES). */
+  "combat:pact:bond": (payload: { characterId: string; weaponId?: string; itemId?: string; damageType?: string }) => void;
+  /** Pact of the Chain: the Warlock forgoes their attack so their familiar attacks `targetId` with its Reaction (EnemyStatBlock.reactionAttack). */
+  "combat:familiar:attack": (payload: { attackerId: string; targetId: string }) => void;
   "combat:attack": (payload: {
     attackerId: string;
     attackerName: string;
@@ -433,6 +443,8 @@ export interface ClientToServerEvents {
     chosenCommand?: string;
     /** Caster's pick when the spell declares skillOptions (Guidance's chosen skill). */
     chosenSkill?: string;
+    /** Find Familiar's modal pick: its name, appearance, and form (a PACT_FAMILIAR_FORMS key for Pact of the Chain, else unset). Saved to Character.familiars. */
+    chosenFamiliar?: StoredFamiliar;
     /** placesTrap spells only — the grid cell the caster targeted. */
     originGx?: number;
     originGy?: number;

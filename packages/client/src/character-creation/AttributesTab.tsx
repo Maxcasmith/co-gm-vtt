@@ -10,7 +10,7 @@ import {
   POINT_BUY_BUDGET, POINT_BUY_MIN, POINT_BUY_MAX, POINT_BUY_COSTS,
   type StatName,
 } from './srd.ts';
-import SkillPicker from './SkillPicker.tsx';
+import SkillPicker, { pruneSkills } from './SkillPicker.tsx';
 
 const METHOD_LABEL: Record<AttributeMethod, string> = {
   roll: 'Dice Roll',
@@ -247,7 +247,14 @@ export default function AttributesTab({ attributeMethods }: Props) {
       <div className="select-section">
         <label className="modal-label">
           Background
-          <select className="modal-select" value={c.background} onChange={e => { c.set('background', e.target.value); c.set('backgroundAsi', {}); }}>
+          <select className="modal-select" value={c.background} onChange={e => {
+            // A new background changes its Skilled feat and fixed skills — re-validate picks against it.
+            const pruned = pruneSkills({ ...c, background: e.target.value });
+            c.set('background', e.target.value);
+            c.set('backgroundAsi', {});
+            c.set('skillProficiencies', pruned.skillProficiencies);
+            c.set('expertiseSkills', pruned.expertiseSkills);
+          }}>
             <option value="">Select background…</option>
             {backgrounds.map(b => <option key={b} value={b}>{b}</option>)}
           </select>

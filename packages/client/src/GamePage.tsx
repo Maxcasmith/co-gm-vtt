@@ -112,6 +112,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   const [itemQtyOverrides, setItemQtyOverrides] = useState<Record<string, number>>({});
   const [resourceOverrides, setResourceOverrides] = useState<Record<string, number> | null>(null);
   const [inspirationOverride, setInspirationOverride] = useState<boolean | null>(null);
+  const [pactWeapon, setPactWeapon] = useState<Character['pactWeapon']>(character.pactWeapon);
+  const [familiars, setFamiliars] = useState<Character['familiars']>(character.familiars);
   const [equipment, setEquipment] = useState<Character['equipment']>(character.equipment);
   const [liveConditions, setLiveConditions] = useState<Character['conditions']>(character.conditions);
   // Same pattern `equipment` uses: AITab edits its own copy of tactics/aiControlled and never
@@ -336,6 +338,12 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     });
     // Heroic Inspiration granted (Musician) or spent (roll toggles) — same stale-closure reasoning
     // as featureResources above, kept as its own override for the same fix.
+    socket.on('character:familiars:update', ({ characterId, familiars: next }) => {
+      if (characterId === character.id) setFamiliars(next);
+    });
+    socket.on('character:pactWeapon:update', ({ characterId, pactWeapon: next }) => {
+      if (characterId === character.id) setPactWeapon(next);
+    });
     socket.on('character:inspiration:update', ({ heroicInspiration }) => {
       setInspirationOverride(heroicInspiration);
     });
@@ -670,14 +678,23 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
   useEffect(() => on('vtt:combat:attack', ({ attackerId, attackerName, targetId, weapon, bonusSpell, isOffhand, actionType, useInspiration }) => {
     socketRef.current?.emit('combat:attack', { attackerId, attackerName, targetId, weapon, ...(bonusSpell ? { bonusSpell } : {}), ...(isOffhand ? { isOffhand } : {}), ...(actionType ? { actionType } : {}), ...(useInspiration ? { useInspiration } : {}) });
   }), []);
+  useEffect(() => on('vtt:familiar:delete', payload => {
+    socketRef.current?.emit('character:familiar:delete', payload);
+  }), []);
+  useEffect(() => on('vtt:combat:pact:bond', payload => {
+    socketRef.current?.emit('combat:pact:bond', payload);
+  }), []);
+  useEffect(() => on('vtt:combat:familiar:attack', payload => {
+    socketRef.current?.emit('combat:familiar:attack', payload);
+  }), []);
   useEffect(() => on('vtt:combat:ability:use', ({ casterId, casterName, abilityKey, targetId, chosenItem, chosenAmount, cureCondition }) => {
     socketRef.current?.emit('combat:ability:use', { casterId, casterName, abilityKey, targetId, chosenItem, chosenAmount, cureCondition });
   }), []);
   useEffect(() => on('vtt:combat:spell:attack', ({ casterId, casterName, targetIds, spell, slotLevel, chosenDamageType }) => {
     socketRef.current?.emit('combat:spell:attack', { casterId, casterName, targetIds, spell, slotLevel, chosenDamageType });
   }), []);
-  useEffect(() => on('vtt:combat:spell:cast', ({ casterId, casterName, spell, slotLevel, targetIds, chosenDamageType, chosenCommand, chosenSkill, originGx, originGy }) => {
-    socketRef.current?.emit('combat:spell:cast', { casterId, casterName, spell, slotLevel, targetIds, chosenDamageType, chosenCommand, chosenSkill, ...(originGx !== undefined ? { originGx, originGy } : {}) });
+  useEffect(() => on('vtt:combat:spell:cast', ({ casterId, casterName, spell, slotLevel, targetIds, chosenDamageType, chosenCommand, chosenSkill, chosenFamiliar, originGx, originGy }) => {
+    socketRef.current?.emit('combat:spell:cast', { casterId, casterName, spell, slotLevel, targetIds, chosenDamageType, chosenCommand, chosenSkill, ...(chosenFamiliar ? { chosenFamiliar } : {}), ...(originGx !== undefined ? { originGx, originGy } : {}) });
   }), []);
   useEffect(() => on('vtt:equipment:update', payload => {
     socketRef.current?.emit('character:equipment:update', payload);
@@ -899,6 +916,8 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
     aiControlled,
     resourceUses: resourceOverrides ?? character.resourceUses,
     heroicInspiration: inspirationOverride ?? character.heroicInspiration,
+    pactWeapon,
+    familiars,
   };
 
   return (
@@ -953,7 +972,7 @@ function GameCanvas({ character, onCharacterUpdate }: { character: Character; on
           onClose={() => setGroupsOpen(false)}
         />
       )}
-      <CombatDock character={liveCharacter} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} activeBuffs={activeBuffs} elevationFt={elevations[character.id] ?? 0} connectedAllies={connected} allyCharacterIds={partyCharacterIds} />
+      <CombatDock character={liveCharacter} combatActive={combatActive} movementRemaining={movementRemaining} playerCurrentHp={playerHpState?.current} currentSpellSlots1={playerSlotsState?.current} maxSpellSlots1={playerSlotsState?.max} activeBuffs={activeBuffs} elevationFt={elevations[character.id] ?? 0} connectedAllies={connected} allyCharacterIds={partyCharacterIds} />
       <EncounterLoadingOverlay onActiveChange={setCombatLoading} />
       <DungeonLoadingOverlay visible={mapLoading} generating={dungeonGenerating} />
       {storyboardQueue && <StoryboardOverlay queue={storyboardQueue} onDone={() => setStoryboardQueue(null)} skippable={false} />}

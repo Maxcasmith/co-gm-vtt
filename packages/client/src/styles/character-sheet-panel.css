@@ -1121,3 +1121,11 @@ button.choice-item {
   padding: 10px;
 }
 
+
+.choice-info-req {
+  font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 13px;
+  font-style: italic;
+  color: var(--text-muted);
+  margin: 0 0 6px;
+}

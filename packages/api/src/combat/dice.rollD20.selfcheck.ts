@@ -37,4 +37,25 @@ for (let i = 0; i < 200; i++) {
   assert.deepStrictEqual(reconcile(b, keptDie(b), 3).modifiers, b.modifiers);
 }
 
+// Halfling Luck: a kept natural 1 is rerolled once (Math.random stubbed: 0 → 1, 0.5 → 11).
+{
+  const real = Math.random;
+  const seq = (...vals: number[]) => { Math.random = () => vals.shift() ?? 0.5; };
+  seq(0, 0.5);
+  const lucky = rollD20([], { species: 'Halfling' });
+  assert.deepStrictEqual([keptDie(lucky), lucky.rerolledFrom, lucky.rerolledBy], [11, 1, 'Luck']);
+  seq(0, 0.5);
+  assert.strictEqual(keptDie(rollD20([], { species: 'Human' })), 1);
+  // Advantage [1, 1]: only the kept die rerolls, then the higher wins.
+  seq(0, 0, 0.5);
+  assert.strictEqual(keptDie(rollD20([adv('x')], { species: 'Halfling' })), 11);
+  // Disadvantage [1, 15]: the kept 1 rerolls to 11, lower still wins → 11.
+  seq(0, 0.7, 0.5);
+  assert.strictEqual(keptDie(rollD20([dis('x')], { species: 'Halfling' })), 11);
+  // A later hook reroll isn't mislabelled as Luck.
+  seq(0, 0.5);
+  assert.strictEqual(reconcile(withModifiers(rollD20([], { species: 'Halfling' }), []), 20, 0).rerolledBy, undefined);
+  Math.random = real;
+}
+
 console.log('dice.rollD20.selfcheck: all assertions passed');

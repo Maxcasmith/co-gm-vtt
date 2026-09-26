@@ -1,5 +1,5 @@
 import type { Character, SenseKind } from "shared";
-import { effectiveWeaponProfs, effectiveArmorTraining, getSenses } from "shared";
+import { effectiveWeaponProfs, effectiveArmorTraining, getSenses, characterDamageResistances } from "shared";
 import { dispatch } from "../events.ts";
 import { PipCounter } from "../components/PipCounter/PipCounter.tsx";
 import { STAT_NAMES, CLASS_SAVING_THROWS, BACKGROUND_SKILLS, SKILLS } from "../character-creation/srd.ts";
@@ -147,6 +147,12 @@ export function AbilitiesTab({ character }: { character: Character }) {
                 ].map((line) => (
                   <span key={line}>{line}</span>
                 ))}
+              </span>
+            </div>
+            <div className="sheet-proficiency-row">
+              <span className="sheet-proficiency-label">Damage Resistances</span>
+              <span className="sheet-proficiency-value">
+                {characterDamageResistances(character).join(", ") || "None"}
               </span>
             </div>
           </div>

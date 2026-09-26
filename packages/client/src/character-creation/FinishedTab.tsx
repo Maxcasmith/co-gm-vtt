@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { Spell } from 'shared';
 import { useCharacter } from './CharacterContext.tsx';
-import { CLASS_FEATURES, STAT_NAMES, BACKGROUND_ASI, CLASS_SKILLS, CLASS_SPELL_ALLOWANCE, SPECIES_SUBSPECIES } from './srd.ts';
+import { CLASS_FEATURES, STAT_NAMES, BACKGROUND_ASI, BACKGROUND_SKILLS, CLASS_SPELL_ALLOWANCE, SPECIES_SUBSPECIES, PACT_OF_THE_TOME } from './srd.ts';
+import { skillSources } from './SkillPicker.tsx';
 
 const API = `http://${window.location.hostname}:3001`;
 
@@ -33,6 +34,7 @@ export default function FinishedTab({ error }: Props) {
   if (!c.characterClass) missing.push({ text: 'Class', tab: 'class' });
   if (!c.species) missing.push({ text: 'Species', tab: 'species' });
   else if ((SPECIES_SUBSPECIES[c.species] ?? []).length > 0 && !c.subspecies) missing.push({ text: 'Lineage', tab: 'species' });
+  else if (c.species === 'Dragonborn' && !c.draconicAncestry) missing.push({ text: 'Draconic Ancestry', tab: 'species' });
   if (c.attributeMethod === 'roll') {
     if (!c.rolled) missing.push({ text: 'Ability scores not rolled', tab: 'attributes' });
     else if (c.pool.length > 0) missing.push({ text: `${c.pool.length} rolled score(s) not assigned`, tab: 'attributes' });
@@ -45,14 +47,20 @@ export default function FinishedTab({ error }: Props) {
     const asiLeft = 3 - (BACKGROUND_ASI[c.background] ?? []).reduce((n, st) => n + (c.backgroundAsi[st] ?? 0), 0);
     if (asiLeft > 0) missing.push({ text: `${asiLeft} background ability point(s) unspent`, tab: 'attributes' });
   }
+  for (const src of skillSources(c)) {
+    const picked = Object.values(c.skillProficiencies).filter(label => label === src.label).length;
+    if (picked < src.count) missing.push({ text: `${src.count - picked} ${src.label} skill(s) not chosen`, tab: 'attributes' });
+  }
+  // Background skills are fixed grants; everything else is a pick, labelled by what granted it.
+  const skills = [
+    ...(BACKGROUND_SKILLS[c.background] ?? []).map(name => ({ name, source: c.background })),
+    ...Object.entries(c.skillProficiencies).map(([name, source]) => ({ name, source })),
+  ].sort((a, b) => a.name.localeCompare(b.name));
   if (c.characterClass) {
-    const classSkills = CLASS_SKILLS[c.characterClass];
-    const picked = Object.values(c.skillProficiencies).filter(src => src === c.characterClass).length;
-    if (classSkills && picked < classSkills.count) missing.push({ text: `${classSkills.count - picked} class skill(s) not chosen`, tab: 'attributes' });
     const features = CLASS_FEATURES[c.characterClass] ?? [];
     if (features.some(f => f.name === 'Fighting Style') && !c.fightingStyle) missing.push({ text: 'Fighting style', tab: 'classFeatures' });
     if (features.some(f => f.name === 'Divine Order' || f.name === 'Primal Order') && !c.classOrder) missing.push({ text: 'Class order', tab: 'classFeatures' });
-    if (features.some(f => f.name === 'Eldritch Invocations') && c.invocations.length < 2) missing.push({ text: `${2 - c.invocations.length} invocation(s) not chosen`, tab: 'classFeatures' });
+    if (features.some(f => f.name === 'Eldritch Invocations') && c.invocations.length === 0) missing.push({ text: 'Eldritch invocation', tab: 'classFeatures' });
     const allowance = CLASS_SPELL_ALLOWANCE[c.characterClass];
     if (allowance && spellDetails.length === learnedNames.length) {
       const own = spellDetails.filter(sp => c.learnedSpells[sp.name] === c.characterClass);
@@ -60,6 +68,12 @@ export default function FinishedTab({ error }: Props) {
       const leveled = own.length - cantrips;
       if (cantrips < allowance.cantrips) missing.push({ text: `${allowance.cantrips - cantrips} cantrip(s) not learned`, tab: 'spells' });
       if (leveled < allowance.spells) missing.push({ text: `${allowance.spells - leveled} spell(s) not learned`, tab: 'spells' });
+    }
+    if (c.invocations.includes(PACT_OF_THE_TOME.label) && spellDetails.length === learnedNames.length) {
+      const tome = spellDetails.filter(sp => c.learnedSpells[sp.name] === PACT_OF_THE_TOME.label);
+      const cantrips = tome.filter(sp => sp.level === 0).length;
+      if (cantrips < PACT_OF_THE_TOME.cantrips) missing.push({ text: `${PACT_OF_THE_TOME.cantrips - cantrips} Book of Shadows cantrip(s) not chosen`, tab: 'spells' });
+      if (tome.length - cantrips < PACT_OF_THE_TOME.spells) missing.push({ text: `${PACT_OF_THE_TOME.spells - (tome.length - cantrips)} Book of Shadows ritual(s) not chosen`, tab: 'spells' });
     }
   }
 
@@ -86,6 +100,25 @@ export default function FinishedTab({ error }: Props) {
               </div>
             ))}
           </div>
+        </section>
+
+        <section className="spells-section">
+          <div className="spells-section-header">
+            <h3 className="spells-section-title">Skills</h3>
+          </div>
+          {skills.length === 0 ? (
+            <p className="spells-empty">No skills chosen.</p>
+          ) : (
+            <div className="spells-learned-list">
+              {skills.map(skill => (
+                <div key={`${skill.name}:${skill.source}`} className="spells-learned-chip">
+                  <span className="spells-learned-name">{skill.name}</span>
+                  <span className="spells-tag spells-tag--ritual">{skill.source}</span>
+                  {c.expertiseSkills.includes(skill.name) && <span className="spells-learned-level">Expertise</span>}
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="spells-section">

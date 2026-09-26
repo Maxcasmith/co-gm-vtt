@@ -1,4 +1,4 @@
-import type { RollBreakdown, CombatRollEvent, EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon, ReactionOffer, Condition, Manoeuvre, GoalTier, GroupColor, AlertPause } from 'shared';
+import type { RollBreakdown, CombatRollEvent, EnemyStatBlock, TokenPosition, Weapon, Spell, Consumable, TurnOrderEntry, AttackResult, SpellAttackResult, SpellSaveResult, SpellSaveOutcome, CombatVictory, CheckRequest, RollResult, Dungeon, ReactionOffer, Condition, Manoeuvre, GoalTier, GroupColor, AlertPause, StoredFamiliar } from 'shared';
 
 // ── Payload types ─────────────────────────────────────────────────────────────
 //
@@ -58,7 +58,8 @@ export interface SceneReadyPayload { ready: boolean }
 
 export interface CombatStatePayload { active: boolean }
 export type TargetingStartPayload =
-  | { kind: 'weapon'; weapon: Weapon; actionType: 'action' | 'bonusAction' | 'reaction'; bonusSpell?: Spell; isOffhand?: boolean; useInspiration?: boolean }
+  // viaFamiliar: Pact of the Chain — the click sends combat:familiar:attack instead; `weapon` is only a stand-in for the range ring.
+  | { kind: 'weapon'; weapon: Weapon; actionType: 'action' | 'bonusAction' | 'reaction'; bonusSpell?: Spell; isOffhand?: boolean; useInspiration?: boolean; viaFamiliar?: true }
   | { kind: 'spell'; spell: Spell; casterId: string; actionType: 'action' | 'bonusAction' | 'reaction'; slotLevel?: number; chosenDamageType?: string; chosenCommand?: string; chosenSkill?: string; casterLevel?: number }
   | { kind: 'ability'; abilityKey: string; label: string; casterId: string; actionCost: 'action' | 'bonusAction' | 'reaction'; chosenAmount?: number; cureCondition?: boolean; includeSelf?: boolean };
 export type TargetingCancelPayload = Record<string, never>;
@@ -67,7 +68,10 @@ export interface CombatAbilityUsePayload { casterId: string; casterName: string;
 export interface CombatAttackResultPayload extends AttackResult {}
 export interface CombatSpellAttackPayload { casterName: string; casterId: string; targetIds: string[]; spell: Spell; slotLevel: number; chosenDamageType?: string }
 export interface CombatSpellAttackResultPayload extends SpellAttackResult {}
-export interface CombatSpellCastPayload { casterName: string; casterId: string; spell: Spell; slotLevel: number; targetIds: string[]; chosenDamageType?: string; chosenCommand?: string; chosenSkill?: string; originGx?: number; originGy?: number }
+export interface CombatSpellCastPayload { casterName: string; casterId: string; spell: Spell; slotLevel: number; targetIds: string[]; chosenDamageType?: string; chosenCommand?: string; chosenSkill?: string; chosenFamiliar?: StoredFamiliar | undefined; originGx?: number; originGy?: number }
+export interface CombatFamiliarAttackPayload { attackerId: string; targetId: string }
+export interface FamiliarDeletePayload { characterId: string; name: string }
+export interface CombatPactBondPayload { characterId: string; weaponId?: string; itemId?: string; damageType?: string }
 export interface CombatSpellSaveResultPayload extends SpellSaveResult {}
 export interface CombatEffectAuraStartPayload { casterId: string; casterName: string; color: string; style?: 'fire' | undefined }
 export interface CombatEffectAuraEndPayload { casterId: string; casterName: string }
@@ -252,6 +256,9 @@ export interface VTTEventMap {
   'vtt:targeting:start':        TargetingStartPayload;
   'vtt:targeting:cancel':       TargetingCancelPayload;
   'vtt:combat:attack':          CombatAttackPayload;
+  'vtt:combat:familiar:attack': CombatFamiliarAttackPayload;
+  'vtt:combat:pact:bond':       CombatPactBondPayload;
+  'vtt:familiar:delete':        FamiliarDeletePayload;
   'vtt:combat:attack:result':   CombatAttackResultPayload;
   'vtt:combat:ability:use':     CombatAbilityUsePayload;
   'vtt:combat:spell:attack':        CombatSpellAttackPayload;

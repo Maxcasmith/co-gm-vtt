@@ -7,7 +7,7 @@ import { fightOf, toFightOf, playerSocketIds, dungeonOf, io } from '../../state.
 import { calcMaxHp, rollApplicableDamage } from '../dice.ts';
 import { applyDamageToCreature, applyDamageToPlayer } from './damage.ts';
 import { advanceTurn } from './lifecycle.ts';
-import { rollSavingThrow } from './rolls.ts';
+import { rollSavingThrow, effectConditions } from './rolls.ts';
 import { applyCondition } from './statusEffects.ts';
 import { postChat } from '../../partyGroups.ts';
 
@@ -83,7 +83,7 @@ export async function checkTrapAt(cid: string, gx: number, gy: number, triggerId
   let saved = false;
   let saveRoll: Awaited<ReturnType<typeof rollSavingThrow>> | undefined;
   if (trapDef.save) {
-    const result = await rollSavingThrow(cid, targetId, trapDef.save.ability, trapDef.save.dc);
+    const result = await rollSavingThrow(cid, targetId, trapDef.save.ability, trapDef.save.dc, effectConditions(trapDef.effects));
     saved = result.saved;
     saveRoll = result;
     console.log(`[trap] ${triggerName} triggers ${entity.name} — save vs DC${trapDef.save.dc}: ${saved ? 'SAVE' : 'FAIL'}`);

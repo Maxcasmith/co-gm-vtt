@@ -11,15 +11,26 @@ export const dis = (label: string): RollModeSource => ({ label, sign: -1 });
  * inline, falsy entries are skipped. 2024 PHB: any Advantage plus any Disadvantage cancels to a
  * flat roll, no matter how many of each; both sides stay listed so the log can show why.
  */
-export function rollD20(sources: (RollModeSource | false | '' | null | undefined)[] = []): RollBreakdown {
+export function rollD20(sources: (RollModeSource | false | '' | null | undefined)[] = [], roller?: { species?: string | undefined }): RollBreakdown {
   const modeSources = sources.filter((s): s is RollModeSource => !!s);
   const hasAdv = modeSources.some(s => s.sign > 0);
   const hasDis = modeSources.some(s => s.sign < 0);
   const mode = hasAdv === hasDis ? 'normal' : hasAdv ? 'advantage' : 'disadvantage';
   const raw = () => Math.floor(Math.random() * 20) + 1;
   const dice = mode === 'normal' ? [raw()] : [raw(), raw()];
-  const [a, b = a] = dice as [number, number?];
-  const keptIndex = mode === 'advantage' ? (b > a ? 1 : 0) : mode === 'disadvantage' ? (b < a ? 1 : 0) : 0;
+  const pick = () => {
+    const [a, b = a] = dice as [number, number?];
+    return mode === 'advantage' ? (b > a ? 1 : 0) : mode === 'disadvantage' ? (b < a ? 1 : 0) : 0;
+  };
+  let keptIndex = pick();
+  // 2024 PHB Halfling Luck: a 1 on the d20 of a D20 Test is rerolled, and the new roll must be
+  // used. Only the die that would count is rerolled — then Advantage/Disadvantage picks again.
+  // `roller` is only passed at player D20 Test sites (attacks, checks, saves, initiative).
+  if (roller?.species === 'Halfling' && dice[keptIndex] === 1) {
+    dice[keptIndex] = raw();
+    keptIndex = pick();
+    return { mode, modeSources, dice, keptIndex, rerolledFrom: 1, rerolledBy: 'Luck', modifiers: [], total: dice[keptIndex]! };
+  }
   return { mode, modeSources, dice, keptIndex, modifiers: [], total: dice[keptIndex]! };
 }
 
@@ -39,7 +50,7 @@ export function withModifiers(b: RollBreakdown, modifiers: RollModifier[]): Roll
  * the modifiers can't account for lands as "Other effects", so the rows always sum to the total.
  */
 export function reconcile(b: RollBreakdown, d20: number, bonus: number): RollBreakdown {
-  const rerolled = d20 === keptDie(b) ? b : { ...b, dice: [d20], keptIndex: 0, rerolledFrom: keptDie(b) };
+  const rerolled = d20 === keptDie(b) ? b : { ...b, dice: [d20], keptIndex: 0, rerolledFrom: keptDie(b), rerolledBy: undefined };
   const delta = bonus - sumModifiers(b.modifiers);
   const modifiers = delta ? [...b.modifiers, { label: 'Other effects', value: delta }] : b.modifiers;
   return { ...rerolled, modifiers, total: d20 + bonus };
@@ -48,8 +59,8 @@ export function reconcile(b: RollBreakdown, d20: number, bonus: number): RollBre
 export function dexLine(stats: CharacterStats): RollModifier { return { label: 'Dexterity', value: statMod(stats.dex) }; }
 
 /** Initiative is a Dexterity check (2024 PHB), so anything affecting checks (Poisoned) applies to it too. */
-export function rollInitiative(holder: { conditions?: ActiveCondition[] | undefined }, modifiers: RollModifier[]): RollBreakdown {
-  return withModifiers(rollD20(conditionModeSources(holder, 'check', 'dex')), modifiers);
+export function rollInitiative(holder: { conditions?: ActiveCondition[] | undefined; species?: string | undefined }, modifiers: RollModifier[]): RollBreakdown {
+  return withModifiers(rollD20(conditionModeSources(holder, 'check', 'dex'), holder), modifiers);
 }
 
 export function fmtMod(n: number) { return n >= 0 ? `+${n}` : `${n}`; }

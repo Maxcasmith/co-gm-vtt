@@ -111,6 +111,8 @@ function CreatePageInner({ campaignId, campaignName, isCampaign, attributeMethod
           species: c.species,
           background: c.background,
           class: c.characterClass,
+          ...(c.subspecies ? { subspecies: c.subspecies } : {}),
+          ...(c.draconicAncestry ? { draconicAncestry: c.draconicAncestry } : {}),
           speciesOriginFeat: c.speciesOriginFeat,
           backstory: c.backstory,
           stats: c.toStats(),

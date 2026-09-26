@@ -130,6 +130,7 @@
   },
   "Mage Armor": {
     "resolution": "none",
+    "explorationCastable": true,
     "hooks": [
       {
         "type": "acOverride",

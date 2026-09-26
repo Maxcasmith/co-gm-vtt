@@ -1,4 +1,5 @@
-import type { ActionResource, EffectSpec, HookSpec } from "./spells.ts";
+import type { ActionResource, EffectSpec, HookSpec, Spell } from "./spells.ts";
+import { draconicDamageType, type Character } from "./character.ts";
 
 /**
  * A non-spell class feature a player can trigger mid-combat (Rage, Second Wind, Bardic
@@ -14,7 +15,9 @@ import type { ActionResource, EffectSpec, HookSpec } from "./spells.ts";
 export interface AbilityDef {
   key: string;
   label: string;
-  class: string;
+  /** Owner — exactly one of class (Rage, Second Wind) or species (Healing Hands, Adrenaline Rush). See ownsAbility. */
+  class?: string;
+  species?: string;
   actionCost: ActionResource;
   /** Key into RESOURCE_DEFS (character.ts) — this ability's limited-use pool, always spent from the caster regardless of `target`. */
   resourceKey: string;
@@ -30,6 +33,14 @@ export interface AbilityDef {
   cureCost?: number;
   /** 'ally'-target abilities that may also target the caster (Lay on Hands can heal yourself). Unset/false abilities (Bardic Inspiration — "another creature" only) can't be self-targeted. */
   includeSelf?: boolean;
+  /** Adds the caster's character level to the onUse heal roll (Second Wind's "1d10 + Fighter level"). */
+  addLevelToHeal?: true;
+  /** Also grants a Dash's worth of movement, same event the standard Dash action sends (Adrenaline Rush). */
+  grantsDash?: true;
+}
+
+export function ownsAbility(character: Pick<Character, "class" | "species">, ability: AbilityDef): boolean {
+  return ability.species ? character.species === ability.species : character.class === ability.class;
 }
 
 /** Populated per-feature as each is wired up (see build audit) — empty is a valid, fully-functional state. */
@@ -44,6 +55,7 @@ export const ABILITY_DEFS: Record<string, AbilityDef> = {
     resourceKey: "secondWind",
     target: "self",
     onUse: [{ type: "heal", scaling: { mode: "cantrip", base: "1d10", tiers: [] } }],
+    addLevelToHeal: true,
   },
   // 2024 PHB Barbarian: Bonus Action, resistance to B/P/S + a flat melee damage bonus (+2 at
   // 1-8, +3 at 9-15, +4 at 16-20 — the "0dN+flat" base/tiers below is the existing flat-value
@@ -138,4 +150,58 @@ export const ABILITY_DEFS: Record<string, AbilityDef> = {
     cureCost: 5,
     includeSelf: true,
   },
+  // 2024 PHB Aasimar: Magic action, touch a creature, it regains HP equal to Proficiency Bonus d4s.
+  // PB tracks character level (2 → 6 at 5/9/13/17), so the cantrip-level tiers encode it directly.
+  healingHands: {
+    key: "healingHands",
+    label: "Healing Hands",
+    species: "Aasimar",
+    actionCost: "action",
+    resourceKey: "healingHands",
+    target: "ally",
+    includeSelf: true,
+    onUse: [{ type: "heal", scaling: { mode: "cantrip", base: "2d4", tiers: [{ atLevel: 5, value: "3d4" }, { atLevel: 9, value: "4d4" }, { atLevel: 13, value: "5d4" }, { atLevel: 17, value: "6d4" }] } }],
+  },
+  // 2024 PHB Orc: Dash as a Bonus Action plus Temporary HP equal to Proficiency Bonus — the
+  // "0dN+flat" tiers are the same flat-value idiom Rage uses, stepping with PB by level.
+  adrenalineRush: {
+    key: "adrenalineRush",
+    label: "Adrenaline Rush",
+    species: "Orc",
+    actionCost: "bonusAction",
+    resourceKey: "adrenalineRush",
+    target: "self",
+    onUse: [{ type: "tempHp", scaling: { mode: "cantrip", base: "0d4+2", tiers: [{ atLevel: 5, value: "0d4+3" }, { atLevel: 9, value: "0d4+4" }, { atLevel: 13, value: "0d4+5" }, { atLevel: 17, value: "0d4+6" }] } }],
+    grantsDash: true,
+  },
 };
+
+export type BreathShape = "cone" | "line";
+
+/**
+ * 2024 PHB Dragonborn Breath Weapon as a synthetic Spell, so it rides the ordinary spell-cast
+ * pipeline (AoE templating, Dex saves, half on success) instead of a parallel one. Built from the
+ * character on both sides — the server never trusts the client's copy beyond `shape`. DC uses CON
+ * and uses come from RESOURCE_DEFS.breathWeapon; both are special-cased in combat:spell:cast.
+ * ponytail: modeled as a full Action, not "replace one attack of the Attack action" — revisit if
+ * Extra Attack ever needs to mix breath with weapon swings in one turn.
+ */
+export function breathWeaponSpell(character: Pick<Character, "species" | "subspecies" | "draconicAncestry">, shape: BreathShape): Spell | undefined {
+  const damageType = draconicDamageType(character);
+  if (!damageType) return undefined;
+  return {
+    name: "Breath Weapon", source: "Dragonborn", level: 0, levelLabel: "Cantrip",
+    castingTime: "Action", duration: "Instantaneous", school: "Evocation", range: "Self",
+    components: "", classes: [], atHigherLevels: "", isRitual: false,
+    text: `Exhale ${damageType.toLowerCase()} energy in a ${shape === "cone" ? "15-foot cone" : "30-foot line"}. Dexterity save, half damage on a success.`,
+    combat: {
+      resolution: "save",
+      save: { ability: "dex", halfOnSave: true },
+      area: shape === "cone" ? { shape: "cone", size: 15, origin: "self" } : { shape: "line", size: 30, width: 5, origin: "self" },
+      onHit: [{
+        type: "damage", damageType,
+        scaling: { mode: "cantrip", base: "1d10", tiers: [{ atLevel: 5, value: "2d10" }, { atLevel: 11, value: "3d10" }, { atLevel: 17, value: "4d10" }] },
+      }],
+    },
+  };
+}

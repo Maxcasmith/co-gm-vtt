@@ -1,20 +1,23 @@
 import type { Character } from 'shared';
-import { statMod, effectiveWeaponProfs, CLASS_SPELLCASTING_ABILITY } from 'shared';
+import { statMod, effectiveWeaponProfs, CLASS_SPELLCASTING_ABILITY, isPactWeapon } from 'shared';
 import type { TargetingStartPayload } from '../events.ts';
 
 // Mirrors the server's attack-roll math (packages/api/src/index.ts combat:attack / combat:spell:attack)
 // so the hover readout matches the actual roll odds, including extended-range disadvantage.
 export function attackBonusFor(character: Character, targeting: TargetingStartPayload): number | null {
   const charProf = character.proficiencyBonus ?? 2;
+  if (targeting.kind === 'weapon' && targeting.viaFamiliar) return null; // the familiar's own bonus, not known client-side
   if (targeting.kind === 'weapon') {
     const weapon = targeting.weapon;
     const strMod = statMod(character.stats.str);
     const dexMod = statMod(character.stats.dex);
     const isMelee = weapon.range <= 10; // covers reach weapons (e.g. Whip, range 10) — next tier up is bows at 80+
     const useDex = !isMelee || (weapon.isFinesse && dexMod > strMod);
-    const statBonus = useDex ? dexMod : strMod;
+    // Pact of the Blade: proficient, and Charisma if it beats Str/Dex.
+    const pact = isPactWeapon(character, weapon);
+    const statBonus = Math.max(useDex ? dexMod : strMod, pact ? statMod(character.stats.cha) : -Infinity);
     const classWeaponProfs = effectiveWeaponProfs(character);
-    const isProficient = weapon.properties?.some(p => classWeaponProfs.includes(p as 'simple' | 'martial'));
+    const isProficient = pact || weapon.properties?.some(p => classWeaponProfs.includes(p as 'simple' | 'martial'));
     const weaponBonus = (weapon.attackBonus ?? 0) + (isProficient ? charProf : 0);
     return statBonus + weaponBonus;
   }

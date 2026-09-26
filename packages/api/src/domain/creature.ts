@@ -21,6 +21,7 @@ export class Creature {
   speed: number;
   stats: CharacterStats;
   attacks: { name: string; bonus: number; damage: string }[];
+  reactionAttack: EnemyStatBlock['reactionAttack'];
   effects: string[];
   creatureType: CreatureType;
   conditions: ActiveCondition[];
@@ -53,6 +54,7 @@ export class Creature {
       console.warn(`[creature] ${data.name} (${data.id}) has no attacks[] — stat block generated without one, substituting a default Strike`);
     }
     this.attacks = data.attacks ?? [defaultAttack(data.stats)];
+    this.reactionAttack = data.reactionAttack;
     this.effects = [];
     // Old saved encounters predate creatureType — fall back to Humanoid rather than backfilling.
     this.creatureType = data.creatureType ?? 'Humanoid';
@@ -98,6 +100,7 @@ export class Creature {
       speed: this.speed,
       stats: this.stats,
       attacks: this.attacks,
+      ...(this.reactionAttack !== undefined ? { reactionAttack: this.reactionAttack } : {}),
       creatureType: this.creatureType,
       conditions: this.conditions,
       damageResistances: this.damageResistances,

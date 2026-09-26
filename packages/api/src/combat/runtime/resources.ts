@@ -1,5 +1,5 @@
 import type { Character } from 'shared';
-import { spellSlotsForCharacter, hasOriginFeat, trySpendResource, resourceCurrent, magicInitiateKeyForSpell } from 'shared';
+import { spellSlotsForCharacter, hasOriginFeat, trySpendResource, resourceCurrent, magicInitiateKeyForSpell, invocationSpell } from 'shared';
 import { getCharacter, updateCharacter } from '../../storage.ts';
 import { io, campaignRoom, fightOf, playerSocketIds } from '../../state.ts';
 import { rollD20, keptDie } from '../dice.ts';
@@ -45,7 +45,8 @@ export async function offerLuckAttackReroll(
   await updateCharacter(cid, attackerId, c => ({ ...c, resourceUses: nextResourceUses }));
   io.to(campaignRoom(cid)).emit('combat:player:featureResources', { characterId: attackerId, resourceUses: nextResourceUses });
   console.log(`[lucky] ${attackerName} spends a Luck Point to reroll a missed attack against ${targetName}`);
-  return keptDie(rollD20());
+  // The new roll is still a D20 Test — a Halfling's Luck rerolls it again if it comes up 1.
+  return keptDie(rollD20([], fresh));
 }
 
 /**
@@ -66,6 +67,8 @@ export async function trySpendHeroicInspiration(cid: string, characterId: string
 // either — see spellSlotsForCharacter). Cantrips (slotLevel 0) and any untracked tier are free.
 export async function trySpendSpellSlot(cid: string, charId: string, char: Character, slotLevel: number, spellName: string): Promise<boolean> {
   if (slotLevel !== 1) return true;
+  // Armor of Shadows / Pact of the Chain: cast at will, no slot (INVOCATION_SPELLS).
+  if (invocationSpell(char, spellName)) return true;
 
   // Magic Initiate's spell spends its own once-per-Long-Rest charge before any class slot; once
   // that's gone it falls through to slots like any other known spell (2024 PHB). A non-caster

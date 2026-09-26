@@ -135,7 +135,7 @@ export const SPECIES_PLAIN_PERKS: Record<string, string[]> = {
   Elf: [
     "You can see in the dark.",
     "You're hard to charm or magically manipulate.",
-    "You're naturally perceptive — you notice things others miss.",
+    "You're naturally sharp — pick one of reading people, noticing things, or finding your way.",
     "You don't sleep the normal way, you rest in a short meditative trance instead.",
   ],
   Gnome: [
@@ -146,7 +146,6 @@ export const SPECIES_PLAIN_PERKS: Record<string, string[]> = {
     "You inherit a unique power from a legendary giant bloodline.",
     "At higher levels, you can grow to a larger size for a short time.",
     "You can carry and lift far more than your size would suggest.",
-    "You can shrug off part of an incoming hit once a day.",
   ],
   Halfling: [
     "You're hard to frighten.",
@@ -162,7 +161,6 @@ export const SPECIES_PLAIN_PERKS: Record<string, string[]> = {
   Orc: [
     "You can burst into a sprint and shrug off a bit of extra damage while doing it, a few times a day.",
     "You can see in the dark, further than most.",
-    "You can carry and lift far more than your size would suggest.",
     "Once a day, you can survive a hit that would otherwise knock you out.",
   ],
   Tiefling: [
@@ -191,7 +189,7 @@ export const SPECIES_FEATURES: Record<string, SpeciesFeature[]> = {
     {
       name: "Healing Hands",
       description:
-        "As a Magic action, you can touch a creature and restore a number of Hit Points equal to your Proficiency Bonus. Once you use this trait you can't do so again until you finish a Long Rest.",
+        "As a Magic action, you touch a creature and roll a number of d4s equal to your Proficiency Bonus. The creature regains a number of Hit Points equal to the total rolled. Once you use this trait, you can't use it again until you finish a Long Rest.",
     },
     {
       name: "Light Bearer",
@@ -201,7 +199,7 @@ export const SPECIES_FEATURES: Record<string, SpeciesFeature[]> = {
     {
       name: "Celestial Revelation",
       description:
-        "When you reach 3rd level, choose Necrotic Shroud, Radiant Consumption, or Radiant Soul. This transformation manifests as wings and an aura for 1 minute, granting bonus effects once per Long Rest.",
+        "When you reach character level 3, you can transform as a Bonus Action into one of Heavenly Wings, Inner Radiance, or Necrotic Shroud (chosen each time) for 1 minute. Once on each of your turns, you can deal extra damage equal to your Proficiency Bonus to one target you damage with an attack or spell — Necrotic for Necrotic Shroud, Radiant otherwise. Once per Long Rest.",
     },
   ],
   Dragonborn: [
@@ -213,12 +211,12 @@ export const SPECIES_FEATURES: Record<string, SpeciesFeature[]> = {
     {
       name: "Draconic Ancestry",
       description:
-        "Your lineage grants a damage type: Chromatic (acid/lightning/poison/fire/cold), Gem (psychic/radiant/thunder/force/necrotic), or Metallic (fire/cold, with secondary effects).",
+        "Choose a dragon within your lineage — it sets your damage type. Chromatic: Black (acid), Blue (lightning), Green (poison), Red (fire), White (cold). Gem: Amethyst (force), Crystal (radiant), Emerald (psychic), Sapphire (thunder), Topaz (necrotic). Metallic: Brass (fire), Bronze (lightning), Copper (acid), Gold (fire), Silver (cold).",
     },
     {
       name: "Breath Weapon",
       description:
-        "When you take the Attack action, you can replace one attack with an exhalation of magical energy in a 15-foot cone or 30-foot line. Each creature in that area must make a Dexterity saving throw (DC = 8 + CON modifier + proficiency bonus). Damage equals 1d10 per two character levels.",
+        "When you take the Attack action, you can replace one attack with an exhalation of magical energy in a 15-foot cone or 30-foot line. Each creature in that area must make a Dexterity saving throw (DC = 8 + CON modifier + proficiency bonus). A creature takes 1d10 damage of your ancestry's type on a failed save, or half as much on a success; this rises to 2d10 at 5th level, 3d10 at 11th, and 4d10 at 17th. You can use it a number of times equal to your Proficiency Bonus, regaining all uses on a Long Rest.",
     },
     {
       name: "Damage Resistance",
@@ -287,12 +285,12 @@ export const SPECIES_FEATURES: Record<string, SpeciesFeature[]> = {
     },
     {
       name: "Keen Senses",
-      description: "You have proficiency in the Perception skill.",
+      description: "You have proficiency in the Insight, Perception, or Survival skill (your choice).",
     },
     {
       name: "Trance",
       description:
-        "You don't need to sleep. Instead you meditate for 4 hours per day, after which you gain the same benefit as a Human from 8 hours of sleep.",
+        "You don't need to sleep, and magic can't put you to sleep. You can finish a Long Rest in 4 hours if you spend those hours in a trancelike meditation, during which you retain consciousness.",
     },
   ],
   Drow: [
@@ -351,22 +349,17 @@ export const SPECIES_FEATURES: Record<string, SpeciesFeature[]> = {
     {
       name: "Giant Ancestry",
       description:
-        "You are descended from giants. Choose one giant type (Cloud, Fire, Frost, Hill, Stone, or Storm) to determine your Giant Legacy trait, which you can use once per Long Rest.",
+        "You are descended from giants. Choose one benefit: Cloud's Jaunt (Bonus Action teleport up to 30 feet), Fire's Burn (+1d10 Fire damage on a hit), Frost's Chill (+1d6 Cold damage on a hit and the target's Speed drops by 10 feet), Hill's Tumble (knock a Large or smaller target Prone on a hit), Stone's Endurance (Reaction when you take damage: reduce it by 1d12 + your Constitution modifier), or Storm's Thunder (Reaction when a creature within 60 feet damages you: it takes 1d8 Thunder damage). You can use it a number of times equal to your Proficiency Bonus, regaining all uses on a Long Rest.",
     },
     {
       name: "Large Form",
       description:
-        "Starting at 5th level, as a Bonus Action you become Large for 1 minute. While Large, you have Advantage on Strength checks and your Speed increases by 10 feet.",
+        "Starting at character level 5, as a Bonus Action you can become Large for 10 minutes, if you're in a big enough space. While Large, you have Advantage on Strength checks and your Speed increases by 10 feet. Once per Long Rest.",
     },
     {
       name: "Powerful Build",
       description:
-        "You count as one size larger when determining your carrying capacity and the weight you can push, drag, or lift.",
-    },
-    {
-      name: "Stone's Endurance",
-      description:
-        "When you take damage, you can use your Reaction to roll a d12. Add your Constitution modifier to the number rolled and reduce the damage by that total. Once used, you must finish a Short or Long Rest.",
+        "You have Advantage on any ability check you make to end the Grappled condition. You also count as one size larger when determining your carrying capacity.",
     },
   ],
   Halfling: [
@@ -381,9 +374,9 @@ export const SPECIES_FEATURES: Record<string, SpeciesFeature[]> = {
         "You can move through the space of any creature that is of a size larger than yours.",
     },
     {
-      name: "Lucky",
+      name: "Luck",
       description:
-        "When you roll a 1 on the d20 for an attack roll, ability check, or saving throw, you can reroll the die and must use the new roll.",
+        "When you roll a 1 on the d20 of a D20 Test, you can reroll the die, and you must use the new roll.",
     },
     {
       name: "Naturally Stealthy",
@@ -410,17 +403,12 @@ export const SPECIES_FEATURES: Record<string, SpeciesFeature[]> = {
     {
       name: "Adrenaline Rush",
       description:
-        "You can take the Dash action as a Bonus Action. When you do, you gain a number of Temporary Hit Points equal to your Proficiency Bonus. You can use this trait a number of times equal to your Proficiency Bonus per Long Rest.",
+        "You can take the Dash action as a Bonus Action. When you do, you gain a number of Temporary Hit Points equal to your Proficiency Bonus. You can use this trait a number of times equal to your Proficiency Bonus, and you regain all expended uses when you finish a Short or Long Rest.",
     },
     {
       name: "Darkvision",
       description:
         "You can see in dim light within 120 feet as if it were bright light.",
-    },
-    {
-      name: "Powerful Build",
-      description:
-        "You count as one size larger when determining carrying capacity and weight you can push, drag, or lift.",
     },
     {
       name: "Relentless Endurance",
@@ -829,11 +817,6 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
   ],
   Ranger: [
     {
-      name: "Expertise",
-      description:
-        "You gain Expertise in two skills of your choice from your skill proficiencies, doubling your proficiency bonus for those skills.",
-    },
-    {
       name: "Favored Enemy",
       description:
         "You always have the Hunter's Mark spell prepared and it doesn't count against your prepared spells. You can cast it twice before a Long Rest without expending a spell slot.",
@@ -887,7 +870,7 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
     {
       name: "Eldritch Invocations",
       description:
-        "In your study of occult lore you have unearthed eldritch invocations — fragments of forbidden knowledge. You learn two Invocations of your choice that each grant a constant or triggered magical benefit.",
+        "In your study of occult lore you have unearthed eldritch invocations — fragments of forbidden knowledge. You gain one invocation of your choice, such as Pact of the Tome, and learn more as you gain Warlock levels.",
     },
     {
       name: "Pact Magic",
@@ -985,14 +968,32 @@ export const PRIMAL_ORDERS: ClassOrder[] = [
   },
 ];
 
-// ── Eldritch Invocations (Warlock level 1 choice, choose 2) ──────────────────
-// 2024 PHB's full invocation list has ~28 entries, most gated behind Warlock level 2+ or a
-// prerequisite invocation — this is only the subset with no prerequisite at all, i.e. what's
-// actually choosable at level 1. Selection only for now — no mechanical effects wired yet.
+// ── Eldritch Invocations (Warlock level 1 choice, choose 1) ──────────────────
+// The 2024 PHB's full invocation list. Only the five with no prerequisite are choosable at level
+// 1; the rest carry a `prerequisite` and are hidden at creation (ClassFeaturesTab).
+// None of the gated ones have mechanics yet — they'll matter once level-up grants invocations.
+// Mechanics: Eldritch Mind (rollSave), Armor of Shadows / Pact of the Chain (INVOCATION_SPELLS,
+// PACT_FAMILIAR_FORMS, combat:familiar:attack), Pact of the Tome (SpellsTab's tome pool), Pact of
+// the Blade (isPactWeapon, combat:pact:bond).
 
 export interface Invocation {
   name: string;
   description: string;
+  /** 2024 PHB prerequisite — a Warlock level, another invocation, and/or a free-text condition. Unset = none. */
+  prerequisite?: { level?: number; invocation?: string; note?: string };
+}
+
+/** "Level 5+ Warlock, Pact of the Blade" — the prerequisite as the PHB prints it. */
+export function invocationPrerequisiteText(inv: Invocation): string | undefined {
+  const p = inv.prerequisite;
+  if (!p) return undefined;
+  return [p.level && `Level ${p.level}+ Warlock`, p.invocation, p.note].filter(Boolean).join(", ");
+}
+
+/** Whether a Warlock of `level` with `invocations` meets inv's prerequisite. A `note` (e.g. "a damaging Warlock cantrip") isn't checked — it only ever rides alongside a level gate. */
+export function invocationPrerequisiteMet(inv: Invocation, level: number, invocations: readonly string[]): boolean {
+  const p = inv.prerequisite;
+  return !p || ((p.level ?? 0) <= level && (!p.invocation || invocations.includes(p.invocation)));
 }
 
 export const ELDRITCH_INVOCATIONS: Invocation[] = [
@@ -1009,19 +1010,70 @@ export const ELDRITCH_INVOCATIONS: Invocation[] = [
   {
     name: "Pact of the Blade",
     description:
-      "As a Bonus Action, you can conjure a pact weapon in your hand — a Simple or Martial Melee weapon of your choice with which you bond. Until the bond ends, you have proficiency with the weapon, and you can use it as a Spellcasting Focus. Whenever you attack with the bonded weapon, you can use your Charisma modifier for the attack and damage rolls instead of Strength or Dexterity.",
+      "As a Bonus Action, you can conjure a pact weapon in your hand — a Simple or Martial Melee weapon of your choice with which you bond — or create a bond with a magic weapon you touch. Until the bond ends, you have proficiency with the weapon, and you can use it as a Spellcasting Focus. Whenever you attack with the bonded weapon, you can use your Charisma modifier for the attack and damage rolls instead of Strength or Dexterity, and you can make it deal Necrotic, Psychic, or Radiant damage instead of its normal type. The bond ends if you use this Bonus Action again, if you're more than 5 feet from the weapon for 1 minute or more, or if you die.",
   },
   {
     name: "Pact of the Chain",
     description:
-      "You learn the Find Familiar spell and can cast it as a Magic action without expending a spell slot. When you take the Attack action, you can forgo one of your own attacks to let your familiar make one attack with its Reaction.",
+      "You learn the Find Familiar spell and can cast it as a Magic action without expending a spell slot. Your familiar can take a normal form or a special one: Imp, Pseudodragon, Quasit, Skeleton, Slaad Tadpole, Sphinx of Wonder, Sprite, or Venomous Snake. When you take the Attack action, you can forgo one of your own attacks to let your familiar make one attack with its Reaction.",
   },
   {
     name: "Pact of the Tome",
     description:
-      "A Book of Shadows appears in your hand at the end of a Short or Long Rest. Choose three cantrips and two 1st-level Ritual spells from any class's spell list — while the book is on your person, you have them prepared as Warlock spells. You can also use the book as a Spellcasting Focus.",
+      "A Book of Shadows appears in your hand at the end of a Short or Long Rest. Choose three cantrips and two level 1 spells with the Ritual tag from any class's spell list — while the book is on your person, you have them prepared as Warlock spells. You can also use the book as a Spellcasting Focus.",
   },
+  // ── Gated behind Warlock level 2+ or another invocation — shown at creation, but disabled ──
+  { name: "Agonizing Blast", prerequisite: { level: 2, note: "a Warlock cantrip that deals damage" },
+    description: "Choose one of your known Warlock cantrips that deals damage. You can add your Charisma modifier to that spell's damage rolls. You can gain this invocation more than once, choosing a different eligible cantrip each time." },
+  { name: "Devil's Sight", prerequisite: { level: 2 },
+    description: "You can see normally in Dim Light and Darkness — both magical and nonmagical — within 120 feet of yourself." },
+  { name: "Eldritch Spear", prerequisite: { level: 2, note: "a Warlock cantrip that deals damage" },
+    description: "Choose one of your known Warlock cantrips that deals damage and has a range of 10+ feet. When you cast that spell, its range increases by a number of feet equal to 30 times your Warlock level. You can gain this invocation more than once, choosing a different eligible cantrip each time." },
+  { name: "Fiendish Vigor", prerequisite: { level: 2 },
+    description: "You can cast False Life on yourself without expending a spell slot. When you cast it with this feature, you don't roll the die for the Temporary Hit Points; you automatically get the highest number on the die." },
+  { name: "Lessons of the First Ones", prerequisite: { level: 2 },
+    description: "You have received knowledge from an elder entity of the multiverse, allowing you to gain one Origin feat of your choice. You can gain this invocation more than once, choosing a different Origin feat each time." },
+  { name: "Mask of Many Faces", prerequisite: { level: 2 },
+    description: "You can cast Disguise Self without expending a spell slot." },
+  { name: "Misty Visions", prerequisite: { level: 2 },
+    description: "You can cast Silent Image without expending a spell slot." },
+  { name: "Otherworldly Leap", prerequisite: { level: 2 },
+    description: "You can cast Jump on yourself without expending a spell slot." },
+  { name: "Repelling Blast", prerequisite: { level: 2, note: "a Warlock cantrip that deals damage via an attack roll" },
+    description: "Choose one of your known Warlock cantrips that requires an attack roll. When you hit a Large or smaller creature with that cantrip, you can push the creature up to 10 feet straight away from you. You can gain this invocation more than once, choosing a different eligible cantrip each time." },
+  { name: "Ascendant Step", prerequisite: { level: 5 },
+    description: "You can cast Levitate on yourself without expending a spell slot." },
+  { name: "Eldritch Smite", prerequisite: { level: 5, invocation: "Pact of the Blade" },
+    description: "Once per turn when you hit a creature with your pact weapon, you can expend a Pact Magic spell slot to deal an extra 1d8 Force damage to the target, plus another 1d8 per level of the spell slot, and you can give the target the Prone condition if it is Huge or smaller." },
+  { name: "Gaze of Two Minds", prerequisite: { level: 5 },
+    description: "You can use a Bonus Action to touch a willing creature and perceive through its senses until the end of your next turn. As long as the creature is on the same plane of existence as you, you can take a Bonus Action on subsequent turns to maintain this connection. While perceiving through the other creature's senses, you benefit from any special senses it has, and you can cast spells as if you were in your space or the other creature's space if the two of you are within 60 feet of each other." },
+  { name: "Gift of the Depths", prerequisite: { level: 5 },
+    description: "You can breathe underwater, and you gain a Swim Speed equal to your Speed. You can also cast Water Breathing once without expending a spell slot. You regain the ability to cast it in this way again when you finish a Long Rest." },
+  { name: "Investment of the Chain Master", prerequisite: { level: 5, invocation: "Pact of the Chain" },
+    description: "Your familiar gains a Fly or Swim Speed of 40 feet, you can take a Bonus Action to command it to take the Attack action, its attacks can deal Necrotic or Radiant damage, it uses your spell save DC, and you can take a Reaction to grant it Resistance when it takes damage." },
+  { name: "Master of Myriad Forms", prerequisite: { level: 5 },
+    description: "You can cast Alter Self without expending a spell slot." },
+  { name: "One with Shadows", prerequisite: { level: 5 },
+    description: "While you're in an area of Dim Light or Darkness, you can cast Invisibility on yourself without expending a spell slot." },
+  { name: "Thirsting Blade", prerequisite: { level: 5, invocation: "Pact of the Blade" },
+    description: "You gain the Extra Attack feature for your pact weapon only. With that feature, you can attack twice with the weapon instead of once when you take the Attack action on your turn." },
+  { name: "Whispers of the Grave", prerequisite: { level: 7 },
+    description: "You can cast Speak with Dead without expending a spell slot." },
+  { name: "Gift of the Protectors", prerequisite: { level: 9, invocation: "Pact of the Tome" },
+    description: "A new page appears in your Book of Shadows. With your permission, a creature can take an action to write its name on it (up to your Charisma modifier). When any creature whose name is on the page is reduced to 0 Hit Points but not killed outright, it magically drops to 1 Hit Point instead. Once triggered, it can't be used again until you finish a Long Rest." },
+  { name: "Lifedrinker", prerequisite: { level: 9, invocation: "Pact of the Blade" },
+    description: "Once per turn when you hit a creature with your pact weapon, you can deal an extra 1d6 Necrotic, Psychic, or Radiant damage (your choice) to the creature, and you can expend one of your Hit Point Dice to roll it and regain Hit Points equal to the roll plus your Constitution modifier." },
+  { name: "Visions of Distant Realms", prerequisite: { level: 9 },
+    description: "You can cast Arcane Eye without expending a spell slot." },
+  { name: "Devouring Blade", prerequisite: { level: 12, invocation: "Thirsting Blade" },
+    description: "The Extra Attack of your Thirsting Blade invocation confers two extra attacks rather than one." },
+  { name: "Witch Sight", prerequisite: { level: 15 },
+    description: "You have Truesight with a range of 30 feet." },
 ];
+
+// Pact of the Tome's Book of Shadows: any class's cantrips + level 1 Ritual spells, learned under
+// the invocation's name (SpellsTab's tome pool). They're Warlock spells, so Charisma casts them.
+export const PACT_OF_THE_TOME = { label: "Pact of the Tome", cantrips: 3, spells: 2 } as const;
 
 // Sourced from shared (server needs the same table for spell save resolution);
 // re-cased to uppercase here since StatName/STAT_NAMES are uppercase throughout this file.

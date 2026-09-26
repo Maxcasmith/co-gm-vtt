@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import type { Spell } from 'shared';
 import { useCharacter } from './CharacterContext.tsx';
 import TileGrid from './TileGrid.tsx';
-import { CLASS_FEATURES, CLASS_SPELL_ALLOWANCE, FEAT_SPELL_GRANTS, BACKGROUND_FEAT, speciesSpellGrant } from './srd.ts';
+import { CLASS_FEATURES, CLASS_SPELL_ALLOWANCE, FEAT_SPELL_GRANTS, BACKGROUND_FEAT, PACT_OF_THE_TOME, speciesSpellGrant } from './srd.ts';
 
 const API = `http://${window.location.hostname}:3001`;
 
@@ -36,12 +36,19 @@ export default function SpellsTab() {
     return lineage.forClass ? spell.classes.includes(lineage.forClass) : lineage.cantrips.includes(spell.name);
   }
 
+  // Pact of the Tome — a fourth pool: any class's cantrips, and level 1 spells with the Ritual tag.
+  const tome = c.invocations.includes(PACT_OF_THE_TOME.label);
+  function tomeEligible(spell: Spell): boolean {
+    return tome && (spell.level === 0 || (spell.level === 1 && spell.isRitual));
+  }
+
   // A spell only reachable through a feat's class or a lineage (not also on the character's own
   // class list) can never draw from the class pool. Used for the "foreign spell" badge in the
   // browser; the actual pool a *learned* spell drew from is its recorded source.
   function featOnlySource(spell: Spell): string | undefined {
     if (spell.classes.includes(c.characterClass)) return undefined;
-    return featSources.find(fs => spell.classes.includes(fs.grant.forClass))?.name ?? (lineageEligible(spell) ? lineage!.label : undefined);
+    return featSources.find(fs => spell.classes.includes(fs.grant.forClass))?.name ?? (lineageEligible(spell) ? lineage!.label : undefined)
+      ?? (tomeEligible(spell) ? PACT_OF_THE_TOME.label : undefined);
   }
 
   // Thaumaturge (Divine Order) and Magician (Primal Order) each know one cantrip beyond the
@@ -69,11 +76,11 @@ export default function SpellsTab() {
     fetch(`${API}/api/spells?level=0&level=1`)
       .then(r => r.json())
       .then((data: Spell[]) => setAllSpells(data.filter(s =>
-        s.classes.includes(c.characterClass) || featSources.some(fs => s.classes.includes(fs.grant.forClass)) || lineageEligible(s))))
+        s.classes.includes(c.characterClass) || featSources.some(fs => s.classes.includes(fs.grant.forClass)) || lineageEligible(s) || tomeEligible(s))))
       .catch(() => setAllSpells([]))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [c.characterClass, featSourceNames.join(','), lineage?.label]);
+  }, [c.characterClass, featSourceNames.join(','), lineage?.label, tome]);
 
   const schools = useMemo(() => [...new Set(allSpells.map(s => s.school))].sort(), [allSpells]);
 
@@ -102,6 +109,8 @@ export default function SpellsTab() {
   const learnedCantrips     = countBySource(true, c.characterClass);
   const learnedSpellCount   = countBySource(false, c.characterClass);
   const learnedLineageCantrips = lineage ? countBySource(true, lineage.label) : 0;
+  const learnedTomeCantrips = countBySource(true, PACT_OF_THE_TOME.label);
+  const learnedTomeSpells   = countBySource(false, PACT_OF_THE_TOME.label);
 
   // A same-class Magic Initiate merges its spell list with the class's own, so most spells are
   // eligible for either pool. Class slots fill first; once those are full, eligible spells spill
@@ -124,8 +133,14 @@ export default function SpellsTab() {
     return lineage && lineageEligible(spell) && learnedLineageCantrips < lineage.cantrips.length ? lineage.label : undefined;
   }
 
+  function tomeSlot(spell: Spell): string | undefined {
+    if (!tomeEligible(spell)) return undefined;
+    const open = spell.level === 0 ? learnedTomeCantrips < PACT_OF_THE_TOME.cantrips : learnedTomeSpells < PACT_OF_THE_TOME.spells;
+    return open ? PACT_OF_THE_TOME.label : undefined;
+  }
+
   function limitReached(spell: Spell): boolean {
-    return !classSlot(spell) && !featSlotSource(spell) && !lineageSlot(spell);
+    return !classSlot(spell) && !featSlotSource(spell) && !lineageSlot(spell) && !tomeSlot(spell);
   }
 
   function toggleLearn(spell: Spell) {
@@ -134,7 +149,7 @@ export default function SpellsTab() {
       delete next[spell.name];
       c.set('learnedSpells', next);
     } else {
-      const source = classSlot(spell) ? c.characterClass : featSlotSource(spell) ?? lineageSlot(spell);
+      const source = classSlot(spell) ? c.characterClass : featSlotSource(spell) ?? lineageSlot(spell) ?? tomeSlot(spell);
       if (!source) return;
       c.set('learnedSpells', { ...c.learnedSpells, [spell.name]: source });
     }
@@ -171,6 +186,8 @@ export default function SpellsTab() {
                   fs.grant.spells > 0   && <span key={`${fs.name}-s`} className={learnedFeatSpells >= fs.grant.spells ? 'spells-count spells-count--full' : 'spells-count'}>{learnedFeatSpells}/{fs.grant.spells} {fs.name} spells</span>,
                 ];
               })}
+              {tome && <span className={learnedTomeCantrips >= PACT_OF_THE_TOME.cantrips ? 'spells-count spells-count--full' : 'spells-count'}>{learnedTomeCantrips}/{PACT_OF_THE_TOME.cantrips} {PACT_OF_THE_TOME.label} cantrips</span>}
+              {tome && <span className={learnedTomeSpells >= PACT_OF_THE_TOME.spells ? 'spells-count spells-count--full' : 'spells-count'}>{learnedTomeSpells}/{PACT_OF_THE_TOME.spells} {PACT_OF_THE_TOME.label} rituals</span>}
               {lineage && <span className={learnedLineageCantrips >= lineage.cantrips.length ? 'spells-count spells-count--full' : 'spells-count'}>{learnedLineageCantrips}/{lineage.cantrips.length} {lineage.label} cantrips</span>}
             </span>
           </div>

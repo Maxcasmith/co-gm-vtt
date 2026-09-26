@@ -1,7 +1,7 @@
-import type { TurnOrderEntry, Weapon, Spell, SpellAttackResult, RollBreakdown, RollModifier, SpellSaveOutcome, SpellSaveResult, CreatureType, Character, ActionResource, AttackContext, DungeonEntity, EffectSpec, AbilityKey, HookSpec } from 'shared';
-import { effectiveWeaponProfs, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, isAmmunition, isWeapon, isMonkWeapon, statMod, parseRangeFeet, resolveForcedMovement, findPath, effectApplies, actionCostFromCastingTime, requiresConcentration, resolveSpellDamageDice, hasOriginFeat, hasClassLevel, crossesObscuredArea, ABILITY_DEFS, trySpendResource, trySpendResourceAmount, resourceCurrent, getSenses, hasLineOfSight, closedDoorCells, monkMartialArtsActive, monkLevel, martialArtsDie } from 'shared';
+import type { StoredFamiliar, TurnOrderEntry, Weapon, Spell, SpellAttackResult, RollBreakdown, RollModifier, SpellSaveOutcome, SpellSaveResult, CreatureType, Character, ActionResource, AttackContext, DungeonEntity, EffectSpec, AbilityKey, HookSpec } from 'shared';
+import { effectiveWeaponProfs, CLASS_SPELLCASTING_ABILITY, CLASS_SAVING_THROWS, isAmmunition, isWeapon, isMonkWeapon, statMod, parseRangeFeet, resolveForcedMovement, findPath, effectApplies, actionCostFromCastingTime, requiresConcentration, resolveSpellDamageDice, hasOriginFeat, hasClassLevel, crossesObscuredArea, ABILITY_DEFS, trySpendResource, trySpendResourceAmount, resourceCurrent, getSenses, hasLineOfSight, closedDoorCells, monkMartialArtsActive, monkLevel, martialArtsDie, breathWeaponSpell, ownsAbility, invocationSpell, PACT_FAMILIAR_FORMS, isPactWeapon, weaponDamageType, PACT_WEAPON_CHOICES, PACT_WEAPON_DAMAGE_TYPES } from 'shared';
 import { randomUUID } from 'crypto';
-import { getCharacter, updateCharacter, saveEncounter, listCharacters, getConfig, saveDungeon, getHouseRules } from '../storage.ts';
+import { getCharacter, updateCharacter, saveEncounter, listCharacters, getConfig, saveDungeon, getHouseRules, loadPartyAllies, savePartyAllies } from '../storage.ts';
 import { getFeatureProvider, hasFeatureProvider } from '../providers/index.ts';
 import { generateCombatFlavour, generateSpellSaveFlavour } from '../session-processor/imagePrompts.ts';
 import { Participant, type Encounter } from '../domain/encounter.ts';
@@ -20,9 +20,10 @@ import { applyDamageToCreature, applyDamageToPlayer, applyHealingToPlayer, apply
 import { advanceTurn, tryBeginCombat, updateAlertSelection, resolveAlertPause } from '../combat/runtime/lifecycle.ts';
 import { trySpendSpellSlot, offerLuckAttackReroll, trySpendHeroicInspiration } from '../combat/runtime/resources.ts';
 import { emitResources } from '../combat/runtime/shared.ts';
+import { resolveCreatureAttack } from '../combat/runtime/ai.ts';
 import { applyCondition, clearCondition, breakSanctuaryOn } from '../combat/runtime/statusEffects.ts';
 import { startConcentrating, isConcentratingOn, breakConcentration } from '../combat/runtime/concentration.ts';
-import { rollSavingThrow, rollSave, investigateIllusion, emitCombatRoll } from '../combat/runtime/rolls.ts';
+import { rollSavingThrow, rollSave, effectConditions, investigateIllusion, emitCombatRoll } from '../combat/runtime/rolls.ts';
 import { checkTrapAt } from '../combat/runtime/traps.ts';
 import { canMove, applyElevationChange, checkMovementTriggers } from '../combat/runtime/movement.ts';
 import { getWorldTimeSecs } from '../combat/runtime/environment.ts';
@@ -123,7 +124,7 @@ async function resolveSplashAoE(
     const participant = encounter.findParticipant(targetId);
     if (!participant || participant.isDead()) continue;
 
-    const { saved, roll, total, breakdown } = await rollSavingThrow(cid, targetId, saveAbility, dc);
+    const { saved, roll, total, breakdown } = await rollSavingThrow(cid, targetId, saveAbility, dc, effectConditions(effects));
     const targetType: CreatureType = participant.isPlayer ? 'Humanoid' : (participant.creature?.creatureType ?? 'Humanoid');
     const rolledDamage = rollApplicableDamage(effects, targetType, casterLevel, slotLevel);
 
@@ -166,6 +167,46 @@ async function grantItem(cid: string, casterId: string, spec: NonNullable<Spell[
   if (sid) io.to(sid).emit('character:inventory:add', [item]);
 }
 
+const FAMILIAR_NAMES = new Set(['Familiar', ...Object.keys(PACT_FAMILIAR_FORMS)]);
+
+/** The Find Familiar modal's pick, trimmed and capped — undefined unless it has a name. */
+function sanitizeFamiliar(raw: StoredFamiliar | undefined): StoredFamiliar | undefined {
+  if (!raw || typeof raw.name !== 'string' || typeof raw.description !== 'string') return undefined;
+  const name = raw.name.trim().slice(0, 40);
+  if (!name) return undefined;
+  const form = typeof raw.form === 'string' && raw.form in PACT_FAMILIAR_FORMS ? raw.form : undefined;
+  return { name, description: raw.description.trim().slice(0, 500), ...(form ? { form } : {}) };
+}
+
+/**
+ * A summon spell's companion. Find Familiar takes the modal's name/description, and its form's
+ * stat block when the caster has Pact of the Chain; it's tagged `familiar` so a later summon
+ * replaces it (grantCompanion).
+ */
+function companionFor(char: Character, spell: Spell, familiar: StoredFamiliar | undefined): NonNullable<Spell['combat']>['grantsCompanion'] {
+  const base = spell.combat?.grantsCompanion;
+  if (!base || spell.name !== 'Find Familiar') return base;
+  const form = familiar?.form && char.invocations?.includes('Pact of the Chain') ? PACT_FAMILIAR_FORMS[familiar.form] : undefined;
+  return {
+    ...(form ?? base),
+    ...(familiar ? { name: familiar.name } : {}),
+    ...(familiar?.description ? { appearance: familiar.description } : {}),
+    familiar: true,
+  };
+}
+
+/** Saves the summoned familiar to the caster's stored list (upsert by name) for the modal to offer next time. */
+async function rememberFamiliar(cid: string, casterId: string, familiar: StoredFamiliar | undefined): Promise<void> {
+  if (!familiar) return;
+  const key = familiar.name.toLowerCase();
+  const updated = await updateCharacter(cid, casterId, c => ({
+    ...c,
+    familiars: [...(c.familiars ?? []).filter(f => f.name.toLowerCase() !== key), familiar],
+  }));
+  const sid = playerSocketIds.get(casterId);
+  if (sid && updated?.familiars) io.to(sid).emit('character:familiars:update', { characterId: casterId, familiars: updated.familiars });
+}
+
 /**
  * Summons a spell's `grantsCompanion` spec via the same party_join effect a recruited NPC ally
  * uses (persists, auto-joins turn order if combat is active) — tagged with `ownerId: casterId`
@@ -176,6 +217,14 @@ async function grantItem(cid: string, casterId: string, spec: NonNullable<Spell[
 async function grantCompanion(cid: string, casterId: string, casterName: string, spec: NonNullable<Spell['combat']>['grantsCompanion']): Promise<void> {
   if (!spec) return;
   const id = randomUUID();
+  // Casting Find Familiar again swaps the form (2024 PHB) — drop this caster's old familiar first.
+  // ponytail: only the saved roster; an old familiar already in a live fight stays until it ends.
+  if (spec.familiar) {
+    const allies = await loadPartyAllies(cid);
+    // FAMILIAR_NAMES catches familiars summoned before the `familiar` tag existed.
+    const kept = allies.filter(a => !(a.ownerId === casterId && (a.familiar || FAMILIAR_NAMES.has(a.name))));
+    if (kept.length !== allies.length) await savePartyAllies(cid, kept);
+  }
   await applyEffects(cid, [{ type: 'party_join', ally: { ...spec, id, ownerId: casterId } }], [casterId]);
   const pos = positionsOf(cid, casterName)[casterName] ?? positionsOf(cid, casterName)[casterId];
   if (pos) {
@@ -516,11 +565,14 @@ export async function resolvePlayerAttack(
       const offhandItem = char.inventory?.find(i => i.id === char.equipment?.offHand);
       const hasOffhandWeapon = !!offhandItem && isWeapon(offhandItem);
       const spellAbilityKey = CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int';
-      const statBonus = weaponOverride ? statMod(char.stats[spellAbilityKey]) : (useDex ? dexMod : strMod);
-      const statName = weaponOverride ? (STAT_FULL[spellAbilityKey.toUpperCase()] ?? spellAbilityKey) : (useDex ? 'Dexterity' : 'Strength');
+      // Pact of the Blade: proficient with the bonded weapon, and Charisma may stand in for Str/Dex.
+      const pact = isPactWeapon(char, weapon);
+      const usePactCha = pact && !weaponOverride && statMod(char.stats.cha) > (useDex ? dexMod : strMod);
+      const statBonus = weaponOverride ? statMod(char.stats[spellAbilityKey]) : usePactCha ? statMod(char.stats.cha) : (useDex ? dexMod : strMod);
+      const statName = weaponOverride ? (STAT_FULL[spellAbilityKey.toUpperCase()] ?? spellAbilityKey) : usePactCha ? 'Charisma (Pact of the Blade)' : (useDex ? 'Dexterity' : 'Strength');
       const charProf = char.proficiencyBonus ?? 2;
       const classWeaponProfs = effectiveWeaponProfs(char);
-      const isProficient = weapon.properties?.some(p => classWeaponProfs.includes(p as 'simple' | 'martial'));
+      const isProficient = pact || weapon.properties?.some(p => classWeaponProfs.includes(p as 'simple' | 'martial'));
       // Bless/Bane — rerolled fresh against every attack, not fixed at cast time (see RollModifierHook).
       // Bardic Inspiration's single die is unregistered the moment it's summed in (consumeOnUse).
       const rollMods = getStateEngine(cid).getHooksOwnedBy(attackerId, 'rollModifier') as RollModifierHook[];
@@ -562,7 +614,7 @@ export async function resolvePlayerAttack(
         inDarkness && dis("Can't see target"), attackerSelfDisadvantage && dis(attackerSelfDisadvantage),
         targetAdvantageGrant && adv(targetAdvantageGrant), attackerSelfAdvantage && adv(attackerSelfAdvantage),
         inspirationSpent && adv('Heroic Inspiration'),
-      ]), toHitLines);
+      ], char), toHitLines);
       let roll = keptDie(breakdown);
       const atkCtx = await engine.trigger('afterAttackRoll', await engine.trigger('beforeAttackRoll', {
         attackerId, attackerName,
@@ -666,7 +718,7 @@ export async function resolvePlayerAttack(
               const casterAbility = CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int';
               dc = 8 + charProf + statMod(char.stats[casterAbility]) + dcBonusFor(getStateEngine(cid), attackerId);
               const { saved: s, roll: saveRoll, bonus: saveBonus, total: saveTotal, breakdown: saveBreakdown } =
-                await rollSavingThrow(cid, targetId, pending.save.ability, dc);
+                await rollSavingThrow(cid, targetId, pending.save.ability, dc, effectConditions(pending.effects, pending.hooks));
               saved = s;
               console.log(`[bundled-smite] ${creature.name} save vs ${pending.spellName} DC${dc}: d20=${saveRoll}${fmtMod(saveBonus)}=${saveTotal} — ${saved ? 'SAVE' : 'FAIL'}`);
               emitCombatRoll(cid, targetId, { actorName: creature.name, label: `${pending.save.ability.toUpperCase()} save vs ${pending.spellName}`, dc, success: saved, breakdown: saveBreakdown });
@@ -787,7 +839,7 @@ export async function resolvePlayerAttack(
         const helpfulAllyNearTarget = !!targetPos && await hasHelpfulAllyWithinMeleeRange(cid, attackerId, targetPos.gx, targetPos.gy);
         const dmgCtx = await engine.trigger('beforeDamage', {
           sourceId: attackerId, targetId, targetName: creature.name,
-          amount: damage, damageType: weapon.damageType, sourceName: weapon.name,
+          amount: damage, damageType: weaponDamageType(char, weapon), sourceName: weapon.name,
           isMelee, weaponTwoHanded: weapon.twoHanded, hasOffhandWeapon,
           attackRollMode: breakdown.mode,
           isFinesseOrRangedWeapon: weapon.isFinesse || !isMelee,
@@ -841,7 +893,7 @@ export async function resolvePlayerAttack(
         isCrit,
         damage,
         damageRoll,
-        damageType: weapon.damageType,
+        damageType: weaponDamageType(char, weapon),
         damageFormula: weapon.damage,
         damageStatBonus,
         bonusSpellName: bonus?.spellName,
@@ -966,7 +1018,7 @@ export async function resolvePlayerSpellAttack(
           breakdown = withModifiers(rollD20([
             ...conditionModeSources(char, 'attack'), ...targetModeSources(creature), obscured && dis('Obscured'),
             targetAdvantageGrant && adv(targetAdvantageGrant), casterSelfAdvantage && adv(casterSelfAdvantage),
-          ]), toHitLines);
+          ], char), toHitLines);
           roll = keptDie(breakdown);
           atkCtx = await engine.trigger('afterAttackRoll', await engine.trigger('beforeAttackRoll', {
             attackerId: casterId, attackerName: casterName,
@@ -1333,6 +1385,91 @@ export function registerCombatHandlers(ctx: JoinContext): void {
     void resolvePlayerAttack(campaignId, payload);
   });
 
+  socket.on('character:familiar:delete', ({ characterId, name }) => {
+    void (async () => {
+      if (typeof name !== 'string') return;
+      const key = name.toLowerCase();
+      const updated = await updateCharacter(campaignId, characterId, c => ({ ...c, familiars: (c.familiars ?? []).filter(f => f.name.toLowerCase() !== key) }));
+      const sid = playerSocketIds.get(characterId);
+      if (sid && updated) io.to(sid).emit('character:familiars:update', { characterId, familiars: updated.familiars ?? [] });
+    })();
+  });
+
+  // Pact of the Blade: conjure a pact weapon (or bond a carried magic one) into the main hand —
+  // a Bonus Action mid-fight, free outside one. The old conjured weapon vanishes; a bonded magic
+  // weapon just stops being the pact weapon. ponytail: RAW also ends the bond after a minute more
+  // than 5 ft from the weapon, or on death — neither tracked; re-bonding is the only way it ends.
+  socket.on('combat:pact:bond', ({ characterId, weaponId, itemId, damageType }) => {
+    void (async () => {
+      const cid = campaignId;
+      const char = await getCharacter(cid, characterId);
+      if (!char?.invocations?.includes('Pact of the Blade')) return;
+      if (damageType && !(PACT_WEAPON_DAMAGE_TYPES as readonly string[]).includes(damageType)) return;
+      const template = weaponId ? PACT_WEAPON_CHOICES.find(w => w.id === weaponId) : undefined;
+      const carried = itemId ? char.inventory?.find(i => i.id === itemId) : undefined;
+      // RAW bonds by touch only with a magic weapon; an attack bonus is this app's only magic marker.
+      const bondable = carried && isWeapon(carried) && carried.range <= 10 && (carried.attackBonus ?? 0) > 0 ? carried : undefined;
+      const weapon = template ? { ...template, id: randomUUID(), name: `Pact ${template.name}`, type: 'weapon' as const } : bondable;
+      if (!weapon) return;
+      if (fightOf(cid, characterId) && !trySpendAction(cid, characterId, 'bonusAction')) return;
+
+      const dropId = char.pactWeapon?.conjured && char.pactWeapon.itemId !== weapon.id ? char.pactWeapon.itemId : undefined;
+      const pactWeapon = { itemId: weapon.id, conjured: !!template, ...(damageType ? { damageType } : {}) };
+      const prevMain = char.inventory?.find(i => i.id === char.equipment?.mainHand);
+      const equipment = { ...char.equipment, mainHand: weapon.id };
+      // Two-handed takes the off hand too; freeing it from a two-hander (or the vanished weapon) empties it.
+      if (weapon.twoHanded) equipment.offHand = weapon.id;
+      else if (equipment.offHand === dropId || (prevMain && isWeapon(prevMain) && prevMain.twoHanded && equipment.offHand === prevMain.id)) delete equipment.offHand;
+      await updateCharacter(cid, characterId, c => ({
+        ...c,
+        inventory: [...(c.inventory ?? []).filter(i => i.id !== dropId), ...(template ? [weapon] : [])],
+        equipment,
+        pactWeapon,
+      }));
+
+      const sid = playerSocketIds.get(characterId);
+      if (sid && dropId) io.to(sid).emit('character:inventory:remove', { itemId: dropId, quantity: 0 });
+      if (sid && template) io.to(sid).emit('character:inventory:add', [weapon]);
+      for (const slot of ['mainHand', 'offHand'] as const) {
+        io.to(campaignRoom(cid)).emit('character:equipment:update', { characterId, slot, itemId: equipment[slot] ?? null });
+      }
+      io.to(campaignRoom(cid)).emit('character:pactWeapon:update', { characterId, pactWeapon });
+      const verb = template ? 'conjures' : 'bonds with';
+      void postChat(cid, { text: `${char.name} ${verb} ${weapon.name}${damageType ? ` (${damageType})` : ''}.`, senderName: 'System', timestamp: Date.now() }, [characterId]);
+    })();
+  });
+
+  // Pact of the Chain: forgo your attack (the Attack action, one attack at this level) so your
+  // familiar makes one attack with its Reaction. It must already be within 5 ft of the target.
+  socket.on('combat:familiar:attack', ({ attackerId, targetId }) => {
+    void (async () => {
+      const cid = campaignId;
+      const encounter = fightOf(cid, attackerId);
+      const char = await getCharacter(cid, attackerId);
+      if (!encounter || !char?.invocations?.includes('Pact of the Chain')) return;
+      const block = (reason: string) => {
+        const sid = playerSocketIds.get(attackerId);
+        if (sid) io.to(sid).emit('combat:attack:blocked', { reason });
+      };
+      const familiar = encounter.turnOrder.find(p => p.ownerId === attackerId && !p.isDead() && p.creature?.reactionAttack);
+      const atk = familiar?.creature?.reactionAttack;
+      const target = encounter.findParticipant(targetId);
+      if (!familiar?.creature || !atk) return block('No familiar with an attack in this fight');
+      if (!target || target.isDead()) return;
+      const positions = positionsOf(cid, attackerId);
+      const fpos = positions[familiar.id];
+      const tpos = positions[target.isPlayer ? target.name : target.id];
+      if (!fpos || !tpos || Math.max(Math.abs(fpos.gx - tpos.gx), Math.abs(fpos.gy - tpos.gy)) > 1) {
+        return block(`${familiar.name} must be within 5 ft of ${target.name}`);
+      }
+      if (!familiar.hasResource('reaction')) return block(`${familiar.name} has already used its Reaction`);
+      if (!trySpendAction(cid, attackerId, 'action')) return;
+      familiar.trySpend('reaction');
+      emitResources(cid, familiar);
+      await resolveCreatureAttack(cid, familiar, familiar.creature, atk, target, positions, tpos);
+    })();
+  });
+
   // Spell attack (e.g. Fire Bolt, or Jim's Magic Missile's 3 darts) — mirrors combat:attack but
   // uses the caster's spellcasting modifier for the attack roll and adds no stat mod to damage.
   // One attack roll per entry in targetIds — most spells send a single entry (spellTargetCount
@@ -1344,9 +1481,10 @@ export function registerCombatHandlers(ctx: JoinContext): void {
 
   // Save-based spell (single-target or AoE) — computes the DC once, then rolls each
   // affected target's save mechanically and applies damage/conditions behind the curtain.
-  socket.on('combat:spell:cast', ({ casterId, casterName, spell, slotLevel, targetIds, chosenDamageType, chosenCommand, chosenSkill, originGx, originGy }) => {
+  socket.on('combat:spell:cast', ({ casterId, casterName, spell, slotLevel, targetIds, chosenDamageType, chosenCommand, chosenSkill, chosenFamiliar, originGx, originGy }) => {
     void (async () => {
       const cid = campaignId;
+      const familiar = sanitizeFamiliar(chosenFamiliar);
 
       // Journal-only spells (Ceremony) never resolve mechanically and can't be cast while combat
       // is active — no action, no attack/save, just a slot spend and a journal/chat line.
@@ -1387,7 +1525,10 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           return;
         }
         if (spell.combat.grantsItem) await grantItem(cid, casterId, spell.combat.grantsItem);
-        if (spell.combat.grantsCompanion) await grantCompanion(cid, casterId, casterName, spell.combat.grantsCompanion);
+        if (spell.combat.grantsCompanion) {
+          await grantCompanion(cid, casterId, casterName, companionFor(char, spell, familiar));
+          await rememberFamiliar(cid, casterId, familiar);
+        }
         if (spell.combat.followingObject) placeFollowingObject(cid, casterId, casterName, spell.combat.followingObject);
         if (spell.combat.hooks?.length) {
           // Self-only (Disguise Self) — nothing in this exploration-cast branch targets anyone
@@ -1412,8 +1553,34 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       const char = await getCharacter(cid, casterId);
       if (!char) return;
 
-      const castCost = spell.combat?.actionCostOverride ?? actionCostFromCastingTime(spell.castingTime);
-      if (castCost && castCost !== 'reaction' && !trySpendAction(cid, casterId, castCost)) return;
+      // Dragonborn Breath Weapon (breathWeaponSpell): rebuilt from the saved ancestry so the
+      // client's damage/area can't be spoofed — only the cone/line pick comes from the payload.
+      // Spends RESOURCE_DEFS.breathWeapon instead of a slot, checked before the action is spent.
+      const isBreath = spell.name === 'Breath Weapon';
+      let breathUses: Record<string, number> | undefined;
+      if (isBreath) {
+        const rebuilt = breathWeaponSpell(char, spell.combat?.area?.shape === 'line' ? 'line' : 'cone');
+        breathUses = rebuilt ? trySpendResource(char, 'breathWeapon') : undefined;
+        if (!rebuilt || !breathUses) {
+          const sid = playerSocketIds.get(casterId);
+          if (sid) io.to(sid).emit('combat:attack:blocked', { reason: 'No uses of Breath Weapon left' });
+          return;
+        }
+        spell = rebuilt;
+      }
+      // Armor of Shadows: the free Mage Armor is on yourself only.
+      if (invocationSpell(char, spell.name)?.selfOnly) targetIds = [casterId];
+
+      // Longer casting times (Find Familiar's 1 hour, Snare's 1 minute) cost a full action mid-fight,
+      // same as the client's spellActionCost — Pact of the Chain's "cast it as a Magic action" too.
+      const castCost = spell.combat?.actionCostOverride ?? actionCostFromCastingTime(spell.castingTime) ?? 'action';
+      if (castCost !== 'reaction' && !trySpendAction(cid, casterId, castCost)) return;
+
+      if (breathUses) {
+        const nextResourceUses = breathUses;
+        await updateCharacter(cid, casterId, fresh => ({ ...fresh, resourceUses: nextResourceUses }));
+        io.to(campaignRoom(cid)).emit('combat:player:featureResources', { characterId: casterId, resourceUses: nextResourceUses });
+      }
 
       // Redirecting an already-sustained spell (Hunter's Mark, Witch Bolt) is free — no slot, per
       // RAW — checked first so it wins over Favored Enemy below: retargeting a mark you're
@@ -1433,7 +1600,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         }
       }
 
-      const free = spentFavoredEnemy || alreadySustaining;
+      const free = spentFavoredEnemy || alreadySustaining || isBreath;
       if (!free && !(await trySpendSpellSlot(cid, casterId, char, slotLevel, spell.name))) {
         const sid = playerSocketIds.get(casterId);
         if (sid) io.to(sid).emit('combat:attack:blocked', { reason: 'No spell slots left' });
@@ -1461,7 +1628,8 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       // Searing Smite's Burning) — see the `pending.save` branch in combat:attack below.
       // ponytail: curse-style buffs that mark an enemy target over a duration (Hex, Hunter's
       // Mark) need target-lock + duration tracking, a different shape — not handled here yet.
-      if (parseRangeFeet(spell.range) === 0 && targetIds.length === 1 && targetIds[0] === casterId) {
+      // Summons (Find Familiar) resolve here too, whatever their range — there's no target to pick.
+      if ((parseRangeFeet(spell.range) === 0 || combat?.grantsCompanion) && targetIds.length === 1 && targetIds[0] === casterId) {
         // Tear down whatever this caster was concentrating on BEFORE the hooks below register —
         // same reasoning as the autoHit/curse branch above: these hooks are also caster-owned, so
         // registering them first and breaking after would unregister the ones just added right
@@ -1521,7 +1689,10 @@ export function registerCombatHandlers(ctx: JoinContext): void {
           // resolution of its own, just the announcement so the table knows it's active and the
           // GM can narrate what it senses. Previously fell through to a silent no-op here.
           if (combat?.grantsItem) await grantItem(cid, casterId, combat.grantsItem);
-          if (combat?.grantsCompanion) await grantCompanion(cid, casterId, casterName, combat.grantsCompanion);
+          if (combat?.grantsCompanion) {
+            await grantCompanion(cid, casterId, casterName, companionFor(char, spell, familiar));
+            await rememberFamiliar(cid, casterId, familiar);
+          }
           if (combat?.followingObject) placeFollowingObject(cid, casterId, casterName, combat.followingObject);
           const msg = { text: `${casterName} casts ${spell.name}.`, senderName: 'System', timestamp: Date.now() };
           void postChat(cid, msg, [casterId]);
@@ -1658,7 +1829,8 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         spellLevel: spell.level, slotLevel, targetIds,
       });
 
-      const casterSpellAbility = CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int';
+      // Breath Weapon's DC is 8 + CON + PB (2024 PHB), not the class spellcasting ability.
+      const casterSpellAbility = isBreath ? 'con' : CLASS_SPELLCASTING_ABILITY[char.class] ?? 'int';
       const casterAbilityMod = statMod(char.stats[casterSpellAbility]);
       const charProf = char.proficiencyBonus ?? 2;
       const dc = 8 + charProf + casterAbilityMod + dcBonusFor(engine, casterId);
@@ -1696,7 +1868,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
         const saveStats = targetChar?.stats ?? participant.creature?.stats;
         if (!saveStats) continue;
         // Same modifier set every other save reads (rollSave) — Bless/Bane/Mind Sliver included.
-        let breakdown = rollSave(engine, targetId, saveStats, targetChar ?? participant.creature ?? {}, targetChar, saveAbility);
+        let breakdown = rollSave(engine, targetId, saveStats, targetChar ?? participant.creature ?? {}, targetChar, saveAbility, [], effectConditions(effectiveOnHit, effectiveHooks));
         const d20 = keptDie(breakdown);
         const saveBonus = breakdown.total - d20;
         const saveCtx = await engine.trigger('beforeSave', {
@@ -1896,7 +2068,7 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       if (!ability) return;
 
       const char = await getCharacter(cid, casterId);
-      if (!char || char.class !== ability.class) return;
+      if (!char || !ownsAbility(char, ability)) return;
 
       const casterParticipant = encounter.findParticipant(casterId);
       if (!casterParticipant || casterParticipant.isDead()) return;
@@ -1937,10 +2109,20 @@ export function registerCombatHandlers(ctx: JoinContext): void {
       // Second Wind's "1d10 + Fighter level" reuses the ability-mod dice idiom (base die +
       // a flat number added once) with the caster's level standing in for an ability modifier —
       // resolveSpellDamageDice doesn't care what the number represents, only that it's added.
-      const rolledHeal = rollApplicableHeal(ability.onUse, char.level ?? 1, 0, char.level ?? 1);
+      const rolledHeal = rollApplicableHeal(ability.onUse, char.level ?? 1, 0, ability.addLevelToHeal ? char.level ?? 1 : 0);
       if (rolledHeal) {
         if (effectParticipant.isPlayer) applyHealingToPlayer(cid, effectParticipant, effectId, rolledHeal.total, ability.label);
         else if (effectParticipant.creature) applyHealingToCreature(cid, effectId, rolledHeal.total);
+      }
+
+      // Temp HP onUse (Adrenaline Rush) — same resolve-then-grant as a tempHp spell's cast path.
+      const tempHpDice = resolveSpellDamageDice(ability.onUse.find(e => e.type === 'tempHp')?.scaling, char.level ?? 1, 0);
+      if (tempHpDice && effectParticipant.isPlayer) grantTempHpToPlayer(cid, effectParticipant, rollDice(tempHpDice));
+
+      // Adrenaline Rush's Dash — same movement grant the standard Dash action sends.
+      if (ability.grantsDash) {
+        const sid = playerSocketIds.get(casterId);
+        if (sid) io.to(sid).emit('movement:granted', { ft: char.speed ?? 30 });
       }
 
       // Lay on Hands: heal the chosen amount straight out of the pool — no dice, no scaling.

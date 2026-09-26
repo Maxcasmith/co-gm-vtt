@@ -268,19 +268,6 @@
   pointer-events: auto;
 }
 
-.combat-dock-column {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-}
-
-.combat-dock-weapons {
-  display: flex;
-  flex-direction: row;
-  gap: 8px;
-}
-
 .combat-dock-weapon-btn {
   width: 40px;
   height: 40px;
@@ -406,6 +393,8 @@
 
 .combat-dock-pips {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 10px;
   align-items: center;
 }
@@ -450,23 +439,6 @@
 .combat-dock-elevation button:disabled {
   opacity: 0.4;
   cursor: default;
-}
-
-.combat-dock-resource-pips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.combat-dock-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.combat-dock-actions--disabled {
-  opacity: 0.4;
-  pointer-events: none;
 }
 
 .combat-dock--down {
@@ -519,50 +491,6 @@
   border-color: var(--border);
 }
 
-.combat-action-btn {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 12px;
-  width: auto;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: linear-gradient(160deg, #1c1928 0%, #141220 100%);
-  color: var(--text);
-  font-family: 'Crimson Pro', Georgia, serif;
-  font-size: 13px;
-  line-height: 1.2;
-  text-align: center;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, box-shadow 0.12s, transform 0.1s;
-  user-select: none;
-}
-
-.combat-action-btn:hover:not(.combat-action-btn--spent) {
-  background: linear-gradient(160deg, #221f30 0%, #1a1726 100%);
-  transform: translateY(-1px);
-}
-
-.combat-action-btn:active:not(.combat-action-btn--spent) {
-  transform: translateY(0);
-}
-
-.combat-action-btn--active {
-  background: linear-gradient(160deg, #14291e 0%, #0f1f16 100%);
-  border-color: #16a34a;
-  color: #86efac;
-  box-shadow: 0 0 12px #22c55e33;
-}
-
-.combat-action-btn--spent {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-
-.combat-action-btn--standard {}
-
 .combat-effects-row {
   display: flex;
   gap: 6px;
@@ -581,12 +509,41 @@
   letter-spacing: 0.02em;
 }
 
-.combat-action-btn-cost {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #22c55e;
-  flex-shrink: 0;
-  margin-top: 1px;
+/* ── Hotbar: hands | shared actions | class abilities | spells | End Turn ───── */
+
+.combat-hotbar {
+  display: flex;
+  align-items: center;
 }
 
+.combat-hotbar-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-left: 1px solid var(--border);
+}
+
+.combat-hotbar-section:first-child {
+  padding-left: 0;
+  border-left: none;
+}
+
+/* Two rows, filled column-first — each new icon lands under the previous one, then wraps right. */
+.combat-hotbar-grid {
+  display: grid;
+  grid-template-rows: repeat(2, 40px);
+  grid-auto-flow: column;
+  grid-auto-columns: 40px;
+}
+
+/* Six columns visible; the rest scroll sideways. */
+.combat-hotbar-spells {
+  max-width: calc(6 * 40px + 5 * 6px);
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.combat-hotbar .combat-end-turn-btn {
+  margin-left: 12px;
+}

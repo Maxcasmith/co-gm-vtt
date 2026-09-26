@@ -157,3 +157,6 @@ export class Greataxe extends Weapon {
   };
   constructor(overrides: Partial<WeaponProps> = {}) { super({ ...Greataxe.DEFAULTS, ...overrides }); }
 }
+
+/** Pact of the Blade's conjurable Simple/Martial Melee weapons — every melee weapon this catalog has (the Torch is a light source first). */
+export const PACT_WEAPON_CHOICES: WeaponProps[] = [Dagger, Handaxe, Whip, Longsword, Warhammer, Greataxe].map(w => w.DEFAULTS);

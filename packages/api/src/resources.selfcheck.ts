@@ -3,7 +3,7 @@
 // `tsx src/resources.selfcheck.ts` from packages/api.
 import assert from 'node:assert';
 import type { Character, CharacterStats, ResourceDef } from 'shared';
-import { RESOURCE_DEFS, resourceMax, resourceCurrent, trySpendResource, applyResourceRestRegain } from 'shared';
+import { RESOURCE_DEFS, resourceMax, resourceCurrent, trySpendResource, applyResourceRestRegain, breathWeaponSpell, resolveSpellDamageDice, ABILITY_DEFS, ownsAbility, characterDamageResistances, invocationSpell, isPactWeapon, weaponDamageType, PACT_FAMILIAR_FORMS } from 'shared';
 
 const stats: CharacterStats = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
 function char(resourceUses?: Record<string, number>): Character {
@@ -67,5 +67,47 @@ delete RESOURCE_DEFS['featPool'];
 
 // Restore the real defs so a script running after this one in the same process sees them.
 Object.assign(RESOURCE_DEFS, realDefs);
+
+// Species-gated pool (Dragonborn Breath Weapon): only with a resolved ancestry; PB uses.
+const redDragon = { ...char(), species: 'Dragonborn', subspecies: 'Chromatic', draconicAncestry: 'Red', proficiencyBonus: 3 };
+assert.strictEqual(resourceMax(redDragon, 'breathWeapon'), 3);
+assert.strictEqual(resourceMax({ ...redDragon, draconicAncestry: '' }, 'breathWeapon'), 0);
+assert.strictEqual(resourceMax({ ...redDragon, subspecies: 'Gem' }, 'breathWeapon'), 0); // Red isn't a Gem dragon
+const breath = breathWeaponSpell(redDragon, 'cone')!;
+assert.strictEqual(breath.combat?.onHit?.[0]?.damageType, 'Fire');
+assert.deepStrictEqual(breath.combat?.area, { shape: 'cone', size: 15, origin: 'self' });
+assert.strictEqual(breathWeaponSpell(redDragon, 'line')!.combat?.area?.size, 30);
+assert.strictEqual(resolveSpellDamageDice(breath.combat!.onHit![0]!.scaling, 1, 0), '1d10');
+assert.strictEqual(resolveSpellDamageDice(breath.combat!.onHit![0]!.scaling, 5, 0), '2d10');
+
+// Species-owned abilities: Orc gets Adrenaline Rush + Relentless Endurance regardless of class.
+const orc = { ...char(), species: 'Orc', class: 'Wizard', proficiencyBonus: 2 };
+assert.ok(ownsAbility(orc, ABILITY_DEFS['adrenalineRush']!));
+assert.ok(!ownsAbility(orc, ABILITY_DEFS['rage']!)); // Wizard, not Barbarian
+assert.strictEqual(resourceMax(orc, 'adrenalineRush'), 2);
+assert.strictEqual(resourceMax(orc, 'relentlessEndurance'), 1);
+assert.deepStrictEqual(applyResourceRestRegain({ ...orc, resourceUses: { adrenalineRush: 0, relentlessEndurance: 0 } }, 'short'), { adrenalineRush: 2, relentlessEndurance: 0 });
+assert.strictEqual(resolveSpellDamageDice(ABILITY_DEFS['healingHands']!.onUse[0]!.scaling, 1, 0), '2d4');
+assert.strictEqual(resolveSpellDamageDice(ABILITY_DEFS['adrenalineRush']!.onUse[0]!.scaling, 5, 0), '0d4+3');
+
+// Species resistances: derived from species + lineage + ancestry, merged with persisted ones, deduped.
+assert.deepStrictEqual(characterDamageResistances({ species: 'Aasimar' }), ['Necrotic', 'Radiant']);
+assert.deepStrictEqual(characterDamageResistances({ species: 'Tiefling', subspecies: 'Infernal' }), ['Fire']);
+assert.deepStrictEqual(characterDamageResistances({ ...redDragon, damageResistances: ['Fire'] }), ['Fire']);
+assert.deepStrictEqual(characterDamageResistances({ species: 'Human' }), []);
+
+// Eldritch Invocations: at-will spells only with the invocation; pact weapon only on its bonded item.
+assert.deepStrictEqual(invocationSpell({ invocations: ['Armor of Shadows'] }, 'Mage Armor'), { spell: 'Mage Armor', selfOnly: true });
+assert.strictEqual(invocationSpell({ invocations: ['Armor of Shadows'] }, 'Find Familiar'), undefined);
+assert.strictEqual(invocationSpell({}, 'Mage Armor'), undefined);
+const bladelock = { invocations: ['Pact of the Blade'], pactWeapon: { itemId: 'w1', conjured: true, damageType: 'radiant' } };
+assert.ok(isPactWeapon(bladelock, { id: 'w1' }));
+assert.ok(!isPactWeapon(bladelock, { id: 'w2' }));
+assert.ok(!isPactWeapon({ pactWeapon: bladelock.pactWeapon }, { id: 'w1' })); // invocation gone, bond ignored
+assert.strictEqual(weaponDamageType(bladelock, { id: 'w1', damageType: 'slashing' }), 'radiant');
+assert.strictEqual(weaponDamageType(bladelock, { id: 'w2', damageType: 'slashing' }), 'slashing');
+assert.strictEqual(weaponDamageType({ ...bladelock, pactWeapon: { itemId: 'w1', conjured: true } }, { id: 'w1', damageType: 'slashing' }), 'slashing');
+// Pact of the Chain forms never attack on their own turn — only via reactionAttack.
+for (const form of Object.values(PACT_FAMILIAR_FORMS)) assert.ok(form.attacks.length === 0 && form.reactionAttack);
 
 console.log('resources.selfcheck: all assertions passed');

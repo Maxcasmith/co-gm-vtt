@@ -1,4 +1,4 @@
-import { updateCharacter } from '../../storage.ts';
+import { getCharacter, updateCharacter } from '../../storage.ts';
 import { Participant } from '../../domain/encounter.ts';
 import { io, campaignRoom, fightOf, playerSocketIds, getStateEngine } from '../../state.ts';
 import { rollD20, keptDie } from '../dice.ts';
@@ -16,7 +16,8 @@ export async function runDeathSave(cid: string, actor: Participant): Promise<voi
 
   if (saves.stable) { advanceTurn(cid, encounter); return; }
 
-  const breakdown = rollD20();
+  // A death save is a saving throw, so Halfling Luck applies.
+  const breakdown = rollD20([], (await getCharacter(cid, actor.id)) ?? undefined);
   const roll = keptDie(breakdown);
   const isNat20 = roll === 20;
   const isNat1 = roll === 1;

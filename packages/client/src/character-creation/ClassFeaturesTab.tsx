@@ -1,8 +1,18 @@
 import { useCharacter } from './CharacterContext.tsx';
-import { FIGHTING_STYLES, DIVINE_ORDERS, PRIMAL_ORDERS, ELDRITCH_INVOCATIONS, CLASS_FEATURES } from './srd.ts';
+import { FIGHTING_STYLES, DIVINE_ORDERS, PRIMAL_ORDERS, ELDRITCH_INVOCATIONS, CLASS_FEATURES, invocationPrerequisiteMet, invocationPrerequisiteText } from './srd.ts';
 import ChoicePicker from './ChoicePicker.tsx';
+import { INVOCATION_SPELLS } from 'shared';
 
-const INVOCATION_COUNT = 2;
+const CREATION_LEVEL = 1;
+const INVOCATION_NAMES = new Set(ELDRITCH_INVOCATIONS.map(i => i.name));
+
+/** learnedSpells with every invocation-sourced pick (Mage Armor, Find Familiar, Tome picks) swapped for `invocation`'s grant. */
+export function withInvocationSpells(learned: Record<string, string>, invocation?: string): Record<string, string> {
+  const next = Object.fromEntries(Object.entries(learned).filter(([, src]) => !INVOCATION_NAMES.has(src)));
+  const grant = invocation ? INVOCATION_SPELLS[invocation] : undefined;
+  if (invocation && grant) next[grant.spell] ??= invocation;
+  return next;
+}
 
 export function hasClassFeaturesStep(characterClass: string): boolean {
   const features = CLASS_FEATURES[characterClass] ?? [];
@@ -15,16 +25,6 @@ export default function ClassFeaturesTab() {
   const hasFightingStyle = features.some(f => f.name === 'Fighting Style');
   const hasClassOrder = features.some(f => f.name === 'Divine Order' || f.name === 'Primal Order');
   const hasInvocations = features.some(f => f.name === 'Eldritch Invocations');
-
-  function toggleInvocation(name: string) {
-    const idx = c.invocations.indexOf(name);
-    if (idx >= 0) {
-      c.set('invocations', c.invocations.filter(n => n !== name));
-    } else {
-      if (c.invocations.length >= INVOCATION_COUNT) return;
-      c.set('invocations', [...c.invocations, name]);
-    }
-  }
 
   return (
     <>
@@ -46,11 +46,17 @@ export default function ClassFeaturesTab() {
       )}
       {hasInvocations && (
         <ChoicePicker
-          title="Eldritch Invocations"
-          options={ELDRITCH_INVOCATIONS}
+          title="Eldritch Invocation"
+          options={ELDRITCH_INVOCATIONS
+            // Creation is always Warlock level 1: level-gated invocations are hidden outright; one
+            // whose level is met but needs another invocation shows locked until that's picked.
+            .filter(inv => (inv.prerequisite?.level ?? 0) <= CREATION_LEVEL)
+            .map(inv => invocationPrerequisiteMet(inv, CREATION_LEVEL, c.invocations) ? inv : { ...inv, disabledReason: `Requires ${invocationPrerequisiteText(inv)}` })}
           selected={c.invocations}
-          max={INVOCATION_COUNT}
-          onToggle={toggleInvocation}
+          onToggle={name => {
+            c.set('invocations', [name]);
+            c.set('learnedSpells', withInvocationSpells(c.learnedSpells, name));
+          }}
         />
       )}
     </>

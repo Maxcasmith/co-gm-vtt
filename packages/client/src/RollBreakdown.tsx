@@ -17,7 +17,7 @@ function modeNote(b: RollBreakdown): string | null {
     advantage.length ? `Advantage: ${advantage.join(', ')}` : '',
     disadvantage.length ? `Disadvantage: ${disadvantage.join(', ')}` : '',
     b.mode === 'normal' && advantage.length && disadvantage.length ? 'cancelled' : '',
-    b.rerolledFrom !== undefined ? 'rerolled' : '',
+    b.rerolledFrom !== undefined ? `rerolled${b.rerolledBy ? ` (${b.rerolledBy})` : ''}` : '',
   ].filter(Boolean);
   return parts.length ? parts.join(' · ') : null;
 }

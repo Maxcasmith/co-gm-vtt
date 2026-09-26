@@ -4,6 +4,7 @@ import { getCharacter, updateCharacter, listCharacters, getConfig, getHouseRules
 import { getFeatureProvider } from '../../providers/index.ts';
 import { generateCombatFlavour } from '../../session-processor/imagePrompts.ts';
 import { Participant } from '../../domain/encounter.ts';
+import type { Creature } from '../../domain/creature.ts';
 import { io, campaignRoom, fightOf, toFight, positionsOf, getStateEngine } from '../../state.ts';
 import { rollD20, dis, keptDie, withModifiers, reconcile, sumModifiers, rollDice, fmtMod, resolveHit, maxDiceValue } from '../dice.ts';
 import { conditionModeSources, targetModeSources } from '../conditions/rollModeFor.ts';
@@ -139,150 +140,8 @@ export async function runEnemyAI(cid: string, actor: Participant): Promise<void>
       if (action) await executeSpecialAction(cid, actor, action, target, round);
     } else {
       const atk = creature.attacks[plan.actionRef.index];
-      const targetParticipant = target;
-
-      if (atk) {
-        let targetAc: number;
-        let targetCharForAttack: Awaited<ReturnType<typeof listCharacters>>[number] | undefined;
-
-        if (targetParticipant.isPlayer) {
-          const chars = await listCharacters(cid);
-          targetCharForAttack = chars.find(c => c.name === targetParticipant.name);
-          targetAc = targetCharForAttack ? calcAC(targetCharForAttack) : 10;
-        } else {
-          targetAc = encounter.findCreature(targetParticipant.id)?.ac ?? 10;
-        }
-
-        const engine = getStateEngine(cid);
-        const targetKeyId = targetParticipant.isPlayer
-          ? (targetCharForAttack?.id ?? targetParticipant.id)
-          : targetParticipant.id;
-        const targetHolder = targetParticipant.isPlayer ? targetCharForAttack : encounter.findCreature(targetParticipant.id);
-        // Protection from Evil and Good — disadvantage imposed on the warded target's attacker
-        // when the attacker's own creature type is on the spell's list, checked pre-roll same as
-        // grantAdvantage (the d20 is already picked by the time beforeAttackRoll's chain runs).
-        const wardedAgainst = engine.getHooksOwnedBy(targetKeyId, 'attackerDisadvantage')
-          .some(h => (h as AttackerDisadvantageHook).appliesTo(creature.creatureType ?? 'Humanoid'));
-        // Protection Fighting Style — offered only when the target is a player (protectors are
-        // always player-controlled too); suspends here while the protector decides.
-        const protectedAgainst = targetParticipant.isPlayer && await offerProtectionReaction(
-          cid, encounter.turnOrder, positions, targetKeyId, targetPos, targetParticipant.name, actor.name,
-        );
-        if (encounter.ended) return;
-        // Lucky — offered after Protection, so a player doesn't burn a Luck Point on an attack an
-        // ally already turned to Disadvantage for free.
-        const luckDisadvantage = targetParticipant.isPlayer && !protectedAgainst && await offerLuckDisadvantage(
-          cid, targetKeyId, targetParticipant.name, actor.name,
-        );
-        if (encounter.ended) return;
-        const toHitLines = [{ label: 'Attack bonus', value: atk.bonus }, ...bladeWardPenalty(cid, targetKeyId)];
-        const attackBonus = sumModifiers(toHitLines);
-        let breakdown = withModifiers(rollD20([
-          ...conditionModeSources(creature, 'attack'), ...targetModeSources(targetHolder ?? {}),
-          wardedAgainst && dis('Protection from Evil and Good'), protectedAgainst && dis('Protection Fighting Style'),
-          luckDisadvantage && dis('Luck Point'),
-        ]), toHitLines);
-        const roll = keptDie(breakdown);
-
-        // Two-phase resolution: roll, let the afterAttackRoll chain run (which may suspend here for
-        // several seconds while the defender decides whether to spend a reaction), then re-derive
-        // the outcome from the possibly-modified context. Nothing is broadcast until after this, so
-        // the client never renders a hit that a reaction later turns into a miss.
-        const atkCtx = await engine.trigger('afterAttackRoll', await engine.trigger('beforeAttackRoll', {
-          attackerId: actor.id,
-          attackerName: actor.name,
-          targetId: targetKeyId,
-          targetName: targetParticipant.name,
-          targetIsPlayer: targetParticipant.isPlayer,
-          sourceName: atk.name,
-          d20: roll,
-          attackBonus,
-          ac: targetAc,
-          total: roll + attackBonus,
-          hit: resolveHit(roll, attackBonus, targetAc),
-        }));
-        if (encounter.ended) return;
-
-        atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
-        atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
-        breakdown = reconcile(breakdown, atkCtx.d20, atkCtx.attackBonus);
-        const isCrit = atkCtx.d20 === 20;
-        const houseRules = await getHouseRules(cid);
-
-        // Sanctuary — only worth checking on a roll that would otherwise land; a miss doesn't
-        // need the save. ponytail: no retargeting (RAW lets the attacker pick a new target
-        // instead) — a failed save just wastes the attack, same as if nothing else were in range.
-        if (atkCtx.hit && !(await checkSanctuary(cid, actor.id, targetKeyId, targetParticipant.name))) {
-          atkCtx.hit = false;
-          console.log(`[ai] ${actor.name}'s attack on ${targetParticipant.name} fails — Sanctuary`);
-        }
-
-        const total = atkCtx.total;
-        const hit = atkCtx.hit;
-        targetAc = atkCtx.ac;
-        let damage: number | undefined;
-        let damageRoll: number | undefined;
-        let remainingHp: number | undefined;
-        let targetDead = false;
-
-        if (hit) {
-          damageRoll = isCrit
-            ? rollDice(atk.damage) + (houseRules.perkinsCrit ? maxDiceValue(atk.damage) : rollDice(atk.damage))
-            : rollDice(atk.damage);
-          const dmgCtx = await engine.trigger('beforeDamage', {
-            sourceId: actor.id,
-            targetId: targetKeyId,
-            targetName: targetParticipant.name,
-            amount: damageRoll,
-            damageType: undefined,
-            sourceName: atk.name,
-          });
-          damage = Math.max(0, dmgCtx.amount);
-
-          if (targetParticipant.isPlayer && targetCharForAttack) {
-            const playerParticipant = encounter.players.find(p => p.id === targetCharForAttack!.id);
-            if (playerParticipant) {
-              await applyDamageToPlayer(cid, playerParticipant, damage, {
-                charId: targetCharForAttack.id,
-                sourceId: actor.id,
-                isCrit,
-              });
-              remainingHp = playerParticipant.currentHp;
-              targetDead = playerParticipant.currentHp <= 0;
-              console.log(`[ai] ${actor.name} attacks ${targetParticipant.name} with ${atk.name}: ${roll}${fmtMod(atk.bonus)} = ${total} vs AC ${targetAc} — HIT ${damage} (${playerParticipant.currentHp}/${playerParticipant.maxHp} HP)`);
-            }
-          } else {
-            // Ally or other non-player target — use creature damage path
-            await applyDamageToCreature(cid, targetParticipant.id, damage, { sourceId: actor.id, isCrit });
-            remainingHp = encounter.findCreature(targetParticipant.id)?.currentHp;
-            targetDead = encounter.findCreature(targetParticipant.id)?.isDead() ?? false;
-          }
-
-          await engine.trigger('afterDamage', dmgCtx);
-        } else {
-          console.log(`[ai] ${actor.name} attacks ${targetParticipant.name} with ${atk.name}: ${roll}${fmtMod(atk.bonus)} = ${total} vs AC ${targetAc} — MISS`);
-        }
-
-        const targetId = targetParticipant.isPlayer ? (targetCharForAttack?.id ?? targetParticipant.name) : targetParticipant.id;
-        const atkResult: AttackResult = {
-          attackerName: actor.name, targetName: targetParticipant.name, targetId,
-          // Monster attacks aren't modeled with a range yet (see EnemyStatBlock.attacks) — the client
-          // only reads isMelee for player-sourced swing effects, so this is inert here regardless.
-          weaponName: atk.name, isMelee: true, d20: atkCtx.d20, breakdown, attackBonus: atkCtx.attackBonus, statName: 'Attack', total, ac: targetAc,
-          hit, isCrit, damage, damageRoll, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
-        };
-        toFight(encounter).emit('combat:attack:result', atkResult);
-
-        const cfg = await getConfig();
-        const cfgAdapter = getFeatureProvider(cfg, 'combatNarration');
-        {
-          const flavour = await generateCombatFlavour(atkResult, cfgAdapter);
-          if (flavour) {
-            const msg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
-            void postChat(cid, msg, [actor.id]);
-          }
-        }
-      }
+      if (atk) await resolveCreatureAttack(cid, actor, creature, atk, target, positions, targetPos);
+      if (encounter.ended) return;
     }
   } else {
     console.log(`[ai] ${actor.name} cannot reach ${target.name} (${finalDistFt}ft away)`);
@@ -324,3 +183,155 @@ export async function runPlayerTactics(cid: string, actor: Participant): Promise
   advanceTurn(cid, encounter);
 }
 
+/**
+ * One creature attack roll against `targetParticipant`, start to finish: reactions, hit, damage,
+ * result broadcast and flavour. Shared by a creature's own AI turn and a Pact of the Chain
+ * familiar's Reaction attack (combat:familiar:attack).
+ */
+export async function resolveCreatureAttack(
+  cid: string, actor: Participant, creature: Creature, atk: { name: string; bonus: number; damage: string },
+  targetParticipant: Participant, positions: Record<string, { gx: number; gy: number }>, targetPos: { gx: number; gy: number } | undefined,
+): Promise<void> {
+  const encounter = fightOf(cid, actor.id);
+  if (!encounter) return;
+  let targetAc: number;
+  let targetCharForAttack: Awaited<ReturnType<typeof listCharacters>>[number] | undefined;
+
+  if (targetParticipant.isPlayer) {
+    const chars = await listCharacters(cid);
+    targetCharForAttack = chars.find(c => c.name === targetParticipant.name);
+    targetAc = targetCharForAttack ? calcAC(targetCharForAttack) : 10;
+  } else {
+    targetAc = encounter.findCreature(targetParticipant.id)?.ac ?? 10;
+  }
+
+  const engine = getStateEngine(cid);
+  const targetKeyId = targetParticipant.isPlayer
+    ? (targetCharForAttack?.id ?? targetParticipant.id)
+    : targetParticipant.id;
+  const targetHolder = targetParticipant.isPlayer ? targetCharForAttack : encounter.findCreature(targetParticipant.id);
+  // Protection from Evil and Good — disadvantage imposed on the warded target's attacker
+  // when the attacker's own creature type is on the spell's list, checked pre-roll same as
+  // grantAdvantage (the d20 is already picked by the time beforeAttackRoll's chain runs).
+  const wardedAgainst = engine.getHooksOwnedBy(targetKeyId, 'attackerDisadvantage')
+    .some(h => (h as AttackerDisadvantageHook).appliesTo(creature.creatureType ?? 'Humanoid'));
+  // Protection Fighting Style — offered only when the target is a player (protectors are
+  // always player-controlled too); suspends here while the protector decides.
+  const protectedAgainst = targetParticipant.isPlayer && await offerProtectionReaction(
+    cid, encounter.turnOrder, positions, targetKeyId, targetPos, targetParticipant.name, actor.name,
+  );
+  if (encounter.ended) return;
+  // Lucky — offered after Protection, so a player doesn't burn a Luck Point on an attack an
+  // ally already turned to Disadvantage for free.
+  const luckDisadvantage = targetParticipant.isPlayer && !protectedAgainst && await offerLuckDisadvantage(
+    cid, targetKeyId, targetParticipant.name, actor.name,
+  );
+  if (encounter.ended) return;
+  const toHitLines = [{ label: 'Attack bonus', value: atk.bonus }, ...bladeWardPenalty(cid, targetKeyId)];
+  const attackBonus = sumModifiers(toHitLines);
+  let breakdown = withModifiers(rollD20([
+    ...conditionModeSources(creature, 'attack'), ...targetModeSources(targetHolder ?? {}),
+    wardedAgainst && dis('Protection from Evil and Good'), protectedAgainst && dis('Protection Fighting Style'),
+    luckDisadvantage && dis('Luck Point'),
+  ]), toHitLines);
+  const roll = keptDie(breakdown);
+
+  // Two-phase resolution: roll, let the afterAttackRoll chain run (which may suspend here for
+  // several seconds while the defender decides whether to spend a reaction), then re-derive
+  // the outcome from the possibly-modified context. Nothing is broadcast until after this, so
+  // the client never renders a hit that a reaction later turns into a miss.
+  const atkCtx = await engine.trigger('afterAttackRoll', await engine.trigger('beforeAttackRoll', {
+    attackerId: actor.id,
+    attackerName: actor.name,
+    targetId: targetKeyId,
+    targetName: targetParticipant.name,
+    targetIsPlayer: targetParticipant.isPlayer,
+    sourceName: atk.name,
+    d20: roll,
+    attackBonus,
+    ac: targetAc,
+    total: roll + attackBonus,
+    hit: resolveHit(roll, attackBonus, targetAc),
+  }));
+  if (encounter.ended) return;
+
+  atkCtx.total = atkCtx.d20 + atkCtx.attackBonus;
+  atkCtx.hit = resolveHit(atkCtx.d20, atkCtx.attackBonus, atkCtx.ac);
+  breakdown = reconcile(breakdown, atkCtx.d20, atkCtx.attackBonus);
+  const isCrit = atkCtx.d20 === 20;
+  const houseRules = await getHouseRules(cid);
+
+  // Sanctuary — only worth checking on a roll that would otherwise land; a miss doesn't
+  // need the save. ponytail: no retargeting (RAW lets the attacker pick a new target
+  // instead) — a failed save just wastes the attack, same as if nothing else were in range.
+  if (atkCtx.hit && !(await checkSanctuary(cid, actor.id, targetKeyId, targetParticipant.name))) {
+    atkCtx.hit = false;
+    console.log(`[ai] ${actor.name}'s attack on ${targetParticipant.name} fails — Sanctuary`);
+  }
+
+  const total = atkCtx.total;
+  const hit = atkCtx.hit;
+  targetAc = atkCtx.ac;
+  let damage: number | undefined;
+  let damageRoll: number | undefined;
+  let remainingHp: number | undefined;
+  let targetDead = false;
+
+  if (hit) {
+    damageRoll = isCrit
+      ? rollDice(atk.damage) + (houseRules.perkinsCrit ? maxDiceValue(atk.damage) : rollDice(atk.damage))
+      : rollDice(atk.damage);
+    const dmgCtx = await engine.trigger('beforeDamage', {
+      sourceId: actor.id,
+      targetId: targetKeyId,
+      targetName: targetParticipant.name,
+      amount: damageRoll,
+      damageType: undefined,
+      sourceName: atk.name,
+    });
+    damage = Math.max(0, dmgCtx.amount);
+
+    if (targetParticipant.isPlayer && targetCharForAttack) {
+      const playerParticipant = encounter.players.find(p => p.id === targetCharForAttack!.id);
+      if (playerParticipant) {
+        await applyDamageToPlayer(cid, playerParticipant, damage, {
+          charId: targetCharForAttack.id,
+          sourceId: actor.id,
+          isCrit,
+        });
+        remainingHp = playerParticipant.currentHp;
+        targetDead = playerParticipant.currentHp <= 0;
+        console.log(`[ai] ${actor.name} attacks ${targetParticipant.name} with ${atk.name}: ${roll}${fmtMod(atk.bonus)} = ${total} vs AC ${targetAc} — HIT ${damage} (${playerParticipant.currentHp}/${playerParticipant.maxHp} HP)`);
+      }
+    } else {
+      // Ally or other non-player target — use creature damage path
+      await applyDamageToCreature(cid, targetParticipant.id, damage, { sourceId: actor.id, isCrit });
+      remainingHp = encounter.findCreature(targetParticipant.id)?.currentHp;
+      targetDead = encounter.findCreature(targetParticipant.id)?.isDead() ?? false;
+    }
+
+    await engine.trigger('afterDamage', dmgCtx);
+  } else {
+    console.log(`[ai] ${actor.name} attacks ${targetParticipant.name} with ${atk.name}: ${roll}${fmtMod(atk.bonus)} = ${total} vs AC ${targetAc} — MISS`);
+  }
+
+  const targetId = targetParticipant.isPlayer ? (targetCharForAttack?.id ?? targetParticipant.name) : targetParticipant.id;
+  const atkResult: AttackResult = {
+    attackerName: actor.name, targetName: targetParticipant.name, targetId,
+    // Monster attacks aren't modeled with a range yet (see EnemyStatBlock.attacks) — the client
+    // only reads isMelee for player-sourced swing effects, so this is inert here regardless.
+    weaponName: atk.name, isMelee: true, d20: atkCtx.d20, breakdown, attackBonus: atkCtx.attackBonus, statName: 'Attack', total, ac: targetAc,
+    hit, isCrit, damage, damageRoll, damageFormula: hit ? atk.damage : undefined, remainingHp, targetDead,
+  };
+  toFight(encounter).emit('combat:attack:result', atkResult);
+
+  const cfg = await getConfig();
+  const cfgAdapter = getFeatureProvider(cfg, 'combatNarration');
+  {
+    const flavour = await generateCombatFlavour(atkResult, cfgAdapter);
+    if (flavour) {
+      const msg = { text: flavour, senderName: 'Combat', timestamp: Date.now() };
+      void postChat(cid, msg, [actor.id]);
+    }
+  }
+}

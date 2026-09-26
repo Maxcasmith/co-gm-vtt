@@ -6,7 +6,7 @@ import assert from 'node:assert';
 import type { Character, CharacterStats } from 'shared';
 import { StateEngine } from '../stateEngine/StateEngine.ts';
 import { RollModifierHook } from '../stateEngine/hooks/RollModifierHook.ts';
-import { checkModifiers, saveModifiers } from './rolls.ts';
+import { checkModifiers, saveModifiers, rollSave, effectConditions } from './rolls.ts';
 
 const stats: CharacterStats = { str: 16, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
 const char: Character = {
@@ -37,6 +37,21 @@ assert.deepStrictEqual(saveModifiers(new StateEngine('t'), 'hero', stats, char, 
   assert.deepStrictEqual(labels(checkModifiers(engine, 'hero', stats, char, 'str', 'Athletics')), ['Strength', 'Proficiency', 'Expertise', 'Guidance (d4)']);
   // Bless applies to saves.
   assert.deepStrictEqual(labels(saveModifiers(engine, 'hero', stats, char, 'str')), ['Strength', 'Proficiency', 'Bless (d4)']);
+}
+
+// Species save Advantage: Brave only when the save is against Frightened; Gnomish Cunning on any mental save.
+{
+  const engine = new StateEngine('t');
+  const halfling = { ...char, species: 'Halfling' };
+  const sources = (c: Character, ability: 'wis' | 'dex', against: string[]) => rollSave(engine, 'hero', stats, {}, c, ability, [], against).modeSources.map(s => s.label);
+  assert.deepStrictEqual(sources(halfling, 'wis', ['Frightened']), ['Brave']);
+  assert.deepStrictEqual(sources(halfling, 'wis', []), []);
+  assert.deepStrictEqual(sources({ ...char, species: 'Gnome' }, 'wis', []), ['Gnomish Cunning']);
+  assert.deepStrictEqual(sources({ ...char, species: 'Gnome' }, 'dex', []), []);
+  const warlock = { ...char, invocations: ['Eldritch Mind'] };
+  assert.deepStrictEqual(rollSave(engine, 'hero', stats, {}, warlock, 'con', [], ['Concentrating']).modeSources.map(s => s.label), ['Eldritch Mind']);
+  assert.deepStrictEqual(rollSave(engine, 'hero', stats, {}, warlock, 'con', [], []).modeSources.map(s => s.label), []);
+  assert.deepStrictEqual(effectConditions([{ type: 'condition', condition: 'Charmed' }], [{ type: 'recurringDamage', duration: { until: 'endOfCombat' }, conditionNames: ['Prone', 'Incapacitated'] }]), ['Charmed', 'Prone', 'Incapacitated']);
 }
 
 console.log('rolls.modifiers.selfcheck: all assertions passed');

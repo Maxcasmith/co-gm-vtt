@@ -157,7 +157,7 @@ export class RecurringDamageHook extends Hook<'beforeTurn' | 'afterTurn'> {
     }
 
     if (!this.saveToEnd || this.dc === undefined) return;
-    const { saved, roll, bonus, total, breakdown } = await rollSavingThrow(cid, this.ownerId, this.saveToEnd.ability, this.dc);
+    const { saved, roll, bonus, total, breakdown } = await rollSavingThrow(cid, this.ownerId, this.saveToEnd.ability, this.dc, this.conditionNames);
     console.log(`[hook] ${participant.name} save vs ${this.source} DC${this.dc}: d20=${roll}${fmtMod(bonus)}=${total} — ${saved ? 'ENDS' : 'CONTINUES'}`);
     emitCombatRoll(cid, this.ownerId, { actorName: participant.name, label: `${this.saveToEnd.ability.toUpperCase()} save to end ${this.source}`, dc: this.dc, success: saved, breakdown });
     if (saved) {

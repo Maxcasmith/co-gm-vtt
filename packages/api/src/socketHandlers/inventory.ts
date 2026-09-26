@@ -1,4 +1,4 @@
-import { isWeapon, isArmor, effectiveWeaponProfs, effectiveArmorTraining, characterLightRangeFt } from 'shared';
+import { isWeapon, isArmor, effectiveWeaponProfs, effectiveArmorTraining, characterLightRangeFt, isPactWeapon } from 'shared';
 import type { Manoeuvre } from 'shared';
 import { getCharacter, updateCharacter } from '../storage.ts';
 import { io, campaignRoom, playerSocketIds, fightOf } from '../state.ts';
@@ -84,7 +84,7 @@ export function registerInventoryHandlers(ctx: JoinContext): void {
           isWeapon(item) ? weaponProfs.includes(item.properties.includes('martial') ? 'martial' : 'simple') :
           isArmor(item) ? (item.isShield ? armorTraining.includes('shield') : item.armorType === 'none' || armorTraining.includes(item.armorType)) :
           true;
-        if (!proficient) return;
+        if (!proficient && !(isWeapon(item) && isPactWeapon(char, item))) return;
 
         if (isHandSlot && isWeapon(item) && item.twoHanded) {
           updates.mainHand = itemId;

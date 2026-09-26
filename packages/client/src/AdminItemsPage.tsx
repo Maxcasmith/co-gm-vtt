@@ -37,6 +37,13 @@ interface Props {
   onHome: () => void;
 }
 
+// Combat-dock buttons that aren't ABILITY_DEFS entries but still show an icon.
+const DOCK_ONLY_ICONS = [
+  { name: 'Breath Weapon', description: 'Breath Weapon, a Dragonborn species combat ability icon.' },
+  { name: 'Pact Weapon', description: 'Pact Weapon, a Warlock Pact of the Blade combat ability icon.' },
+  { name: 'Familiar Attack', description: 'Familiar Attack, a Warlock Pact of the Chain combat ability icon.' },
+];
+
 export default function AdminItemsPage({ password, onHome }: Props) {
   const [createIconsOpen, setCreateIconsOpen] = useState(false);
   const [iconsRefreshKey, setIconsRefreshKey] = useState(0);
@@ -44,7 +51,8 @@ export default function AdminItemsPage({ password, onHome }: Props) {
 
   const iconCandidates: IconCandidate[] = [
     ...CHARACTER_CREATION_SHOP.items.filter(item => !item.iconPath).map(item => ({ name: item.name, description: item.description })),
-    ...Object.values(ABILITY_DEFS).map(ability => ({ name: ability.label, description: `${ability.label}, a ${ability.class} class combat ability icon.` })),
+    ...Object.values(ABILITY_DEFS).map(ability => ({ name: ability.label, description: `${ability.label}, a ${ability.class ? `${ability.class} class` : `${ability.species} species`} combat ability icon.` })),
+    ...DOCK_ONLY_ICONS,
   ];
 
   return (
@@ -75,8 +83,11 @@ export default function AdminItemsPage({ password, onHome }: Props) {
           <IconCell
             key={ability.key}
             name={ability.label}
-            onClick={() => setDetailSubject({ name: ability.label, description: `${ability.label}, a ${ability.class} class combat ability icon.`, raw: ability as unknown as Record<string, unknown> })}
+            onClick={() => setDetailSubject({ name: ability.label, description: `${ability.label}, a ${ability.class ? `${ability.class} class` : `${ability.species} species`} combat ability icon.`, raw: ability as unknown as Record<string, unknown> })}
           />
+        ))}
+        {DOCK_ONLY_ICONS.map(icon => (
+          <IconCell key={icon.name} name={icon.name} onClick={() => setDetailSubject({ ...icon, raw: icon })} />
         ))}
       </div>
     </AdminPageShell>

@@ -3,11 +3,49 @@ import { Button } from '../components/Button/Button.tsx';
 import { useCharacter } from './CharacterContext.tsx';
 import { SKILLS, CLASS_SKILLS, BACKGROUND_FEAT, BACKGROUND_SKILLS, CLASS_FEATURES } from './srd.ts';
 
-interface Source {
+export interface SkillSource {
   key: string;
   label: string;
   skills: string[]; // empty = any skill allowed
   count: number;
+}
+
+type SourceInputs = Pick<ReturnType<typeof useCharacter>, 'characterClass' | 'background' | 'species' | 'speciesOriginFeat'>;
+
+/** Every pick-your-own skill grant the current choices give — shared with FinishedTab's missing check and SpeciesTab's pruning. */
+export function skillSources(c: SourceInputs): SkillSource[] {
+  const sources: SkillSource[] = [];
+  if (c.characterClass && CLASS_SKILLS[c.characterClass]) {
+    const cs = CLASS_SKILLS[c.characterClass]!;
+    sources.push({ key: 'class', label: c.characterClass, skills: cs.skills, count: cs.count });
+  }
+  if (c.background && BACKGROUND_FEAT[c.background] === 'Skilled') {
+    sources.push({ key: 'bg-skilled', label: 'Skilled', skills: [], count: 3 });
+  }
+  if (c.species === 'Human') {
+    sources.push({ key: 'skillful', label: 'Skillful', skills: [], count: 1 });
+    if (c.speciesOriginFeat === 'Skilled') {
+      sources.push({ key: 'origin-skilled', label: 'Skilled (Origin)', skills: [], count: 3 });
+    }
+  }
+  if (c.species === 'Elf') {
+    sources.push({ key: 'keen-senses', label: 'Keen Senses', skills: ['Insight', 'Perception', 'Survival'], count: 1 });
+  }
+  return sources;
+}
+
+/**
+ * Re-validates skill picks after a species/origin feat/background change: drops picks whose source
+ * no longer exists or that the new background now grants outright, then any Expertise left riding
+ * on a skill the character is no longer proficient in (or all of it, if the class has no Expertise).
+ */
+export function pruneSkills(c: SourceInputs & Pick<ReturnType<typeof useCharacter>, 'skillProficiencies' | 'expertiseSkills'>) {
+  const labels = new Set(skillSources(c).map(s => s.label));
+  const bgSkills = BACKGROUND_SKILLS[c.background] ?? [];
+  const skillProficiencies = Object.fromEntries(Object.entries(c.skillProficiencies).filter(([name, label]) => labels.has(label) && !bgSkills.includes(name)));
+  const proficient = new Set([...Object.keys(skillProficiencies), ...bgSkills]);
+  const hasExpertise = (CLASS_FEATURES[c.characterClass] ?? []).some(f => f.name === 'Expertise');
+  return { skillProficiencies, expertiseSkills: hasExpertise ? c.expertiseSkills.filter(s => proficient.has(s)) : [] };
 }
 
 function usedBySource(profs: Record<string, string>, label: string): number {
@@ -24,25 +62,7 @@ export default function SkillPicker() {
     ? (CLASS_FEATURES[c.characterClass] ?? []).some(f => f.name === 'Expertise')
     : false;
 
-  // Build the available sources from current character choices
-  const sources: Source[] = [];
-
-  if (c.characterClass && CLASS_SKILLS[c.characterClass]) {
-    const cs = CLASS_SKILLS[c.characterClass]!;
-    sources.push({ key: 'class', label: c.characterClass, skills: cs.skills, count: cs.count });
-  }
-
-  const bgFeatName = c.background ? BACKGROUND_FEAT[c.background] : '';
-  if (bgFeatName === 'Skilled') {
-    sources.push({ key: 'bg-skilled', label: 'Skilled', skills: [], count: 3 });
-  }
-
-  if (c.species === 'Human') {
-    sources.push({ key: 'skillful', label: 'Skillful', skills: [], count: 1 });
-    if (c.speciesOriginFeat === 'Skilled') {
-      sources.push({ key: 'origin-skilled', label: 'Skilled (Origin)', skills: [], count: 3 });
-    }
-  }
+  const sources = skillSources(c);
 
   // Keep active tab valid when sources change (e.g. class changes)
   const allKeys = [...sources.map(s => s.key), ...(hasExpertise ? ['expertise'] : [])];
@@ -107,7 +127,7 @@ export default function SkillPicker() {
               <Button
                 key={skill.name}
                 variant="ghost"
-                className={['skill-item', isExpert ? 'skill-item--active skill-item--expertise' : '', !isProficient ? 'skill-item--disabled' : ''].filter(Boolean).join(' ')}
+                className={['skill-item', isExpert ? 'skill-item--active skill-item--expertise' : '', !isProficient ? 'skill-item--disabled' : '', isProficient && !canToggle ? 'skill-item--full' : ''].filter(Boolean).join(' ')}
                 onClick={() => { if (canToggle) toggleExpertise(skill.name); }}
                 disabled={!isProficient}
               >

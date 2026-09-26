@@ -85,7 +85,7 @@ export function registerChatHandlers(ctx: JoinContext): void {
               if (result.type === 'attack' && result.dc && result.damageFormula && result.targetId && char) {
                 const statKey = (result.stat ?? 'str') as keyof CharacterStats;
                 const mod = statMod(char.stats[statKey]);
-                const breakdown = withModifiers(rollD20(conditionModeSources(char, 'attack')), [{ label: STAT_FULL[statKey.toUpperCase()] ?? statKey.toUpperCase(), value: mod }]);
+                const breakdown = withModifiers(rollD20(conditionModeSources(char, 'attack'), char), [{ label: STAT_FULL[statKey.toUpperCase()] ?? statKey.toUpperCase(), value: mod }]);
                 const roll = keptDie(breakdown);
                 const { total } = breakdown;
                 const hit = resolveHit(roll, mod, result.dc);

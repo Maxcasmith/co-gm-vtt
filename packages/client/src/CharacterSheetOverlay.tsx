@@ -404,7 +404,14 @@ export default function CharacterSheetOverlay({
 
         <div className="sheet-content">
           {tab === "abilities" && <AbilitiesTab character={character} />}
-          {tab === "features" && <FeaturesTab character={character} />}
+          {tab === "features" && (
+            <FeaturesTab
+              character={character}
+              combatActive={combatActive}
+              canAction={isMyTurn && actionAvailable}
+              canBonusAction={isMyTurn && bonusActionAvailable}
+            />
+          )}
           {tab === "inventory" && (
             <InventoryTab character={character} sessionActive={sessionActive} />
           )}

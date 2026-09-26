@@ -1,13 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import type { Character, Spell, Weapon } from 'shared';
-import { actionCostFromCastingTime, isWeapon, hasOriginFeat, unarmedStrikeFor, monkMartialArtsActive, ABILITY_DEFS, RESOURCE_DEFS, resourceCurrent, resourceMax } from 'shared';
+import type { BreathShape, Character, Spell, Weapon } from 'shared';
+import { actionCostFromCastingTime, isWeapon, hasOriginFeat, unarmedStrikeFor, monkMartialArtsActive, spellSlotsForCharacter, ABILITY_DEFS, RESOURCE_DEFS, resourceCurrent, resourceMax, breathWeaponSpell, ownsAbility } from 'shared';
 import { dispatch, on } from './events.ts';
 import type { TargetingStartPayload } from './events.ts';
 import { Button } from './components/Button/Button.tsx';
 import { PipCounter } from './components/PipCounter/PipCounter.tsx';
 import ItemIcon from './ItemIcon.tsx';
 import InfoTooltip from './create-campaign/InfoTooltip.tsx';
+import TileGrid from './character-creation/TileGrid.tsx';
+import { PactWeaponModal, startFamiliarAttack } from './characterSheet/PactActions.tsx';
+import { FindFamiliarModal } from './characterSheet/FindFamiliarModal.tsx';
+import { castBlocked, castSpell, defaultSpellChoices, hasSpellChoices, spellActionCost } from './characterSheet/spellCasting.ts';
+import type { CastContext, SpellChoices } from './characterSheet/spellCasting.ts';
+import { SpellOptions } from './characterSheet/SpellOptions.tsx';
 import './app.css';
 
 const API = `http://${window.location.hostname}:3001`;
@@ -17,6 +23,9 @@ interface Props {
   combatActive: boolean;
   movementRemaining: number;
   playerCurrentHp?: number;
+  /** Live level-1 slot pool from the server — same source the character sheet reads. */
+  currentSpellSlots1?: number | undefined;
+  maxSpellSlots1?: number | undefined;
   /** HUD actions unlocked this turn by an active actionUnlock hook (Expeditious Retreat, Jump) — see ACTION_UNLOCKS below. */
   activeBuffs?: string[];
   /** Height off the ground (Feather Fall, falling damage) — see combat:elevation:set. */
@@ -44,10 +53,11 @@ type Resources = Record<PipKey, boolean>;
 
 const ALL_AVAILABLE: Resources = { action: true, bonusAction: true, reaction: true };
 
+// Hotbar grids fill column-first, so this order lays out Dash/Dodge on top, Disengage/Hide below.
 const STANDARD_ACTIONS = [
   { key: 'dash',      label: 'Dash'      },
-  { key: 'dodge',     label: 'Dodge',     effect: 'Dodging'     },
   { key: 'disengage', label: 'Disengage', effect: 'Disengaging' },
+  { key: 'dodge',     label: 'Dodge',     effect: 'Dodging'     },
   { key: 'hide',      label: 'Hide',      effect: 'Hiding'      },
 ] as const;
 
@@ -64,7 +74,7 @@ function saveResources(id: string, r: Resources) {
   sessionStorage.setItem(storageKey(id), JSON.stringify(r));
 }
 
-export default function CombatDock({ character, combatActive, movementRemaining, playerCurrentHp, activeBuffs = [], elevationFt = 0, connectedAllies = [], allyCharacterIds = {} }: Props) {
+export default function CombatDock({ character, combatActive, movementRemaining, playerCurrentHp, currentSpellSlots1, maxSpellSlots1, activeBuffs = [], elevationFt = 0, connectedAllies = [], allyCharacterIds = {} }: Props) {
   const [resources, setResources] = useState<Resources>(() =>
     combatActive ? loadResources(character.id) : ALL_AVAILABLE
   );
@@ -76,12 +86,21 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   const [chosenItems, setChosenItems] = useState<Record<string, string>>({});
   // Params modal for a "spend up to what's left" ability (Lay on Hands) — open when set.
   const [amountModal, setAmountModal] = useState<{ key: string; amount: number; cure: boolean } | null>(null);
+  // Dragonborn Breath Weapon's cone-or-line pick, asked before targeting starts.
+  const [breathModal, setBreathModal] = useState(false);
+  const [pactModal, setPactModal] = useState(false);
   const [inspirationArmed, setInspirationArmed] = useState(false);
   // Origin feat Healer — which ally (or self) to tend with a Healer's Kit charge.
   const [healerPicker, setHealerPicker] = useState(false);
+  // Learned spells castable as an action or bonus action — the hotbar's spell zone.
+  const [hotbarSpells, setHotbarSpells] = useState<Spell[]>([]);
+  // Pre-cast picker for a spell with per-cast options (damage type, Command's word, skill).
+  const [spellModal, setSpellModal] = useState<{ spell: Spell; choices: SpellChoices; customCommand: string } | null>(null);
+  // Find Familiar asks for a name/description (FindFamiliarModal) before it casts.
+  const [familiarSpell, setFamiliarSpell] = useState<Spell | null>(null);
   // Favored Enemy has no ABILITY_DEFS entry — it's spent inside the normal spell-cast flow when
-  // casting Hunter's Mark (see combat.ts), so this button just fetches that one Spell and fires
-  // the same targeting:start SpellsTab uses, rather than a whole spell list on the combat HUD.
+  // casting Hunter's Mark (see combat.ts), so this button fires the same targeting:start
+  // SpellsTab uses, from the same spell fetch as the hotbar's spell zone.
   const [huntersMark, setHuntersMark] = useState<Spell | null>(null);
   // Favored Enemy grants Hunter's Mark automatically — "prepared... doesn't count against your
   // prepared spells" (srd.ts) — so it's never in character.spells; gate on the class feature only.
@@ -91,13 +110,22 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   // Favored Enemy" rather than implying it'll spend another of the limited uses below.
   const [huntersMarkActive, setHuntersMarkActive] = useState(false);
 
+  const learnedNames = character.spells ?? [];
   useEffect(() => {
-    if (!favoredEnemyRanger) { setHuntersMark(null); return; }
-    fetch(`${API}/api/spells?class=Ranger`)
+    if (!learnedNames.length && !favoredEnemyRanger) { setHotbarSpells([]); setHuntersMark(null); return; }
+    // Not class-filtered: feat and lineage spells can come from any class list (see SpellsTab).
+    fetch(`${API}/api/spells`)
       .then(r => r.json())
-      .then((all: Spell[]) => setHuntersMark(all.find(s => s.name === "Hunter's Mark") ?? null))
+      .then((all: Spell[]) => {
+        setHotbarSpells(all
+          .filter(s => learnedNames.includes(s.name))
+          .filter(s => { const cost = actionCostFromCastingTime(s.castingTime); return cost === 'action' || cost === 'bonusAction'; })
+          .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)));
+        setHuntersMark(favoredEnemyRanger ? all.find(s => s.name === "Hunter's Mark") ?? null : null);
+      })
       .catch(() => {});
-  }, [favoredEnemyRanger]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [learnedNames.join(','), favoredEnemyRanger]);
 
   useEffect(() => on('vtt:combat:concentration', ({ targetId, targetName, spellName }) => {
     if (targetId !== character.id && targetName !== character.name) return;
@@ -114,6 +142,7 @@ export default function CombatDock({ character, combatActive, movementRemaining,
       setInspirationArmed(false);
       setHealerPicker(false);
       setHuntersMarkActive(false);
+      setSpellModal(null);
     }
   }, [combatActive, character.id]);
 
@@ -188,37 +217,37 @@ export default function CombatDock({ character, combatActive, movementRemaining,
   const baseSpeed = character.speed ?? 30;
   const actionsDisabled = !isMyTurn || isDown;
 
-  // Two-Weapon Fighting: both hands hold a weapon, neither two-handed — offers a bonus-action
-  // attack with the off-hand weapon. The Two-Weapon Fighting style (added to damage) is checked
-  // server-side; every dual-wielder gets the extra attack regardless of style, per RAW.
+  // Hand slots. An empty main hand (or one holding a non-weapon) falls back to Unarmed Strike
+  // for any class; the off-hand slot is hidden unless it holds a weapon — except a Monk with an
+  // empty off hand, whose Martial Arts Bonus Unarmed Strike lives there (monkMartialArtsActive
+  // carries the full RAW gate: unarmored, shieldless, Monk weapons only).
   const mainHandItem = character.inventory?.find(item => item.id === character.equipment?.mainHand);
   const offHandItem = character.inventory?.find(item => item.id === character.equipment?.offHand);
-  const offhandWeapon = (mainHandItem && offHandItem && isWeapon(mainHandItem) && isWeapon(offHandItem)
-    && !mainHandItem.twoHanded && !offHandItem.twoHanded) ? offHandItem : undefined;
+  const mainWeapon = mainHandItem && isWeapon(mainHandItem) ? mainHandItem : undefined;
+  const offWeapon = offHandItem && isWeapon(offHandItem) && offHandItem.id !== mainWeapon?.id ? offHandItem : undefined;
+  const mainSlotWeapon = mainWeapon ?? unarmedStrikeFor(character);
+  // Two-Weapon Fighting: both hands hold a weapon, neither two-handed — the off-hand weapon
+  // attacks as a bonus action. The Two-Weapon Fighting style (added to damage) is checked
+  // server-side; every dual-wielder gets the extra attack regardless of style, per RAW.
+  const offhandIsTwf = !!(mainWeapon && offWeapon && !mainWeapon.twoHanded && !offWeapon.twoHanded);
+  const monkBonusStrike = !offHandItem && monkMartialArtsActive(character) ? unarmedStrikeFor(character) : undefined;
 
-  // Martial Arts' Bonus Unarmed Strike — only while unarmored, shieldless, and wielding nothing
-  // but Monk weapons (or nothing); monkMartialArtsActive already carries that full RAW gate.
-  const monkBonusStrike = monkMartialArtsActive(character) ? unarmedStrikeFor(character) : undefined;
-
-  // The off-hand weapon only ever gets its own bonus-action button (above) — never also listed
-  // as an action-attack option, or it'd render twice (once as an action button, once as bonus).
-  const equippedWeapons = [character.equipment?.mainHand, character.equipment?.offHand]
-    .filter((id, i, arr): id is string => !!id && arr.indexOf(id) === i && id !== offhandWeapon?.id)
-    .map(id => character.inventory?.find(item => item.id === id))
-    .filter((item): item is Weapon => !!item && isWeapon(item));
-  equippedWeapons.push(unarmedStrikeFor(character));
-
-  const availableAbilities = Object.entries(ABILITY_DEFS).filter(([, a]) => a.class === character.class);
+  const availableAbilities = Object.entries(ABILITY_DEFS).filter(([, a]) => ownsAbility(character, a));
   // Every RESOURCE_DEFS pool the character owns (Second Wind, Rage, Favored Enemy, ...) — not
   // just the ones with an ABILITY_DEFS button, so silently-spent pools (Favored Enemy's free
   // Hunter's Mark) get HUD representation too.
   const ownedResources = Object.values(RESOURCE_DEFS).filter(def => resourceMax(character, def.key) > 0);
+  const slotsMax = maxSpellSlots1 ?? character.maxSpellSlots1 ?? spellSlotsForCharacter(character);
+  const slotsCurrent = currentSpellSlots1 ?? character.currentSpellSlots1 ?? slotsMax;
+  const castCtx: CastContext = { character, combatActive, isMyTurn, resources, currentSpellSlots1: slotsCurrent };
   const huntersMarkCost = huntersMark ? (actionCostFromCastingTime(huntersMark.castingTime) ?? 'action') : undefined;
   // Which resource pool the current targeting flow is about to spend — pulses that resource's
   // pips the same way the actionType pip already pulses (see the PIPS.map data-active check).
   const activeResourceKey = targeting?.kind === 'ability'
     ? ABILITY_DEFS[targeting.abilityKey]?.resourceKey
-    : (targeting?.kind === 'spell' && huntersMark && targeting.spell.name === huntersMark.name ? 'favoredEnemy' : undefined);
+    : targeting?.kind === 'spell' && huntersMark && targeting.spell.name === huntersMark.name ? 'favoredEnemy'
+    : targeting?.kind === 'spell' && targeting.spell.name === 'Breath Weapon' ? 'breathWeapon'
+    : undefined;
 
   function handleWeaponClick(weapon: Weapon) {
     if (actionsDisabled || !resources.action) return;
@@ -238,6 +267,26 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     if (actionsDisabled || !resources.bonusAction) return;
     dispatch('vtt:sheet:closed', {});
     dispatch('vtt:targeting:start', { kind: 'weapon', weapon, actionType: 'bonusAction', ...(inspirationArmed ? { useInspiration: true } : {}) });
+  }
+
+  function handleSpellClick(spell: Spell) {
+    if (castBlocked(castCtx, spell)) return;
+    if (spell.name === 'Find Familiar') {
+      setFamiliarSpell(spell);
+      return;
+    }
+    if (hasSpellChoices(spell)) {
+      setSpellModal({ spell, choices: defaultSpellChoices(spell), customCommand: '' });
+      return;
+    }
+    castSpell(castCtx, spell, {});
+  }
+
+  function confirmSpellModal() {
+    if (!spellModal) return;
+    const { spell, choices, customCommand } = spellModal;
+    setSpellModal(null);
+    castSpell(castCtx, spell, { ...choices, command: customCommand.trim() || choices.command });
   }
 
   function handleAbilityClick(key: string, ability: (typeof ABILITY_DEFS)[string]) {
@@ -347,6 +396,26 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     dispatch('vtt:targeting:start', { kind: 'spell', spell: huntersMark, casterId: character.id, actionType: huntersMarkCost, casterLevel: character.level });
   }
 
+  // Dragonborn Breath Weapon rides the spell-cast flow as a synthetic spell (breathWeaponSpell) —
+  // the server rebuilds it from the saved ancestry and spends RESOURCE_DEFS.breathWeapon.
+  const hasBreathWeapon = resourceMax(character, 'breathWeapon') > 0;
+  const breathBlocked = actionsDisabled || !resources.action || resourceCurrent(character, 'breathWeapon') <= 0;
+
+  function handleBreathShape(shape: BreathShape) {
+    setBreathModal(false);
+    const spell = breathWeaponSpell(character, shape);
+    if (!spell || breathBlocked) return;
+    dispatch('vtt:sheet:closed', {});
+    dispatch('vtt:targeting:start', { kind: 'spell', spell, casterId: character.id, actionType: 'action', casterLevel: character.level });
+  }
+
+  // Warlock pact actions — see characterSheet/PactActions.tsx.
+  const hasPactOfTheChain = !!character.invocations?.includes('Pact of the Chain');
+  const familiarBlocked = actionsDisabled || !resources.action;
+  const familiarTargeting = targeting?.kind === 'weapon' && !!targeting.viaFamiliar;
+  const hasPactOfTheBlade = !!character.invocations?.includes('Pact of the Blade');
+  const pactBlocked = actionsDisabled || !resources.bonusAction;
+
   if (isDown) {
     return (
       <div className="combat-dock-wrapper">
@@ -359,7 +428,8 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     );
   }
 
-  const weaponsUsable = !actionsDisabled && resources.action;
+  const actionUsable = !actionsDisabled && resources.action;
+  const bonusUsable = !actionsDisabled && resources.bonusAction;
 
   const amountModalAbility = amountModal ? ABILITY_DEFS[amountModal.key] : undefined;
   const amountModalPool = amountModalAbility ? resourceCurrent(character, amountModalAbility.resourceKey) : 0;
@@ -372,123 +442,37 @@ export default function CombatDock({ character, combatActive, movementRemaining,
     { name: character.name, id: character.id },
     ...connectedAllies.filter(name => name !== character.name && allyCharacterIds[name]).map(name => ({ name, id: allyCharacterIds[name]! })),
   ];
-  const canUseHealerKit = hasOriginFeat(character, 'Healer') && !!healersKit && weaponsUsable;
+  const canUseHealerKit = hasOriginFeat(character, 'Healer') && !!healersKit && actionUsable;
+
+  const btnClass = (spent: boolean, active = false) =>
+    `combat-dock-weapon-btn${spent ? ' combat-dock-weapon-btn--spent' : ''}${active ? ' combat-dock-weapon-btn--active' : ''}`;
+  const targetingWeapon = targeting?.kind === 'weapon' ? targeting : undefined;
+  const hasClassSection = availableAbilities.length > 0 || !!huntersMark || hasBreathWeapon || hasPactOfTheChain || hasPactOfTheBlade;
 
   return (
   <>
   <div className="combat-dock-wrapper">
-    <div className="combat-dock-column">
-      {canUseHealerKit && (
-        healerPicker ? (
-          <div className="combat-dock-alert-picker">
-            {healerTargets.map(t => (
-              <Button key={t.id} variant="ghost" className="combat-dock-luck-toggle" onClick={() => handleHealerKit(t.id)}>
-                Tend {t.name === character.name ? 'self' : t.name}
-              </Button>
-            ))}
-            <Button variant="ghost" className="combat-dock-luck-toggle" onClick={() => setHealerPicker(false)}>Cancel</Button>
-          </div>
-        ) : (
-          <Button
-            variant="ghost"
-            data-action-cost="action"
-            className="combat-dock-weapon-btn"
-            title={`Healer's Kit (${healersKit?.quantity}) — expend a use to tend a creature within 5ft`}
-            onClick={() => setHealerPicker(true)}
-          >
-            <ItemIcon className="combat-dock-weapon-icon" name="Healer's Kit" />
-          </Button>
-        )
-      )}
-      {character.heroicInspiration && (
-        <Button
-          variant="ghost"
-          className={`combat-dock-luck-toggle${inspirationArmed ? ' combat-dock-luck-toggle--active' : ''}`}
-          title="Spend Heroic Inspiration on your next attack roll for Advantage"
-          onClick={() => setInspirationArmed(prev => !prev)}
-        >
-          Inspiration{inspirationArmed ? ' — armed' : ''}
-        </Button>
-      )}
-      {(equippedWeapons.length > 0 || offhandWeapon || availableAbilities.length > 0 || huntersMark) && (
-        <div className="combat-dock-weapons">
-          {equippedWeapons.map(weapon => (
-            <Button
-              key={weapon.id}
-              variant="ghost"
-              data-action-cost="action"
-              className={`combat-dock-weapon-btn${!weaponsUsable ? ' combat-dock-weapon-btn--spent' : ''}${targeting?.kind === 'weapon' && targeting.weapon.id === weapon.id ? ' combat-dock-weapon-btn--active' : ''}`}
-              title={weapon.name}
-              onClick={() => handleWeaponClick(weapon)}
-            >
-              <ItemIcon className="combat-dock-weapon-icon" name={weapon.name} iconPath={weapon.iconPath} />
+    <div className="combat-dock">
+      {canUseHealerKit && healerPicker && (
+        <div className="combat-dock-alert-picker">
+          {healerTargets.map(t => (
+            <Button key={t.id} variant="ghost" className="combat-dock-luck-toggle" onClick={() => handleHealerKit(t.id)}>
+              Tend {t.name === character.name ? 'self' : t.name}
             </Button>
           ))}
-          {offhandWeapon && (
-            <Button
-              key={`offhand:${offhandWeapon.id}`}
-              variant="ghost"
-              data-action-cost="bonusAction"
-              className={`combat-dock-weapon-btn${(actionsDisabled || !resources.bonusAction) ? ' combat-dock-weapon-btn--spent' : ''}${targeting?.kind === 'weapon' && targeting.isOffhand ? ' combat-dock-weapon-btn--active' : ''}`}
-              title={`${offhandWeapon.name} (off-hand)`}
-              onClick={() => handleOffhandClick(offhandWeapon)}
-            >
-              <ItemIcon className="combat-dock-weapon-icon" name={offhandWeapon.name} iconPath={offhandWeapon.iconPath} />
-            </Button>
-          )}
-          {monkBonusStrike && (
-            <Button
-              key="monk-bonus-strike"
-              variant="ghost"
-              data-action-cost="bonusAction"
-              className={`combat-dock-weapon-btn${(actionsDisabled || !resources.bonusAction) ? ' combat-dock-weapon-btn--spent' : ''}${targeting?.kind === 'weapon' && !targeting.isOffhand && targeting.actionType === 'bonusAction' && targeting.weapon.id === 'unarmed-strike' ? ' combat-dock-weapon-btn--active' : ''}`}
-              title={`${monkBonusStrike.name} (bonus action)`}
-              onClick={() => handleMonkBonusClick(monkBonusStrike)}
-            >
-              <ItemIcon className="combat-dock-weapon-icon" name={monkBonusStrike.name} iconPath={monkBonusStrike.iconPath} />
-            </Button>
-          )}
-          {availableAbilities.map(([key, ability]) => (
-            <div className="combat-dock-ability-group" key={key}>
-              {!!ability.itemChoices?.length && (
-                <select
-                  className="combat-dock-ability-select"
-                  value={chosenItems[key] ?? ability.itemChoices[0]}
-                  onChange={e => setChosenItems(prev => ({ ...prev, [key]: e.target.value }))}
-                >
-                  {ability.itemChoices.map(name => <option key={name} value={name}>{name}</option>)}
-                </select>
-              )}
-              <Button
-                variant="ghost"
-                data-action-cost={ability.actionCost}
-                className={`combat-dock-ability-btn${(actionsDisabled || !resources[ability.actionCost] || resourceCurrent(character, ability.resourceKey) <= 0) ? ' combat-dock-ability-btn--spent' : ''}${targeting?.kind === 'ability' && targeting.abilityKey === key ? ' combat-dock-ability-btn--active' : ''}`}
-                title={ability.label}
-                onClick={() => handleAbilityClick(key, ability)}
-              >
-                <ItemIcon className="combat-dock-weapon-icon" name={ability.label} alt={ability.label} />
-              </Button>
-              <span className="combat-dock-ability-uses">{resourceCurrent(character, ability.resourceKey)}/{resourceMax(character, ability.resourceKey)}</span>
-            </div>
-          ))}
-          {huntersMark && (
-            <div className="combat-dock-ability-group">
-              <Button
-                variant="ghost"
-                data-action-cost={huntersMarkCost}
-                className={`combat-dock-ability-btn${(actionsDisabled || !resources[huntersMarkCost!]) ? ' combat-dock-ability-btn--spent' : ''}${targeting?.kind === 'spell' && targeting.spell.name === huntersMark.name ? ' combat-dock-ability-btn--active' : ''}`}
-                title={huntersMarkActive ? 'More Favored Enemy' : "Hunter's Mark (Favored Enemy)"}
-                onClick={handleCastHuntersMark}
-              >
-                <ItemIcon className="combat-dock-weapon-icon" name="Hunter's Mark" alt="Hunter's Mark" />
-              </Button>
-              <span className="combat-dock-ability-uses">{resourceCurrent(character, 'favoredEnemy')}/{resourceMax(character, 'favoredEnemy')}</span>
-            </div>
-          )}
+          <Button variant="ghost" className="combat-dock-luck-toggle" onClick={() => setHealerPicker(false)}>Cancel</Button>
         </div>
       )}
-    <div className="combat-dock">
+
       <div className="combat-dock-pips">
+        <span className="combat-dock-speed" title="Movement remaining">{movementRemaining}ft</span>
+        {elevationFt > 0 && (
+          <span className="combat-dock-elevation" title="Height off the ground">
+            {isFlying && <Button variant="ghost" onClick={() => handleElevationChange(-10)} disabled={elevationFt <= 0}>-</Button>}
+            {elevationFt}ft ↑
+            {isFlying && <Button variant="ghost" onClick={() => handleElevationChange(10)}>+</Button>}
+          </span>
+        )}
         {PIPS.map(pip => (
           <PipCounter
             key={pip.key}
@@ -500,69 +484,27 @@ export default function CombatDock({ character, combatActive, movementRemaining,
             title={pip.title}
           />
         ))}
-        <span className="combat-dock-speed">{movementRemaining}ft</span>
-        {elevationFt > 0 && (
-          <span className="combat-dock-elevation" title="Height off the ground">
-            {isFlying && <Button variant="ghost" onClick={() => handleElevationChange(-10)} disabled={elevationFt <= 0}>-</Button>}
-            {elevationFt}ft ↑
-            {isFlying && <Button variant="ghost" onClick={() => handleElevationChange(10)}>+</Button>}
-          </span>
-        )}
-      </div>
-
-      {ownedResources.length > 0 && (
-        <div className="combat-dock-resource-pips">
-          {ownedResources.map(def => (
-            <PipCounter
-              key={def.key}
-              color={def.key}
-              shape="square"
-              max={resourceMax(character, def.key)}
-              current={resourceCurrent(character, def.key)}
-              active={def.key === activeResourceKey}
-              title={def.label}
-            />
-          ))}
-        </div>
-      )}
-
-      <div className={`combat-dock-actions${actionsDisabled ? ' combat-dock-actions--disabled' : ''}`}>
-        {STANDARD_ACTIONS.map(action => (
-          <Button
-            key={action.key}
-            variant="ghost"
-            className={`combat-action-btn combat-action-btn--standard${(actionsDisabled || !resources.action) ? ' combat-action-btn--spent' : ''}`}
-            onClick={() => handleStandardAction(action)}
-          >
-            {action.label}
-            <span className="combat-action-btn-cost" />
-          </Button>
+        {ownedResources.map(def => (
+          <PipCounter
+            key={def.key}
+            color={def.key}
+            shape="square"
+            max={resourceMax(character, def.key)}
+            current={resourceCurrent(character, def.key)}
+            active={def.key === activeResourceKey}
+            title={def.label}
+          />
         ))}
-        {isRestrained && (
-          <Button
-            variant="ghost"
-            className={`combat-action-btn combat-action-btn--standard${(actionsDisabled || !resources.action) ? ' combat-action-btn--spent' : ''}`}
-            onClick={handleEscapeAttempt}
-          >
-            Escape
-            <span className="combat-action-btn-cost" />
-          </Button>
+        {slotsMax > 0 && (
+          <PipCounter
+            color="spellSlot1"
+            shape="square"
+            max={slotsMax}
+            current={slotsCurrent}
+            active={targeting?.kind === 'spell' && targeting.spell.level >= 1}
+            title="Level 1 Spell Slots"
+          />
         )}
-        {activeBuffs.filter((kind): kind is keyof typeof ACTION_UNLOCKS => kind in ACTION_UNLOCKS).map(kind => {
-          const unlock = ACTION_UNLOCKS[kind];
-          const disabled = actionsDisabled || (unlock.cost === 'bonusAction' ? !resources.bonusAction : movementRemaining < 10);
-          return (
-            <Button
-              key={kind}
-              variant="ghost"
-              className={`combat-action-btn combat-action-btn--standard${disabled ? ' combat-action-btn--spent' : ''}`}
-              onClick={() => handleActionUnlock(kind)}
-            >
-              {unlock.label}
-              <span className="combat-action-btn-cost" />
-            </Button>
-          );
-        })}
       </div>
 
       {activeEffects.length > 0 && (
@@ -572,19 +514,277 @@ export default function CombatDock({ character, combatActive, movementRemaining,
           ))}
         </div>
       )}
-    </div>
-    </div>
 
-    <Button
-      variant="ghost"
-      className={`combat-end-turn-btn${!isMyTurn ? ' combat-end-turn-btn--waiting' : ''}`}
-      onKeyDown={e => e.code === 'Space' && e.preventDefault()}
-      onClick={() => isMyTurn && dispatch('vtt:combat:turn:end', {})}
-    >
-      {isMyTurn ? 'End Turn' : 'Waiting…'}
-    </Button>
+      <div className="combat-hotbar">
+        <div className="combat-hotbar-section combat-hotbar-grid">
+          <Button
+            variant="ghost"
+            data-action-cost="action"
+            className={btnClass(!actionUsable, targetingWeapon?.actionType === 'action' && targetingWeapon.weapon.id === mainSlotWeapon.id)}
+            title={mainSlotWeapon.name}
+            onClick={() => handleWeaponClick(mainSlotWeapon)}
+          >
+            <ItemIcon className="combat-dock-weapon-icon" name={mainSlotWeapon.name} iconPath={mainSlotWeapon.iconPath} alt={mainSlotWeapon.name} />
+          </Button>
+          {offWeapon && (offhandIsTwf ? (
+            <Button
+              variant="ghost"
+              data-action-cost="bonusAction"
+              className={btnClass(!bonusUsable, !!targetingWeapon?.isOffhand)}
+              title={`${offWeapon.name} (off-hand)`}
+              onClick={() => handleOffhandClick(offWeapon)}
+            >
+              <ItemIcon className="combat-dock-weapon-icon" name={offWeapon.name} iconPath={offWeapon.iconPath} alt={offWeapon.name} />
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              data-action-cost="action"
+              className={btnClass(!actionUsable, targetingWeapon?.actionType === 'action' && targetingWeapon.weapon.id === offWeapon.id)}
+              title={offWeapon.name}
+              onClick={() => handleWeaponClick(offWeapon)}
+            >
+              <ItemIcon className="combat-dock-weapon-icon" name={offWeapon.name} iconPath={offWeapon.iconPath} alt={offWeapon.name} />
+            </Button>
+          ))}
+          {monkBonusStrike && (
+            <Button
+              variant="ghost"
+              data-action-cost="bonusAction"
+              className={btnClass(!bonusUsable, targetingWeapon?.actionType === 'bonusAction' && !targetingWeapon.isOffhand && targetingWeapon.weapon.id === monkBonusStrike.id)}
+              title={`${monkBonusStrike.name} (bonus action)`}
+              onClick={() => handleMonkBonusClick(monkBonusStrike)}
+            >
+              <ItemIcon className="combat-dock-weapon-icon" name={monkBonusStrike.name} iconPath={monkBonusStrike.iconPath} alt={monkBonusStrike.name} />
+            </Button>
+          )}
+        </div>
 
+        <div className="combat-hotbar-section combat-hotbar-grid">
+          {STANDARD_ACTIONS.map(action => (
+            <Button
+              key={action.key}
+              variant="ghost"
+              data-action-cost="action"
+              className={btnClass(!actionUsable)}
+              title={action.label}
+              onClick={() => handleStandardAction(action)}
+            >
+              <ItemIcon className="combat-dock-weapon-icon" name={action.label} alt={action.label} />
+            </Button>
+          ))}
+          {isRestrained && (
+            <Button variant="ghost" data-action-cost="action" className={btnClass(!actionUsable)} title="Escape" onClick={handleEscapeAttempt}>
+              <ItemIcon className="combat-dock-weapon-icon" name="Escape" alt="Escape" />
+            </Button>
+          )}
+          {activeBuffs.filter((kind): kind is keyof typeof ACTION_UNLOCKS => kind in ACTION_UNLOCKS).map(kind => {
+            const unlock = ACTION_UNLOCKS[kind];
+            const disabled = actionsDisabled || (unlock.cost === 'bonusAction' ? !resources.bonusAction : movementRemaining < 10);
+            return (
+              <Button
+                key={kind}
+                variant="ghost"
+                data-action-cost={unlock.cost === 'bonusAction' ? 'bonusAction' : undefined}
+                className={btnClass(disabled)}
+                title={unlock.label}
+                onClick={() => handleActionUnlock(kind)}
+              >
+                <ItemIcon className="combat-dock-weapon-icon" name={unlock.label} alt={unlock.label} />
+              </Button>
+            );
+          })}
+          {canUseHealerKit && (
+            <Button
+              variant="ghost"
+              data-action-cost="action"
+              className={btnClass(false, healerPicker)}
+              title={`Healer's Kit (${healersKit?.quantity}) — expend a use to tend a creature within 5ft`}
+              onClick={() => setHealerPicker(prev => !prev)}
+            >
+              <ItemIcon className="combat-dock-weapon-icon" name="Healer's Kit" alt="Healer's Kit" />
+            </Button>
+          )}
+          {character.heroicInspiration && (
+            <Button
+              variant="ghost"
+              className={btnClass(false, inspirationArmed)}
+              title={`Heroic Inspiration${inspirationArmed ? ' (armed)' : ''} — spend on your next attack roll for Advantage`}
+              onClick={() => setInspirationArmed(prev => !prev)}
+            >
+              <ItemIcon className="combat-dock-weapon-icon" name="Heroic Inspiration" alt="Heroic Inspiration" />
+            </Button>
+          )}
+        </div>
+
+        {hasClassSection && (
+          <div className="combat-hotbar-section">
+            {availableAbilities.map(([key, ability]) => (
+              <div className="combat-dock-ability-group" key={key}>
+                {!!ability.itemChoices?.length && (
+                  <select
+                    className="combat-dock-ability-select"
+                    value={chosenItems[key] ?? ability.itemChoices[0]}
+                    onChange={e => setChosenItems(prev => ({ ...prev, [key]: e.target.value }))}
+                  >
+                    {ability.itemChoices.map(name => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                )}
+                <Button
+                  variant="ghost"
+                  data-action-cost={ability.actionCost}
+                  className={`combat-dock-ability-btn${(actionsDisabled || !resources[ability.actionCost] || resourceCurrent(character, ability.resourceKey) <= 0) ? ' combat-dock-ability-btn--spent' : ''}${targeting?.kind === 'ability' && targeting.abilityKey === key ? ' combat-dock-ability-btn--active' : ''}`}
+                  title={ability.label}
+                  onClick={() => handleAbilityClick(key, ability)}
+                >
+                  <ItemIcon className="combat-dock-weapon-icon" name={ability.label} alt={ability.label} />
+                </Button>
+                <span className="combat-dock-ability-uses">{resourceCurrent(character, ability.resourceKey)}/{resourceMax(character, ability.resourceKey)}</span>
+              </div>
+            ))}
+            {huntersMark && (
+              <div className="combat-dock-ability-group">
+                <Button
+                  variant="ghost"
+                  data-action-cost={huntersMarkCost}
+                  className={`combat-dock-ability-btn${(actionsDisabled || !resources[huntersMarkCost!]) ? ' combat-dock-ability-btn--spent' : ''}${targeting?.kind === 'spell' && targeting.spell.name === huntersMark.name ? ' combat-dock-ability-btn--active' : ''}`}
+                  title={huntersMarkActive ? 'More Favored Enemy' : "Hunter's Mark (Favored Enemy)"}
+                  onClick={handleCastHuntersMark}
+                >
+                  <ItemIcon className="combat-dock-weapon-icon" name="Hunter's Mark" alt="Hunter's Mark" />
+                </Button>
+                <span className="combat-dock-ability-uses">{resourceCurrent(character, 'favoredEnemy')}/{resourceMax(character, 'favoredEnemy')}</span>
+              </div>
+            )}
+            {hasBreathWeapon && (
+              <div className="combat-dock-ability-group">
+                <Button
+                  variant="ghost"
+                  data-action-cost="action"
+                  className={`combat-dock-ability-btn${breathBlocked ? ' combat-dock-ability-btn--spent' : ''}${targeting?.kind === 'spell' && targeting.spell.name === 'Breath Weapon' ? ' combat-dock-ability-btn--active' : ''}`}
+                  title="Breath Weapon"
+                  onClick={() => !breathBlocked && setBreathModal(true)}
+                >
+                  <ItemIcon className="combat-dock-weapon-icon" name="Breath Weapon" alt="Breath Weapon" />
+                </Button>
+                <span className="combat-dock-ability-uses">{resourceCurrent(character, 'breathWeapon')}/{resourceMax(character, 'breathWeapon')}</span>
+              </div>
+            )}
+            {hasPactOfTheBlade && (
+              <div className="combat-dock-ability-group">
+                <Button
+                  variant="ghost"
+                  data-action-cost="bonusAction"
+                  className={`combat-dock-ability-btn${pactBlocked ? ' combat-dock-ability-btn--spent' : ''}`}
+                  title="Pact Weapon (Pact of the Blade)"
+                  onClick={() => !pactBlocked && setPactModal(true)}
+                >
+                  <ItemIcon className="combat-dock-weapon-icon" name="Pact Weapon" alt="Pact Weapon" />
+                </Button>
+              </div>
+            )}
+            {hasPactOfTheChain && (
+              <div className="combat-dock-ability-group">
+                <Button
+                  variant="ghost"
+                  data-action-cost="action"
+                  className={`combat-dock-ability-btn${familiarBlocked ? ' combat-dock-ability-btn--spent' : ''}${familiarTargeting ? ' combat-dock-ability-btn--active' : ''}`}
+                  title="Familiar Attack (Pact of the Chain)"
+                  onClick={() => !familiarBlocked && startFamiliarAttack(character)}
+                >
+                  <ItemIcon className="combat-dock-weapon-icon" name="Familiar Attack" alt="Familiar Attack" />
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {hotbarSpells.length > 0 && (
+          <div className="combat-hotbar-section combat-hotbar-grid combat-hotbar-spells">
+            {hotbarSpells.map(spell => (
+              <Button
+                key={spell.name}
+                variant="ghost"
+                data-action-cost={spellActionCost(spell)}
+                className={btnClass(castBlocked(castCtx, spell), targeting?.kind === 'spell' && targeting.spell.name === spell.name)}
+                title={`${spell.name} (${spell.levelLabel})`}
+                onClick={() => handleSpellClick(spell)}
+              >
+                <ItemIcon className="combat-dock-weapon-icon" name={spell.name} alt={spell.name} />
+              </Button>
+            ))}
+          </div>
+        )}
+
+        <Button
+          variant="ghost"
+          className={`combat-end-turn-btn${!isMyTurn ? ' combat-end-turn-btn--waiting' : ''}`}
+          onKeyDown={e => e.code === 'Space' && e.preventDefault()}
+          onClick={() => isMyTurn && dispatch('vtt:combat:turn:end', {})}
+        >
+          {isMyTurn ? 'End Turn' : 'Waiting…'}
+        </Button>
+      </div>
+    </div>
   </div>
+
+  {spellModal && createPortal(
+    <div className="modal-overlay" onClick={() => setSpellModal(null)}>
+      <dialog className="modal campaign-modal" open onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">{spellModal.spell.name}</h2>
+        </div>
+        <div className="modal-form">
+          <SpellOptions
+            spell={spellModal.spell}
+            choices={spellModal.choices}
+            customCommand={spellModal.customCommand}
+            onChange={choices => setSpellModal(prev => prev && { ...prev, choices })}
+            onCustomCommandChange={customCommand => setSpellModal(prev => prev && { ...prev, customCommand })}
+          />
+        </div>
+        <div className="modal-actions">
+          <Button variant="outline" color="secondary" onClick={() => setSpellModal(null)}>Cancel</Button>
+          <Button onClick={confirmSpellModal}>Cast</Button>
+        </div>
+      </dialog>
+    </div>,
+    document.body
+  )}
+
+  {breathModal && createPortal(
+    <div className="modal-overlay" onClick={() => setBreathModal(false)}>
+      <dialog className="modal campaign-modal" open onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">Breath Weapon</h2>
+        </div>
+        <div className="modal-form">
+          <TileGrid
+            items={[{ id: 'cone', name: 'Cone (15ft)' }, { id: 'line', name: 'Line (30ft)' }]}
+            selectedId=""
+            onSelect={id => handleBreathShape(id === 'line' ? 'line' : 'cone')}
+          />
+        </div>
+        <div className="modal-actions">
+          <Button variant="outline" color="secondary" onClick={() => setBreathModal(false)}>Cancel</Button>
+        </div>
+      </dialog>
+    </div>,
+    document.body
+  )}
+
+  {familiarSpell && (
+    <FindFamiliarModal
+      character={character}
+      onClose={() => setFamiliarSpell(null)}
+      onSummon={familiar => {
+        setFamiliarSpell(null);
+        castSpell(castCtx, familiarSpell, { familiar });
+      }}
+    />
+  )}
+
+  {pactModal && <PactWeaponModal character={character} onClose={() => setPactModal(false)} />}
 
   {amountModal && amountModalAbility && createPortal(
     <div className="modal-overlay" onClick={() => setAmountModal(null)}>
